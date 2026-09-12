@@ -437,7 +437,7 @@ function diasEntre(isoInicio, isoFim) {
   return Math.round((b - a) / 86400000);
 }
 
-function cardOS(a) {
+function osCardCorpo(a) {
   const status = statusOS(a);
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
@@ -447,7 +447,6 @@ function cardOS(a) {
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
-    <div class="os-card">
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
         <span class="tag tag-blue">${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
@@ -463,7 +462,13 @@ function cardOS(a) {
       <div class="os-card-footer">
         <span class="os-venc">Venc ${vd}/${vm} · ${vencRelativo}</span>
         <span class="os-dias-abertura">${diasAbertura} dia${diasAbertura === 1 ? '' : 's'} desde a abertura</span>
-      </div>
+      </div>`;
+}
+
+function cardOS(a) {
+  return `
+    <div class="os-card">
+      ${osCardCorpo(a)}
       ${a.visita_id ? `<button class="btn-outline-sm" style="margin-top:10px;" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="display:block; margin-top:8px; font-size:12px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
     </div>`;
 }
@@ -1461,24 +1466,55 @@ function gerarPdfLaudo(d, item) {
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
 let visitasAbertas = new Set();
+let osAno = new Date().getFullYear();
+let osMes = new Date().getMonth();
+
 async function renderAprovacoesVisitas() {
-  const [{ visitas: pendentes }, { visitas: concluidas }] = await Promise.all([
-    api('/api/visitas?status=pendente'),
-    api('/api/visitas?status=aprovado'),
-  ]);
-  window._pendentesCache = pendentes;
-  window._concluidasCache = concluidas;
-  desenharAprovacoesVisitas();
+  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
+  window._osAgendaCache = agenda;
+  window._osVisitasPorAgenda = {};
+  visitas.forEach((v) => { window._osVisitasPorAgenda[v.agenda_id] = v; });
+  desenharOrdemServico();
 }
 
-function desenharAprovacoesVisitas() {
-  const pendentes = window._pendentesCache || [];
-  const concluidas = window._concluidasCache || [];
-  const reaberturas = concluidas.filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
+function mudarMesOS(delta) {
+  osMes += delta;
+  if (osMes < 0) { osMes = 11; osAno--; }
+  if (osMes > 11) { osMes = 0; osAno++; }
+  desenharOrdemServico();
+}
+
+function irParaHojeOS() {
+  const hoje = new Date();
+  osAno = hoje.getFullYear();
+  osMes = hoje.getMonth();
+  desenharOrdemServico();
+}
+
+function desenharOrdemServico() {
+  const agenda = window._osAgendaCache || [];
+  const visitasPorAgenda = window._osVisitasPorAgenda || {};
+  const doMes = agenda
+    .filter((a) => {
+      const d = new Date(a.data_hora_inicio);
+      return d.getFullYear() === osAno && d.getMonth() === osMes;
+    })
+    .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  const reaberturas = Object.values(visitasPorAgenda).filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
+
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Ordem de Serviço</h1><p>${pendentes.length} pendente(s) de aprovação</p></div>
-    ${pendentes.length ? pendentes.map((v) => cardVisita(v, 'pendente')).join('') : `<div class="empty">Nada pendente no momento.</div>`}
+    <div class="page-head"><h1>Ordem de Serviço</h1><p>${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}</p></div>
+    <div class="panel" style="padding:14px 18px; margin-bottom:22px;">
+      <div class="cal-head" style="margin-bottom:0;">
+        <div class="cal-nav">
+          <button onclick="mudarMesOS(-1)">‹</button>
+          <div class="cal-mes-label">${MES_LABEL[osMes]} de ${osAno}</div>
+          <button onclick="mudarMesOS(1)">›</button>
+        </div>
+        <button class="btn-outline-sm" onclick="irParaHojeOS()">Hoje</button>
+      </div>
+    </div>
 
     ${reaberturas.length ? `
     <div class="page-head"><h1 style="font-size:16px;">Solicitações de reabertura</h1></div>
@@ -1496,36 +1532,40 @@ function desenharAprovacoesVisitas() {
         </tr>`).join('')}
     </table></div>` : ''}
 
-    <div class="page-head"><h1 style="font-size:16px;">Concluídas</h1><p>${concluidas.length} aprovada(s)</p></div>
-    ${concluidas.length ? concluidas.map((v) => cardVisita(v, 'concluida')).join('') : `<div class="empty">Nenhuma visita concluída ainda.</div>`}`;
+    ${doMes.length ? doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('') : `<div class="empty">Nenhuma O.S. neste mês.</div>`}`;
 }
 
-function cardVisita(v, contexto) {
-  const aberto = visitasAbertas.has(v.id);
+function cardOSAdmin(a, visita) {
+  const aberto = visita && visitasAbertas.has(visita.id);
+  let acoes;
+  if (visita && visita.status_aprovacao === 'pendente') {
+    acoes = `
+      <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
+      <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id})">Aprovar${visita.relevante_biblioteca ? ' e incluir na biblioteca' : ''}</button>
+      <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado') {
+    acoes = `
+      <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
+      <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>`;
+  } else if (visita && visita.status_aprovacao === 'reprovado') {
+    acoes = `
+      <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
+      <span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
+  } else {
+    acoes = `<span style="font-size:12px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
+  }
   return `
-    <div class="item-card">
-      <div class="item-top">
-        <div><div class="item-title">${esc(v.equipamento_tipo || '—')}</div>
-          <div class="item-meta">Técnico: ${esc(v.tecnico_nome || '—')}<span class="sep">·</span>${esc(v.causa || v.resultado || '')}</div>
-        </div>
-        <button class="btn-outline-sm" onclick="alternarVisitaAberta(${v.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
-      </div>
-      ${aberto ? `<div class="item-body">${detalheRelatorioVisita(v)}</div>` : ''}
-      <div class="review-box" style="margin-top:14px;">
-        ${contexto === 'pendente' ? `
-          <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${v.id})">Aprovar${v.relevante_biblioteca ? ' e incluir na biblioteca' : ''}</button>
-          <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${v.id})">Reprovar</button>
-        ` : `
-          <button class="btn-outline-sm" onclick="reabrirVisita(${v.id})">Reabrir</button>
-          <button class="btn-outline-sm" onclick="excluirVisita(${v.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
-        `}
-      </div>
+    <div class="os-card">
+      ${osCardCorpo(a)}
+      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">${acoes}</div>
+      ${aberto ? `<div class="item-body">${detalheRelatorioVisita(visita)}</div>` : ''}
     </div>`;
 }
 
 function alternarVisitaAberta(id) {
   if (visitasAbertas.has(id)) visitasAbertas.delete(id); else visitasAbertas.add(id);
-  desenharAprovacoesVisitas();
+  desenharOrdemServico();
 }
 
 function detalheRelatorioVisita(v) {
