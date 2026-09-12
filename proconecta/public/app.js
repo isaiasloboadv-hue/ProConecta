@@ -7,8 +7,24 @@ let paginaAtual = null;
 let navAbertos = new Set();
 let sinoTimer = null;
 let procDraft = [{ texto: '', fotos: [] }];
+let relatorioDraft = null;
+let relatorioAgendaAtual = null;
 
 const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente' };
+
+const CHECKLIST_CORRETIVA = [
+  'Instalação mecânica', 'Instalação elétrica', 'Instalação software', 'Sistema de segurança',
+  'Tryout', 'Utilização de nobreak', 'Aterramento da máquina', 'Tomada dedicada', 'Lente',
+  'I/O da máquina', 'Sistema de refrigeração', 'Acompanhamento da linha',
+  'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
+];
+const UF_REGIAO = {
+  AC: 'Norte', AP: 'Norte', AM: 'Norte', PA: 'Norte', RO: 'Norte', RR: 'Norte', TO: 'Norte',
+  AL: 'Nordeste', BA: 'Nordeste', CE: 'Nordeste', MA: 'Nordeste', PB: 'Nordeste', PE: 'Nordeste', PI: 'Nordeste', RN: 'Nordeste', SE: 'Nordeste',
+  DF: 'Centro-Oeste', GO: 'Centro-Oeste', MT: 'Centro-Oeste', MS: 'Centro-Oeste',
+  ES: 'Sudeste', MG: 'Sudeste', RJ: 'Sudeste', SP: 'Sudeste',
+  PR: 'Sul', RS: 'Sul', SC: 'Sul',
+};
 
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
@@ -111,6 +127,7 @@ const NAV = {
         { key: 'adicionar-procedimento', label: 'Manual de Procedimentos', page: 'add-procedimento' },
       ]},
       { key: 'meus-registros', label: 'Meus registros', page: 'meus-registros' },
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
   ],
   administrador: [
@@ -126,6 +143,7 @@ const NAV = {
         { key: 'adicionar-defeito', label: 'Defeitos/Falhas', page: 'add-defeito' },
         { key: 'adicionar-procedimento', label: 'Manual de Procedimentos', page: 'add-procedimento' },
       ]},
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'equipamentos', label: 'Equipamentos', page: 'equipamentos' },
     { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
@@ -136,6 +154,7 @@ const NAV = {
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
       ]},
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'equipamentos', label: 'Meus equipamentos', page: 'equipamentos' },
     { key: 'chamados', label: 'Abertura de chamado', page: 'chamados' },
@@ -194,6 +213,7 @@ async function ir(pagina) {
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
     if (pagina === 'biblioteca-procedimentos') return renderBibliotecaProcedimentos();
+    if (pagina === 'biblioteca-ranking') return renderRankingTecnicos();
     if (pagina === 'add-defeito') return renderFormDefeito(main, null);
     if (pagina === 'add-procedimento') return renderFormProcedimento(main, null);
     if (pagina === 'meus-registros') return renderMeusRegistros();
@@ -256,6 +276,7 @@ document.addEventListener('click', (e) => {
 // ---------- AGENDA ----------
 async function renderAgenda() {
   const { agenda } = await api('/api/agenda');
+  window._agendaCache = agenda;
   const isAdmin = USER.papel === 'administrador';
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -316,7 +337,9 @@ async function salvarNovaAtividade() {
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
-async function abrirDiario(agendaId) {
+function abrirDiario(agendaId) {
+  const item = (window._agendaCache || []).find((a) => a.id === agendaId);
+  if (item && item.tipo === 'corretiva') return renderRelatorioCorretiva(item);
   document.getElementById('diario-form').innerHTML = `
     <div class="panel"><div class="panel-head">Diário técnico — atividade #${agendaId}</div>
       <div class="form-grid">
@@ -351,6 +374,471 @@ async function finalizarDiario(agendaId) {
     mostrarToast('Atividade finalizada e enviada para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- RELATÓRIO TÉCNICO (atendimento corretivo) ----------
+
+function chaveRascunho(agendaId) { return `pc_rascunho_relatorio_${agendaId}`; }
+
+function relatorioPadrao(item) {
+  return {
+    agenda_id: item.id,
+    empresa: item.cliente_nome || '',
+    contato: item.cliente_contato || '',
+    telefone: item.cliente_telefone || '',
+    setor_cliente: item.cliente_setor || '',
+    endereco: item.cliente_endereco || '',
+    numero: item.cliente_numero || '',
+    bairro: item.cliente_bairro || '',
+    cep: item.cliente_cep || '',
+    cidade: item.cliente_cidade || '',
+    estado: item.cliente_estado || '',
+    data_inicial: (item.data_hora_inicio || '').slice(0, 10),
+    data_final: (item.data_hora_fim || '').slice(0, 10),
+    modelo_maquina: item.equipamento_modelo || '',
+    numero_serie: item.equipamento_serie || '',
+    servico: item.problema || '',
+    tecnico_nome: USER.nome,
+    checklist: CHECKLIST_CORRETIVA.map((label) => ({ item: label, resposta: '', observacao: '' })),
+    observacoes: '',
+    aceite: '',
+    avaliacao: { estrelas: 0, duvidas_sanadas: '', apto_operar: '' },
+    assinatura_cliente_nome: '',
+    assinatura_cliente_img: null,
+    assinatura_tecnico_nome: USER.nome,
+    assinatura_tecnico_img: null,
+    emails_copia: [''],
+    relevante_biblioteca: false,
+  };
+}
+
+function renderRelatorioCorretiva(item) {
+  relatorioAgendaAtual = item;
+  let salvoEm = null;
+  try {
+    const bruto = localStorage.getItem(chaveRascunho(item.id));
+    if (bruto) { const salvo = JSON.parse(bruto); relatorioDraft = salvo.draft; salvoEm = salvo.em; }
+    else relatorioDraft = relatorioPadrao(item);
+  } catch (e) { relatorioDraft = relatorioPadrao(item); }
+  relatorioDraft.agenda_id = item.id;
+
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Relatório técnico — Atendimento corretivo</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
+    <div class="panel">
+      <h2>Dados do atendimento</h2>
+      <div class="form-grid">
+        <div><label>Empresa*</label><input id="rc-empresa" oninput="atualizarRascunho()"></div>
+        <div><label>Contato*</label><input id="rc-contato" oninput="atualizarRascunho()"></div>
+        <div><label>Telefone*</label><input id="rc-telefone" oninput="atualizarRascunho()"></div>
+        <div><label>Setor do cliente</label><input id="rc-setor_cliente" oninput="atualizarRascunho()"></div>
+        <div class="full"><label>Endereço*</label><input id="rc-endereco" oninput="atualizarRascunho()"></div>
+        <div><label>Número*</label><input id="rc-numero" oninput="atualizarRascunho()"></div>
+        <div><label>Bairro*</label><input id="rc-bairro" oninput="atualizarRascunho()"></div>
+        <div><label>CEP*</label><input id="rc-cep" oninput="atualizarRascunho()"></div>
+        <div><label>Cidade*</label><input id="rc-cidade" oninput="atualizarRascunho()"></div>
+        <div><label>Estado*</label><select id="rc-estado" onchange="atualizarRascunho()"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
+        <div><label>Região</label><input id="rc-regiao" disabled></div>
+        <div><label>Data inicial*</label><input type="date" id="rc-data_inicial" oninput="atualizarRascunho()"></div>
+        <div><label>Data final*</label><input type="date" id="rc-data_final" oninput="atualizarRascunho()"></div>
+        <div><label>Modelo da máquina*</label><input id="rc-modelo_maquina" oninput="atualizarRascunho()"></div>
+        <div><label>Nº de série*</label><input id="rc-numero_serie" oninput="atualizarRascunho()"></div>
+        <div><label>Serviço*</label><input id="rc-servico" oninput="atualizarRascunho()"></div>
+        <div><label>Técnico*</label><input id="rc-tecnico_nome" oninput="atualizarRascunho()"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Item / entrega / observação*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer pendência.</p>
+      <div id="rc-checklist"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Sobre o equipamento</h2>
+      <p style="font-size:13.5px; line-height:1.6;">
+        O equipamento <b>${esc(item.equipamento_modelo || item.equipamento_tipo || '')}</b> está coberto por uma garantia de 1 ano a partir da data de entrega.
+        Esta garantia cobre defeitos de fabricação e mão de obra. Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>
+        <b>WhatsApp:</b> 12 99718-7506 &nbsp; <b>Telefone:</b> 12 3902-3453<br>
+        <b>E-mail:</b> suporte@promarking.com.br / tecnico@promarking.com.br
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>Observações*</h2>
+      <textarea id="rc-observacoes" placeholder="Observações adicionais sobre o atendimento (obrigatório — escreva N/A se não houver)" oninput="atualizarRascunho()"></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Aceite*</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Por meio da assinatura deste termo, formalizamos o aceite da entrega técnica final deste serviço em ${esc(item.equipamento_modelo || item.equipamento_tipo || 'equipamento')}.</p>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none; margin-bottom:8px;"><input type="radio" name="rc-aceite" value="aceito" onchange="atualizarRascunho()" style="width:auto;"> Li e aceito os termos acima</label>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;"><input type="radio" name="rc-aceite" value="nao_aceito" onchange="atualizarRascunho()" style="width:auto;"> Não aceito</label>
+    </div>
+
+    <div class="panel">
+      <h2>Avaliação de desempenho*</h2>
+      <label>Em uma escala de 1 a 5, qual a sua satisfação com a entrega técnica?</label>
+      <div id="rc-estrelas" style="margin-bottom:18px;"></div>
+      <label>O técnico sanou todas as dúvidas na entrega?</label>
+      <div style="display:flex; gap:18px; margin-bottom:18px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rc-duvidas" value="sim" onchange="atualizarRascunho()" style="width:auto;"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rc-duvidas" value="nao" onchange="atualizarRascunho()" style="width:auto;"> Não</label>
+      </div>
+      <label>Você se julga apto a operar o equipamento?</label>
+      <div style="display:flex; gap:18px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rc-apto" value="sim" onchange="atualizarRascunho()" style="width:auto;"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rc-apto" value="nao" onchange="atualizarRascunho()" style="width:auto;"> Não</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Assinatura*</h2>
+      <div class="row2">
+        ${blocoAssinatura('cliente', 'Cliente')}
+        ${blocoAssinatura('tecnico', 'Técnico')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Envio do termo*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">E-mails que devem receber uma cópia deste termo assim que ele for concluído e assinado.</p>
+      <div id="rc-emails"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarEmailRelatorio()">+ Adicionar e-mail</button>
+    </div>
+
+    <div class="panel">
+      <h2>Biblioteca de conhecimento</h2>
+      <label style="display:flex; align-items:center; gap:10px; font-weight:600; text-transform:none; font-size:13.5px;">
+        <input type="checkbox" id="rc-relevante-biblioteca" onchange="atualizarRascunho()" style="width:auto; accent-color:var(--blue);">
+        Este atendimento é relevante para a Biblioteca de Defeitos/Falhas — ao ser aprovado pelo administrador, entra na biblioteca com seu nome como autor.
+      </label>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do relatório preenchido é gerado e baixado automaticamente.</p>
+      <p id="rc-rascunho-status" style="font-size:12px; color:var(--green);">${salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="limparRelatorio(${item.id})">Limpar formulário</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorio()">Concluir e gerar PDF</button>
+      </div>
+    </div>
+  `;
+  preencherCamposRelatorio();
+  renderChecklistRelatorio();
+  renderEstrelas();
+  renderEmailsRelatorio();
+  montarAssinatura('cliente');
+  montarAssinatura('tecnico');
+}
+
+function blocoAssinatura(chave, titulo) {
+  return `
+    <div>
+      <label>${titulo}</label>
+      <input id="rc-assinatura-${chave}-nome" placeholder="Nome do ${titulo.toLowerCase()}" oninput="atualizarRascunho()" style="margin-bottom:8px;">
+      <canvas id="rc-canvas-${chave}" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div id="rc-assinatura-${chave}-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="ampliarAssinatura('${chave}')">⤢ Ampliar para assinar</button>
+        <button class="btn-outline-sm" onclick="limparAssinatura('${chave}')">Limpar</button>
+      </div>
+    </div>`;
+}
+
+function preencherCamposRelatorio() {
+  const d = relatorioDraft;
+  ['empresa', 'contato', 'telefone', 'setor_cliente', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie', 'servico', 'tecnico_nome', 'observacoes'].forEach((campo) => {
+    const el = document.getElementById('rc-' + campo);
+    if (el) el.value = d[campo] || '';
+  });
+  document.getElementById('rc-estado').value = d.estado || '';
+  atualizarRegiao();
+  if (d.aceite) { const r = document.querySelector(`input[name="rc-aceite"][value="${d.aceite}"]`); if (r) r.checked = true; }
+  if (d.avaliacao.duvidas_sanadas) { const r = document.querySelector(`input[name="rc-duvidas"][value="${d.avaliacao.duvidas_sanadas}"]`); if (r) r.checked = true; }
+  if (d.avaliacao.apto_operar) { const r = document.querySelector(`input[name="rc-apto"][value="${d.avaliacao.apto_operar}"]`); if (r) r.checked = true; }
+  document.getElementById('rc-assinatura-cliente-nome').value = d.assinatura_cliente_nome || '';
+  document.getElementById('rc-assinatura-tecnico-nome').value = d.assinatura_tecnico_nome || '';
+  document.getElementById('rc-relevante-biblioteca').checked = !!d.relevante_biblioteca;
+}
+
+function atualizarRegiao() {
+  const uf = document.getElementById('rc-estado').value;
+  document.getElementById('rc-regiao').value = UF_REGIAO[uf] || '—';
+}
+
+function renderChecklistRelatorio() {
+  document.getElementById('rc-checklist').innerHTML = relatorioDraft.checklist.map((c, i) => `
+    <div class="step-item" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <b style="color:var(--navy); font-size:13.5px;">${String(i + 1).padStart(2, '0')} ${esc(c.item)}</b>
+        <div style="display:flex; gap:6px;">
+          ${['sim', 'nao', 'na'].map((v) => `<button type="button" class="btn-outline-sm" style="${c.resposta === v ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="marcarChecklist(${i}, '${v}')">${v === 'sim' ? 'Sim' : v === 'nao' ? 'Não' : 'N/A'}</button>`).join('')}
+        </div>
+      </div>
+      <input placeholder="Observação (opcional)" value="${esc(c.observacao)}" oninput="relatorioDraft.checklist[${i}].observacao=this.value; atualizarRascunho(true);">
+    </div>`).join('');
+}
+function marcarChecklist(i, valor) {
+  relatorioDraft.checklist[i].resposta = valor;
+  renderChecklistRelatorio();
+  atualizarRascunho();
+}
+
+function renderEstrelas() {
+  document.getElementById('rc-estrelas').innerHTML = [1, 2, 3, 4, 5].map((n) => `
+    <button type="button" onclick="marcarEstrela(${n})" style="background:none; border:none; cursor:pointer; font-size:28px; color:${n <= relatorioDraft.avaliacao.estrelas ? 'var(--blue)' : '#D8E2EF'};">★</button>
+  `).join('');
+}
+function marcarEstrela(n) {
+  relatorioDraft.avaliacao.estrelas = n;
+  renderEstrelas();
+  atualizarRascunho();
+}
+
+function renderEmailsRelatorio() {
+  document.getElementById('rc-emails').innerHTML = relatorioDraft.emails_copia.map((em, i) => `
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input placeholder="nome@empresa.com" value="${esc(em)}" oninput="relatorioDraft.emails_copia[${i}]=this.value; atualizarRascunho(true);">
+      ${relatorioDraft.emails_copia.length > 1 ? `<button class="btn-outline-sm" onclick="removerEmailRelatorio(${i})">×</button>` : ''}
+    </div>`).join('');
+}
+function adicionarEmailRelatorio() { relatorioDraft.emails_copia.push(''); renderEmailsRelatorio(); atualizarRascunho(); }
+function removerEmailRelatorio(i) { relatorioDraft.emails_copia.splice(i, 1); renderEmailsRelatorio(); atualizarRascunho(); }
+
+function atualizarRascunho(semLerCampos) {
+  if (!semLerCampos) {
+    const d = relatorioDraft;
+    ['empresa', 'contato', 'telefone', 'setor_cliente', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie', 'servico', 'tecnico_nome', 'observacoes'].forEach((campo) => {
+      const el = document.getElementById('rc-' + campo);
+      if (el) d[campo] = el.value;
+    });
+    d.estado = document.getElementById('rc-estado').value;
+    atualizarRegiao();
+    const aceite = document.querySelector('input[name="rc-aceite"]:checked');
+    d.aceite = aceite ? aceite.value : '';
+    const duvidas = document.querySelector('input[name="rc-duvidas"]:checked');
+    d.avaliacao.duvidas_sanadas = duvidas ? duvidas.value : '';
+    const apto = document.querySelector('input[name="rc-apto"]:checked');
+    d.avaliacao.apto_operar = apto ? apto.value : '';
+    d.assinatura_cliente_nome = document.getElementById('rc-assinatura-cliente-nome').value;
+    d.assinatura_tecnico_nome = document.getElementById('rc-assinatura-tecnico-nome').value;
+    d.relevante_biblioteca = document.getElementById('rc-relevante-biblioteca').checked;
+  }
+  try {
+    localStorage.setItem(chaveRascunho(relatorioDraft.agenda_id), JSON.stringify({ draft: relatorioDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
+    const status = document.getElementById('rc-rascunho-status');
+    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  } catch (e) {}
+}
+
+function limparRelatorio(agendaId) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  localStorage.removeItem(chaveRascunho(agendaId));
+  renderRelatorioCorretiva(relatorioAgendaAtual);
+}
+
+// ---------- assinatura (canvas, sem dependências externas) ----------
+const assinaturaEstado = {};
+function montarAssinatura(chave) {
+  const canvas = document.getElementById('rc-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  assinaturaEstado[chave] = { desenhando: false, temTraco: false };
+  if (relatorioDraft['assinatura_' + chave + '_img']) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); assinaturaEstado[chave].temTraco = true; atualizarStatusAssinatura(chave); };
+    img.src = relatorioDraft['assinatura_' + chave + '_img'];
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); assinaturaEstado[chave].desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!assinaturaEstado[chave].desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); assinaturaEstado[chave].temTraco = true; }
+  function parar() {
+    if (!assinaturaEstado[chave].desenhando) return;
+    assinaturaEstado[chave].desenhando = false;
+    if (assinaturaEstado[chave].temTraco) {
+      relatorioDraft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
+      atualizarStatusAssinatura(chave);
+      atualizarRascunho(true);
+    }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinatura(chave) {
+  const el = document.getElementById(`rc-assinatura-${chave}-status`);
+  if (el) { el.textContent = assinaturaEstado[chave].temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = assinaturaEstado[chave].temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinatura(chave) {
+  const canvas = document.getElementById('rc-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  assinaturaEstado[chave].temTraco = false;
+  relatorioDraft['assinatura_' + chave + '_img'] = null;
+  atualizarStatusAssinatura(chave);
+  atualizarRascunho(true);
+}
+
+function ampliarAssinatura(chave) {
+  let modal = document.getElementById('modal-assinatura');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-assinatura';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Assinar</h3>
+      <p>Desenhe a assinatura com o dedo ou o mouse.</p>
+      <canvas id="modal-canvas" width="900" height="380" style="width:100%; height:260px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-canvas').getContext('2d').clearRect(0,0,900,380)">Limpar</button>
+        <button class="btn btn-primary" onclick="confirmarAssinaturaModal('${chave}')">Usar esta assinatura</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-assinatura').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+  const canvas = document.getElementById('modal-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  let desenhando = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar); canvas.addEventListener('mousemove', mover); window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false }); canvas.addEventListener('touchmove', mover, { passive: false }); canvas.addEventListener('touchend', parar);
+}
+function confirmarAssinaturaModal(chave) {
+  const modalCanvas = document.getElementById('modal-canvas');
+  const destino = document.getElementById('rc-canvas-' + chave);
+  const ctxDestino = destino.getContext('2d');
+  ctxDestino.clearRect(0, 0, destino.width, destino.height);
+  ctxDestino.drawImage(modalCanvas, 0, 0, destino.width, destino.height);
+  assinaturaEstado[chave].temTraco = true;
+  relatorioDraft['assinatura_' + chave + '_img'] = destino.toDataURL('image/png');
+  atualizarStatusAssinatura(chave);
+  atualizarRascunho(true);
+  document.getElementById('modal-assinatura').classList.remove('show');
+}
+
+// ---------- concluir: validar, salvar, gerar PDF, enviar por e-mail ----------
+async function concluirRelatorio() {
+  atualizarRascunho();
+  const d = relatorioDraft;
+  const obrigatorios = ['empresa', 'contato', 'telefone', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie', 'servico', 'tecnico_nome', 'observacoes'];
+  for (const campo of obrigatorios) {
+    if (!String(d[campo] || '').trim()) return alert('Preencha todos os campos obrigatórios de "Dados do atendimento".');
+  }
+  if (d.checklist.some((c) => !c.resposta)) return alert('Responda todos os itens do checklist (Sim/Não/N-A).');
+  if (!d.aceite) return alert('Selecione o aceite do cliente.');
+  if (!d.avaliacao.estrelas) return alert('Selecione a avaliação por estrelas.');
+  if (!d.avaliacao.duvidas_sanadas || !d.avaliacao.apto_operar) return alert('Responda as duas perguntas da avaliação de desempenho.');
+  if (!d.assinatura_cliente_nome || !d.assinatura_cliente_img) return alert('Colete o nome e a assinatura do cliente.');
+  if (!d.assinatura_tecnico_nome || !d.assinatura_tecnico_img) return alert('Colete o nome e a assinatura do técnico.');
+  const emails = d.emails_copia.map((e) => e.trim()).filter(Boolean);
+  if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
+
+  const body = { agenda_id: d.agenda_id, relatorio: { ...d, emails_copia: emails }, relevante_biblioteca: d.relevante_biblioteca };
+  let visita;
+  try {
+    ({ visita } = await api('/api/visitas', { method: 'POST', body }));
+  } catch (e) {
+    alert('Erro ao concluir: ' + e.message);
+    return;
+  }
+  // A partir daqui a visita já foi salva e enviada para aprovação — isso não pode mais falhar
+  // pro técnico. PDF e envio por e-mail são best-effort: se falharem, avisa mas não trava.
+  localStorage.removeItem(chaveRascunho(d.agenda_id));
+  let avisoExtra = '';
+  try {
+    const pdfDataUri = gerarPdfRelatorio(d, relatorioAgendaAtual);
+    const link = document.createElement('a');
+    link.href = pdfDataUri;
+    link.download = `relatorio-tecnico-${visita.id}.pdf`;
+    document.body.appendChild(link); link.click(); link.remove();
+    const pdfBase64 = pdfDataUri.split(',')[1];
+    try { await api(`/api/visitas/${visita.id}/enviar-relatorio`, { method: 'POST', body: { pdf_base64: pdfBase64, emails } }); }
+    catch (e) { avisoExtra = ' O PDF foi gerado, mas o envio por e-mail falhou — tente reenviar depois.'; }
+  } catch (e) {
+    console.error('Falha ao gerar o PDF localmente:', e);
+    avisoExtra = ' O relatório foi salvo, mas não foi possível gerar o PDF neste dispositivo.';
+  }
+  mostrarToast('Relatório concluído e enviado para aprovação do administrador.' + avisoExtra);
+  renderAgenda();
+}
+
+function gerarPdfRelatorio(d, item) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const margem = 40; let y = 50;
+  const largura = doc.internal.pageSize.getWidth() - margem * 2;
+  function titulo(t) { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71); doc.text(t, margem, y); y += 18; doc.setDrawColor(20, 103, 214); doc.line(margem, y - 12, margem + largura, y - 12); }
+  function linha(rotulo, valor) {
+    if (y > 760) { doc.addPage(); y = 50; }
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
+    doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
+    const linhas = doc.splitTextToSize(String(valor || '—'), largura - 130);
+    doc.text(linhas, margem + 130, y);
+    y += Math.max(14, linhas.length * 12);
+  }
+  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+  doc.text('Relatório Técnico — Pro Conecta', margem, y); y += 22;
+  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+  doc.text(`Elaborado: ${new Date().toLocaleDateString('pt-BR')} · Setor: ${USER.setor || 'Suporte Técnico'}`, margem, y); y += 24;
+
+  titulo('Dados do atendimento');
+  linha('Empresa', d.empresa); linha('Contato', d.contato); linha('Telefone', d.telefone);
+  linha('Endereço', `${d.endereco}, ${d.numero} — ${d.bairro}, ${d.cidade}/${d.estado} — CEP ${d.cep}`);
+  linha('Data inicial', d.data_inicial); linha('Data final', d.data_final);
+  linha('Modelo da máquina', d.modelo_maquina); linha('Nº de série', d.numero_serie);
+  linha('Serviço', d.servico); linha('Técnico', d.tecnico_nome);
+  y += 8;
+
+  titulo('Item / entrega / observação');
+  d.checklist.forEach((c, i) => {
+    if (y > 760) { doc.addPage(); y = 50; }
+    const r = c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A';
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(16, 24, 38);
+    doc.text(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${r}`, margem, y); y += 13;
+    if (c.observacao) { doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104); const linhas = doc.splitTextToSize('Obs: ' + c.observacao, largura - 10); doc.text(linhas, margem + 12, y); y += linhas.length * 12; }
+  });
+  y += 8;
+
+  titulo('Observações');
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.observacoes, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+
+  titulo('Aceite e avaliação');
+  linha('Aceite', d.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito');
+  linha('Satisfação', `${d.avaliacao.estrelas}/5 estrelas`);
+  linha('Dúvidas sanadas', d.avaliacao.duvidas_sanadas === 'sim' ? 'Sim' : 'Não');
+  linha('Apto a operar', d.avaliacao.apto_operar === 'sim' ? 'Sim' : 'Não');
+  y += 8;
+
+  if (y > 560) { doc.addPage(); y = 50; }
+  titulo('Assinaturas');
+  const wImg = 220, hImg = 90;
+  doc.setFontSize(10); doc.setTextColor(16, 24, 38);
+  doc.text(`Cliente: ${d.assinatura_cliente_nome}`, margem, y);
+  doc.text(`Técnico: ${d.assinatura_tecnico_nome}`, margem + largura / 2, y);
+  y += 8;
+  try { doc.addImage(d.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
+  try { doc.addImage(d.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
+
+  return doc.output('datauristring');
 }
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
@@ -407,7 +895,7 @@ async function renderBibliotecaDefeitos(filtros = {}) {
           <div class="kv"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
           <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
           <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
-          <div class="item-meta">Registrado por ${esc(r.autor_nome || '—')} em ${fmtData(r.criado_em)}</div>
+          <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
         </div>
       </div>`).join('') : `<div class="empty">Nenhum caso aprovado com esses filtros ainda.</div>`}`;
 }
@@ -447,7 +935,7 @@ async function renderBibliotecaProcedimentos(filtros = {}) {
                 ${p.fotos && p.fotos.length ? `<div class="item-step-photos">${p.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da etapa">`).join('')}</div>` : ''}
               </li>`).join('')}
           </ol>
-          <div class="item-meta">Registrado por ${esc(r.autor_nome || '—')} em ${fmtData(r.criado_em)}</div>
+          <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
         </div>
       </div>`).join('') : `<div class="empty">Nenhum procedimento aprovado com esses filtros ainda.</div>`}`;
 }
@@ -456,6 +944,28 @@ function filtrarProcedimentos() {
     equipamento: document.getElementById('f-equip').value,
     q: document.getElementById('f-q').value,
   });
+}
+
+// ---------- RANKING DE TÉCNICOS ----------
+async function renderRankingTecnicos() {
+  const { ranking } = await api('/api/registros/ranking');
+  const main = document.getElementById('main');
+  const medalhas = ['🥇', '🥈', '🥉'];
+  main.innerHTML = `
+    <div class="page-head"><h1>Ranking de técnicos</h1><p>Quem mais contribuiu com casos e procedimentos aprovados na biblioteca</p></div>
+    ${ranking.length ? ranking.map((r, i) => `
+      <div class="item-card" style="display:flex; align-items:center; gap:16px;">
+        <div style="font-size:22px; width:34px; text-align:center; flex-shrink:0;">${medalhas[i] || (i + 1) + 'º'}</div>
+        <div class="user-avatar" style="width:38px; height:38px; flex-shrink:0;">${initials(r.autor_nome)}</div>
+        <div style="flex:1;">
+          <div class="item-title" style="margin:0;">${esc(r.autor_nome)}</div>
+          <div class="item-meta">${r.defeitos} defeito(s)/falha(s) <span class="sep">·</span> ${r.procedimentos} procedimento(s)</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:22px; font-weight:800; color:var(--navy);">${r.total}</div>
+          <div style="font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px;">contribuições</div>
+        </div>
+      </div>`).join('') : `<div class="empty">Ainda não há registros aprovados na biblioteca.</div>`}`;
 }
 
 function abrirLightbox(src) {

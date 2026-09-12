@@ -42,4 +42,33 @@ async function enviarConvite({ nome, email, link }) {
   return { enviado: true, modo: 'resend', link };
 }
 
-module.exports = { enviarConvite };
+async function enviarRelatorio({ emails, pdfBase64, nomeArquivo }) {
+  const assunto = 'Relatório técnico — Pro Conecta';
+  const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>`;
+
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`\n[email] Nenhum provedor configurado (RESEND_API_KEY ausente) — relatório "${nomeArquivo}" seria enviado para:`);
+    console.log(`[email] ${emails.join(', ')}\n`);
+    return { enviado: false, modo: 'simulado', destinatarios: emails };
+  }
+
+  const resp = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: REMETENTE, to: emails, subject: assunto, html: corpoHtml,
+      attachments: [{ filename: nomeArquivo, content: pdfBase64 }],
+    }),
+  });
+  if (!resp.ok) {
+    const detalhe = await resp.text().catch(() => '');
+    console.error('[email] Falha ao enviar relatório via Resend:', resp.status, detalhe);
+    return { enviado: false, modo: 'erro', destinatarios: emails };
+  }
+  return { enviado: true, modo: 'resend', destinatarios: emails };
+}
+
+module.exports = { enviarConvite, enviarRelatorio };

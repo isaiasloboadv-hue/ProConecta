@@ -34,7 +34,11 @@ function seed() {
       { id: 4, nome: 'Cliente ABC', email: 'cliente@abc.com.br', papel: 'cliente', cargo: 'Responsável pela manutenção', setor: 'Facilities', celular: '(12) 99999-0004', cliente_id: 1, status: 'ativo', convite_token: null, ...senhaPadrao },
     ],
     clientes: [
-      { id: 1, nome_empresa: 'Cliente ABC Ltda', contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', nivel_acesso: 'completo' },
+      {
+        id: 1, nome_empresa: 'Cliente ABC Ltda', contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', nivel_acesso: 'completo',
+        setor: 'Produção', endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial',
+        cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
+      },
     ],
     equipamentos: [
       { id: 1, cliente_id: 1, tipo: 'Máquina de Gelo', modelo: 'Promarking MP5-80P', numero_serie: '2301013587', localizacao: 'Cozinha' },
@@ -74,6 +78,11 @@ function load() {
     if (u.convite_token === undefined) u.convite_token = null;
     if (u.cargo === undefined) u.cargo = '';
     if (u.setor === undefined) u.setor = '';
+  }
+  for (const c of data.clientes) {
+    for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado']) {
+      if (c[campo] === undefined) c[campo] = '';
+    }
   }
   return data;
 }

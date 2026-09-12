@@ -235,6 +235,8 @@ textarea{resize:vertical;min-height:64px;}
 .item-body{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:13.5px;color:var(--ink);line-height:1.55;}
 .item-body .kv{margin-bottom:8px;}
 .item-body .kv b{color:var(--navy);}
+.item-autor{display:flex; justify-content:flex-end; margin-top:10px; font-size:11.5px; color:var(--ink-soft);}
+.item-autor b{color:var(--navy);}
 
 .expand-toggle{background:none;border:none;color:var(--blue);font-family:inherit;font-weight:700;font-size:12.5px;cursor:pointer;padding:0;margin-top:10px;}
 

@@ -66,11 +66,53 @@ function agendaComDetalhes(data, item) {
   return {
     ...item,
     tecnico_nome: tecnico ? tecnico.nome : null,
+    tecnico_setor: tecnico ? tecnico.setor : null,
     cliente_nome: cliente ? cliente.nome_empresa : null,
+    cliente_contato: cliente ? cliente.contato : null,
+    cliente_telefone: cliente ? cliente.telefone : null,
+    cliente_setor: cliente ? cliente.setor : null,
+    cliente_endereco: cliente ? cliente.endereco : null,
+    cliente_numero: cliente ? cliente.numero : null,
+    cliente_bairro: cliente ? cliente.bairro : null,
+    cliente_cep: cliente ? cliente.cep : null,
+    cliente_cidade: cliente ? cliente.cidade : null,
+    cliente_estado: cliente ? cliente.estado : null,
     equipamento_tipo: equipamento ? equipamento.tipo : null,
     equipamento_modelo: equipamento ? equipamento.modelo : null,
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
   };
+}
+
+// ---------- relatório técnico de atendimento corretivo ----------
+
+const CHECKLIST_CORRETIVA = [
+  'Instalação mecânica', 'Instalação elétrica', 'Instalação software', 'Sistema de segurança',
+  'Tryout', 'Utilização de nobreak', 'Aterramento da máquina', 'Tomada dedicada', 'Lente',
+  'I/O da máquina', 'Sistema de refrigeração', 'Acompanhamento da linha',
+  'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
+];
+
+function validarRelatorio(r) {
+  if (!r || typeof r !== 'object') return 'Relatório técnico é obrigatório para atendimentos corretivos.';
+  const camposTexto = ['empresa', 'contato', 'telefone', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado',
+    'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie', 'servico', 'tecnico_nome', 'observacoes'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando no relatório: ${c}`;
+  }
+  if (!Array.isArray(r.checklist) || r.checklist.length !== CHECKLIST_CORRETIVA.length) {
+    return 'Checklist do relatório incompleto.';
+  }
+  for (const item of r.checklist) {
+    if (!item || !['sim', 'nao', 'na'].includes(item.resposta)) return 'Todo item do checklist precisa de uma resposta (Sim/Não/N-A).';
+  }
+  if (r.aceite !== 'aceito' && r.aceite !== 'nao_aceito') return 'É preciso registrar o aceite do cliente.';
+  if (!r.avaliacao || !(r.avaliacao.estrelas >= 1 && r.avaliacao.estrelas <= 5)) return 'Avaliação de desempenho (estrelas) é obrigatória.';
+  if (r.avaliacao.duvidas_sanadas !== 'sim' && r.avaliacao.duvidas_sanadas !== 'nao') return 'Responda se as dúvidas foram sanadas.';
+  if (r.avaliacao.apto_operar !== 'sim' && r.avaliacao.apto_operar !== 'nao') return 'Responda se o cliente se julga apto a operar o equipamento.';
+  if (!r.assinatura_cliente_nome || !r.assinatura_cliente_img) return 'Assinatura do cliente é obrigatória.';
+  if (!r.assinatura_tecnico_nome || !r.assinatura_tecnico_img) return 'Assinatura do técnico é obrigatória.';
+  if (!Array.isArray(r.emails_copia) || r.emails_copia.length === 0) return 'Informe ao menos um e-mail para envio do termo.';
+  return null;
 }
 
 function usuarioPublico(u) {
@@ -192,16 +234,24 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
   if (agendaItem.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta atividade não é sua.' });
 
+  let relatorio = null;
+  if (agendaItem.tipo === 'corretiva') {
+    const erro = validarRelatorio(body.relatorio);
+    if (erro) return enviarJSON(res, 400, { erro });
+    relatorio = body.relatorio;
+  }
+
   const visita = {
     id: nextId(data, 'visitas'),
     agenda_id: agendaItem.id,
     tecnico_id: user.id,
     equipamento_id: agendaItem.equipamento_id,
     analise: body.analise || '',
-    causa: body.causa || '',
-    correcao: body.correcao || '',
+    causa: body.causa || (relatorio ? relatorio.servico : ''),
+    correcao: body.correcao || (relatorio ? relatorio.observacoes : ''),
     resultado: body.resultado || 'solucionado', // solucionado | parcial | nao_solucionado | aguardando_peca
     relevante_biblioteca: !!body.relevante_biblioteca,
+    relatorio,
     status_aprovacao: 'pendente',
     aprovado_por: null,
     data_aprovacao: null,
@@ -211,6 +261,23 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   agendaItem.status = 'concluida';
   db.save(data);
   enviarJSON(res, 201, { visita });
+});
+
+// POST /api/visitas/:id/enviar-relatorio  (envia o PDF do relatório corretivo por e-mail)
+rota('POST', /^\/api\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico envia o relatório.' });
+  const body = await lerCorpo(req);
+  if (!body.pdf_base64 || !Array.isArray(body.emails) || body.emails.length === 0) {
+    return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
+  }
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
+  const nomeArquivo = `relatorio-tecnico-${visita.id}.pdf`;
+  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo });
+  enviarJSON(res, 200, { envio: resultado });
 });
 
 // GET /api/visitas?status=pendente
@@ -344,6 +411,26 @@ rota('GET', /^\/api\/registros\/meus$/, async (req, res) => {
     .filter((r) => r.autor_id === user.id)
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
   enviarJSON(res, 200, { registros: lista });
+});
+
+// GET /api/registros/ranking — ranking de técnicos que mais contribuíram com a biblioteca aprovada
+rota('GET', /^\/api\/registros\/ranking$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const contagem = new Map();
+  for (const r of data.registros) {
+    if (r.status !== 'aprovado') continue;
+    const atual = contagem.get(r.autor_id) || { total: 0, defeitos: 0, procedimentos: 0 };
+    atual.total += 1;
+    if (r.tipo === 'defeito') atual.defeitos += 1; else atual.procedimentos += 1;
+    contagem.set(r.autor_id, atual);
+  }
+  const ranking = [...contagem.entries()].map(([autor_id, c]) => {
+    const autor = data.usuarios.find((u) => u.id === autor_id);
+    return { autor_id, autor_nome: autor ? autor.nome : 'Ex-usuário', ...c };
+  }).sort((a, b) => b.total - a.total);
+  enviarJSON(res, 200, { ranking });
 });
 
 // GET /api/registros/fila — administrador: fila de aprovação (status em_analise)
