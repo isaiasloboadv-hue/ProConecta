@@ -99,6 +99,32 @@ const CHECKLIST_CORRETIVA = [
 // tipos de OS que usam o relatório completo (checklist + aceite + avaliação + assinatura + PDF)
 const TIPOS_RELATORIO_COMPLETO = ['corretiva', 'preventiva', 'treinamento_presencial'];
 
+// dados do atendimento definidos pelo administrador na abertura da OS — o técnico só visualiza,
+// nunca são aceitos a partir do que o técnico envia (mesmo que ele tente via chamada direta à API)
+function dadosAtendimentoBloqueados(data, agendaItem, user) {
+  const cliente = data.clientes.find((c) => c.id === agendaItem.cliente_id);
+  const equipamento = data.equipamentos.find((e) => e.id === agendaItem.equipamento_id);
+  return {
+    empresa: cliente ? cliente.nome_empresa : '',
+    contato: agendaItem.contato || (cliente ? cliente.contato : ''),
+    telefone: agendaItem.telefone || (cliente ? cliente.telefone : ''),
+    setor_cliente: agendaItem.setor_cliente || (cliente ? cliente.setor : ''),
+    endereco: agendaItem.endereco || (cliente ? cliente.endereco : ''),
+    numero: agendaItem.numero || (cliente ? cliente.numero : ''),
+    bairro: agendaItem.bairro || (cliente ? cliente.bairro : ''),
+    cep: agendaItem.cep || (cliente ? cliente.cep : ''),
+    cidade: agendaItem.cidade || (cliente ? cliente.cidade : ''),
+    estado: agendaItem.estado || (cliente ? cliente.estado : ''),
+    data_inicial: (agendaItem.data_hora_inicio || '').slice(0, 10),
+    data_final: (agendaItem.data_hora_fim || '').slice(0, 10),
+    equipamento_tipo: equipamento ? equipamento.tipo : '',
+    modelo_maquina: equipamento ? equipamento.modelo : '',
+    numero_serie: equipamento ? equipamento.numero_serie : '',
+    servico: agendaItem.problema || '',
+    tecnico_nome: user.nome,
+  };
+}
+
 function validarRelatorio(r) {
   if (!r || typeof r !== 'object') return 'Relatório técnico é obrigatório para este tipo de atendimento.';
   const camposTexto = ['empresa', 'contato', 'telefone', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado',
@@ -219,9 +245,10 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador pode criar atividades.' });
   const body = await lerCorpo(req);
-  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo'];
+  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo',
+    'contato', 'telefone', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado'];
   for (const campo of obrig) {
-    if (!body[campo]) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
+    if (!body[campo] || !String(body[campo]).trim()) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
   }
   const data = db.load();
   const item = {
@@ -234,6 +261,9 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     tipo: body.tipo, // preventiva | corretiva | treinamento
     categoria: body.categoria || 'inloco', // online | inloco
     problema: body.problema || '',
+    // dados do atendimento definidos pelo administrador ao abrir a OS — o técnico só visualiza
+    contato: body.contato, telefone: body.telefone, setor_cliente: body.setor_cliente || '',
+    endereco: body.endereco, numero: body.numero, bairro: body.bairro, cep: body.cep, cidade: body.cidade, estado: body.estado,
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,
@@ -253,16 +283,31 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
   if (agendaItem.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta atividade não é sua.' });
 
+  // dados do atendimento (cliente, contato, endereço, equipamento, datas, técnico) são sempre os que o
+  // administrador definiu na agenda — o que vier do técnico para esses campos é ignorado
+  const bloqueados = dadosAtendimentoBloqueados(data, agendaItem, user);
+
   let relatorio = null;
   let relatorioSimples = null;
   if (TIPOS_RELATORIO_COMPLETO.includes(agendaItem.tipo)) {
-    const erro = validarRelatorio(body.relatorio);
+    const relatorioCompleto = { ...(body.relatorio || {}), ...bloqueados };
+    const erro = validarRelatorio(relatorioCompleto);
     if (erro) return enviarJSON(res, 400, { erro });
-    relatorio = body.relatorio;
+    relatorio = relatorioCompleto;
   } else if (agendaItem.tipo === 'treinamento_online' || agendaItem.tipo === 'demonstracao_tecnica') {
-    const erro = validarRelatorioSimples(body.relatorio_simples, agendaItem.tipo === 'treinamento_online');
+    const relatorioSimplesCompleto = {
+      ...(body.relatorio_simples || {}),
+      empresa: bloqueados.empresa,
+      contato: bloqueados.contato,
+      telefone: bloqueados.telefone,
+      tecnico_nome: bloqueados.tecnico_nome,
+      equipamento_tipo: bloqueados.equipamento_tipo,
+      equipamento_modelo: bloqueados.modelo_maquina,
+      numero_serie: bloqueados.numero_serie,
+    };
+    const erro = validarRelatorioSimples(relatorioSimplesCompleto, agendaItem.tipo === 'treinamento_online');
     if (erro) return enviarJSON(res, 400, { erro });
-    relatorioSimples = body.relatorio_simples;
+    relatorioSimples = relatorioSimplesCompleto;
   }
 
   const camposVisita = {

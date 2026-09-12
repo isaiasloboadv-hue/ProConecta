@@ -313,13 +313,14 @@ async function renderAgenda() {
 }
 
 async function mostrarFormNovaAtividade() {
-  const [{ usuarios }, { equipamentos }] = await Promise.all([api('/api/usuarios'), api('/api/equipamentos')]);
+  const [{ usuarios }, { equipamentos }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes')]);
   const tecnicos = usuarios.filter((u) => u.papel === 'tecnico');
+  window._clientesCache = clientes;
   document.getElementById('form-nova-atividade').innerHTML = `
     <div class="panel"><div class="panel-head">Nova atividade</div>
       <div class="form-grid">
         <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}">${t.nome}</option>`).join('')}</select></div>
-        <div><label>Equipamento</label><select id="na-equip">${equipamentos.map((e) => `<option value="${e.id}" data-cliente="${e.cliente_id}">${e.tipo} — ${e.modelo}</option>`).join('')}</select></div>
+        <div><label>Equipamento</label><select id="na-equip" onchange="preencherClienteNovaAtividade()">${equipamentos.map((e) => `<option value="${e.id}" data-cliente="${e.cliente_id}">${e.tipo} — ${e.modelo}</option>`).join('')}</select></div>
         <div><label>Tipo</label><select id="na-tipo">
           <option value="corretiva">Corretiva</option>
           <option value="preventiva">Preventiva</option>
@@ -329,10 +330,39 @@ async function mostrarFormNovaAtividade() {
         </select></div>
         <div><label>Início</label><input type="datetime-local" id="na-inicio"></div>
         <div><label>Fim previsto</label><input type="datetime-local" id="na-fim"></div>
-        <div class="full"><label>Problema relatado</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente..."></textarea></div>
+        <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito..."></textarea></div>
+      </div>
+      <h2 style="margin-top:4px;">Dados do atendimento</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pré-preenchido a partir do cadastro do cliente — ajuste se for diferente para este atendimento. Fica travado para o técnico.</p>
+      <div class="form-grid">
+        <div><label>Contato*</label><input id="na-contato"></div>
+        <div><label>Telefone*</label><input id="na-telefone"></div>
+        <div><label>Setor do cliente</label><input id="na-setor-cliente"></div>
+        <div class="full"><label>Endereço*</label><input id="na-endereco"></div>
+        <div><label>Número*</label><input id="na-numero"></div>
+        <div><label>Bairro*</label><input id="na-bairro"></div>
+        <div><label>CEP*</label><input id="na-cep"></div>
+        <div><label>Cidade*</label><input id="na-cidade"></div>
+        <div><label>Estado*</label><select id="na-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">Salvar atividade</button>
     </div>`;
+  preencherClienteNovaAtividade();
+}
+
+function preencherClienteNovaAtividade() {
+  const equipSelect = document.getElementById('na-equip');
+  const clienteId = Number(equipSelect.options[equipSelect.selectedIndex].dataset.cliente);
+  const cliente = (window._clientesCache || []).find((c) => c.id === clienteId) || {};
+  document.getElementById('na-contato').value = cliente.contato || '';
+  document.getElementById('na-telefone').value = cliente.telefone || '';
+  document.getElementById('na-setor-cliente').value = cliente.setor || '';
+  document.getElementById('na-endereco').value = cliente.endereco || '';
+  document.getElementById('na-numero').value = cliente.numero || '';
+  document.getElementById('na-bairro').value = cliente.bairro || '';
+  document.getElementById('na-cep').value = cliente.cep || '';
+  document.getElementById('na-cidade').value = cliente.cidade || '';
+  document.getElementById('na-estado').value = cliente.estado || '';
 }
 
 async function salvarNovaAtividade() {
@@ -346,6 +376,15 @@ async function salvarNovaAtividade() {
     data_hora_inicio: document.getElementById('na-inicio').value,
     data_hora_fim: document.getElementById('na-fim').value,
     problema: document.getElementById('na-problema').value,
+    contato: document.getElementById('na-contato').value,
+    telefone: document.getElementById('na-telefone').value,
+    setor_cliente: document.getElementById('na-setor-cliente').value,
+    endereco: document.getElementById('na-endereco').value,
+    numero: document.getElementById('na-numero').value,
+    bairro: document.getElementById('na-bairro').value,
+    cep: document.getElementById('na-cep').value,
+    cidade: document.getElementById('na-cidade').value,
+    estado: document.getElementById('na-estado').value,
   };
   try {
     await api('/api/agenda', { method: 'POST', body });
@@ -403,15 +442,15 @@ function relatorioPadrao(item) {
   return {
     agenda_id: item.id,
     empresa: item.cliente_nome || '',
-    contato: item.cliente_contato || '',
-    telefone: item.cliente_telefone || '',
-    setor_cliente: item.cliente_setor || '',
-    endereco: item.cliente_endereco || '',
-    numero: item.cliente_numero || '',
-    bairro: item.cliente_bairro || '',
-    cep: item.cliente_cep || '',
-    cidade: item.cliente_cidade || '',
-    estado: item.cliente_estado || '',
+    contato: item.contato || item.cliente_contato || '',
+    telefone: item.telefone || item.cliente_telefone || '',
+    setor_cliente: item.setor_cliente || item.cliente_setor || '',
+    endereco: item.endereco || item.cliente_endereco || '',
+    numero: item.numero || item.cliente_numero || '',
+    bairro: item.bairro || item.cliente_bairro || '',
+    cep: item.cep || item.cliente_cep || '',
+    cidade: item.cidade || item.cliente_cidade || '',
+    estado: item.estado || item.cliente_estado || '',
     data_inicial: (item.data_hora_inicio || '').slice(0, 10),
     data_final: (item.data_hora_fim || '').slice(0, 10),
     modelo_maquina: item.equipamento_modelo || '',
@@ -455,24 +494,25 @@ async function renderRelatorioCorretiva(item) {
     <div class="page-head"><h1>Relatório técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
     <div class="panel">
       <h2>Dados do atendimento</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Definidos pelo administrador na abertura desta OS — não podem ser alterados aqui.</p>
       <div class="form-grid">
-        <div><label>Empresa*</label><input id="rc-empresa" oninput="atualizarRascunho()"></div>
-        <div><label>Contato*</label><input id="rc-contato" oninput="atualizarRascunho()"></div>
-        <div><label>Telefone*</label><input id="rc-telefone" oninput="atualizarRascunho()"></div>
-        <div><label>Setor do cliente</label><input id="rc-setor_cliente" oninput="atualizarRascunho()"></div>
-        <div class="full"><label>Endereço*</label><input id="rc-endereco" oninput="atualizarRascunho()"></div>
-        <div><label>Número*</label><input id="rc-numero" oninput="atualizarRascunho()"></div>
-        <div><label>Bairro*</label><input id="rc-bairro" oninput="atualizarRascunho()"></div>
-        <div><label>CEP*</label><input id="rc-cep" oninput="atualizarRascunho()"></div>
-        <div><label>Cidade*</label><input id="rc-cidade" oninput="atualizarRascunho()"></div>
-        <div><label>Estado*</label><select id="rc-estado" onchange="atualizarRascunho()"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
+        <div><label>Empresa</label><input id="rc-empresa" disabled></div>
+        <div><label>Contato</label><input id="rc-contato" disabled></div>
+        <div><label>Telefone</label><input id="rc-telefone" disabled></div>
+        <div><label>Setor do cliente</label><input id="rc-setor_cliente" disabled></div>
+        <div class="full"><label>Endereço</label><input id="rc-endereco" disabled></div>
+        <div><label>Número</label><input id="rc-numero" disabled></div>
+        <div><label>Bairro</label><input id="rc-bairro" disabled></div>
+        <div><label>CEP</label><input id="rc-cep" disabled></div>
+        <div><label>Cidade</label><input id="rc-cidade" disabled></div>
+        <div><label>Estado</label><input id="rc-estado" disabled></div>
         <div><label>Região</label><input id="rc-regiao" disabled></div>
-        <div><label>Data inicial*</label><input type="date" id="rc-data_inicial" oninput="atualizarRascunho()"></div>
-        <div><label>Data final*</label><input type="date" id="rc-data_final" oninput="atualizarRascunho()"></div>
-        <div><label>Modelo da máquina*</label><input id="rc-modelo_maquina" oninput="atualizarRascunho()"></div>
-        <div><label>Nº de série*</label><input id="rc-numero_serie" oninput="atualizarRascunho()"></div>
-        <div><label>Serviço*</label><input id="rc-servico" oninput="atualizarRascunho()"></div>
-        <div><label>Técnico*</label><input id="rc-tecnico_nome" oninput="atualizarRascunho()"></div>
+        <div><label>Data inicial</label><input id="rc-data_inicial" disabled></div>
+        <div><label>Data final</label><input id="rc-data_final" disabled></div>
+        <div><label>Modelo da máquina</label><input id="rc-modelo_maquina" disabled></div>
+        <div><label>Nº de série</label><input id="rc-numero_serie" disabled></div>
+        <div><label>Serviço</label><input id="rc-servico" disabled></div>
+        <div><label>Técnico</label><input id="rc-tecnico_nome" disabled></div>
       </div>
     </div>
 
@@ -873,26 +913,26 @@ function gerarPdfRelatorio(d, item) {
 async function renderRelatorioSimples(item, exigirSerie) {
   relatorioAgendaAtual = item;
   let r = {
-    empresa: item.cliente_nome || '', contato: item.cliente_contato || '', telefone: item.cliente_telefone || '',
+    empresa: item.cliente_nome || '', contato: item.contato || item.cliente_contato || '', telefone: item.telefone || item.cliente_telefone || '',
     tecnico_nome: USER.nome, equipamento_tipo: item.equipamento_tipo || '', equipamento_modelo: item.equipamento_modelo || '',
     numero_serie: item.equipamento_serie || '', observacoes: '',
   };
   if (item.visita_id) {
-    try { const { visita } = await api(`/api/visitas/${item.visita_id}`); if (visita.relatorio_simples) r = { ...r, ...visita.relatorio_simples }; } catch (e) {}
+    try { const { visita } = await api(`/api/visitas/${item.visita_id}`); if (visita.relatorio_simples) r = { ...r, observacoes: visita.relatorio_simples.observacoes || '' }; } catch (e) {}
   }
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Relatório — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Dados do cliente e do equipamento. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>Relatório — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Dados do cliente e do equipamento definidos pelo administrador. Preencha as observações abaixo.</p></div>
     <div class="panel">
       <div class="form-grid">
-        <div><label>Empresa*</label><input id="rs-empresa" value="${esc(r.empresa)}"></div>
-        <div><label>Contato*</label><input id="rs-contato" value="${esc(r.contato)}"></div>
-        <div><label>Telefone*</label><input id="rs-telefone" value="${esc(r.telefone)}"></div>
+        <div><label>Empresa</label><input id="rs-empresa" value="${esc(r.empresa)}" disabled></div>
+        <div><label>Contato</label><input id="rs-contato" value="${esc(r.contato)}" disabled></div>
+        <div><label>Telefone</label><input id="rs-telefone" value="${esc(r.telefone)}" disabled></div>
         <div><label>Data</label><input id="rs-data" value="${esc((item.data_hora_inicio || '').slice(0, 10))}" disabled></div>
-        <div><label>Técnico*</label><input id="rs-tecnico" value="${esc(r.tecnico_nome)}"></div>
-        <div><label>Equipamento*</label><input id="rs-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
-        <div><label>Modelo*</label><input id="rs-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
-        ${exigirSerie ? `<div><label>Nº de série*</label><input id="rs-serie" value="${esc(r.numero_serie)}"></div>` : ''}
+        <div><label>Técnico</label><input id="rs-tecnico" value="${esc(r.tecnico_nome)}" disabled></div>
+        <div><label>Equipamento</label><input id="rs-equip-tipo" value="${esc(r.equipamento_tipo)}" disabled></div>
+        <div><label>Modelo</label><input id="rs-equip-modelo" value="${esc(r.equipamento_modelo)}" disabled></div>
+        ${exigirSerie ? `<div><label>Nº de série</label><input id="rs-serie" value="${esc(r.numero_serie)}" disabled></div>` : ''}
       </div>
       <label>Observações*</label>
       <textarea id="rs-observacoes" placeholder="O que foi feito / observado no atendimento...">${esc(r.observacoes)}</textarea>
