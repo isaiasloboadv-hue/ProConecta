@@ -15,7 +15,11 @@ const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
 };
-const TIPOS_RELATORIO_COMPLETO = ['corretiva', 'preventiva', 'treinamento_presencial'];
+// laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura)
+const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva'];
+// termo de aceite com checklist/assinatura — hoje só treinamento presencial, enquanto
+// o modelo de referência específico dele não chega
+const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];
 
 const CHECKLIST_CORRETIVA = [
   'Instalação mecânica', 'Instalação elétrica', 'Instalação software', 'Sistema de segurança',
@@ -395,7 +399,8 @@ async function salvarNovaAtividade() {
 function abrirDiario(agendaId) {
   const item = (window._agendaCache || []).find((a) => a.id === agendaId);
   if (!item) return;
-  if (TIPOS_RELATORIO_COMPLETO.includes(item.tipo)) return renderRelatorioCorretiva(item);
+  if (TIPOS_LAUDO_TECNICO.includes(item.tipo)) return renderLaudoTecnico(item);
+  if (TIPOS_TERMO_ACEITE.includes(item.tipo)) return renderRelatorioCorretiva(item);
   if (item.tipo === 'treinamento_online') return renderRelatorioSimples(item, true);
   if (item.tipo === 'demonstracao_tecnica') return renderRelatorioSimples(item, false);
   document.getElementById('diario-form').innerHTML = `
@@ -963,6 +968,342 @@ async function concluirRelatorioSimples(exigirSerie) {
   } catch (e) { alert('Erro ao concluir: ' + e.message); }
 }
 
+// ---------- LAUDO TÉCNICO (corretiva / preventiva) ----------
+let laudoDraft = null;
+let laudoAgendaAtual = null;
+function chaveRascunhoLaudo(agendaId) { return `pc_rascunho_laudo_${agendaId}`; }
+
+function laudoPadrao(item) {
+  return {
+    agenda_id: item.id,
+    marca: '', data_fabricacao: '',
+    garantia: '', garantia_obs: '',
+    acessorios: '', defeito_informado: item.problema || item.servico || '',
+    data_entrada: (item.data_hora_inicio || '').slice(0, 10),
+    data_conclusao: new Date().toISOString().slice(0, 10),
+    laudo_tecnico: '', servico_realizado: '',
+    pecas: [], fotos: [], observacoes: '',
+    relevante_biblioteca: false,
+  };
+}
+
+function periodoReparo(d) {
+  if (!d.data_entrada || !d.data_conclusao) return '—';
+  const ini = new Date(d.data_entrada + 'T00:00:00');
+  const fim = new Date(d.data_conclusao + 'T00:00:00');
+  const dias = Math.max(0, Math.round((fim - ini) / 86400000));
+  return `${dias} dia${dias === 1 ? '' : 's'}`;
+}
+
+async function renderLaudoTecnico(item) {
+  laudoAgendaAtual = item;
+  let salvoEm = null;
+  try {
+    const bruto = localStorage.getItem(chaveRascunhoLaudo(item.id));
+    if (bruto) {
+      const salvo = JSON.parse(bruto);
+      laudoDraft = salvo.draft;
+      salvoEm = salvo.em;
+    } else if (item.visita_id) {
+      const { visita } = await api(`/api/visitas/${item.visita_id}`);
+      laudoDraft = visita.laudo ? { ...laudoPadrao(item), ...visita.laudo } : laudoPadrao(item);
+    } else {
+      laudoDraft = laudoPadrao(item);
+    }
+  } catch (e) { laudoDraft = laudoPadrao(item); }
+  laudoDraft.agenda_id = item.id;
+
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Laudo Técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
+    <div class="panel">
+      <h2>Dados do atendimento</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Definidos pelo administrador na abertura desta OS — não podem ser alterados aqui.</p>
+      <div class="form-grid">
+        <div><label>Empresa</label><input value="${esc(item.cliente_nome || '')}" disabled></div>
+        <div><label>Contato</label><input value="${esc(item.contato || item.cliente_contato || '')}" disabled></div>
+        <div><label>Telefone</label><input value="${esc(item.telefone || item.cliente_telefone || '')}" disabled></div>
+        <div class="full"><label>Endereço</label><input value="${esc(`${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`)}" disabled></div>
+        <div><label>Técnico</label><input value="${esc(USER.nome)}" disabled></div>
+        <div><label>Equipamento</label><input value="${esc(item.equipamento_tipo || '')}" disabled></div>
+        <div><label>Modelo</label><input value="${esc(item.equipamento_modelo || '')}" disabled></div>
+        <div><label>Nº de série</label><input value="${esc(item.equipamento_serie || '')}" disabled></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados do equipamento</h2>
+      <div class="form-grid">
+        <div><label>Marca</label><input id="lt-marca" placeholder="Marca do equipamento" oninput="atualizarRascunhoLaudo()"></div>
+        <div><label>Data de fabricação</label><input id="lt-data_fabricacao" type="date" oninput="atualizarRascunhoLaudo()"></div>
+        <div class="full"><label>Acessórios recebidos</label><input id="lt-acessorios" placeholder="ex: cabo de força, fonte, controle..." oninput="atualizarRascunhoLaudo()"></div>
+        <div class="full"><label>Defeito informado pelo cliente</label><input id="lt-defeito_informado" oninput="atualizarRascunhoLaudo()"></div>
+      </div>
+      <label>Equipamento está na garantia?*</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="sim" onchange="atualizarRascunhoLaudo()" style="width:auto;"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="nao" onchange="atualizarRascunhoLaudo()" style="width:auto;"> Não</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="outros" onchange="atualizarRascunhoLaudo()" style="width:auto;"> Outros</label>
+      </div>
+      <input id="lt-garantia_obs" placeholder="Especifique (obrigatório se 'Outros')" oninput="atualizarRascunhoLaudo()">
+    </div>
+
+    <div class="panel">
+      <h2>Técnico responsável</h2>
+      <div class="form-grid">
+        <div><label>Data de entrada</label><input id="lt-data_entrada" type="date" disabled></div>
+        <div><label>Data de conclusão*</label><input id="lt-data_conclusao" type="date" oninput="atualizarRascunhoLaudo()"></div>
+        <div><label>Período de reparo</label><input id="lt-periodo" disabled></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Laudo técnico*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">O que foi analisado e o que foi encontrado.</p>
+      <textarea id="lt-laudo_tecnico" placeholder="Descreva o diagnóstico..." oninput="atualizarRascunhoLaudo()"></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Serviço realizado*</h2>
+      <textarea id="lt-servico_realizado" placeholder="Descreva o que foi feito para solucionar..." oninput="atualizarRascunhoLaudo()"></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Peças fornecidas</h2>
+      <div class="steps-list" id="lt-pecas"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarPecaLaudo()">+ Adicionar peça</button>
+    </div>
+
+    <div class="panel">
+      <h2>Relatório fotográfico*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Anexe ao menos uma foto do equipamento/serviço realizado.</p>
+      <div class="step-photos" id="lt-fotos"></div>
+      <label class="photo-add" style="margin-top:10px;">
+        <span class="plus">+</span>Foto
+        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosLaudo(event)">
+      </label>
+    </div>
+
+    <div class="panel">
+      <h2>Observações</h2>
+      <textarea id="lt-observacoes" placeholder="Observações adicionais (opcional)" oninput="atualizarRascunhoLaudo()"></textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Sobre o equipamento</h2>
+      <p style="font-size:13.5px; line-height:1.6;">
+        Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>
+        <b>WhatsApp:</b> 12 99718-7506 &nbsp; <b>Telefone:</b> 12 3902-3453<br>
+        <b>E-mail:</b> suporte@promarking.com.br / atendimento@promarking.com.br / tecnico@promarking.com.br / posvenda@promarking.com.br
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>Biblioteca de conhecimento</h2>
+      <label style="display:flex; align-items:center; gap:10px; font-weight:600; text-transform:none; font-size:13.5px;">
+        <input type="checkbox" id="lt-relevante-biblioteca" onchange="atualizarRascunhoLaudo()" style="width:auto; accent-color:var(--blue);">
+        Este atendimento é relevante para a Biblioteca de Defeitos/Falhas — ao ser aprovado pelo administrador, entra na biblioteca com seu nome como autor.
+      </label>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do laudo preenchido é gerado e baixado automaticamente.</p>
+      <p id="lt-rascunho-status" style="font-size:12px; color:var(--green);">${salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="limparLaudo(${item.id})">Limpar formulário</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirLaudoTecnico()">Concluir e gerar PDF</button>
+      </div>
+    </div>`;
+  preencherCamposLaudo();
+  renderPecasLaudo();
+  renderFotosLaudo();
+}
+
+function preencherCamposLaudo() {
+  const d = laudoDraft;
+  ['marca', 'data_fabricacao', 'acessorios', 'defeito_informado', 'garantia_obs', 'data_conclusao', 'laudo_tecnico', 'servico_realizado', 'observacoes'].forEach((campo) => {
+    const el = document.getElementById('lt-' + campo);
+    if (el) el.value = d[campo] || '';
+  });
+  document.getElementById('lt-data_entrada').value = d.data_entrada || '';
+  document.getElementById('lt-periodo').value = periodoReparo(d);
+  if (d.garantia) { const r = document.querySelector(`input[name="lt-garantia"][value="${d.garantia}"]`); if (r) r.checked = true; }
+  document.getElementById('lt-relevante-biblioteca').checked = !!d.relevante_biblioteca;
+}
+
+function renderPecasLaudo() {
+  document.getElementById('lt-pecas').innerHTML = laudoDraft.pecas.map((p, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="laudoDraft.pecas[${i}].descricao=this.value; atualizarRascunhoLaudo(true);">
+        <input placeholder="Qtd" value="${esc(p.quantidade || '')}" style="flex:0 0 70px;" oninput="laudoDraft.pecas[${i}].quantidade=this.value; atualizarRascunhoLaudo(true);">
+        <button class="step-rm" onclick="removerPecaLaudo(${i})">×</button>
+      </div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
+}
+function adicionarPecaLaudo() { laudoDraft.pecas.push({ descricao: '', quantidade: '' }); renderPecasLaudo(); atualizarRascunhoLaudo(true); }
+function removerPecaLaudo(i) { laudoDraft.pecas.splice(i, 1); renderPecasLaudo(); atualizarRascunhoLaudo(true); }
+
+function renderFotosLaudo() {
+  document.getElementById('lt-fotos').innerHTML = laudoDraft.fotos.map((f, j) => `
+    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do laudo">
+      <button class="photo-rm" onclick="removerFotoLaudo(${j})">×</button>
+    </div>`).join('');
+}
+function adicionarFotosLaudo(event) {
+  const arquivos = Array.from(event.target.files || []);
+  Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(leitor.result);
+    leitor.readAsDataURL(arquivo);
+  }))).then((dataUrls) => {
+    laudoDraft.fotos.push(...dataUrls);
+    renderFotosLaudo();
+    atualizarRascunhoLaudo(true);
+  });
+}
+function removerFotoLaudo(j) { laudoDraft.fotos.splice(j, 1); renderFotosLaudo(); atualizarRascunhoLaudo(true); }
+
+function atualizarRascunhoLaudo(semLerCampos) {
+  if (!semLerCampos) {
+    const d = laudoDraft;
+    ['marca', 'data_fabricacao', 'acessorios', 'defeito_informado', 'garantia_obs', 'data_conclusao', 'laudo_tecnico', 'servico_realizado', 'observacoes'].forEach((campo) => {
+      const el = document.getElementById('lt-' + campo);
+      if (el) d[campo] = el.value;
+    });
+    const garantia = document.querySelector('input[name="lt-garantia"]:checked');
+    d.garantia = garantia ? garantia.value : '';
+    d.relevante_biblioteca = document.getElementById('lt-relevante-biblioteca').checked;
+  }
+  document.getElementById('lt-periodo').value = periodoReparo(laudoDraft);
+  try {
+    localStorage.setItem(chaveRascunhoLaudo(laudoDraft.agenda_id), JSON.stringify({ draft: laudoDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
+    const status = document.getElementById('lt-rascunho-status');
+    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  } catch (e) {}
+}
+
+function limparLaudo(agendaId) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  localStorage.removeItem(chaveRascunhoLaudo(agendaId));
+  renderLaudoTecnico(laudoAgendaAtual);
+}
+
+async function concluirLaudoTecnico() {
+  atualizarRascunhoLaudo();
+  const d = laudoDraft;
+  if (!d.garantia) return alert('Informe se o equipamento está na garantia.');
+  if (d.garantia === 'outros' && !String(d.garantia_obs || '').trim()) return alert('Especifique a garantia em "Outros".');
+  if (!d.data_conclusao) return alert('Informe a data de conclusão.');
+  if (!String(d.laudo_tecnico || '').trim()) return alert('Preencha o laudo técnico.');
+  if (!String(d.servico_realizado || '').trim()) return alert('Descreva o serviço realizado.');
+  if (!d.fotos.length) return alert('Anexe ao menos uma foto no relatório fotográfico.');
+
+  const body = { agenda_id: d.agenda_id, laudo: d, relevante_biblioteca: d.relevante_biblioteca };
+  let visita;
+  try {
+    ({ visita } = await api('/api/visitas', { method: 'POST', body }));
+  } catch (e) {
+    alert('Erro ao concluir: ' + e.message);
+    return;
+  }
+  localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
+  let avisoExtra = '';
+  try {
+    const pdfDataUri = gerarPdfLaudo(d, laudoAgendaAtual);
+    const link = document.createElement('a');
+    link.href = pdfDataUri;
+    link.download = `laudo-tecnico-${visita.id}.pdf`;
+    document.body.appendChild(link); link.click(); link.remove();
+  } catch (e) {
+    console.error('Falha ao gerar o PDF localmente:', e);
+    avisoExtra = ' O laudo foi salvo, mas não foi possível gerar o PDF neste dispositivo.';
+  }
+  mostrarToast('Laudo concluído e enviado para aprovação do administrador.' + avisoExtra);
+  renderAgenda();
+}
+
+function gerarPdfLaudo(d, item) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const margem = 40; let y = 50;
+  const largura = doc.internal.pageSize.getWidth() - margem * 2;
+  function titulo(t) { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71); doc.text(t, margem, y); y += 18; doc.setDrawColor(20, 103, 214); doc.line(margem, y - 12, margem + largura, y - 12); }
+  function linha(rotulo, valor) {
+    if (y > 760) { doc.addPage(); y = 50; }
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
+    doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
+    const linhas = doc.splitTextToSize(String(valor || '—'), largura - 130);
+    doc.text(linhas, margem + 130, y);
+    y += Math.max(14, linhas.length * 12);
+  }
+  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+  doc.text('Laudo Técnico — Pro Conecta', margem, y); y += 22;
+  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+  doc.text(`Elaborado: ${new Date().toLocaleDateString('pt-BR')} · Setor: ${USER.setor || 'Suporte Técnico'}`, margem, y); y += 24;
+
+  titulo('Dados do atendimento');
+  linha('Empresa', item.cliente_nome); linha('Contato', item.contato || item.cliente_contato); linha('Telefone', item.telefone || item.cliente_telefone);
+  linha('Endereço', `${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`);
+  linha('Técnico', USER.nome);
+  linha('Equipamento', `${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''} (${item.equipamento_serie || '—'})`);
+  y += 8;
+
+  titulo('Dados do equipamento');
+  linha('Marca', d.marca); linha('Data de fabricação', d.data_fabricacao);
+  linha('Garantia', d.garantia === 'sim' ? 'Sim' : d.garantia === 'nao' ? 'Não' : `Outros — ${d.garantia_obs}`);
+  linha('Acessórios recebidos', d.acessorios); linha('Defeito informado', d.defeito_informado);
+  y += 8;
+
+  titulo('Técnico responsável');
+  linha('Data de entrada', d.data_entrada); linha('Data de conclusão', d.data_conclusao); linha('Período de reparo', periodoReparo(d));
+  y += 8;
+
+  titulo('Laudo técnico');
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.laudo_tecnico, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+
+  titulo('Serviço realizado');
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.servico_realizado, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+
+  if (d.pecas.length) {
+    titulo('Peças fornecidas');
+    d.pecas.forEach((p) => {
+      if (y > 760) { doc.addPage(); y = 50; }
+      doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
+      doc.text(`• ${p.descricao || '—'}${p.quantidade ? ' (qtd: ' + p.quantidade + ')' : ''}`, margem, y); y += 13;
+    });
+    y += 8;
+  }
+
+  if (d.observacoes) {
+    titulo('Observações');
+    if (y > 740) { doc.addPage(); y = 50; }
+    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
+    const linhas = doc.splitTextToSize(d.observacoes, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8;
+  }
+
+  if (d.fotos.length) {
+    doc.addPage(); y = 50;
+    titulo('Relatório fotográfico');
+    const wImg = 240, hImg = 180;
+    let x = margem;
+    d.fotos.forEach((f, i) => {
+      if (x + wImg > margem + largura) { x = margem; y += hImg + 20; }
+      if (y + hImg > 780) { doc.addPage(); y = 50; x = margem; }
+      const m = /^data:image\/(\w+);/.exec(f);
+      const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+      try { doc.addImage(f, formato, x, y, wImg, hImg); } catch (e) {}
+      x += wImg + 20;
+    });
+  }
+
+  doc.setFontSize(9); doc.setTextColor(74, 85, 104);
+  doc.text('PRO Marking · WhatsApp 12 99718-7506 · Telefone 12 3902-3453 · suporte@promarking.com.br', margem, doc.internal.pageSize.getHeight() - 24);
+
+  return doc.output('datauristring');
+}
+
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
 let visitasAbertas = new Set();
 async function renderAprovacoesVisitas() {
@@ -1059,6 +1400,22 @@ function detalheRelatorioVisita(v) {
       <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
       <div class="kv"><b>Equipamento:</b> ${esc(r.equipamento_tipo)} — ${esc(r.equipamento_modelo)} ${r.numero_serie ? `(${esc(r.numero_serie)})` : ''}</div>
       <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>`;
+  }
+  if (v.laudo) {
+    const l = v.laudo;
+    return `
+      ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
+      <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
+      <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')}) <span class="sep">·</span> <b>Marca:</b> ${esc(l.marca || '—')}</div>
+      <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `Outros — ${esc(l.garantia_obs || '')}`}</div>
+      <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
+      <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
+      <div class="kv"><b>Data de entrada:</b> ${esc(l.data_entrada || '—')} <span class="sep">·</span> <b>Data de conclusão:</b> ${esc(l.data_conclusao || '—')} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
+      <div class="kv"><b>Laudo técnico:</b> ${esc(l.laudo_tecnico || '')}</div>
+      <div class="kv"><b>Serviço realizado:</b> ${esc(l.servico_realizado || '')}</div>
+      ${(l.pecas || []).length ? `<div class="kv"><b>Peças fornecidas:</b></div><ol class="item-steps">${l.pecas.map((p) => `<li>${esc(p.descricao || '—')}${p.quantidade ? ' (qtd: ' + esc(p.quantidade) + ')' : ''}</li>`).join('')}</ol>` : ''}
+      ${l.observacoes ? `<div class="kv"><b>Observações:</b> ${esc(l.observacoes)}</div>` : ''}
+      ${(l.fotos || []).length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="step-photos">${l.fotos.map((f) => `<div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do laudo"></div>`).join('')}</div>` : ''}`;
   }
   return `<div class="kv"><b>Causa:</b> ${esc(v.causa)}</div><div class="kv"><b>Correção:</b> ${esc(v.correcao)}</div><div class="kv"><b>Resultado:</b> ${esc(v.resultado)}</div>`;
 }

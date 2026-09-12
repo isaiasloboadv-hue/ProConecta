@@ -96,14 +96,19 @@ const CHECKLIST_CORRETIVA = [
   'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
 ];
 
-// tipos de OS que usam o relatório completo (checklist + aceite + avaliação + assinatura + PDF)
-const TIPOS_RELATORIO_COMPLETO = ['corretiva', 'preventiva', 'treinamento_presencial'];
+// tipos de OS que usam o Laudo Técnico (diagnóstico + serviço realizado + peças + fotos, sem assinatura)
+const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva'];
+// tipos que usam o termo de aceite com checklist/assinatura — hoje só treinamento presencial,
+// enquanto o modelo de referência específico dele não chega
+const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];
 
 // dados do atendimento definidos pelo administrador na abertura da OS — o técnico só visualiza,
 // nunca são aceitos a partir do que o técnico envia (mesmo que ele tente via chamada direta à API)
 function dadosAtendimentoBloqueados(data, agendaItem, user) {
   const cliente = data.clientes.find((c) => c.id === agendaItem.cliente_id);
   const equipamento = data.equipamentos.find((e) => e.id === agendaItem.equipamento_id);
+  // o token de sessão só carrega id/papel/nome/cliente_id — o e-mail vem do cadastro completo
+  const usuarioCompleto = data.usuarios.find((u) => u.id === user.id);
   return {
     empresa: cliente ? cliente.nome_empresa : '',
     contato: agendaItem.contato || (cliente ? cliente.contato : ''),
@@ -122,6 +127,7 @@ function dadosAtendimentoBloqueados(data, agendaItem, user) {
     numero_serie: equipamento ? equipamento.numero_serie : '',
     servico: agendaItem.problema || '',
     tecnico_nome: user.nome,
+    tecnico_email: usuarioCompleto ? usuarioCompleto.email : '',
   };
 }
 
@@ -157,6 +163,18 @@ function validarRelatorioSimples(r, exigirSerie) {
     if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
   }
   if (!r.observacoes || !String(r.observacoes).trim()) return 'Observações são obrigatórias.';
+  return null;
+}
+
+// laudo técnico: usado em corretiva e preventiva (diagnóstico + serviço + peças + fotos, sem assinatura)
+function validarLaudoTecnico(l) {
+  if (!l || typeof l !== 'object') return 'Laudo técnico é obrigatório para este tipo de atendimento.';
+  if (l.garantia !== 'sim' && l.garantia !== 'nao' && l.garantia !== 'outros') return 'Informe se o equipamento está na garantia.';
+  if (l.garantia === 'outros' && !String(l.garantia_obs || '').trim()) return 'Especifique a garantia em "Outros".';
+  if (!l.data_conclusao) return 'Informe a data de conclusão.';
+  if (!String(l.laudo_tecnico || '').trim()) return 'O laudo técnico (o que foi analisado e encontrado) é obrigatório.';
+  if (!String(l.servico_realizado || '').trim()) return 'Descreva o serviço realizado.';
+  if (!Array.isArray(l.fotos) || l.fotos.length === 0) return 'Anexe ao menos uma foto no relatório fotográfico.';
   return null;
 }
 
@@ -289,7 +307,13 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
 
   let relatorio = null;
   let relatorioSimples = null;
-  if (TIPOS_RELATORIO_COMPLETO.includes(agendaItem.tipo)) {
+  let laudo = null;
+  if (TIPOS_LAUDO_TECNICO.includes(agendaItem.tipo)) {
+    const laudoCompleto = { ...(body.laudo || {}), ...bloqueados };
+    const erro = validarLaudoTecnico(laudoCompleto);
+    if (erro) return enviarJSON(res, 400, { erro });
+    laudo = laudoCompleto;
+  } else if (TIPOS_TERMO_ACEITE.includes(agendaItem.tipo)) {
     const relatorioCompleto = { ...(body.relatorio || {}), ...bloqueados };
     const erro = validarRelatorio(relatorioCompleto);
     if (erro) return enviarJSON(res, 400, { erro });
@@ -312,12 +336,13 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
 
   const camposVisita = {
     analise: body.analise || '',
-    causa: body.causa || (relatorio ? relatorio.servico : '') || (relatorioSimples ? `${relatorioSimples.equipamento_tipo} ${relatorioSimples.equipamento_modelo}`.trim() : ''),
-    correcao: body.correcao || (relatorio ? relatorio.observacoes : '') || (relatorioSimples ? relatorioSimples.observacoes : ''),
+    causa: body.causa || (laudo ? laudo.laudo_tecnico : '') || (relatorio ? relatorio.servico : '') || (relatorioSimples ? `${relatorioSimples.equipamento_tipo} ${relatorioSimples.equipamento_modelo}`.trim() : ''),
+    correcao: body.correcao || (laudo ? laudo.servico_realizado : '') || (relatorio ? relatorio.observacoes : '') || (relatorioSimples ? relatorioSimples.observacoes : ''),
     resultado: body.resultado || 'solucionado', // solucionado | parcial | nao_solucionado | aguardando_peca
     relevante_biblioteca: !!body.relevante_biblioteca,
     relatorio,
     relatorio_simples: relatorioSimples,
+    laudo,
     status_aprovacao: 'pendente',
     aprovado_por: null,
     data_aprovacao: null,
