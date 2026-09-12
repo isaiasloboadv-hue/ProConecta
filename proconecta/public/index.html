@@ -4,47 +4,61 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pro Conecta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@800;900&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-<div id="login-screen">
-  <div class="login-box">
-    <div class="brand">Pro Conecta</div>
-    <div class="brand-sub">Gestão de Manutenção &amp; Conhecimento Técnico</div>
-    <div class="field"><label>E-mail</label><input id="login-email" value="admin@proconecta.com.br"></div>
-    <div class="field"><label>Senha</label><input id="login-senha" type="password" value="123456"></div>
-    <div class="error-msg" id="login-erro"></div>
-    <button class="btn btn-primary" onclick="fazerLogin()">Entrar</button>
-    <div class="hint">
-      Contas de teste (senha <b>123456</b>):<br>
-      admin@proconecta.com.br (administrador)<br>
-      isaias@proconecta.com.br (técnico)<br>
-      cliente@abc.com.br (cliente)
+<div id="authView">
+  <div class="auth-wrap">
+    <div class="auth-brand">
+      <div class="brand-mark"><img src="/logo.png" alt="Pro Conecta" style="height:64px;width:auto;display:block;"></div>
+      <div class="wordmark stacked"><span class="pro">Pro</span><span class="conecta">Conecta</span></div>
+    </div>
+    <div class="auth-form">
+      <h1>Entrar</h1>
+      <p>Acesse com o e-mail e a senha cadastrados.</p>
+      <div class="auth-error hidden" id="login-erro"></div>
+      <div class="field"><label>E-mail</label><input id="login-email" placeholder="seu@email.com.br"></div>
+      <div class="field"><label>Senha</label><input id="login-senha" type="password"></div>
+      <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="fazerLogin()">Entrar</button>
+      <div class="demo-box">
+        <div class="dtitle">Contas de demonstração</div>
+        <div class="demo-row"><span><b>Técnico</b> — isaias@proconecta.com.br</span><button class="demo-use" onclick="preencherDemo('isaias@proconecta.com.br')">Usar</button></div>
+        <div class="demo-row"><span><b>Administrador</b> — admin@proconecta.com.br</span><button class="demo-use" onclick="preencherDemo('admin@proconecta.com.br')">Usar</button></div>
+        <div class="demo-row"><span><b>Cliente</b> — cliente@abc.com.br</span><button class="demo-use" onclick="preencherDemo('cliente@abc.com.br')">Usar</button></div>
+      </div>
+    </div>
+    <div class="auth-strip">
+      <img src="https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=300&h=120&fit=crop" alt="">
+      <img src="https://images.unsplash.com/photo-1565043666747-69f6646db940?w=300&h=120&fit=crop" alt="">
+      <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?w=300&h=120&fit=crop" alt="">
     </div>
   </div>
 </div>
 
-<div id="app-screen" class="hidden">
-  <div class="sidebar">
-    <div class="sb-top">
-      <span>Pro Conecta</span>
-      <div class="bell-wrap">
-        <button class="btn-bell" id="btn-bell" onclick="alternarSino()">
-          🔔<span class="bell-badge hidden" id="bell-badge">0</span>
-        </button>
-        <div class="bell-panel" id="bell-panel"></div>
-      </div>
+<div id="appView" style="display:none">
+  <header>
+    <div class="brand">
+      <div class="brand-mark chip"><img src="/logo.png" alt="Pro Conecta" style="height:28px;width:auto;display:block;"></div>
+      <div class="wordmark inline"><span class="pro">Pro</span><span class="conecta">Conecta</span></div>
     </div>
-    <div class="sb-nav" id="sb-nav"></div>
-    <div class="sb-bottom">
-      <div class="un" id="sb-nome"></div>
-      <div class="ur" id="sb-papel"></div>
-      <a onclick="sair()">Sair</a>
-    </div>
+    <div class="header-right" id="headerRight"></div>
+  </header>
+
+  <div class="shell">
+    <nav class="side" id="sideNav"></nav>
+    <main id="main"></main>
   </div>
-  <div class="main" id="main-content"></div>
 </div>
+
+<div class="toast" id="toast"></div>
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" onclick="fecharLightbox()">×</button>
+  <img id="lightbox-img" src="" alt="Foto ampliada">
+</div>
+<div class="modal-overlay" id="inviteModal"></div>
 
 <script src="/app.js"></script>
 </body>
