@@ -15,6 +15,15 @@ const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
 };
+// versão curta pro topo do card de O.S. — cabe ao lado da tag do técnico sem quebrar linha
+const TIPO_OS_LABEL_CURTO = {
+  corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Trein. online',
+  treinamento_presencial: 'Trein. presencial', demonstracao_tecnica: 'Demo. técnica',
+};
+const TIPO_OS_COR = {
+  corretiva: 'falha', preventiva: 'green', treinamento_online: 'blue',
+  treinamento_presencial: 'amber', demonstracao_tecnica: 'orange',
+};
 // laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura)
 const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva'];
 // termo de aceite com checklist/assinatura — hoje só treinamento presencial, enquanto
@@ -449,8 +458,8 @@ function osCardCorpo(a) {
   return `
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
-        <span class="tag tag-blue">${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
-        <span class="tag os-tag-tecnico">${esc(a.tecnico_nome || '—')}</span>
+        <span class="tag tag-${TIPO_OS_COR[a.tipo] || 'blue'} os-tag-tipo" title="${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}">${esc(TIPO_OS_LABEL_CURTO[a.tipo] || TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
+        <span class="tag os-tag-tecnico" title="${esc(a.tecnico_nome || '—')}">${esc(a.tecnico_nome || '—')}</span>
       </div>
       <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
       <div class="os-card-fields">
@@ -469,7 +478,9 @@ function cardOS(a) {
   return `
     <div class="os-card">
       ${osCardCorpo(a)}
-      ${a.visita_id ? `<button class="btn-outline-sm" style="margin-top:10px;" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="display:block; margin-top:8px; font-size:12px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
+      <div class="os-card-actions">
+        ${a.visita_id ? `<button class="btn-outline-sm" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
+      </div>
     </div>`;
 }
 
