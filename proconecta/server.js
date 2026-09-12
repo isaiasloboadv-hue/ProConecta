@@ -265,8 +265,9 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador pode criar atividades.' });
   const body = await lerCorpo(req);
-  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo',
-    'contato', 'telefone', 'email', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado'];
+  // treinamento online não exige deslocamento até o cliente, então não pede endereço
+  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
+  if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
   for (const campo of obrig) {
     if (!body[campo] || !String(body[campo]).trim()) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
   }
@@ -283,7 +284,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     problema: body.problema || '',
     // dados do atendimento definidos pelo administrador ao abrir a OS — o técnico só visualiza
     contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
-    endereco: body.endereco, numero: body.numero, bairro: body.bairro, cep: body.cep, cidade: body.cidade, estado: body.estado,
+    endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+    cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,

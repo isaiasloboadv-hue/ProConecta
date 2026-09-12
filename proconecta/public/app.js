@@ -336,7 +336,7 @@ function renderAgendaCalendario() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova atividade</button>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
     <div id="form-nova-atividade"></div>
     <div class="panel">
@@ -488,29 +488,30 @@ async function mostrarFormNovaAtividade() {
   const [{ usuarios }, { equipamentos }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes')]);
   const tecnicos = usuarios.filter((u) => u.papel === 'tecnico');
   window._clientesCache = clientes;
+  window._equipamentosCache = equipamentos;
   document.getElementById('form-nova-atividade').innerHTML = `
-    <div class="panel"><div class="panel-head">Nova atividade</div>
+    <div class="panel"><div class="panel-head">Nova Ordem de Serviço</div>
+      <h2 style="margin-top:0;">Tipo de serviço</h2>
       <div class="form-grid">
-        <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}">${t.nome}</option>`).join('')}</select></div>
-        <div><label>Equipamento</label><select id="na-equip" onchange="preencherClienteNovaAtividade()">${equipamentos.map((e) => `<option value="${e.id}" data-cliente="${e.cliente_id}">${e.tipo} — ${e.modelo}</option>`).join('')}</select></div>
-        <div><label>Tipo</label><select id="na-tipo">
+        <div class="full"><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
           <option value="corretiva">Corretiva</option>
           <option value="preventiva">Preventiva</option>
           <option value="treinamento_online">Treinamento online</option>
           <option value="treinamento_presencial">Treinamento presencial</option>
           <option value="demonstracao_tecnica">Demonstração Técnica</option>
         </select></div>
-        <div><label>Início</label><input type="datetime-local" id="na-inicio"></div>
-        <div><label>Fim previsto</label><input type="datetime-local" id="na-fim"></div>
-        <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito..."></textarea></div>
       </div>
-      <h2 style="margin-top:4px;">Dados do atendimento</h2>
+
+      <h2>Dados do cliente</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pré-preenchido a partir do cadastro do cliente — ajuste se for diferente para este atendimento. Fica travado para o técnico.</p>
       <div class="form-grid">
-        <div><label>Contato*</label><input id="na-contato"></div>
+        <div class="full"><label>Empresa (cliente)</label><select id="na-cliente" onchange="preencherClienteNovaAtividade()">${clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('')}</select></div>
+        <div><label>Contato*</label><input id="na-contato" placeholder="Nome do funcionário responsável por receber o técnico"></div>
         <div><label>Telefone*</label><input id="na-telefone"></div>
         <div><label>E-mail*</label><input id="na-email" type="email"></div>
         <div><label>Setor do cliente</label><input id="na-setor-cliente"></div>
+      </div>
+      <div class="form-grid" id="na-endereco-wrap">
         <div class="full"><label>Endereço*</label><input id="na-endereco"></div>
         <div><label>Número*</label><input id="na-numero"></div>
         <div><label>Bairro*</label><input id="na-bairro"></div>
@@ -518,14 +519,37 @@ async function mostrarFormNovaAtividade() {
         <div><label>Cidade*</label><input id="na-cidade"></div>
         <div><label>Estado*</label><select id="na-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">Salvar atividade</button>
+
+      <h2>Dados do equipamento</h2>
+      <div class="form-grid">
+        <div class="full"><label>Equipamento</label><select id="na-equip"></select></div>
+        <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito..."></textarea></div>
+      </div>
+
+      <h2>Data e horário</h2>
+      <div class="form-grid">
+        <div><label>Início</label><input type="datetime-local" id="na-inicio"></div>
+        <div><label>Fim previsto</label><input type="datetime-local" id="na-fim"></div>
+      </div>
+
+      <h2>Técnico designado</h2>
+      <div class="form-grid">
+        <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('')}</select></div>
+      </div>
+
+      <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">Salvar Ordem de Serviço</button>
     </div>`;
   preencherClienteNovaAtividade();
+  atualizarTipoNovaAtividade();
+}
+
+function atualizarTipoNovaAtividade() {
+  const tipo = document.getElementById('na-tipo').value;
+  document.getElementById('na-endereco-wrap').classList.toggle('hidden', tipo === 'treinamento_online');
 }
 
 function preencherClienteNovaAtividade() {
-  const equipSelect = document.getElementById('na-equip');
-  const clienteId = Number(equipSelect.options[equipSelect.selectedIndex].dataset.cliente);
+  const clienteId = Number(document.getElementById('na-cliente').value);
   const cliente = (window._clientesCache || []).find((c) => c.id === clienteId) || {};
   document.getElementById('na-contato').value = cliente.contato || '';
   document.getElementById('na-telefone').value = cliente.telefone || '';
@@ -537,15 +561,18 @@ function preencherClienteNovaAtividade() {
   document.getElementById('na-cep').value = cliente.cep || '';
   document.getElementById('na-cidade').value = cliente.cidade || '';
   document.getElementById('na-estado').value = cliente.estado || '';
+
+  const equipDoCliente = (window._equipamentosCache || []).filter((e) => e.cliente_id === clienteId);
+  document.getElementById('na-equip').innerHTML = equipDoCliente.length
+    ? equipDoCliente.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')
+    : `<option value="">Nenhum equipamento cadastrado para este cliente</option>`;
 }
 
 async function salvarNovaAtividade() {
-  const equipSelect = document.getElementById('na-equip');
-  const clienteId = equipSelect.options[equipSelect.selectedIndex].dataset.cliente;
   const body = {
     tecnico_id: document.getElementById('na-tecnico').value,
-    equipamento_id: equipSelect.value,
-    cliente_id: clienteId,
+    equipamento_id: document.getElementById('na-equip').value,
+    cliente_id: document.getElementById('na-cliente').value,
     tipo: document.getElementById('na-tipo').value,
     data_hora_inicio: document.getElementById('na-inicio').value,
     data_hora_fim: document.getElementById('na-fim').value,
