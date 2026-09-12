@@ -418,7 +418,7 @@ function desenharDetalheDia(iso) {
   const el = document.getElementById('cal-dia-detalhe');
   el.innerHTML = `
     <div class="page-head" style="margin-top:4px;"><h1 style="font-size:16px;">Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
-    ${agenda.length ? agenda.map((a) => cardOS(a)).join('') : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOS(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
   `;
 }
 
@@ -1532,7 +1532,18 @@ function desenharOrdemServico() {
         </tr>`).join('')}
     </table></div>` : ''}
 
-    ${doMes.length ? doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('') : `<div class="empty">Nenhuma O.S. neste mês.</div>`}`;
+    ${doMes.length ? `<div class="os-grid">${doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('')}</div>` : `<div class="empty">Nenhuma O.S. neste mês.</div>`}
+
+    ${doMes.filter((a) => visitasPorAgenda[a.id] && visitasAbertas.has(visitasPorAgenda[a.id].id)).map((a) => {
+      const visita = visitasPorAgenda[a.id];
+      return `
+        <div class="os-detail-panel">
+          <div class="panel-head">Relatório — OS-${String(a.id).padStart(6, '0')} · ${esc(a.cliente_nome || '—')}
+            <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">Fechar</button>
+          </div>
+          ${detalheRelatorioVisita(visita)}
+        </div>`;
+    }).join('')}`;
 }
 
 function cardOSAdmin(a, visita) {
@@ -1553,13 +1564,12 @@ function cardOSAdmin(a, visita) {
       <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
       <span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else {
-    acoes = `<span style="font-size:12px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
+    acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
   }
   return `
     <div class="os-card">
       ${osCardCorpo(a)}
-      <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">${acoes}</div>
-      ${aberto ? `<div class="item-body">${detalheRelatorioVisita(visita)}</div>` : ''}
+      <div class="os-card-actions">${acoes}</div>
     </div>`;
 }
 
