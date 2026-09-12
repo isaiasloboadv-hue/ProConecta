@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pro Conecta — Ativar acesso</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box" id="caixa">
+    <div class="brand">Pro Conecta</div>
+    <div class="brand-sub">Ativação de primeiro acesso</div>
+    <div id="conteudo"><div class="empty">Verificando convite...</div></div>
+  </div>
+</div>
+
+<script>
+function paramToken() {
+  return new URLSearchParams(window.location.search).get('token') || '';
+}
+
+async function carregar() {
+  const token = paramToken();
+  const conteudo = document.getElementById('conteudo');
+  if (!token) { conteudo.innerHTML = '<div class="error-msg">Link inválido: token não informado.</div>'; return; }
+  try {
+    const res = await fetch('/api/convite/' + token);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Convite inválido.');
+    conteudo.innerHTML = `
+      <p style="margin-bottom:16px; font-size:13.5px;">Olá, <b>${data.nome}</b> (${data.email}). Defina sua senha para ativar sua conta.</p>
+      <div class="field"><label>Nova senha</label><input id="nova-senha" type="password" placeholder="mínimo 6 caracteres"></div>
+      <div class="field"><label>Confirmar senha</label><input id="confirmar-senha" type="password"></div>
+      <div class="error-msg" id="ativar-erro"></div>
+      <button class="btn btn-primary" onclick="ativar('${token}')">Ativar conta e entrar</button>
+    `;
+  } catch (e) {
+    conteudo.innerHTML = `<div class="error-msg">${e.message}</div>`;
+  }
+}
+
+async function ativar(token) {
+  const senha = document.getElementById('nova-senha').value;
+  const confirmar = document.getElementById('confirmar-senha').value;
+  const erroEl = document.getElementById('ativar-erro');
+  erroEl.textContent = '';
+  if (senha.length < 6) { erroEl.textContent = 'A senha precisa ter pelo menos 6 caracteres.'; return; }
+  if (senha !== confirmar) { erroEl.textContent = 'As senhas não conferem.'; return; }
+  try {
+    const res = await fetch('/api/convite/' + token + '/ativar', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Não foi possível ativar a conta.');
+    localStorage.setItem('pc_token', data.token);
+    window.location.href = '/';
+  } catch (e) {
+    erroEl.textContent = e.message;
+  }
+}
+
+carregar();
+</script>
+</body>
+</html>

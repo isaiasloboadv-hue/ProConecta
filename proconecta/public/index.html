@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pro Conecta</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box">
+    <div class="brand">Pro Conecta</div>
+    <div class="brand-sub">Gestão de Manutenção &amp; Conhecimento Técnico</div>
+    <div class="field"><label>E-mail</label><input id="login-email" value="admin@proconecta.com.br"></div>
+    <div class="field"><label>Senha</label><input id="login-senha" type="password" value="123456"></div>
+    <div class="error-msg" id="login-erro"></div>
+    <button class="btn btn-primary" onclick="fazerLogin()">Entrar</button>
+    <div class="hint">
+      Contas de teste (senha <b>123456</b>):<br>
+      admin@proconecta.com.br (administrador)<br>
+      isaias@proconecta.com.br (técnico)<br>
+      cliente@abc.com.br (cliente)
+    </div>
+  </div>
+</div>
+
+<div id="app-screen" class="hidden">
+  <div class="sidebar">
+    <div class="sb-top">
+      <span>Pro Conecta</span>
+      <div class="bell-wrap">
+        <button class="btn-bell" id="btn-bell" onclick="alternarSino()">
+          🔔<span class="bell-badge hidden" id="bell-badge">0</span>
+        </button>
+        <div class="bell-panel" id="bell-panel"></div>
+      </div>
+    </div>
+    <div class="sb-nav" id="sb-nav"></div>
+    <div class="sb-bottom">
+      <div class="un" id="sb-nome"></div>
+      <div class="ur" id="sb-papel"></div>
+      <a onclick="sair()">Sair</a>
+    </div>
+  </div>
+  <div class="main" id="main-content"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

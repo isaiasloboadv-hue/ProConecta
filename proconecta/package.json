@@ -1,0 +1,12 @@
+{
+  "name": "proconecta",
+  "version": "1.0.0",
+  "description": "Pro Conecta - Fase 1 (sem dependências externas)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
