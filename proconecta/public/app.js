@@ -141,7 +141,7 @@ const NAV = {
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
-    { key: 'aprovacoes-visitas', label: 'Aprovação de visitas', page: 'aprovacoes-visitas' },
+    { key: 'aprovacoes-visitas', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -286,26 +286,21 @@ document.addEventListener('click', (e) => {
 async function renderAgenda() {
   const { agenda } = await api('/api/agenda');
   window._agendaCache = agenda;
-  const isAdmin = USER.papel === 'administrador';
+  if (USER.papel === 'administrador') return renderAgendaCalendario();
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
-      <div><h1>${isAdmin ? 'Agenda geral' : 'Minha agenda'}</h1><p>${agenda.length} atividade(s)</p></div>
-      ${isAdmin ? `<button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova atividade</button>` : ''}
-    </div>
-    <div id="form-nova-atividade"></div>
+    <div class="page-head"><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
     <div class="panel"><table>
-      <tr><th>Data</th>${isAdmin ? '<th>Técnico</th>' : ''}<th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Status</th><th></th></tr>
+      <tr><th>Data</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Status</th><th></th></tr>
       ${agenda.length ? agenda.map((a) => `
         <tr>
           <td>${fmtData(a.data_hora_inicio)}</td>
-          ${isAdmin ? `<td>${a.tecnico_nome || '—'}</td>` : ''}
           <td>${a.cliente_nome || '—'}</td>
           <td>${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
           <td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
           <td>${a.status === 'concluida' ? tag('Concluída', 'green') : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${!isAdmin && a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
-            ${!isAdmin && a.status === 'concluida' && a.visita_id ? (
+          <td>${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
+            ${a.status === 'concluida' && a.visita_id ? (
               a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
                 ? `<span class="tag tag-amber">Reabertura solicitada</span>`
                 : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`
@@ -314,6 +309,140 @@ async function renderAgenda() {
     </table></div>
     <div id="diario-form"></div>
   `;
+}
+
+// ---------- AGENDA GERAL (admin): calendário mensal ----------
+const MES_LABEL = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const DOW_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+let calAno = new Date().getFullYear();
+let calMes = new Date().getMonth();
+let calDiaSelecionado = null;
+
+function dataISOLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function renderAgendaCalendario() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova atividade</button>
+    </div>
+    <div id="form-nova-atividade"></div>
+    <div class="panel">
+      <div class="cal-head">
+        <div class="cal-nav">
+          <button onclick="mudarMesCalendario(-1)">‹</button>
+          <div class="cal-mes-label" id="cal-mes-label"></div>
+          <button onclick="mudarMesCalendario(1)">›</button>
+        </div>
+        <button class="btn-outline-sm" onclick="irParaHojeCalendario()">Hoje</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+    <div id="cal-dia-detalhe"></div>
+  `;
+  desenharGradeCalendario();
+  if (calDiaSelecionado) desenharDetalheDia(calDiaSelecionado);
+}
+
+function mudarMesCalendario(delta) {
+  calMes += delta;
+  if (calMes < 0) { calMes = 11; calAno--; }
+  if (calMes > 11) { calMes = 0; calAno++; }
+  desenharGradeCalendario();
+  const detalhe = document.getElementById('cal-dia-detalhe');
+  if (detalhe) detalhe.innerHTML = '';
+}
+
+function irParaHojeCalendario() {
+  const hoje = new Date();
+  calAno = hoje.getFullYear();
+  calMes = hoje.getMonth();
+  calDiaSelecionado = dataISOLocal(hoje);
+  desenharGradeCalendario();
+  desenharDetalheDia(calDiaSelecionado);
+}
+
+function desenharGradeCalendario() {
+  const label = document.getElementById('cal-mes-label');
+  if (label) label.textContent = `${MES_LABEL[calMes]} de ${calAno}`;
+  const grid = document.getElementById('cal-grid');
+  if (!grid) return;
+  const agenda = window._agendaCache || [];
+  const contagemPorDia = {};
+  agenda.forEach((a) => {
+    const dia = (a.data_hora_inicio || '').slice(0, 10);
+    if (!dia) return;
+    contagemPorDia[dia] = (contagemPorDia[dia] || 0) + 1;
+  });
+
+  const inicioSemana = new Date(calAno, calMes, 1).getDay();
+  const diasNoMes = new Date(calAno, calMes + 1, 0).getDate();
+  const hojeISO = dataISOLocal(new Date());
+
+  const celulas = [];
+  for (let i = 0; i < inicioSemana; i++) celulas.push(new Date(calAno, calMes, 1 - (inicioSemana - i)));
+  for (let dia = 1; dia <= diasNoMes; dia++) celulas.push(new Date(calAno, calMes, dia));
+  while (celulas.length % 7 !== 0) {
+    const ultima = celulas[celulas.length - 1];
+    celulas.push(new Date(ultima.getFullYear(), ultima.getMonth(), ultima.getDate() + 1));
+  }
+
+  grid.innerHTML = DOW_LABEL.map((d) => `<div class="cal-dow">${d}</div>`).join('') +
+    celulas.map((data) => {
+      const iso = dataISOLocal(data);
+      const qtd = contagemPorDia[iso] || 0;
+      const classes = ['cal-day'];
+      if (data.getMonth() !== calMes) classes.push('fora-mes');
+      if (iso === hojeISO) classes.push('hoje');
+      if (iso === calDiaSelecionado) classes.push('selecionado');
+      return `<div class="${classes.join(' ')}" onclick="selecionarDiaCalendario('${iso}')">
+        <div class="cal-day-num">${data.getDate()}</div>
+        ${qtd ? `<div class="cal-day-badge">${qtd}</div>` : ''}
+      </div>`;
+    }).join('');
+}
+
+function selecionarDiaCalendario(iso) {
+  calDiaSelecionado = iso;
+  desenharGradeCalendario();
+  desenharDetalheDia(iso);
+}
+
+function desenharDetalheDia(iso) {
+  const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
+    .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  const [y, m, d] = iso.split('-');
+  const el = document.getElementById('cal-dia-detalhe');
+  el.innerHTML = `
+    <div class="page-head" style="margin-top:4px;"><h1 style="font-size:16px;">Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
+    ${agenda.length ? agenda.map((a) => cardOS(a)).join('') : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+  `;
+}
+
+function cardOS(a) {
+  const statusTag = a.status === 'concluida' ? tag('Concluída', 'green') : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber');
+  return `
+    <div class="item-card">
+      <div class="item-top">
+        <div>
+          <div class="item-title">${esc(a.cliente_nome || '—')}<span style="font-weight:500; color:var(--ink-soft); font-size:13px;"> — ${esc(a.equipamento_tipo || '')}${a.equipamento_modelo ? ' (' + esc(a.equipamento_modelo) + ')' : ''}</span></div>
+          <div class="item-meta">
+            <span class="tag tag-blue">${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
+            <span class="sep">·</span> Técnico: ${esc(a.tecnico_nome || '—')}
+            <span class="sep">·</span> ${fmtData(a.data_hora_inicio)}
+          </div>
+        </div>
+        ${statusTag}
+      </div>
+      <div class="item-body">
+        <div class="kv"><b>Contato:</b> ${esc(a.contato || a.cliente_contato || '—')} <span class="sep">·</span> <b>Telefone:</b> ${esc(a.telefone || a.cliente_telefone || '—')}</div>
+        ${a.problema ? `<div class="kv"><b>Problema/serviço:</b> ${esc(a.problema)}</div>` : ''}
+        ${a.visita_id ? `<button class="btn-outline-sm" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="font-size:12.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
+      </div>
+    </div>`;
 }
 
 async function mostrarFormNovaAtividade() {
@@ -1322,7 +1451,7 @@ function desenharAprovacoesVisitas() {
   const reaberturas = concluidas.filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Aprovação de visitas</h1><p>${pendentes.length} pendente(s) de aprovação</p></div>
+    <div class="page-head"><h1>Ordem de Serviço</h1><p>${pendentes.length} pendente(s) de aprovação</p></div>
     ${pendentes.length ? pendentes.map((v) => cardVisita(v, 'pendente')).join('') : `<div class="empty">Nada pendente no momento.</div>`}
 
     ${reaberturas.length ? `
