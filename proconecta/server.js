@@ -63,8 +63,12 @@ function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
   const cliente = data.clientes.find((c) => c.id === item.cliente_id);
   const equipamento = data.equipamentos.find((e) => e.id === item.equipamento_id);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id);
   return {
     ...item,
+    visita_id: visita ? visita.id : null,
+    visita_status: visita ? visita.status_aprovacao : null,
+    visita_solicitacao_reabertura: visita ? visita.solicitacao_reabertura : null,
     tecnico_nome: tecnico ? tecnico.nome : null,
     tecnico_setor: tecnico ? tecnico.setor : null,
     cliente_nome: cliente ? cliente.nome_empresa : null,
@@ -92,8 +96,11 @@ const CHECKLIST_CORRETIVA = [
   'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
 ];
 
+// tipos de OS que usam o relatório completo (checklist + aceite + avaliação + assinatura + PDF)
+const TIPOS_RELATORIO_COMPLETO = ['corretiva', 'preventiva', 'treinamento_presencial'];
+
 function validarRelatorio(r) {
-  if (!r || typeof r !== 'object') return 'Relatório técnico é obrigatório para atendimentos corretivos.';
+  if (!r || typeof r !== 'object') return 'Relatório técnico é obrigatório para este tipo de atendimento.';
   const camposTexto = ['empresa', 'contato', 'telefone', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado',
     'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie', 'servico', 'tecnico_nome', 'observacoes'];
   for (const c of camposTexto) {
@@ -112,6 +119,18 @@ function validarRelatorio(r) {
   if (!r.assinatura_cliente_nome || !r.assinatura_cliente_img) return 'Assinatura do cliente é obrigatória.';
   if (!r.assinatura_tecnico_nome || !r.assinatura_tecnico_img) return 'Assinatura do técnico é obrigatória.';
   if (!Array.isArray(r.emails_copia) || r.emails_copia.length === 0) return 'Informe ao menos um e-mail para envio do termo.';
+  return null;
+}
+
+// formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
+function validarRelatorioSimples(r, exigirSerie) {
+  if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
+  const obrig = ['empresa', 'contato', 'telefone', 'equipamento_tipo', 'equipamento_modelo'];
+  if (exigirSerie) obrig.push('numero_serie');
+  for (const c of obrig) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!r.observacoes || !String(r.observacoes).trim()) return 'Observações são obrigatórias.';
   return null;
 }
 
@@ -235,32 +254,53 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   if (agendaItem.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta atividade não é sua.' });
 
   let relatorio = null;
-  if (agendaItem.tipo === 'corretiva') {
+  let relatorioSimples = null;
+  if (TIPOS_RELATORIO_COMPLETO.includes(agendaItem.tipo)) {
     const erro = validarRelatorio(body.relatorio);
     if (erro) return enviarJSON(res, 400, { erro });
     relatorio = body.relatorio;
+  } else if (agendaItem.tipo === 'treinamento_online' || agendaItem.tipo === 'demonstracao_tecnica') {
+    const erro = validarRelatorioSimples(body.relatorio_simples, agendaItem.tipo === 'treinamento_online');
+    if (erro) return enviarJSON(res, 400, { erro });
+    relatorioSimples = body.relatorio_simples;
   }
 
-  const visita = {
-    id: nextId(data, 'visitas'),
-    agenda_id: agendaItem.id,
-    tecnico_id: user.id,
-    equipamento_id: agendaItem.equipamento_id,
+  const camposVisita = {
     analise: body.analise || '',
-    causa: body.causa || (relatorio ? relatorio.servico : ''),
-    correcao: body.correcao || (relatorio ? relatorio.observacoes : ''),
+    causa: body.causa || (relatorio ? relatorio.servico : '') || (relatorioSimples ? `${relatorioSimples.equipamento_tipo} ${relatorioSimples.equipamento_modelo}`.trim() : ''),
+    correcao: body.correcao || (relatorio ? relatorio.observacoes : '') || (relatorioSimples ? relatorioSimples.observacoes : ''),
     resultado: body.resultado || 'solucionado', // solucionado | parcial | nao_solucionado | aguardando_peca
     relevante_biblioteca: !!body.relevante_biblioteca,
     relatorio,
+    relatorio_simples: relatorioSimples,
     status_aprovacao: 'pendente',
     aprovado_por: null,
     data_aprovacao: null,
-    criado_em: new Date().toISOString(),
+    solicitacao_reabertura: null,
   };
-  data.visitas.push(visita);
+
+  // se a atividade já tinha uma visita (reaberta pelo administrador), edita a mesma em vez de duplicar
+  let visita = data.visitas.find((v) => v.agenda_id === agendaItem.id);
+  if (visita) {
+    Object.assign(visita, camposVisita, { atualizado_em: new Date().toISOString() });
+  } else {
+    visita = { id: nextId(data, 'visitas'), agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, criado_em: new Date().toISOString(), ...camposVisita };
+    data.visitas.push(visita);
+  }
   agendaItem.status = 'concluida';
   db.save(data);
   enviarJSON(res, 201, { visita });
+});
+
+// GET /api/visitas/:id
+rota('GET', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  if (user.papel === 'tecnico' && visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
+  enviarJSON(res, 200, { visita });
 });
 
 // POST /api/visitas/:id/enviar-relatorio  (envia o PDF do relatório corretivo por e-mail)
@@ -348,6 +388,66 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reprovar$/, async (req, res, m) => {
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   visita.status_aprovacao = 'reprovado';
   visita.comentario_reprovacao = body.comentario || '';
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
+// DELETE /api/visitas/:id — administrador exclui um relatório (e o caso de biblioteca vinculado, se houver)
+rota('DELETE', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui relatórios.' });
+  const data = db.load();
+  const idx = data.visitas.findIndex((v) => v.id === Number(m[1]));
+  if (idx === -1) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  const visita = data.visitas[idx];
+  data.registros = data.registros.filter((r) => !(r.origem === 'visita' && r.visita_id === visita.id));
+  data.visitas.splice(idx, 1);
+  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  if (agendaItem) agendaItem.status = 'pendente';
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// POST /api/visitas/:id/reabrir — administrador reabre um relatório já concluído (aprova qualquer solicitação pendente do técnico)
+rota('POST', /^\/api\/visitas\/(\d+)\/reabrir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador reabre relatórios.' });
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  visita.status_aprovacao = 'pendente';
+  visita.aprovado_por = null;
+  visita.data_aprovacao = null;
+  if (visita.solicitacao_reabertura) visita.solicitacao_reabertura.status = 'aprovada';
+  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  if (agendaItem) agendaItem.status = 'pendente';
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
+// POST /api/visitas/:id/solicitar-reabertura — técnico pede para reabrir um relatório concluído
+rota('POST', /^\/api\/visitas\/(\d+)\/solicitar-reabertura$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita reabertura.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
+  visita.solicitacao_reabertura = { motivo: body.motivo || '', solicitado_em: new Date().toISOString(), status: 'pendente' };
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
+// POST /api/visitas/:id/recusar-reabertura — administrador recusa o pedido sem reabrir
+rota('POST', /^\/api\/visitas\/(\d+)\/recusar-reabertura$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador decide sobre a reabertura.' });
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  if (!visita.solicitacao_reabertura) return enviarJSON(res, 400, { erro: 'Não há solicitação de reabertura para esta visita.' });
+  visita.solicitacao_reabertura.status = 'recusada';
   db.save(data);
   enviarJSON(res, 200, { visita });
 });

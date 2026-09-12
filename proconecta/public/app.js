@@ -11,6 +11,11 @@ let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
 const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente' };
+const TIPO_OS_LABEL = {
+  corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
+  treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
+};
+const TIPOS_RELATORIO_COMPLETO = ['corretiva', 'preventiva', 'treinamento_presencial'];
 
 const CHECKLIST_CORRETIVA = [
   'Instalação mecânica', 'Instalação elétrica', 'Instalação software', 'Sistema de segurança',
@@ -293,9 +298,14 @@ async function renderAgenda() {
           ${isAdmin ? `<td>${a.tecnico_nome || '—'}</td>` : ''}
           <td>${a.cliente_nome || '—'}</td>
           <td>${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
-          <td>${a.tipo}</td>
+          <td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
           <td>${a.status === 'concluida' ? tag('Concluída', 'green') : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${!isAdmin && a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}</td>
+          <td>${!isAdmin && a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
+            ${!isAdmin && a.status === 'concluida' && a.visita_id ? (
+              a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
+                ? `<span class="tag tag-amber">Reabertura solicitada</span>`
+                : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`
+            ) : ''}</td>
         </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhuma atividade ainda.</td></tr>`}
     </table></div>
     <div id="diario-form"></div>
@@ -310,7 +320,13 @@ async function mostrarFormNovaAtividade() {
       <div class="form-grid">
         <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}">${t.nome}</option>`).join('')}</select></div>
         <div><label>Equipamento</label><select id="na-equip">${equipamentos.map((e) => `<option value="${e.id}" data-cliente="${e.cliente_id}">${e.tipo} — ${e.modelo}</option>`).join('')}</select></div>
-        <div><label>Tipo</label><select id="na-tipo"><option value="corretiva">Corretiva</option><option value="preventiva">Preventiva</option><option value="treinamento">Treinamento</option></select></div>
+        <div><label>Tipo</label><select id="na-tipo">
+          <option value="corretiva">Corretiva</option>
+          <option value="preventiva">Preventiva</option>
+          <option value="treinamento_online">Treinamento online</option>
+          <option value="treinamento_presencial">Treinamento presencial</option>
+          <option value="demonstracao_tecnica">Demonstração Técnica</option>
+        </select></div>
         <div><label>Início</label><input type="datetime-local" id="na-inicio"></div>
         <div><label>Fim previsto</label><input type="datetime-local" id="na-fim"></div>
         <div class="full"><label>Problema relatado</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente..."></textarea></div>
@@ -339,7 +355,10 @@ async function salvarNovaAtividade() {
 
 function abrirDiario(agendaId) {
   const item = (window._agendaCache || []).find((a) => a.id === agendaId);
-  if (item && item.tipo === 'corretiva') return renderRelatorioCorretiva(item);
+  if (!item) return;
+  if (TIPOS_RELATORIO_COMPLETO.includes(item.tipo)) return renderRelatorioCorretiva(item);
+  if (item.tipo === 'treinamento_online') return renderRelatorioSimples(item, true);
+  if (item.tipo === 'demonstracao_tecnica') return renderRelatorioSimples(item, false);
   document.getElementById('diario-form').innerHTML = `
     <div class="panel"><div class="panel-head">Diário técnico — atividade #${agendaId}</div>
       <div class="form-grid">
@@ -412,19 +431,28 @@ function relatorioPadrao(item) {
   };
 }
 
-function renderRelatorioCorretiva(item) {
+async function renderRelatorioCorretiva(item) {
   relatorioAgendaAtual = item;
   let salvoEm = null;
   try {
     const bruto = localStorage.getItem(chaveRascunho(item.id));
-    if (bruto) { const salvo = JSON.parse(bruto); relatorioDraft = salvo.draft; salvoEm = salvo.em; }
-    else relatorioDraft = relatorioPadrao(item);
+    if (bruto) {
+      const salvo = JSON.parse(bruto);
+      relatorioDraft = salvo.draft;
+      salvoEm = salvo.em;
+    } else if (item.visita_id) {
+      // atividade reaberta: reaproveita o que o técnico já tinha preenchido antes
+      const { visita } = await api(`/api/visitas/${item.visita_id}`);
+      relatorioDraft = visita.relatorio ? { ...relatorioPadrao(item), ...visita.relatorio } : relatorioPadrao(item);
+    } else {
+      relatorioDraft = relatorioPadrao(item);
+    }
   } catch (e) { relatorioDraft = relatorioPadrao(item); }
   relatorioDraft.agenda_id = item.id;
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Relatório técnico — Atendimento corretivo</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>Relatório técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
     <div class="panel">
       <h2>Dados do atendimento</h2>
       <div class="form-grid">
@@ -841,15 +869,73 @@ function gerarPdfRelatorio(d, item) {
   return doc.output('datauristring');
 }
 
-// ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
-async function renderAprovacoesVisitas() {
-  const { visitas } = await api('/api/visitas?status=pendente');
+// ---------- RELATÓRIO SIMPLES (treinamento online / demonstração técnica) ----------
+async function renderRelatorioSimples(item, exigirSerie) {
+  relatorioAgendaAtual = item;
+  let r = {
+    empresa: item.cliente_nome || '', contato: item.cliente_contato || '', telefone: item.cliente_telefone || '',
+    tecnico_nome: USER.nome, equipamento_tipo: item.equipamento_tipo || '', equipamento_modelo: item.equipamento_modelo || '',
+    numero_serie: item.equipamento_serie || '', observacoes: '',
+  };
+  if (item.visita_id) {
+    try { const { visita } = await api(`/api/visitas/${item.visita_id}`); if (visita.relatorio_simples) r = { ...r, ...visita.relatorio_simples }; } catch (e) {}
+  }
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Aprovação de visitas</h1><p>${visitas.length} pendente(s)</p></div>
+    <div class="page-head"><h1>Relatório — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Dados do cliente e do equipamento. Campos com * são obrigatórios.</p></div>
+    <div class="panel">
+      <div class="form-grid">
+        <div><label>Empresa*</label><input id="rs-empresa" value="${esc(r.empresa)}"></div>
+        <div><label>Contato*</label><input id="rs-contato" value="${esc(r.contato)}"></div>
+        <div><label>Telefone*</label><input id="rs-telefone" value="${esc(r.telefone)}"></div>
+        <div><label>Data</label><input id="rs-data" value="${esc((item.data_hora_inicio || '').slice(0, 10))}" disabled></div>
+        <div><label>Técnico*</label><input id="rs-tecnico" value="${esc(r.tecnico_nome)}"></div>
+        <div><label>Equipamento*</label><input id="rs-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
+        <div><label>Modelo*</label><input id="rs-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
+        ${exigirSerie ? `<div><label>Nº de série*</label><input id="rs-serie" value="${esc(r.numero_serie)}"></div>` : ''}
+      </div>
+      <label>Observações*</label>
+      <textarea id="rs-observacoes" placeholder="O que foi feito / observado no atendimento...">${esc(r.observacoes)}</textarea>
+      <button class="btn btn-primary btn-sm" style="margin-top:16px;" onclick="concluirRelatorioSimples(${exigirSerie})">Concluir atendimento</button>
+    </div>`;
+}
+
+async function concluirRelatorioSimples(exigirSerie) {
+  const relatorio_simples = {
+    empresa: document.getElementById('rs-empresa').value,
+    contato: document.getElementById('rs-contato').value,
+    telefone: document.getElementById('rs-telefone').value,
+    tecnico_nome: document.getElementById('rs-tecnico').value,
+    equipamento_tipo: document.getElementById('rs-equip-tipo').value,
+    equipamento_modelo: document.getElementById('rs-equip-modelo').value,
+    numero_serie: exigirSerie ? document.getElementById('rs-serie').value : '',
+    observacoes: document.getElementById('rs-observacoes').value,
+  };
+  const obrig = ['empresa', 'contato', 'telefone', 'equipamento_tipo', 'equipamento_modelo', 'observacoes'];
+  if (exigirSerie) obrig.push('numero_serie');
+  for (const c of obrig) {
+    if (!String(relatorio_simples[c] || '').trim()) return alert('Preencha todos os campos obrigatórios.');
+  }
+  try {
+    await api('/api/visitas', { method: 'POST', body: { agenda_id: relatorioAgendaAtual.id, relatorio_simples } });
+    mostrarToast('Atendimento concluído e enviado para aprovação do administrador.');
+    renderAgenda();
+  } catch (e) { alert('Erro ao concluir: ' + e.message); }
+}
+
+// ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
+async function renderAprovacoesVisitas() {
+  const [{ visitas: pendentes }, { visitas: concluidas }] = await Promise.all([
+    api('/api/visitas?status=pendente'),
+    api('/api/visitas?status=aprovado'),
+  ]);
+  const reaberturas = concluidas.filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Aprovação de visitas</h1><p>${pendentes.length} pendente(s) de aprovação</p></div>
     <div class="panel"><table>
       <tr><th>Equipamento</th><th>Técnico</th><th>Causa</th><th>Correção</th><th>Resultado</th><th></th></tr>
-      ${visitas.length ? visitas.map((v) => `
+      ${pendentes.length ? pendentes.map((v) => `
         <tr>
           <td>${v.equipamento_tipo || '—'}</td>
           <td>${v.tecnico_nome || '—'}</td>
@@ -861,6 +947,37 @@ async function renderAprovacoesVisitas() {
             <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${v.id})">Reprovar</button>
           </td>
         </tr>`).join('') : `<tr><td colspan="6" class="empty">Nada pendente no momento.</td></tr>`}
+    </table></div>
+
+    ${reaberturas.length ? `
+    <div class="page-head"><h1 style="font-size:16px;">Solicitações de reabertura</h1></div>
+    <div class="panel"><table>
+      <tr><th>Equipamento</th><th>Técnico</th><th>Motivo</th><th></th></tr>
+      ${reaberturas.map((v) => `
+        <tr>
+          <td>${v.equipamento_tipo || '—'}</td>
+          <td>${v.tecnico_nome || '—'}</td>
+          <td>${esc(v.solicitacao_reabertura.motivo || '—')}</td>
+          <td>
+            <button class="btn btn-primary btn-sm" onclick="reabrirVisita(${v.id})">Aprovar e reabrir</button>
+            <button class="btn btn-ghost btn-sm" onclick="recusarReabertura(${v.id})">Recusar</button>
+          </td>
+        </tr>`).join('')}
+    </table></div>` : ''}
+
+    <div class="page-head"><h1 style="font-size:16px;">Concluídas</h1><p>${concluidas.length} aprovada(s)</p></div>
+    <div class="panel"><table>
+      <tr><th>Equipamento</th><th>Técnico</th><th>Resultado</th><th></th></tr>
+      ${concluidas.length ? concluidas.map((v) => `
+        <tr>
+          <td>${v.equipamento_tipo || '—'}</td>
+          <td>${v.tecnico_nome || '—'}</td>
+          <td>${v.resultado}</td>
+          <td>
+            <button class="btn-outline-sm" onclick="reabrirVisita(${v.id})">Reabrir</button>
+            <button class="btn-outline-sm" onclick="excluirVisita(${v.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          </td>
+        </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhuma visita concluída ainda.</td></tr>`}
     </table></div>`;
 }
 async function aprovarVisita(id) { await api(`/api/visitas/${id}/aprovar`, { method: 'POST' }); renderAprovacoesVisitas(); }
@@ -868,6 +985,25 @@ async function reprovarVisita(id) {
   const comentario = prompt('Motivo da reprovação (opcional):') || '';
   await api(`/api/visitas/${id}/reprovar`, { method: 'POST', body: { comentario } });
   renderAprovacoesVisitas();
+}
+async function reabrirVisita(id) {
+  if (!confirm('Reabrir este relatório? Ele volta para a fila de aprovação e o técnico pode editá-lo novamente.')) return;
+  try { await api(`/api/visitas/${id}/reabrir`, { method: 'POST' }); mostrarToast('Relatório reaberto.'); renderAprovacoesVisitas(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+async function recusarReabertura(id) {
+  try { await api(`/api/visitas/${id}/recusar-reabertura`, { method: 'POST' }); mostrarToast('Solicitação de reabertura recusada.'); renderAprovacoesVisitas(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirVisita(id) {
+  if (!confirm('Excluir este relatório definitivamente? Se ele já tiver entrado na biblioteca, o caso também é removido. Essa ação não pode ser desfeita.')) return;
+  try { await api(`/api/visitas/${id}`, { method: 'DELETE' }); mostrarToast('Relatório excluído.'); renderAprovacoesVisitas(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+async function solicitarReaberturaVisita(id) {
+  const motivo = prompt('Por que você precisa reabrir este relatório?') || '';
+  try { await api(`/api/visitas/${id}/solicitar-reabertura`, { method: 'POST', body: { motivo } }); mostrarToast('Solicitação enviada ao administrador.'); renderAgenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- BIBLIOTECA: ACESSAR ----------
@@ -1208,7 +1344,7 @@ async function verHistorico(id) {
     <div class="panel"><div class="panel-head">Histórico do equipamento</div>
     <table>
       <tr><th>Data</th><th>Tipo</th><th>Status</th></tr>
-      ${agenda.length ? agenda.map((a) => `<tr><td>${fmtData(a.data_hora_inicio)}</td><td>${a.tipo}</td><td>${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
+      ${agenda.length ? agenda.map((a) => `<tr><td>${fmtData(a.data_hora_inicio)}</td><td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td>${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
     </table></div>`;
 }
 
