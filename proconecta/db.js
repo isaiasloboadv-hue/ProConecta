@@ -35,7 +35,7 @@ function seed() {
     ],
     clientes: [
       {
-        id: 1, nome_empresa: 'Cliente ABC Ltda', contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', nivel_acesso: 'completo',
+        id: 1, nome_empresa: 'Cliente ABC Ltda', contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', nivel_acesso: 'completo',
         setor: 'Produção', endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial',
         cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
       },
@@ -49,7 +49,9 @@ function seed() {
         id: 1, tecnico_id: 2, cliente_id: 1, equipamento_id: 1,
         data_hora_inicio: '2026-09-12T08:00:00', data_hora_fim: '2026-09-12T11:00:00',
         tipo: 'corretiva', categoria: 'inloco', problema: 'Perda de referência do eixo Y',
-        status: 'pendente', valor_servico: null, retrabalho: false,
+        contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', setor_cliente: 'Produção',
+        endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial', cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
+        status: 'pendente', valor_servico: null, retrabalho: false, criado_em: '2026-09-05T09:00:00.000Z',
       },
     ],
     visitas: [],
@@ -80,9 +82,13 @@ function load() {
     if (u.setor === undefined) u.setor = '';
   }
   for (const c of data.clientes) {
-    for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado']) {
+    for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado', 'email']) {
       if (c[campo] === undefined) c[campo] = '';
     }
+  }
+  for (const a of data.agenda) {
+    if (a.email === undefined) a.email = '';
+    if (a.criado_em === undefined) a.criado_em = a.data_hora_inicio || new Date().toISOString();
   }
   return data;
 }

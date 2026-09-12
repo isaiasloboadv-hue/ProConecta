@@ -422,26 +422,49 @@ function desenharDetalheDia(iso) {
   `;
 }
 
+const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído' };
+
+function statusOS(a) {
+  if (a.status === 'concluida') return a.visita_status === 'aprovado' ? 'concluido' : 'pendente';
+  const hojeISO = dataISOLocal(new Date());
+  const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
+  return diaAtendimento > hojeISO ? 'agendado' : 'pendente';
+}
+
+function diasEntre(isoInicio, isoFim) {
+  const a = new Date(isoInicio + 'T00:00:00');
+  const b = new Date(isoFim + 'T00:00:00');
+  return Math.round((b - a) / 86400000);
+}
+
 function cardOS(a) {
-  const statusTag = a.status === 'concluida' ? tag('Concluída', 'green') : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber');
+  const status = statusOS(a);
+  const hojeISO = dataISOLocal(new Date());
+  const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
+  const diaAbertura = (a.criado_em || a.data_hora_inicio || '').slice(0, 10);
+  const diffVenc = diasEntre(hojeISO, diaAtendimento);
+  const vencRelativo = diffVenc === 0 ? 'hoje' : diffVenc > 0 ? `em ${diffVenc} dia${diffVenc === 1 ? '' : 's'}` : `há ${-diffVenc} dia${diffVenc === -1 ? '' : 's'}`;
+  const [vy, vm, vd] = diaAtendimento.split('-');
+  const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
-    <div class="item-card">
-      <div class="item-top">
-        <div>
-          <div class="item-title">${esc(a.cliente_nome || '—')}<span style="font-weight:500; color:var(--ink-soft); font-size:13px;"> — ${esc(a.equipamento_tipo || '')}${a.equipamento_modelo ? ' (' + esc(a.equipamento_modelo) + ')' : ''}</span></div>
-          <div class="item-meta">
-            <span class="tag tag-blue">${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
-            <span class="sep">·</span> Técnico: ${esc(a.tecnico_nome || '—')}
-            <span class="sep">·</span> ${fmtData(a.data_hora_inicio)}
-          </div>
-        </div>
-        ${statusTag}
+    <div class="os-card">
+      <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
+      <div class="os-card-top">
+        <span class="tag tag-blue">${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
+        <span class="tag os-tag-tecnico">${esc(a.tecnico_nome || '—')}</span>
       </div>
-      <div class="item-body">
-        <div class="kv"><b>Contato:</b> ${esc(a.contato || a.cliente_contato || '—')} <span class="sep">·</span> <b>Telefone:</b> ${esc(a.telefone || a.cliente_telefone || '—')}</div>
-        ${a.problema ? `<div class="kv"><b>Problema/serviço:</b> ${esc(a.problema)}</div>` : ''}
-        ${a.visita_id ? `<button class="btn-outline-sm" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="font-size:12.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
+      <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
+      <div class="os-card-fields">
+        <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">OS-${String(a.id).padStart(6, '0')}</span></div>
+        <div class="os-field"><span class="os-field-label">Contato</span><span class="os-field-value">${esc(a.contato || a.cliente_contato || '—')}</span></div>
+        <div class="os-field"><span class="os-field-label">E-mail</span><span class="os-field-value">${esc(a.email || a.cliente_email || '—')}</span></div>
+        <div class="os-field"><span class="os-field-label">Telefone</span><span class="os-field-value">${esc(a.telefone || a.cliente_telefone || '—')}</span></div>
       </div>
+      <div class="os-card-footer">
+        <span class="os-venc">Venc ${vd}/${vm} · ${vencRelativo}</span>
+        <span class="os-dias-abertura">${diasAbertura} dia${diasAbertura === 1 ? '' : 's'} desde a abertura</span>
+      </div>
+      ${a.visita_id ? `<button class="btn-outline-sm" style="margin-top:10px;" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="display:block; margin-top:8px; font-size:12px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
     </div>`;
 }
 
@@ -470,6 +493,7 @@ async function mostrarFormNovaAtividade() {
       <div class="form-grid">
         <div><label>Contato*</label><input id="na-contato"></div>
         <div><label>Telefone*</label><input id="na-telefone"></div>
+        <div><label>E-mail*</label><input id="na-email" type="email"></div>
         <div><label>Setor do cliente</label><input id="na-setor-cliente"></div>
         <div class="full"><label>Endereço*</label><input id="na-endereco"></div>
         <div><label>Número*</label><input id="na-numero"></div>
@@ -489,6 +513,7 @@ function preencherClienteNovaAtividade() {
   const cliente = (window._clientesCache || []).find((c) => c.id === clienteId) || {};
   document.getElementById('na-contato').value = cliente.contato || '';
   document.getElementById('na-telefone').value = cliente.telefone || '';
+  document.getElementById('na-email').value = cliente.email || '';
   document.getElementById('na-setor-cliente').value = cliente.setor || '';
   document.getElementById('na-endereco').value = cliente.endereco || '';
   document.getElementById('na-numero').value = cliente.numero || '';
@@ -511,6 +536,7 @@ async function salvarNovaAtividade() {
     problema: document.getElementById('na-problema').value,
     contato: document.getElementById('na-contato').value,
     telefone: document.getElementById('na-telefone').value,
+    email: document.getElementById('na-email').value,
     setor_cliente: document.getElementById('na-setor-cliente').value,
     endereco: document.getElementById('na-endereco').value,
     numero: document.getElementById('na-numero').value,

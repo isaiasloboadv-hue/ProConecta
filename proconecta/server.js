@@ -74,6 +74,7 @@ function agendaComDetalhes(data, item) {
     cliente_nome: cliente ? cliente.nome_empresa : null,
     cliente_contato: cliente ? cliente.contato : null,
     cliente_telefone: cliente ? cliente.telefone : null,
+    cliente_email: cliente ? cliente.email : null,
     cliente_setor: cliente ? cliente.setor : null,
     cliente_endereco: cliente ? cliente.endereco : null,
     cliente_numero: cliente ? cliente.numero : null,
@@ -113,6 +114,7 @@ function dadosAtendimentoBloqueados(data, agendaItem, user) {
     empresa: cliente ? cliente.nome_empresa : '',
     contato: agendaItem.contato || (cliente ? cliente.contato : ''),
     telefone: agendaItem.telefone || (cliente ? cliente.telefone : ''),
+    email: agendaItem.email || (cliente ? cliente.email : ''),
     setor_cliente: agendaItem.setor_cliente || (cliente ? cliente.setor : ''),
     endereco: agendaItem.endereco || (cliente ? cliente.endereco : ''),
     numero: agendaItem.numero || (cliente ? cliente.numero : ''),
@@ -264,7 +266,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador pode criar atividades.' });
   const body = await lerCorpo(req);
   const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo',
-    'contato', 'telefone', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado'];
+    'contato', 'telefone', 'email', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado'];
   for (const campo of obrig) {
     if (!body[campo] || !String(body[campo]).trim()) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
   }
@@ -280,11 +282,12 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     categoria: body.categoria || 'inloco', // online | inloco
     problema: body.problema || '',
     // dados do atendimento definidos pelo administrador ao abrir a OS — o técnico só visualiza
-    contato: body.contato, telefone: body.telefone, setor_cliente: body.setor_cliente || '',
+    contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
     endereco: body.endereco, numero: body.numero, bairro: body.bairro, cep: body.cep, cidade: body.cidade, estado: body.estado,
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,
+    criado_em: new Date().toISOString(),
   };
   data.agenda.push(item);
   db.save(data);

@@ -270,6 +270,25 @@ textarea{resize:vertical;min-height:64px;}
   .cal-mes-label{min-width:auto;font-size:14px;}
 }
 
+.os-card{position:relative;border:1px solid var(--line);border-radius:12px;padding:14px 16px 12px;margin-bottom:12px;background:#fff;}
+.os-tarja{display:inline-block;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 10px;border-radius:6px;margin-bottom:10px;}
+.os-tarja-agendado{background:var(--green-bg);color:var(--green);}
+.os-tarja-pendente{background:var(--amber-bg);color:var(--amber);}
+.os-tarja-concluido{background:var(--blue-pale);color:var(--blue);}
+.os-card-top{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.os-tag-tecnico{background:var(--blue-pale-2);color:var(--ink-soft);border:1px solid var(--line);}
+.os-card-title{font-size:15px;font-weight:800;color:var(--navy);margin-bottom:10px;}
+.os-card-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding-top:10px;border-top:1px dashed var(--line);}
+.os-field{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.os-field-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8E9DB3;}
+.os-field-value{font-size:13px;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.os-card-footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line);}
+.os-venc{font-size:11.5px;font-weight:700;color:var(--red);background:#FDE8E5;padding:3px 9px;border-radius:6px;}
+.os-dias-abertura{font-size:11.5px;color:var(--ink-soft);}
+@media (max-width:480px){
+  .os-card-fields{grid-template-columns:1fr;}
+}
+
 table{width:100%;border-collapse:collapse;}
 th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft);padding:10px 6px;border-bottom:1px solid var(--line);}
 td{padding:12px 6px;border-bottom:1px solid var(--line);font-size:13px;}
