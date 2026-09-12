@@ -1503,7 +1503,7 @@ function gerarPdfLaudo(d, item) {
 }
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
-let visitasAbertas = new Set();
+let osAbertos = new Set(); // ids de agenda abertos (mostrando o detalhe completo)
 let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
 
@@ -1572,48 +1572,87 @@ function desenharOrdemServico() {
 
     ${doMes.length ? `<div class="os-grid">${doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('')}</div>` : `<div class="empty">Nenhuma O.S. neste mês.</div>`}
 
-    ${doMes.filter((a) => visitasPorAgenda[a.id] && visitasAbertas.has(visitasPorAgenda[a.id].id)).map((a) => {
-      const visita = visitasPorAgenda[a.id];
-      return `
+    ${doMes.filter((a) => osAbertos.has(a.id)).map((a) => `
         <div class="os-detail-panel">
-          <div class="panel-head">Relatório — OS-${String(a.id).padStart(6, '0')} · ${esc(a.cliente_nome || '—')}
-            <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">Fechar</button>
+          <div class="panel-head">OS-${String(a.id).padStart(6, '0')} · ${esc(a.cliente_nome || '—')}
+            <button class="btn-outline-sm" onclick="alternarOSAberta(${a.id})">Fechar</button>
           </div>
-          ${detalheRelatorioVisita(visita)}
-        </div>`;
-    }).join('')}`;
+          ${detalheCompletoOS(a, visitasPorAgenda[a.id])}
+        </div>`).join('')}`;
 }
 
 function cardOSAdmin(a, visita) {
-  const aberto = visita && visitasAbertas.has(visita.id);
   let acoes;
   if (visita && visita.status_aprovacao === 'pendente') {
     acoes = `
-      <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
       <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id})">Aprovar${visita.relevante_biblioteca ? ' e incluir na biblioteca' : ''}</button>
       <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado') {
     acoes = `
-      <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
-    acoes = `
-      <button class="btn-outline-sm" onclick="alternarVisitaAberta(${visita.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
-      <span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
+    acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else {
     acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
   }
+  const aberto = osAbertos.has(a.id);
   return `
-    <div class="os-card">
+    <div class="os-card" onclick="alternarOSAberta(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
-      <div class="os-card-actions">${acoes}</div>
+      <div class="os-card-actions" onclick="event.stopPropagation()">
+        <button class="os-card-toggle" onclick="alternarOSAberta(${a.id})">${aberto ? '▴ Ocultar detalhes' : '▾ Ver detalhes completos'}</button>
+        ${acoes}
+      </div>
     </div>`;
 }
 
-function alternarVisitaAberta(id) {
-  if (visitasAbertas.has(id)) visitasAbertas.delete(id); else visitasAbertas.add(id);
+function alternarOSAberta(id) {
+  if (osAbertos.has(id)) osAbertos.delete(id); else osAbertos.add(id);
   desenharOrdemServico();
+}
+
+function fmtDataHora(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// linha do tempo: abertura da O.S. -> relatório enviado -> aprovação/reprovação
+function timelineOS(a, visita) {
+  const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
+  if (visita) {
+    passos.push({ label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' });
+    if (visita.status_aprovacao === 'aprovado') {
+      passos.push({ label: 'Aprovado pelo administrador', data: visita.data_aprovacao, estado: 'feito' });
+    } else if (visita.status_aprovacao === 'reprovado') {
+      passos.push({ label: 'Reprovado pelo administrador' + (visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''), data: visita.data_aprovacao, estado: 'reprovado' });
+    } else {
+      passos.push({ label: 'Aguardando aprovação do administrador', data: null, estado: 'pendente' });
+    }
+  } else {
+    passos.push({ label: 'Aguardando o técnico preencher o relatório', data: null, estado: 'pendente' });
+  }
+  return `
+    <div class="os-card-title" style="margin-top:18px;">Linha do tempo</div>
+    <ul class="os-timeline">
+      ${passos.map((p) => `<li class="os-timeline-item ${p.estado}">
+        <div class="os-timeline-label">${p.label}</div>
+        <div class="os-timeline-data">${p.data ? fmtDataHora(p.data) : 'Em aberto'}</div>
+      </li>`).join('')}
+    </ul>`;
+}
+
+// detalhe completo de uma O.S.: dados do atendimento + relatório enviado (se houver) + linha do tempo
+function detalheCompletoOS(a, visita) {
+  return `
+    <div class="kv"><b>Empresa:</b> ${esc(a.cliente_nome || '—')} <span class="sep">·</span> <b>Contato:</b> ${esc(a.contato || a.cliente_contato || '—')} <span class="sep">·</span> <b>Telefone:</b> ${esc(a.telefone || a.cliente_telefone || '—')}</div>
+    <div class="kv"><b>E-mail:</b> ${esc(a.email || a.cliente_email || '—')} <span class="sep">·</span> <b>Setor:</b> ${esc(a.setor_cliente || a.cliente_setor || '—')}</div>
+    ${a.endereco || a.cliente_endereco ? `<div class="kv"><b>Endereço:</b> ${esc(a.endereco || a.cliente_endereco)}${a.numero || a.cliente_numero ? ', ' + esc(a.numero || a.cliente_numero) : ''} — ${esc(a.bairro || a.cliente_bairro || '—')}, ${esc(a.cidade || a.cliente_cidade || '—')}/${esc(a.estado || a.cliente_estado || '—')}</div>` : ''}
+    <div class="kv"><b>Equipamento:</b> ${esc(a.equipamento_tipo || '—')} — ${esc(a.equipamento_modelo || '—')}${a.equipamento_serie ? ' (' + esc(a.equipamento_serie) + ')' : ''}</div>
+    <div class="kv"><b>Problema relatado / serviço:</b> ${esc(a.problema || '—')}</div>
+    <div class="kv"><b>Técnico designado:</b> ${esc(a.tecnico_nome || '—')} <span class="sep">·</span> <b>Início previsto:</b> ${fmtData(a.data_hora_inicio)} <span class="sep">·</span> <b>Fim previsto:</b> ${fmtData(a.data_hora_fim)}</div>
+    ${visita ? `<div class="os-card-title" style="margin-top:18px;">Relatório enviado pelo técnico</div>${detalheRelatorioVisita(visita)}` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
+    ${timelineOS(a, visita)}`;
 }
 
 function detalheRelatorioVisita(v) {

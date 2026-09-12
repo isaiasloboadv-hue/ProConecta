@@ -463,6 +463,8 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reprovar$/, async (req, res, m) => {
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   visita.status_aprovacao = 'reprovado';
   visita.comentario_reprovacao = body.comentario || '';
+  visita.aprovado_por = user.id;
+  visita.data_aprovacao = new Date().toISOString();
   db.save(data);
   enviarJSON(res, 200, { visita });
 });
