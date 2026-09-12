@@ -964,30 +964,25 @@ async function concluirRelatorioSimples(exigirSerie) {
 }
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
+let visitasAbertas = new Set();
 async function renderAprovacoesVisitas() {
   const [{ visitas: pendentes }, { visitas: concluidas }] = await Promise.all([
     api('/api/visitas?status=pendente'),
     api('/api/visitas?status=aprovado'),
   ]);
+  window._pendentesCache = pendentes;
+  window._concluidasCache = concluidas;
+  desenharAprovacoesVisitas();
+}
+
+function desenharAprovacoesVisitas() {
+  const pendentes = window._pendentesCache || [];
+  const concluidas = window._concluidasCache || [];
   const reaberturas = concluidas.filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Aprovação de visitas</h1><p>${pendentes.length} pendente(s) de aprovação</p></div>
-    <div class="panel"><table>
-      <tr><th>Equipamento</th><th>Técnico</th><th>Causa</th><th>Correção</th><th>Resultado</th><th></th></tr>
-      ${pendentes.length ? pendentes.map((v) => `
-        <tr>
-          <td>${v.equipamento_tipo || '—'}</td>
-          <td>${v.tecnico_nome || '—'}</td>
-          <td>${v.causa || '—'}</td>
-          <td>${v.correcao || '—'}</td>
-          <td>${v.resultado}</td>
-          <td>
-            <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${v.id})">Aprovar</button>
-            <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${v.id})">Reprovar</button>
-          </td>
-        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nada pendente no momento.</td></tr>`}
-    </table></div>
+    ${pendentes.length ? pendentes.map((v) => cardVisita(v, 'pendente')).join('') : `<div class="empty">Nada pendente no momento.</div>`}
 
     ${reaberturas.length ? `
     <div class="page-head"><h1 style="font-size:16px;">Solicitações de reabertura</h1></div>
@@ -1006,19 +1001,66 @@ async function renderAprovacoesVisitas() {
     </table></div>` : ''}
 
     <div class="page-head"><h1 style="font-size:16px;">Concluídas</h1><p>${concluidas.length} aprovada(s)</p></div>
-    <div class="panel"><table>
-      <tr><th>Equipamento</th><th>Técnico</th><th>Resultado</th><th></th></tr>
-      ${concluidas.length ? concluidas.map((v) => `
-        <tr>
-          <td>${v.equipamento_tipo || '—'}</td>
-          <td>${v.tecnico_nome || '—'}</td>
-          <td>${v.resultado}</td>
-          <td>
-            <button class="btn-outline-sm" onclick="reabrirVisita(${v.id})">Reabrir</button>
-            <button class="btn-outline-sm" onclick="excluirVisita(${v.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
-          </td>
-        </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhuma visita concluída ainda.</td></tr>`}
-    </table></div>`;
+    ${concluidas.length ? concluidas.map((v) => cardVisita(v, 'concluida')).join('') : `<div class="empty">Nenhuma visita concluída ainda.</div>`}`;
+}
+
+function cardVisita(v, contexto) {
+  const aberto = visitasAbertas.has(v.id);
+  return `
+    <div class="item-card">
+      <div class="item-top">
+        <div><div class="item-title">${esc(v.equipamento_tipo || '—')}</div>
+          <div class="item-meta">Técnico: ${esc(v.tecnico_nome || '—')}<span class="sep">·</span>${esc(v.causa || v.resultado || '')}</div>
+        </div>
+        <button class="btn-outline-sm" onclick="alternarVisitaAberta(${v.id})">${aberto ? 'Fechar relatório' : 'Abrir relatório'}</button>
+      </div>
+      ${aberto ? `<div class="item-body">${detalheRelatorioVisita(v)}</div>` : ''}
+      <div class="review-box" style="margin-top:14px;">
+        ${contexto === 'pendente' ? `
+          <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${v.id})">Aprovar${v.relevante_biblioteca ? ' e incluir na biblioteca' : ''}</button>
+          <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${v.id})">Reprovar</button>
+        ` : `
+          <button class="btn-outline-sm" onclick="reabrirVisita(${v.id})">Reabrir</button>
+          <button class="btn-outline-sm" onclick="excluirVisita(${v.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        `}
+      </div>
+    </div>`;
+}
+
+function alternarVisitaAberta(id) {
+  if (visitasAbertas.has(id)) visitasAbertas.delete(id); else visitasAbertas.add(id);
+  desenharAprovacoesVisitas();
+}
+
+function detalheRelatorioVisita(v) {
+  if (v.relatorio) {
+    const r = v.relatorio;
+    return `
+      ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
+      <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
+      <div class="kv"><b>Endereço:</b> ${esc(r.endereco)}, ${esc(r.numero)} — ${esc(r.bairro)}, ${esc(r.cidade)}/${esc(r.estado)} — CEP ${esc(r.cep)}</div>
+      <div class="kv"><b>Data:</b> ${esc(r.data_inicial)} a ${esc(r.data_final)} <span class="sep">·</span> <b>Equipamento:</b> ${esc(r.modelo_maquina)} (${esc(r.numero_serie)})</div>
+      <div class="kv"><b>Serviço:</b> ${esc(r.servico)}</div>
+      <ol class="item-steps">
+        ${(r.checklist || []).map((c) => `<li>${esc(c.item)} — <b>${c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A'}</b>${c.observacao ? ' — ' + esc(c.observacao) : ''}</li>`).join('')}
+      </ol>
+      <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>
+      <div class="kv"><b>Aceite:</b> ${r.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito'}</div>
+      <div class="kv"><b>Avaliação:</b> ${r.avaliacao ? r.avaliacao.estrelas : '—'}/5 estrelas <span class="sep">·</span> Dúvidas sanadas: ${r.avaliacao && r.avaliacao.duvidas_sanadas === 'sim' ? 'Sim' : 'Não'} <span class="sep">·</span> Apto a operar: ${r.avaliacao && r.avaliacao.apto_operar === 'sim' ? 'Sim' : 'Não'}</div>
+      <div class="kv"><b>Assinaturas</b></div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap;">
+        <div>${esc(r.assinatura_cliente_nome || '—')} (cliente)${r.assinatura_cliente_img ? `<br><img src="${r.assinatura_cliente_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_cliente_img}')">` : ''}</div>
+        <div>${esc(r.assinatura_tecnico_nome || '—')} (técnico)${r.assinatura_tecnico_img ? `<br><img src="${r.assinatura_tecnico_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_tecnico_img}')">` : ''}</div>
+      </div>`;
+  }
+  if (v.relatorio_simples) {
+    const r = v.relatorio_simples;
+    return `
+      <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
+      <div class="kv"><b>Equipamento:</b> ${esc(r.equipamento_tipo)} — ${esc(r.equipamento_modelo)} ${r.numero_serie ? `(${esc(r.numero_serie)})` : ''}</div>
+      <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>`;
+  }
+  return `<div class="kv"><b>Causa:</b> ${esc(v.causa)}</div><div class="kv"><b>Correção:</b> ${esc(v.correcao)}</div><div class="kv"><b>Resultado:</b> ${esc(v.resultado)}</div>`;
 }
 async function aprovarVisita(id) { await api(`/api/visitas/${id}/aprovar`, { method: 'POST' }); renderAprovacoesVisitas(); }
 async function reprovarVisita(id) {
