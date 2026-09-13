@@ -1978,9 +1978,14 @@ async function solicitarReaberturaVisita(id) {
 }
 
 // ---------- BIBLIOTECA: ACESSAR ----------
-async function renderBibliotecaDefeitos(filtros = {}) {
-  const params = new URLSearchParams({ tipo: 'defeito', ...filtros });
-  const { registros } = await api('/api/registros?' + params.toString());
+async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
+  let registros = [];
+  if (pesquisou) {
+    const params = new URLSearchParams({ tipo: 'defeito', ...filtros });
+    ({ registros } = await api('/api/registros?' + params.toString()));
+  }
+  window._defeitosCache = registros;
+  window._defeitosFiltros = filtros;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Biblioteca — Defeitos/Falhas</h1><p>Casos aprovados pela liderança, pesquisáveis por equipamento, palavra-chave ou nº de série</p></div>
@@ -1990,33 +1995,52 @@ async function renderBibliotecaDefeitos(filtros = {}) {
       <div class="field"><label>Palavra-chave</label><input id="f-q" value="${esc(filtros.q || '')}" placeholder="sintoma, causa ou solução"></div>
       <button class="btn btn-primary btn-sm" onclick="filtrarDefeitos()">Buscar</button>
     </div>
-    ${registros.length ? registros.map((r) => `
-      <div class="item-card">
-        <div class="item-top">
-          <div><div class="item-title">${esc(r.titulo)}</div>
-            <div class="item-meta">${esc(r.equipamento_tipo)} ${r.equipamento_modelo ? '— ' + esc(r.equipamento_modelo) : ''} ${r.numero_serie ? `<span class="sep">·</span> Nº série ${esc(r.numero_serie)}` : ''}</div>
-          </div>
-          <span class="tag tag-falha">Defeito</span>
-        </div>
-        <div class="item-body">
-          <div class="kv"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
-          <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
-          <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
-          <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
-        </div>
-      </div>`).join('') : `<div class="empty">Nenhum caso aprovado com esses filtros ainda.</div>`}`;
+    ${!pesquisou ? `<div class="empty">Preencha um filtro (opcional) e clique em Buscar para ver os casos aprovados.</div>` : registros.length ? `
+    <div class="panel"><table>
+      <tr><th>Título</th><th>Equipamento</th><th>Nº de série</th><th></th></tr>
+      ${registros.map((r, i) => `
+        <tr style="cursor:pointer;" onclick="abrirDetalheDefeito(${i})">
+          <td>${esc(r.titulo)}</td>
+          <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
+          <td>${esc(r.numero_serie || '—')}</td>
+          <td><button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheDefeito(${i})">Abrir</button></td>
+        </tr>`).join('')}
+    </table></div>` : `<div class="empty">Nenhum caso aprovado com esses filtros ainda.</div>`}`;
 }
 function filtrarDefeitos() {
-  renderBibliotecaDefeitos({
+  const filtros = {
     equipamento: document.getElementById('f-equip').value,
     serie: document.getElementById('f-serie').value,
     q: document.getElementById('f-q').value,
-  });
+  };
+  renderBibliotecaDefeitos(filtros, true);
+}
+function abrirDetalheDefeito(i) {
+  const r = (window._defeitosCache || [])[i];
+  if (!r) return;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}${r.numero_serie ? ' · Nº série ' + esc(r.numero_serie) : ''}</p></div>
+      <button class="btn-outline-sm" onclick="renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <span class="tag tag-falha">Defeito</span>
+      <div class="kv" style="margin-top:12px;"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
+      <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
+      <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
+      <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
+    </div>`;
 }
 
-async function renderBibliotecaProcedimentos(filtros = {}) {
-  const params = new URLSearchParams({ tipo: 'procedimento', ...filtros });
-  const { registros } = await api('/api/registros?' + params.toString());
+async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
+  let registros = [];
+  if (pesquisou) {
+    const params = new URLSearchParams({ tipo: 'procedimento', ...filtros });
+    ({ registros } = await api('/api/registros?' + params.toString()));
+  }
+  window._procedimentosCache = registros;
+  window._procedimentosFiltros = filtros;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Biblioteca — Manual de Procedimentos</h1><p>Procedimentos preventivos aprovados, pesquisáveis por equipamento ou título</p></div>
@@ -2025,32 +2049,48 @@ async function renderBibliotecaProcedimentos(filtros = {}) {
       <div class="field"><label>Título</label><input id="f-q" value="${esc(filtros.q || '')}" placeholder="título do procedimento"></div>
       <button class="btn btn-primary btn-sm" onclick="filtrarProcedimentos()">Buscar</button>
     </div>
-    ${registros.length ? registros.map((r) => `
-      <div class="item-card">
-        <div class="item-top">
-          <div><div class="item-title">${esc(r.titulo)}</div>
-            <div class="item-meta">${esc(r.equipamento_tipo)} ${r.equipamento_modelo ? '— ' + esc(r.equipamento_modelo) : ''} ${r.periodicidade ? `<span class="sep">·</span> Periodicidade: ${esc(r.periodicidade)}` : ''}</div>
-          </div>
-          <span class="tag tag-preventiva">Procedimento</span>
-        </div>
-        <div class="item-body">
-          ${r.precaucoes ? `<div class="kv"><b>Precauções/EPIs:</b> ${esc(r.precaucoes)}</div>` : ''}
-          ${r.ferramentas ? `<div class="kv"><b>Ferramentas:</b> ${esc(r.ferramentas)}</div>` : ''}
-          <ol class="item-steps">
-            ${(r.passos || []).map((p) => `
-              <li>${esc(p.texto)}
-                ${p.fotos && p.fotos.length ? `<div class="item-step-photos">${p.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da etapa">`).join('')}</div>` : ''}
-              </li>`).join('')}
-          </ol>
-          <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
-        </div>
-      </div>`).join('') : `<div class="empty">Nenhum procedimento aprovado com esses filtros ainda.</div>`}`;
+    ${!pesquisou ? `<div class="empty">Preencha um filtro (opcional) e clique em Buscar para ver os procedimentos aprovados.</div>` : registros.length ? `
+    <div class="panel"><table>
+      <tr><th>Título</th><th>Equipamento</th><th>Periodicidade</th><th></th></tr>
+      ${registros.map((r, i) => `
+        <tr style="cursor:pointer;" onclick="abrirDetalheProcedimento(${i})">
+          <td>${esc(r.titulo)}</td>
+          <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
+          <td>${esc(r.periodicidade || '—')}</td>
+          <td><button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheProcedimento(${i})">Abrir</button></td>
+        </tr>`).join('')}
+    </table></div>` : `<div class="empty">Nenhum procedimento aprovado com esses filtros ainda.</div>`}`;
 }
 function filtrarProcedimentos() {
-  renderBibliotecaProcedimentos({
+  const filtros = {
     equipamento: document.getElementById('f-equip').value,
     q: document.getElementById('f-q').value,
-  });
+  };
+  renderBibliotecaProcedimentos(filtros, true);
+}
+function abrirDetalheProcedimento(i) {
+  const r = (window._procedimentosCache || [])[i];
+  if (!r) return;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}${r.periodicidade ? ' · Periodicidade: ' + esc(r.periodicidade) : ''}</p></div>
+      <button class="btn-outline-sm" onclick="renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <span class="tag tag-preventiva">Procedimento</span>
+      <div style="margin-top:12px;">
+        ${r.precaucoes ? `<div class="kv"><b>Precauções/EPIs:</b> ${esc(r.precaucoes)}</div>` : ''}
+        ${r.ferramentas ? `<div class="kv"><b>Ferramentas:</b> ${esc(r.ferramentas)}</div>` : ''}
+        <ol class="item-steps">
+          ${(r.passos || []).map((p) => `
+            <li>${esc(p.texto)}
+              ${p.fotos && p.fotos.length ? `<div class="item-step-photos">${p.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da etapa">`).join('')}</div>` : ''}
+            </li>`).join('')}
+        </ol>
+        <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
+      </div>
+    </div>`;
 }
 
 // ---------- RANKING DE TÉCNICOS ----------
