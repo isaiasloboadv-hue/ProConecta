@@ -265,7 +265,8 @@ function campoClienteHTML(idPrefix, clientes, placeholder, onResolved) {
     <div class="combo-cliente" id="${idPrefix}-wrap">
       <input id="${idPrefix}-nome" autocomplete="off" placeholder="${esc(placeholder || 'Clique para escolher a empresa...')}"
         oninput="filtrarComboCliente('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})"
-        onfocus="this.select(); abrirComboCliente('${idPrefix}')">
+        onfocus="this.select(); abrirComboCliente('${idPrefix}')"
+        onblur="resolverClienteDigitado('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})">
       <div class="combo-lista" id="${idPrefix}-lista"></div>
       <input type="hidden" id="${idPrefix}">
     </div>`;
@@ -304,6 +305,21 @@ function selecionarClienteCombo(idPrefix, clienteId, onResolved) {
   document.getElementById(idPrefix).value = cliente.id;
   document.getElementById(idPrefix + '-lista').classList.remove('show');
   if (onResolved && typeof window[onResolved] === 'function') window[onResolved]();
+}
+
+// se o admin digitou/colou o nome da empresa (ou o navegador autopreencheu o campo) sem
+// clicar numa sugestão da lista, o id oculto fica vazio mesmo com o texto certo na tela —
+// ao sair do campo, tenta casar o texto com uma empresa cadastrada e resolve sozinho.
+function resolverClienteDigitado(idPrefix, onResolved) {
+  if (document.getElementById(idPrefix).value) return;
+  const texto = document.getElementById(idPrefix + '-nome').value.trim().toLowerCase();
+  if (!texto) return;
+  const cliente = (window._clientesCache || []).find((c) => c.nome_empresa.trim().toLowerCase() === texto);
+  if (cliente) {
+    selecionarClienteCombo(idPrefix, cliente.id, onResolved);
+  } else {
+    document.getElementById(idPrefix + '-nome').value = '';
+  }
 }
 
 document.addEventListener('click', (e) => {
