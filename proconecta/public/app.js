@@ -759,8 +759,24 @@ function diasEntre(isoInicio, isoFim) {
   return Math.round((b - a) / 86400000);
 }
 
+// diz em que ponto da linha do tempo a O.S. está agora — vira a tarja horizontal
+// no topo do card, pra dar pra ver o andamento de todos os cards sem abrir um por um
+function faseAtualOS(a) {
+  const visita = (window._visitasPorAgenda || {})[a.id];
+  if (a.finalizada) return { label: 'Finalizada — cliente confirmou', cor: 'green' };
+  if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando confirmação do cliente', cor: 'teal' };
+  if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado — aguardando correção', cor: 'red' };
+  if (visita) return { label: 'Relatório enviado — em análise', cor: 'orange' };
+  if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
+  const hojeISO = dataISOLocal(new Date());
+  const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
+  if (diaAtendimento > hojeISO) return { label: 'Aguardando dia do serviço', cor: 'navy' };
+  return { label: 'Aguardando início do deslocamento', cor: 'amber' };
+}
+
 function osCardCorpo(a) {
   const status = statusOS(a);
+  const fase = faseAtualOS(a);
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
   const diaAbertura = (a.criado_em || a.data_hora_inicio || '').slice(0, 10);
@@ -770,6 +786,7 @@ function osCardCorpo(a) {
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
+      <div class="os-fase-banner os-fase-${fase.cor}">${esc(fase.label)}</div>
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
         <span class="tag tag-${TIPO_OS_COR[a.tipo] || 'blue'} os-tag-tipo" title="${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}">${esc(TIPO_OS_LABEL_CURTO[a.tipo] || TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
