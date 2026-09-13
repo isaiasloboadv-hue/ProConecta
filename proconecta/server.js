@@ -1351,7 +1351,7 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
 
 // ---------- arquivos estáticos (frontend) ----------
 
-const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json' };
+const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
 function servirEstatico(req, res, pathname) {
   let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
