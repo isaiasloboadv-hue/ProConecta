@@ -3280,39 +3280,62 @@ function wPaginaColorida(fillHex, conteudo) {
 }
 
 function wCapa(r, logoDataUri) {
-  const conteudo = [];
+  const topo = [];
   if (logoDataUri) {
     try {
-      conteudo.push(new docx.Paragraph({
+      topo.push(new docx.Paragraph({
         alignment: docx.AlignmentType.CENTER,
-        spacing: { after: 240 },
-        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 84, height: 97 } })],
+        spacing: { before: 160, after: 160 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 70, height: 81 } })],
       }));
     } catch (e) {}
   }
-  conteudo.push(new docx.Paragraph({
+  topo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
-    spacing: { after: 300 },
     children: [
-      new docx.TextRun({ text: 'PRO', bold: true, color: '2E86FF', size: 44 }),
-      new docx.TextRun({ text: 'Marking', bold: true, color: 'FFFFFF', size: 44 }),
+      new docx.TextRun({ text: 'PRO', bold: true, color: '2E86FF', size: 40 }),
+      new docx.TextRun({ text: 'Marking', bold: true, color: 'FFFFFF', size: 40 }),
     ],
   }));
-  conteudo.push(new docx.Paragraph({
-    alignment: docx.AlignmentType.CENTER,
-    spacing: { after: 180 },
-    children: [new docx.TextRun({ text: 'RELATÓRIO TÉCNICO', bold: true, color: 'FFFFFF', size: 36 })],
-  }));
-  conteudo.push(new docx.Paragraph({
-    alignment: docx.AlignmentType.CENTER,
-    spacing: { after: 1200 },
-    children: [new docx.TextRun({ text: (r.empresa ? String(r.empresa) : '—').toUpperCase(), color: 'C8D8EC', size: 24 })],
-  }));
-  conteudo.push(new docx.Paragraph({
-    alignment: docx.AlignmentType.CENTER,
-    children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
-  }));
-  return wPaginaColorida(WORD_COR.navy, conteudo);
+
+  const meio = [
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { after: 160 },
+      children: [new docx.TextRun({ text: 'RELATÓRIO TÉCNICO', bold: true, color: 'FFFFFF', size: 36 })],
+    }),
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      children: [new docx.TextRun({ text: (r.empresa ? String(r.empresa) : '—').toUpperCase(), color: 'C8D8EC', size: 24 })],
+    }),
+  ];
+
+  const base = [
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { after: 240 },
+      children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
+    }),
+  ];
+
+  const linhaBloco = (conteudo, altura, alinhamento) => new docx.TableRow({
+    height: { value: altura, rule: docx.HeightRule.EXACT },
+    children: [new docx.TableCell({
+      shading: { fill: WORD_COR.navy, type: docx.ShadingType.CLEAR, color: 'auto' },
+      verticalAlign: alinhamento,
+      children: conteudo,
+    })],
+  });
+
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: docx.TableBorders.NONE,
+    rows: [
+      linhaBloco(topo, 4000, docx.VerticalAlign.TOP),
+      linhaBloco(meio, 8800, docx.VerticalAlign.CENTER),
+      linhaBloco(base, 2800, docx.VerticalAlign.BOTTOM),
+    ],
+  });
 }
 
 function wPaginaContato(logoDataUri) {
