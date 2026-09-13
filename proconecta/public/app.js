@@ -3146,11 +3146,20 @@ function wBordaFinaTabela() {
   return { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha };
 }
 
+// largura útil da página (A4 menos as margens de 300+300 twips) — usada pra fixar
+// a largura das colunas em twips (DXA) em vez de porcentagem, senão o Word recalcula
+// a largura de cada coluna pelo tamanho do texto e desproporciona as caixas
+function wLarguraConteudo() {
+  return docx.convertMillimetersToTwip(210) - 600;
+}
+
 // caixas lado a lado dentro de uma linha de tabela, igual ao layout do PDF (linhaCampos)
 function wLinhaCampos(campos) {
   const margins = { top: 70, bottom: 70, left: 100, right: 100 };
-  const cells = campos.map((c) => new docx.TableCell({
-    width: { size: Math.round(c.frac * 100), type: docx.WidthType.PERCENTAGE },
+  const larguraTotal = wLarguraConteudo();
+  const larguras = campos.map((c) => Math.round(larguraTotal * c.frac));
+  const cells = campos.map((c, i) => new docx.TableCell({
+    width: { size: larguras[i], type: docx.WidthType.DXA },
     margins,
     children: [new docx.Paragraph({
       children: [
@@ -3159,23 +3168,34 @@ function wLinhaCampos(campos) {
       ],
     })],
   }));
-  return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: wBordaFinaTabela(), rows: [new docx.TableRow({ children: cells })] });
+  return new docx.Table({
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: larguras,
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
+    rows: [new docx.TableRow({ children: cells })],
+  });
 }
 
 // caixa "GARANTIA" (com as opções sim/não/outros) ao lado da caixa "DATA DE FABRICAÇÃO", igual ao PDF
 function wLinhaGarantiaData(garantia, dataFabricacao) {
   const margins = { top: 70, bottom: 70, left: 100, right: 100 };
+  const larguraTotal = wLarguraConteudo();
+  const larguraGarantia = Math.round(larguraTotal * 0.62);
+  const larguraData = larguraTotal - larguraGarantia;
   const runsGarantia = [new docx.TextRun({ text: 'GARANTIA: ', bold: true, color: WORD_COR.ink, size: 18 })];
   [['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']].forEach(([v, l], idx) => {
     if (idx > 0) runsGarantia.push(new docx.TextRun({ text: '   ', size: 18 }));
     runsGarantia.push(new docx.TextRun({ text: (v === garantia ? '☑ ' : '☐ ') + l, bold: true, color: WORD_COR.ink, size: 18 }));
   });
   return new docx.Table({
-    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: [larguraGarantia, larguraData],
+    layout: docx.TableLayoutType.FIXED,
     borders: wBordaFinaTabela(),
     rows: [new docx.TableRow({ children: [
-      new docx.TableCell({ width: { size: 62, type: docx.WidthType.PERCENTAGE }, margins, children: [new docx.Paragraph({ children: runsGarantia })] }),
-      new docx.TableCell({ width: { size: 38, type: docx.WidthType.PERCENTAGE }, margins, children: [new docx.Paragraph({ children: [
+      new docx.TableCell({ width: { size: larguraGarantia, type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: runsGarantia })] }),
+      new docx.TableCell({ width: { size: larguraData, type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: [
         new docx.TextRun({ text: 'DATA DE FABRICAÇÃO: ', bold: true, color: WORD_COR.ink, size: 18 }),
         new docx.TextRun({ text: dataFabricacao ? String(dataFabricacao) : '—', color: WORD_COR.ink, size: 18 }),
       ] })] }),
@@ -3193,10 +3213,12 @@ function wLinhaOpcoes(opcoes, selecionado) {
 }
 
 function wBlocoTexto(texto) {
-  const linha = { style: docx.BorderStyle.SINGLE, size: 4, color: WORD_COR.line };
+  const larguraTotal = wLarguraConteudo();
   return new docx.Table({
-    width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    borders: { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha },
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: [larguraTotal],
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
     rows: [new docx.TableRow({ children: [new docx.TableCell({
       margins: { top: 120, bottom: 120, left: 140, right: 140 },
       children: [new docx.Paragraph({ children: [new docx.TextRun({ text: texto ? String(texto) : '—', size: 20, color: WORD_COR.ink })] })],
@@ -3205,25 +3227,30 @@ function wBlocoTexto(texto) {
 }
 
 function wTabelaPecas(pecas) {
-  const linha = { style: docx.BorderStyle.SINGLE, size: 4, color: WORD_COR.line };
   const margins = { top: 80, bottom: 80, left: 100, right: 100 };
-  const headerCell = (t) => new docx.TableCell({
+  const larguraTotal = wLarguraConteudo();
+  const fracs = [0.12, 0.48, 0.22, 0.18];
+  const larguras = fracs.map((f) => Math.round(larguraTotal * f));
+  const headerCell = (t, i) => new docx.TableCell({
+    width: { size: larguras[i], type: docx.WidthType.DXA },
     shading: { fill: WORD_COR.navy, type: docx.ShadingType.CLEAR, color: 'auto' },
     margins,
     children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, bold: true, color: 'FFFFFF', size: 18 })] })],
   });
-  const cell = (t) => new docx.TableCell({ margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, size: 18, color: WORD_COR.ink })] })] });
-  const linhas = [new docx.TableRow({ children: [headerCell('Item'), headerCell('Descrição da peça'), headerCell('Código PMK'), headerCell('Qtd.')] })];
+  const cell = (t, i) => new docx.TableCell({ width: { size: larguras[i], type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, size: 18, color: WORD_COR.ink })] })] });
+  const linhas = [new docx.TableRow({ children: [headerCell('Item', 0), headerCell('Descrição da peça', 1), headerCell('Código PMK', 2), headerCell('Qtd.', 3)] })];
   if (!pecas.length) {
     linhas.push(new docx.TableRow({ children: [new docx.TableCell({ columnSpan: 4, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma peça informada', italics: true, color: WORD_COR.inkSoft, size: 18 })] })] })] }));
   } else {
     pecas.forEach((p, i) => {
-      linhas.push(new docx.TableRow({ children: [cell(String(i + 1)), cell(p.descricao || '—'), cell(p.codigo_pmk || '—'), cell(String(p.quantidade || '—'))] }));
+      linhas.push(new docx.TableRow({ children: [cell(String(i + 1), 0), cell(p.descricao || '—', 1), cell(p.codigo_pmk || '—', 2), cell(String(p.quantidade || '—'), 3)] }));
     });
   }
   return new docx.Table({
-    width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    borders: { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha },
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: larguras,
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
     rows: linhas,
   });
 }
