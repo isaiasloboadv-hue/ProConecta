@@ -2237,6 +2237,7 @@ async function editarRegistro(id) {
 
 // ---------- APROVAÇÃO DA BIBLIOTECA ----------
 let sugerindoId = null;
+let filaAberta = new Set(); // ids de registros da fila mostrando o conteúdo completo
 async function renderAprovacoesBiblioteca() {
   const { registros } = await api('/api/registros/fila');
   window._filaBiblioteca = registros;
@@ -2247,20 +2248,30 @@ function desenharFilaBiblioteca() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Aprovação — Biblioteca</h1><p>${registros.length} pendente(s)</p></div>
-    ${registros.length ? registros.map((r) => `
+    ${registros.length ? registros.map((r) => {
+      const aberto = filaAberta.has(r.id);
+      return `
       <div class="item-card">
         <div class="item-top">
           <div><div class="item-title">${esc(r.titulo)}</div>
             <div class="item-meta">${r.tipo === 'defeito' ? tag('Defeito/Falha', 'falha') : tag('Procedimento', 'preventiva')}<span class="sep">·</span>${esc(r.equipamento_tipo)}<span class="sep">·</span>por ${esc(r.autor_nome || '—')}</div>
           </div>
         </div>
+        ${aberto ? `
         <div class="item-body">
           ${r.tipo === 'defeito' ? `
             <div class="kv"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
             <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
             <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
           ` : `
-            <ol class="item-steps">${(r.passos || []).map((p) => `<li>${esc(p.texto)} ${p.fotos && p.fotos.length ? `(${p.fotos.length} foto(s))` : ''}</li>`).join('')}</ol>
+            ${r.precaucoes ? `<div class="kv"><b>Precauções/EPIs:</b> ${esc(r.precaucoes)}</div>` : ''}
+            ${r.ferramentas ? `<div class="kv"><b>Ferramentas:</b> ${esc(r.ferramentas)}</div>` : ''}
+            <ol class="item-steps">
+              ${(r.passos || []).map((p) => `
+                <li>${esc(p.texto)}
+                  ${p.fotos && p.fotos.length ? `<div class="item-step-photos">${p.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da etapa">`).join('')}</div>` : ''}
+                </li>`).join('')}
+            </ol>
           `}
         </div>
         <div class="review-box">
@@ -2272,10 +2283,16 @@ function desenharFilaBiblioteca() {
             </div>
           ` : `
             <button class="btn btn-primary btn-sm" onclick="aprovarRegistro(${r.id})">Aprovar</button>
-            <button class="btn btn-orange btn-sm" onclick="sugerindoId=${r.id}; desenharFilaBiblioteca();">Sugerir alteração</button>
+            <button class="btn-outline-sm" onclick="excluirRegistroFila(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            <button class="btn btn-orange btn-sm" onclick="sugerindoId=${r.id}; desenharFilaBiblioteca();">Sugerir edição</button>
+            <button class="btn btn-ghost btn-sm" onclick="filaAberta.delete(${r.id}); desenharFilaBiblioteca();">Fechar</button>
           `}
-        </div>
-      </div>`).join('') : `<div class="empty">Nada pendente no momento.</div>`}`;
+        </div>` : `
+        <div class="review-box">
+          <button class="btn-outline-sm" onclick="filaAberta.add(${r.id}); desenharFilaBiblioteca();">Abrir</button>
+        </div>`}
+      </div>`;
+    }).join('') : `<div class="empty">Nada pendente no momento.</div>`}`;
 }
 async function aprovarRegistro(id) {
   await api(`/api/registros/${id}/aprovar`, { method: 'POST' });
@@ -2291,6 +2308,14 @@ async function confirmarSugestao(id) {
     sugerindoId = null;
     mostrarToast('Alteração sugerida — o autor foi notificado.');
     atualizarSino();
+    renderAprovacoesBiblioteca();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirRegistroFila(id) {
+  if (!confirm('Excluir este registro definitivamente? Essa ação não pode ser desfeita.')) return;
+  try {
+    await api(`/api/registros/${id}`, { method: 'DELETE' });
+    mostrarToast('Registro excluído.');
     renderAprovacoesBiblioteca();
   } catch (e) { alert('Erro: ' + e.message); }
 }

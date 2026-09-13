@@ -855,6 +855,18 @@ rota('POST', /^\/api\/registros\/(\d+)\/sugerir-alteracao$/, async (req, res, m)
   enviarJSON(res, 200, { registro });
 });
 
+// DELETE /api/registros/:id — administrador exclui um registro de biblioteca (pendente ou já aprovado)
+rota('DELETE', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui registros.' });
+  const data = db.load();
+  const idx = data.registros.findIndex((r) => r.id === Number(m[1]));
+  if (idx === -1) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  data.registros.splice(idx, 1);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // POST /api/registros/:id/marcar-lida — o autor marcou a notificação de alteração como vista
 rota('POST', /^\/api\/registros\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
