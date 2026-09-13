@@ -3133,9 +3133,12 @@ function dataUriParaUint8Array(dataUri) {
   return bytes;
 }
 
-function wTitulo(texto) {
+function wTitulo(texto, opcoes) {
+  opcoes = opcoes || {};
   return new docx.Paragraph({
-    spacing: { before: 260, after: 140 },
+    alignment: opcoes.centralizado ? docx.AlignmentType.CENTER : undefined,
+    keepNext: opcoes.manterProximo,
+    spacing: { before: 260, after: opcoes.after != null ? opcoes.after : 140 },
     border: { bottom: { color: WORD_COR.blue, space: 4, style: docx.BorderStyle.SINGLE, size: 6 } },
     children: [new docx.TextRun({ text: String(texto).toUpperCase(), bold: true, color: WORD_COR.blue, size: 22 })],
   });
@@ -3291,12 +3294,16 @@ function wTabelaFotosBloco(fotos) {
   return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: docx.TableBorders.NONE, rows: linhas });
 }
 
+// altura de uma folha A4 inteira, em twips — usada nas páginas de capa/contato, que
+// ficam numa seção própria com margem zero pra cor preencher a folha de ponta a ponta
+const WORD_ALTURA_PAGINA_CHEIA = 16837;
+
 function wPaginaColorida(fillHex, conteudo) {
   return new docx.Table({
     width: { size: 100, type: docx.WidthType.PERCENTAGE },
     borders: docx.TableBorders.NONE,
     rows: [new docx.TableRow({
-      height: { value: 15600, rule: docx.HeightRule.EXACT },
+      height: { value: WORD_ALTURA_PAGINA_CHEIA, rule: docx.HeightRule.EXACT },
       children: [new docx.TableCell({
         shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
         verticalAlign: docx.VerticalAlign.CENTER,
@@ -3362,9 +3369,9 @@ function wCapa(r, logoDataUri) {
     width: { size: 100, type: docx.WidthType.PERCENTAGE },
     borders: docx.TableBorders.NONE,
     rows: [
-      linhaBloco(topo, 6835, docx.VerticalAlign.TOP),
-      linhaBloco(meio, 5965, docx.VerticalAlign.CENTER),
-      linhaBloco(base, 2800, docx.VerticalAlign.BOTTOM),
+      linhaBloco(topo, 7375, docx.VerticalAlign.TOP),
+      linhaBloco(meio, 6431, docx.VerticalAlign.CENTER),
+      linhaBloco(base, 3031, docx.VerticalAlign.BOTTOM),
     ],
   });
 }
@@ -3417,9 +3424,6 @@ function wPaginaContato(logoDataUri) {
 
 async function gerarWordRelatorioManutencao(r, logoDataUri) {
   const children = [];
-
-  children.push(wCapa(r, logoDataUri));
-  children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
 
   if (logoDataUri) {
     try {
@@ -3477,7 +3481,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
   children.push(wTabelaPecas(r.pecas || []));
   children.push(new docx.Paragraph({ spacing: { after: 160 } }));
 
-  children.push(wTitulo('Relatório fotográfico'));
+  children.push(wTitulo('Relatório fotográfico', { centralizado: true, manterProximo: true, after: 260 }));
   const blocosFoto = r.fotos || [];
   const temFotos = blocosFoto.length && blocosFoto.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length));
   if (temFotos) {
@@ -3490,19 +3494,26 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
     children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma foto anexada.', italics: true, color: WORD_COR.inkSoft, size: 20 })] }));
   }
 
-  children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
-  children.push(wPaginaContato(logoDataUri));
+  const tamanhoPagina = { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) };
+  const semMargem = { top: 0, bottom: 0, left: 0, right: 0, header: 0, footer: 0 };
 
+  // capa e página de contato ficam em seções próprias, com margem zero, pra cor
+  // preencher a folha inteira; o conteúdo fica numa seção separada, com margem normal
   const doc = new docx.Document({
-    sections: [{
-      properties: {
-        page: {
-          size: { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) },
-          margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 },
-        },
+    sections: [
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wCapa(r, logoDataUri)],
       },
-      children,
-    }],
+      {
+        properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
+        children,
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wPaginaContato(logoDataUri)],
+      },
+    ],
   });
   return docx.Packer.toBlob(doc);
 }
