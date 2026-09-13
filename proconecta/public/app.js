@@ -89,12 +89,124 @@ async function tentarSessaoExistente() {
   }
 }
 
+// ---------- fila de envio offline (relatórios do técnico) ----------
+// quando o técnico conclui um relatório sem internet, o envio é guardado no aparelho (com
+// fotos e tudo — por isso IndexedDB, não localStorage, que tem pouco espaço) em vez de dar
+// erro. Assim que a conexão voltar (evento 'online', abrir o app de novo, ou tocar em
+// Sincronizar) a fila é reenviada sozinha, na ordem em que foi criada.
+const IDB_NOME = 'proconecta_offline';
+const IDB_STORE = 'fila_visitas';
+const MSG_ENFILEIRADO = 'Sem conexão no momento — o relatório foi guardado neste aparelho e será enviado automaticamente assim que a internet voltar (ou toque em Sincronizar).';
+
+function abrirFilaOfflineDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NOME, 1);
+    req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE, { keyPath: 'id' }); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function filaOfflineAdicionar(item) {
+  const db = await abrirFilaOfflineDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(item);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+async function filaOfflineListar() {
+  const db = await abrirFilaOfflineDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []).sort((a, b) => a.criado_em.localeCompare(b.criado_em)));
+    req.onerror = () => reject(req.error);
+  });
+}
+async function filaOfflineRemover(id) {
+  const db = await abrirFilaOfflineDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(id);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+
+// fetch() lança TypeError quando não há rede (sem chegar a ter resposta do servidor); erros
+// vindos do backend (validação, 403...) chegam como Error normal com mensagem própria — só o
+// primeiro caso deve cair na fila offline, o segundo é um erro de verdade pra tela tratar.
+function ehErroDeConexao(e) { return e instanceof TypeError; }
+
+// tenta enviar o relatório; se falhar por falta de conexão, guarda na fila em vez de propagar
+// o erro. `extra` carrega o que for preciso pra terminar o pós-processamento (PDF/e-mail) do
+// termo de aceite quando esse item sincronizar mais tarde.
+async function enviarVisitaOuEnfileirar(body, extra) {
+  try {
+    const resp = await api('/api/visitas', { method: 'POST', body });
+    return { enviado: true, visita: resp.visita };
+  } catch (e) {
+    if (!ehErroDeConexao(e)) throw e;
+    await filaOfflineAdicionar({ id: 'off-' + Date.now() + '-' + Math.random().toString(36).slice(2), body, criado_em: new Date().toISOString(), ...(extra || {}) });
+    await atualizarBadgeSincronizar();
+    return { enviado: false, enfileirado: true };
+  }
+}
+
+let sincronizandoFilaOffline = false;
+async function sincronizarFilaOffline() {
+  if (sincronizandoFilaOffline || !TOKEN) return;
+  if (!('indexedDB' in window)) return;
+  let fila;
+  try { fila = await filaOfflineListar(); } catch (e) { return; }
+  if (!fila.length) return;
+  sincronizandoFilaOffline = true;
+  let enviados = 0;
+  for (const item of fila) {
+    try {
+      const resp = await api('/api/visitas', { method: 'POST', body: item.body });
+      await filaOfflineRemover(item.id);
+      if (item.chaveRascunho) localStorage.removeItem(item.chaveRascunho);
+      if (item.pdfTermoAceite && resp.visita) {
+        try {
+          const pdfDataUri = gerarPdfRelatorio(item.pdfTermoAceite.dados, item.pdfTermoAceite.agendaItem);
+          const pdfBase64 = pdfDataUri.split(',')[1];
+          await api(`/api/visitas/${resp.visita.id}/enviar-relatorio`, { method: 'POST', body: { pdf_base64: pdfBase64, emails: item.pdfTermoAceite.emails } });
+        } catch (e2) { console.error('PDF/e-mail do relatório sincronizado depois falhou:', e2.message); }
+      }
+      enviados++;
+    } catch (e) {
+      if (ehErroDeConexao(e)) break; // sem rede de novo — tenta o resto na próxima
+      console.error('Descartando item pendente que o servidor rejeitou:', e.message);
+      await filaOfflineRemover(item.id);
+    }
+  }
+  sincronizandoFilaOffline = false;
+  await atualizarBadgeSincronizar();
+  if (enviados > 0) {
+    mostrarToast(`${enviados} relatório${enviados === 1 ? '' : 's'} pendente${enviados === 1 ? '' : 's'} sincronizado${enviados === 1 ? '' : 's'} com sucesso.`);
+    if (paginaAtual === 'agenda') renderAgenda();
+  }
+}
+
+async function atualizarBadgeSincronizar() {
+  const badge = document.getElementById('sync-badge');
+  if (!badge) return;
+  if (!('indexedDB' in window)) { badge.classList.add('hidden'); return; }
+  let fila = [];
+  try { fila = await filaOfflineListar(); } catch (e) {}
+  badge.textContent = fila.length;
+  badge.classList.toggle('hidden', fila.length === 0);
+}
+
+window.addEventListener('online', sincronizarFilaOffline);
+
 function entrarNoApp() {
   document.getElementById('authView').style.display = 'none';
   document.getElementById('appView').style.display = 'block';
   montarSidebar();
   atualizarSino();
   sinoTimer = setInterval(atualizarSino, 15000);
+  atualizarBadgeSincronizar();
+  sincronizarFilaOffline();
   const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
@@ -115,6 +227,7 @@ function renderHeaderRight() {
     </div>
     <button class="btn-bell" id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="bell-badge hidden" id="sync-badge">0</span>
     </button>
     <div class="bell-wrap">
       <button class="btn-bell" id="btn-bell" onclick="alternarSino()">
@@ -894,8 +1007,8 @@ async function finalizarDiario(agendaId) {
     relevante_biblioteca: document.getElementById('dt-relevante').value === 'true',
   };
   try {
-    await api('/api/visitas', { method: 'POST', body });
-    mostrarModalSucesso('Atividade finalizada e enviada para aprovação do administrador.');
+    const r = await enviarVisitaOuEnfileirar(body);
+    mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : 'Atividade finalizada e enviada para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro: ' + e.message); }
 }
@@ -1287,11 +1400,17 @@ async function concluirRelatorio() {
   if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
 
   const body = { agenda_id: d.agenda_id, relatorio: { ...d, emails_copia: emails }, relevante_biblioteca: d.relevante_biblioteca };
-  let visita;
+  let visita, r;
   try {
-    ({ visita } = await api('/api/visitas', { method: 'POST', body }));
+    r = await enviarVisitaOuEnfileirar(body, { chaveRascunho: chaveRascunho(d.agenda_id), pdfTermoAceite: { dados: d, agendaItem: relatorioAgendaAtual, emails } });
+    visita = r.visita;
   } catch (e) {
     alert('Erro ao concluir: ' + e.message);
+    return;
+  }
+  if (r.enfileirado) {
+    mostrarModalSucesso(MSG_ENFILEIRADO);
+    renderAgenda();
     return;
   }
   // A partir daqui a visita já foi salva e enviada para aprovação — isso não pode mais falhar
@@ -1423,8 +1542,8 @@ async function concluirRelatorioSimples(exigirSerie) {
     if (!String(relatorio_simples[c] || '').trim()) return alert('Preencha todos os campos obrigatórios.');
   }
   try {
-    await api('/api/visitas', { method: 'POST', body: { agenda_id: relatorioAgendaAtual.id, relatorio_simples } });
-    mostrarModalSucesso('Atendimento concluído e enviado para aprovação do administrador.');
+    const r = await enviarVisitaOuEnfileirar({ agenda_id: relatorioAgendaAtual.id, relatorio_simples });
+    mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : 'Atendimento concluído e enviado para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro ao concluir: ' + e.message); }
 }
@@ -1676,14 +1795,15 @@ async function concluirLaudoTecnico() {
   if (!d.fotos.length) return alert('Anexe ao menos uma foto no relatório fotográfico.');
 
   const body = { agenda_id: d.agenda_id, laudo: d, relevante_biblioteca: d.relevante_biblioteca };
+  let r;
   try {
-    await api('/api/visitas', { method: 'POST', body });
+    r = await enviarVisitaOuEnfileirar(body, { chaveRascunho: chaveRascunhoLaudo(d.agenda_id) });
   } catch (e) {
     alert('Erro ao concluir: ' + e.message);
     return;
   }
-  localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
-  mostrarModalSucesso('Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
+  if (r.enviado) localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
+  mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
   renderAgenda();
 }
 

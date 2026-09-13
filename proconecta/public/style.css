@@ -330,8 +330,10 @@ th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft)
 td{padding:12px 6px;border-bottom:1px solid var(--line);font-size:13px;}
 tr:last-child td{border-bottom:none;}
 @media(max-width:700px){
+  th{font-size:9.5px;padding:8px 4px;}
+  td{padding:8px 4px;font-size:11px;}
   .panel{overflow-x:auto;}
-  .panel table{min-width:540px;}
+  .panel table{min-width:0;}
 }
 
 .toast{
