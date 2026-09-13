@@ -1106,6 +1106,8 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
   const data = db.load();
+  // o token de login só carrega id/papel/nome — busca o cadastro completo pra pegar o e-mail
+  const autor = data.usuarios.find((u) => u.id === user.id);
   const item = {
     id: nextId(data, 'relatorios_manutencao'),
     autor_id: user.id,
@@ -1116,7 +1118,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     data_fabricacao: body.data_fabricacao || '',
     acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
-    tecnico_nome: user.nome, tecnico_email: user.email,
+    tecnico_nome: user.nome, tecnico_email: (autor && autor.email) || '',
     data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
     laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
     pecas: Array.isArray(body.pecas) ? body.pecas : [],

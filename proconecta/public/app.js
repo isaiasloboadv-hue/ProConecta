@@ -2752,7 +2752,9 @@ function relatorioManutPadrao() {
     acessorios: '', defeito_informado: '',
     data_entrada: '', data_conclusao: '',
     laudo_tecnico: '', servico_realizado: '',
-    pecas: [], fotos: [],
+    pecas: [],
+    // cada bloco é um grupo de fotos + um comentário (com negrito/itálico/cor/fonte) sobre elas
+    fotos: [],
   };
 }
 
@@ -2830,11 +2832,9 @@ function mostrarFormRelatorioManutencao() {
 
     <div class="panel">
       <h2>Relatório fotográfico</h2>
-      <div class="step-photos" id="rm-fotos"></div>
-      <label class="photo-add" style="margin-top:10px;">
-        <span class="plus">+</span>Foto
-        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosRelatorioManut(event)">
-      </label>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Anexe uma ou mais fotos e escreva um comentário sobre elas — o comentário aparece embaixo das fotos no PDF. Clique em "+ Adicionar" pra criar outro grupo de fotos com outro comentário.</p>
+      <div id="rm-blocos-fotos"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarBlocoFotoRelatorioManut()">+ Adicionar fotos e comentário</button>
     </div>
 
     <div class="panel">
@@ -2844,7 +2844,7 @@ function mostrarFormRelatorioManutencao() {
       </div>
     </div>`;
   renderPecasRelatorioManut();
-  renderFotosRelatorioManut();
+  renderBlocosFotosRelatorioManut();
 }
 
 function renderPecasRelatorioManut() {
@@ -2862,24 +2862,159 @@ function renderPecasRelatorioManut() {
 function adicionarPecaRelatorioManut() { relatorioManutDraft.pecas.push({ descricao: '', codigo_pmk: '', quantidade: '' }); renderPecasRelatorioManut(); }
 function removerPecaRelatorioManut(i) { relatorioManutDraft.pecas.splice(i, 1); renderPecasRelatorioManut(); }
 
-function renderFotosRelatorioManut() {
-  document.getElementById('rm-fotos').innerHTML = relatorioManutDraft.fotos.map((f, j) => `
-    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do relatório">
-      <button class="photo-rm" onclick="removerFotoRelatorioManut(${j})">×</button>
-    </div>`).join('');
+// "Relatório fotográfico" em blocos: cada bloco tem suas fotos + um comentário de texto rico
+// (negrito/itálico/sublinhado/cor/fonte) que aparece embaixo delas no PDF — igual pedido pelo
+// usuário, no molde do que já existe nos passos do Manual de Procedimentos da biblioteca.
+function renderBlocosFotosRelatorioManut() {
+  const alvo = document.getElementById('rm-blocos-fotos');
+  if (!alvo) return;
+  alvo.innerHTML = relatorioManutDraft.fotos.map((bloco, i) => `
+    <div class="rm-bloco-foto">
+      <div class="step-photos">
+        ${(bloco.fotos || []).map((f, j) => `
+          <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do relatório">
+            <button class="photo-rm" onclick="removerFotoDoBlocoRelatorioManut(${i}, ${j})">×</button>
+          </div>`).join('')}
+      </div>
+      <label class="photo-add" style="margin-top:8px;">
+        <span class="plus">+</span>Foto
+        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosNoBlocoRelatorioManut(event, ${i})">
+      </label>
+      <div class="rt-toolbar">
+        <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'bold')" title="Negrito"><b>B</b></button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'italic')" title="Itálico"><i>I</i></button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'underline')" title="Sublinhado"><u>S</u></button>
+        <input type="color" title="Cor da fonte" onchange="rtCorRelatorioManut(${i}, this.value)">
+        <select title="Fonte" onchange="rtFonteRelatorioManut(${i}, this.value)">
+          <option value="helvetica">Fonte padrão</option>
+          <option value="times">Fonte serifada</option>
+          <option value="courier">Fonte monoespaçada</option>
+        </select>
+        <button type="button" class="rt-rm" onclick="removerBlocoFotoRelatorioManut(${i})" title="Remover este grupo de fotos">Remover grupo</button>
+      </div>
+      <div class="rt-editor" id="rm-comentario-${i}" contenteditable="true" data-placeholder="Comente essa(s) foto(s)..." oninput="relatorioManutDraft.fotos[${i}].comentario = this.innerHTML;">${bloco.comentario || ''}</div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma foto adicionada ainda.</p>';
 }
-function adicionarFotosRelatorioManut(event) {
+function adicionarBlocoFotoRelatorioManut() {
+  relatorioManutDraft.fotos.push({ comentario: '', fotos: [] });
+  renderBlocosFotosRelatorioManut();
+}
+function removerBlocoFotoRelatorioManut(i) {
+  relatorioManutDraft.fotos.splice(i, 1);
+  renderBlocosFotosRelatorioManut();
+}
+function adicionarFotosNoBlocoRelatorioManut(event, i) {
   const arquivos = Array.from(event.target.files || []);
   Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
     const leitor = new FileReader();
     leitor.onload = () => resolve(leitor.result);
     leitor.readAsDataURL(arquivo);
   }))).then((dataUrls) => {
-    relatorioManutDraft.fotos.push(...dataUrls);
-    renderFotosRelatorioManut();
+    relatorioManutDraft.fotos[i].fotos.push(...dataUrls);
+    renderBlocosFotosRelatorioManut();
   });
 }
-function removerFotoRelatorioManut(j) { relatorioManutDraft.fotos.splice(j, 1); renderFotosRelatorioManut(); }
+function removerFotoDoBlocoRelatorioManut(i, j) {
+  relatorioManutDraft.fotos[i].fotos.splice(j, 1);
+  renderBlocosFotosRelatorioManut();
+}
+// comandos de formatação do comentário — usa o próprio editor contenteditable do navegador
+// (mesma técnica usada em qualquer editor de texto simples embutido numa página).
+// como o seletor de cor nativo (<input type=color>) rouba o foco do editor ao abrir, guarda-se
+// continuamente a última seleção de texto feita dentro de cada editor pra poder restaurá-la
+// antes de aplicar a cor/fonte — senão o texto selecionado "some" e o comando não pega em nada.
+window._rtUltimaSelecao = window._rtUltimaSelecao || {};
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const no = range.commonAncestorContainer;
+  const el = no.nodeType === 1 ? no : no.parentElement;
+  const editor = el && el.closest && el.closest('.rt-editor');
+  if (editor && editor.id.startsWith('rm-comentario-')) {
+    window._rtUltimaSelecao[editor.id] = range.cloneRange();
+  }
+});
+function rtRestaurarSelecao(idEditor) {
+  const range = window._rtUltimaSelecao[idEditor];
+  if (!range) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+function rtExecRelatorioManut(i, comando) {
+  document.getElementById(`rm-comentario-${i}`).focus();
+  document.execCommand(comando, false, null);
+  relatorioManutDraft.fotos[i].comentario = document.getElementById(`rm-comentario-${i}`).innerHTML;
+}
+function rtCorRelatorioManut(i, cor) {
+  const editor = document.getElementById(`rm-comentario-${i}`);
+  editor.focus();
+  rtRestaurarSelecao(editor.id);
+  document.execCommand('foreColor', false, cor);
+  relatorioManutDraft.fotos[i].comentario = editor.innerHTML;
+}
+function rtFonteRelatorioManut(i, fonte) {
+  const editor = document.getElementById(`rm-comentario-${i}`);
+  editor.focus();
+  rtRestaurarSelecao(editor.id);
+  document.execCommand('fontName', false, fonte);
+  relatorioManutDraft.fotos[i].comentario = editor.innerHTML;
+}
+
+// interpreta o HTML simples do comentário (negrito/itálico/sublinhado/cor/fonte) em uma lista de
+// palavras com seu estilo — usada tanto pra desenhar no PDF quanto reaproveitável no futuro.
+function extrairPalavrasComEstilo(html) {
+  const raiz = document.createElement('div');
+  raiz.innerHTML = html || '';
+  const palavras = [];
+  function estiloEfetivo(no, herdado) {
+    const estilo = { ...herdado };
+    if (no.nodeType !== 1) return estilo;
+    const tag = no.tagName.toLowerCase();
+    if (tag === 'b' || tag === 'strong') estilo.negrito = true;
+    if (tag === 'i' || tag === 'em') estilo.italico = true;
+    if (tag === 'u') estilo.sublinhado = true;
+    if (tag === 'font') {
+      if (no.getAttribute('color')) estilo.cor = no.getAttribute('color');
+      if (no.getAttribute('face')) estilo.fonte = no.getAttribute('face');
+    }
+    if (no.style) {
+      if (no.style.color) estilo.cor = no.style.color;
+      if (no.style.fontFamily) estilo.fonte = no.style.fontFamily.split(',')[0].replace(/["']/g, '').trim();
+      const peso = no.style.fontWeight;
+      if (peso === 'bold' || (peso && Number(peso) >= 700)) estilo.negrito = true;
+      if (no.style.fontStyle === 'italic') estilo.italico = true;
+      if (no.style.textDecorationLine === 'underline' || no.style.textDecoration.includes('underline')) estilo.sublinhado = true;
+    }
+    return estilo;
+  }
+  function caminhar(no, estilo) {
+    if (no.nodeType === 3) {
+      no.textContent.split(/(\s+)/).forEach((parte) => { if (parte.trim()) palavras.push({ texto: parte, ...estilo }); });
+      return;
+    }
+    if (no.nodeType !== 1) return;
+    if (no.tagName === 'BR') { palavras.push({ quebra: true }); return; }
+    const novoEstilo = estiloEfetivo(no, estilo);
+    Array.from(no.childNodes).forEach((filho) => caminhar(filho, novoEstilo));
+    if (no.tagName === 'DIV' || no.tagName === 'P') palavras.push({ quebra: true });
+  }
+  Array.from(raiz.childNodes).forEach((no) => caminhar(no, { negrito: false, italico: false, sublinhado: false, cor: null, fonte: null }));
+  while (palavras.length && palavras[palavras.length - 1].quebra) palavras.pop();
+  return palavras;
+}
+// normaliza qualquer cor CSS (nome, hex, rgb(...)) pra um trio [r,g,b] usável no jsPDF
+function corCssParaRgb(cor) {
+  if (!cor) return null;
+  const provisorio = document.createElement('div');
+  provisorio.style.color = cor;
+  document.body.appendChild(provisorio);
+  const computada = getComputedStyle(provisorio).color;
+  document.body.removeChild(provisorio);
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)/.exec(computada);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
 
 async function salvarRelatorioManutencao() {
   const d = relatorioManutDraft;
@@ -3142,24 +3277,58 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     y += 16;
   }
 
+  // desenha uma lista de palavras com estilo (do editor de comentário) respeitando a largura
+  // da página, com negrito/itálico/sublinhado/cor/fonte por palavra.
+  function desenharTextoRico(palavras) {
+    const alturaLinha = 12.5;
+    let x = margem;
+    if (y > pageH - margem - alturaLinha) novaPagina();
+    palavras.forEach((p) => {
+      if (p.quebra) { x = margem; y += alturaLinha; if (y > pageH - margem - alturaLinha) novaPagina(); return; }
+      const fonte = ['helvetica', 'times', 'courier'].includes(p.fonte) ? p.fonte : 'helvetica';
+      const estiloFonte = p.negrito && p.italico ? 'bolditalic' : p.negrito ? 'bold' : p.italico ? 'italic' : 'normal';
+      doc.setFont(fonte, estiloFonte); doc.setFontSize(9.5);
+      const cor = corCssParaRgb(p.cor) || PDF_COR.ink;
+      doc.setTextColor(...cor);
+      const texto = limparPdf(p.texto);
+      if (!texto) return;
+      const wPalavra = doc.getTextWidth(texto + ' ');
+      if (x + wPalavra > margem + largura) { x = margem; y += alturaLinha; if (y > pageH - margem - alturaLinha) novaPagina(); }
+      doc.text(texto, x, y);
+      if (p.sublinhado) { doc.setDrawColor(...cor); doc.setLineWidth(0.5); doc.line(x, y + 1.5, x + doc.getTextWidth(texto), y + 1.5); }
+      x += wPalavra;
+    });
+    y += alturaLinha;
+  }
+
   tituloCentro('Relatório fotográfico');
   if (r.fotos && r.fotos.length) {
-    const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
-    for (let i = 0; i < r.fotos.length; i += 2) {
-      if (y + hImg > pageH - margem) novaPagina();
-      [r.fotos[i], r.fotos[i + 1]].forEach((f, j) => {
-        if (!f) return;
-        const cx = margem + j * (wImg + gap);
-        try {
-          const m = /^data:image\/(\w+);/.exec(f);
-          const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
-          doc.setDrawColor(...PDF_COR.line);
-          doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
-          doc.addImage(f, formato, cx, y, wImg, hImg);
-        } catch (e) {}
-      });
-      y += hImg + gap;
-    }
+    r.fotos.forEach((entrada) => {
+      // compatibilidade com relatórios salvos antes de existir o comentário por grupo de fotos
+      const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+      const fotosDoBloco = bloco.fotos || [];
+      if (fotosDoBloco.length) {
+        const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+        for (let i = 0; i < fotosDoBloco.length; i += 2) {
+          if (y + hImg > pageH - margem) novaPagina();
+          [fotosDoBloco[i], fotosDoBloco[i + 1]].forEach((f, j) => {
+            if (!f) return;
+            const cx = margem + j * (wImg + gap);
+            try {
+              const m = /^data:image\/(\w+);/.exec(f);
+              const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+              doc.setDrawColor(...PDF_COR.line);
+              doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+              doc.addImage(f, formato, cx, y, wImg, hImg);
+            } catch (e) {}
+          });
+          y += hImg + gap;
+        }
+      }
+      const palavras = extrairPalavrasComEstilo(bloco.comentario);
+      if (palavras.length) { desenharTextoRico(palavras); y += 10; }
+      else y += 4;
+    });
   } else {
     doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text('Nenhuma foto anexada.', margem, y); y += 16;
