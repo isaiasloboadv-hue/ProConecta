@@ -314,6 +314,63 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   enviarJSON(res, 201, { agenda: agendaComDetalhes(data, item) });
 });
 
+// PUT /api/agenda/:id — administrador edita uma O.S. já criada
+rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita ordens de serviço.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
+  if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('garantia');
+  for (const campo of obrig) {
+    if (!body[campo] || !String(body[campo]).trim()) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
+  }
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && body.garantia === 'na' && !String(body.garantia_obs || '').trim()) {
+    return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
+  }
+  const equipamentoEscolhido = data.equipamentos.find((e) => e.id === Number(body.equipamento_id));
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
+    return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
+  }
+  Object.assign(item, {
+    tecnico_id: Number(body.tecnico_id),
+    cliente_id: Number(body.cliente_id),
+    equipamento_id: Number(body.equipamento_id),
+    data_hora_inicio: body.data_hora_inicio,
+    data_hora_fim: body.data_hora_fim,
+    tipo: body.tipo,
+    problema: body.problema || '',
+    contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
+    endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+    cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
+    garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
+  });
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// DELETE /api/agenda/:id — administrador exclui uma O.S. inteira (e a visita/registro de biblioteca
+// vinculados, se houver — mesmo cascateamento do DELETE /api/visitas/:id)
+rota('DELETE', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui ordens de serviço.' });
+  const data = db.load();
+  const idx = data.agenda.findIndex((a) => a.id === Number(m[1]));
+  if (idx === -1) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  const agendaId = data.agenda[idx].id;
+  const visita = data.visitas.find((v) => v.agenda_id === agendaId);
+  if (visita) {
+    data.registros = data.registros.filter((r) => !(r.origem === 'visita' && r.visita_id === visita.id));
+    data.visitas = data.visitas.filter((v) => v.id !== visita.id);
+  }
+  data.agenda.splice(idx, 1);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // POST /api/visitas  (técnico registra o diário técnico de uma atividade)
 rota('POST', /^\/api\/visitas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -861,6 +918,43 @@ rota('POST', /^\/api\/clientes$/, async (req, res) => {
   enviarJSON(res, 201, { cliente: item });
 });
 
+// PUT /api/clientes/:id — administrador edita um cliente
+rota('PUT', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita clientes.' });
+  const body = await lerCorpo(req);
+  if (!body.nome_empresa || !String(body.nome_empresa).trim()) {
+    return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  }
+  const data = db.load();
+  const cliente = data.clientes.find((c) => c.id === Number(m[1]));
+  if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
+  Object.assign(cliente, {
+    nome_empresa: body.nome_empresa.trim(),
+    contato: body.contato || '', telefone: body.telefone || '', email: body.email || '',
+    setor: body.setor || '', endereco: body.endereco || '', numero: body.numero || '',
+    bairro: body.bairro || '', cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
+  });
+  db.save(data);
+  enviarJSON(res, 200, { cliente });
+});
+
+// DELETE /api/clientes/:id — bloqueado se houver usuários, O.S. ou equipamentos vinculados a este cliente
+rota('DELETE', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui clientes.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const cliente = data.clientes.find((c) => c.id === id);
+  if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
+  if (data.usuarios.some((u) => u.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem usuários vinculados a este cliente. Remova ou reatribua-os antes de excluir.' });
+  if (data.agenda.some((a) => a.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este cliente. Exclua-as antes.' });
+  if (data.equipamentos.some((e) => e.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem equipamentos atrelados a este cliente. Remova-os antes.' });
+  data.clientes = data.clientes.filter((c) => c.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // GET /api/equipamentos
 rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -888,6 +982,47 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   data.equipamentos.push(item);
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
+});
+
+// PUT /api/equipamentos/:id — edita um item do catálogo (tipo/modelo) ou uma unidade já atrelada
+// (número de série, data de fabricação, localização), conforme o equipamento já tenha cliente ou não
+rota('PUT', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita equipamentos.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const equipamento = data.equipamentos.find((e) => e.id === Number(m[1]));
+  if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
+  if (equipamento.cliente_id === null) {
+    if (!body.tipo || !String(body.tipo).trim() || !body.modelo || !String(body.modelo).trim()) {
+      return enviarJSON(res, 400, { erro: 'Tipo e modelo são obrigatórios.' });
+    }
+    equipamento.tipo = body.tipo.trim();
+    equipamento.modelo = body.modelo.trim();
+  } else {
+    if (!body.numero_serie || !String(body.numero_serie).trim()) {
+      return enviarJSON(res, 400, { erro: 'Número de série é obrigatório.' });
+    }
+    equipamento.numero_serie = body.numero_serie.trim();
+    equipamento.data_fabricacao = body.data_fabricacao || '';
+    equipamento.localizacao = body.localizacao || '';
+  }
+  db.save(data);
+  enviarJSON(res, 200, { equipamento });
+});
+
+// DELETE /api/equipamentos/:id — bloqueado se houver O.S. vinculadas a este equipamento
+rota('DELETE', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui equipamentos.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const equipamento = data.equipamentos.find((e) => e.id === id);
+  if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
+  if (data.agenda.some((a) => a.equipamento_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este equipamento. Exclua-as antes.' });
+  data.equipamentos = data.equipamentos.filter((e) => e.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // POST /api/equipamentos/:id/atrelar — vincula um equipamento do catálogo a um cliente,
@@ -978,6 +1113,43 @@ rota('POST', /^\/api\/usuarios\/(\d+)\/reenviar-convite$/, async (req, res, m) =
   const link = `${APP_URL}/ativar.html?token=${u.convite_token}`;
   const resultado = await email.enviarConvite({ nome: u.nome, email: u.email, link });
   enviarJSON(res, 200, { usuario: usuarioPublico(u), convite: resultado });
+});
+
+// PUT /api/usuarios/:id — administrador edita um usuário
+rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita usuários.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !body.email || !body.papel) {
+    return enviarJSON(res, 400, { erro: 'nome, email e papel são obrigatórios.' });
+  }
+  const data = db.load();
+  const alvo = data.usuarios.find((u) => u.id === Number(m[1]));
+  if (!alvo) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  if (data.usuarios.some((u) => u.id !== alvo.id && u.email === body.email)) {
+    return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
+  }
+  Object.assign(alvo, {
+    nome: body.nome, email: body.email, papel: body.papel,
+    cargo: body.cargo || '', setor: body.setor || '',
+    celular: body.celular || '', cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { usuario: usuarioPublico(alvo) });
+});
+
+// DELETE /api/usuarios/:id
+rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui usuários.' });
+  const id = Number(m[1]);
+  if (id === user.id) return enviarJSON(res, 400, { erro: 'Você não pode excluir a si mesmo.' });
+  const data = db.load();
+  const idx = data.usuarios.findIndex((u) => u.id === id);
+  if (idx === -1) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  data.usuarios.splice(idx, 1);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // ---------- arquivos estáticos (frontend) ----------

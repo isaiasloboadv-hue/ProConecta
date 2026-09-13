@@ -584,46 +584,48 @@ function cardOS(a) {
     </div>`;
 }
 
-async function mostrarFormNovaAtividade() {
+let agendaEmEdicaoId = null;
+async function mostrarFormNovaAtividade(agendaItem) {
+  agendaEmEdicaoId = agendaItem ? agendaItem.id : null;
   const [{ usuarios }, { equipamentos }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes')]);
   const tecnicos = usuarios.filter((u) => u.papel === 'tecnico');
   window._clientesCache = clientes;
   window._equipamentosCache = equipamentos;
   document.getElementById('form-nova-atividade').innerHTML = `
-    <div class="panel"><div class="panel-head">Nova Ordem de Serviço</div>
+    <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço'}</div>
       <h2 style="margin-top:0;">Tipo de serviço</h2>
       <div class="form-grid">
         <div class="full"><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
-          <option value="corretiva">Corretiva</option>
-          <option value="preventiva">Preventiva</option>
-          <option value="treinamento_online">Treinamento online</option>
-          <option value="treinamento_presencial">Treinamento presencial</option>
-          <option value="demonstracao_tecnica">Demonstração Técnica</option>
+          <option value="corretiva" ${agendaItem && agendaItem.tipo === 'corretiva' ? 'selected' : ''}>Corretiva</option>
+          <option value="preventiva" ${agendaItem && agendaItem.tipo === 'preventiva' ? 'selected' : ''}>Preventiva</option>
+          <option value="treinamento_online" ${agendaItem && agendaItem.tipo === 'treinamento_online' ? 'selected' : ''}>Treinamento online</option>
+          <option value="treinamento_presencial" ${agendaItem && agendaItem.tipo === 'treinamento_presencial' ? 'selected' : ''}>Treinamento presencial</option>
+          <option value="demonstracao_tecnica" ${agendaItem && agendaItem.tipo === 'demonstracao_tecnica' ? 'selected' : ''}>Demonstração Técnica</option>
         </select></div>
       </div>
 
       <h2>Dados do cliente</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pré-preenchido a partir do cadastro do cliente — ajuste se for diferente para este atendimento. Fica travado para o técnico.</p>
       <div class="form-grid">
-        <div class="full"><label>Empresa (cliente)</label>${campoClienteHTML('na-cliente', clientes, 'Digite o nome da empresa...', 'preencherClienteNovaAtividade')}</div>
-        <div><label>Contato*</label><input id="na-contato" placeholder="Nome do funcionário responsável por receber o técnico"></div>
-        <div><label>Telefone*</label><input id="na-telefone"></div>
-        <div><label>E-mail*</label><input id="na-email"></div>
-        <div><label>Setor do cliente</label><input id="na-setor-cliente"></div>
+        <div class="full"><label>Empresa (cliente)</label>${campoClienteHTML('na-cliente', clientes, 'Clique para escolher a empresa...', 'preencherClienteNovaAtividade')}</div>
+        <div><label>Contato*</label><input id="na-contato" placeholder="Nome do funcionário responsável por receber o técnico" value="${agendaItem ? esc(agendaItem.contato || '') : ''}"></div>
+        <div><label>Telefone*</label><input id="na-telefone" value="${agendaItem ? esc(agendaItem.telefone || '') : ''}"></div>
+        <div><label>E-mail*</label><input id="na-email" value="${agendaItem ? esc(agendaItem.email || '') : ''}"></div>
+        <div><label>Setor do cliente</label><input id="na-setor-cliente" value="${agendaItem ? esc(agendaItem.setor_cliente || '') : ''}"></div>
       </div>
       <div class="form-grid" id="na-endereco-wrap">
-        <div class="full"><label>Endereço*</label><input id="na-endereco"></div>
-        <div><label>Número*</label><input id="na-numero"></div>
-        <div><label>Bairro*</label><input id="na-bairro"></div>
-        <div><label>CEP*</label><input id="na-cep"></div>
-        <div><label>Cidade*</label><input id="na-cidade"></div>
-        <div><label>Estado*</label><select id="na-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
+        <div class="full"><label>Endereço*</label><input id="na-endereco" value="${agendaItem ? esc(agendaItem.endereco || '') : ''}"></div>
+        <div><label>Número*</label><input id="na-numero" value="${agendaItem ? esc(agendaItem.numero || '') : ''}"></div>
+        <div><label>Bairro*</label><input id="na-bairro" value="${agendaItem ? esc(agendaItem.bairro || '') : ''}"></div>
+        <div><label>CEP*</label><input id="na-cep" value="${agendaItem ? esc(agendaItem.cep || '') : ''}"></div>
+        <div><label>Cidade*</label><input id="na-cidade" value="${agendaItem ? esc(agendaItem.cidade || '') : ''}"></div>
+        <div><label>Estado*</label><select id="na-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}" ${agendaItem && agendaItem.estado === uf ? 'selected' : ''}>${uf}</option>`).join('')}</select></div>
       </div>
 
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
         <div class="full"><label>Equipamento</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
-        <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito..."></textarea></div>
+        <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito...">${agendaItem ? esc(agendaItem.problema || '') : ''}</textarea></div>
       </div>
       <div class="form-grid" id="na-laudo-equip-wrap">
         <div><label>Número de série</label><input id="na-numero-serie" disabled></div>
@@ -631,30 +633,50 @@ async function mostrarFormNovaAtividade() {
         <div class="full">
           <label>Está na garantia?*</label>
           <div style="display:flex; gap:18px; margin-bottom:10px;">
-            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="sim" onchange="atualizarGarantiaNovaAtividade()" style="width:auto;"> Sim</label>
-            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="nao" onchange="atualizarGarantiaNovaAtividade()" style="width:auto;"> Não</label>
-            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="na" onchange="atualizarGarantiaNovaAtividade()" style="width:auto;"> N/A</label>
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="sim" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'sim' ? 'checked' : ''} style="width:auto;"> Sim</label>
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="nao" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'nao' ? 'checked' : ''} style="width:auto;"> Não</label>
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="na" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'na' ? 'checked' : ''} style="width:auto;"> N/A</label>
           </div>
         </div>
-        <div class="full hidden" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..."></div>
+        <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
       </div>
 
       <h2>Data e horário</h2>
       <div class="form-grid">
-        <div><label>Início</label><input type="datetime-local" id="na-inicio"></div>
-        <div><label>Fim previsto</label><input type="datetime-local" id="na-fim"></div>
+        <div><label>Início</label><input type="datetime-local" id="na-inicio" value="${agendaItem ? (agendaItem.data_hora_inicio || '').slice(0, 16) : ''}"></div>
+        <div><label>Fim previsto</label><input type="datetime-local" id="na-fim" value="${agendaItem ? (agendaItem.data_hora_fim || '').slice(0, 16) : ''}"></div>
       </div>
 
       <h2>Técnico designado</h2>
       <div class="form-grid">
-        <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('')}</select></div>
+        <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
       </div>
 
-      <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">Salvar Ordem de Serviço</button>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">${agendaItem ? 'Salvar alterações' : 'Salvar Ordem de Serviço'}</button>
+        ${agendaItem ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoOS()">Cancelar</button>` : ''}
+      </div>
     </div>`;
-  selecionarClienteInicial('na-cliente', clientes);
-  preencherClienteNovaAtividade();
+  if (agendaItem) {
+    const clienteAtual = clientes.find((c) => c.id === agendaItem.cliente_id);
+    if (clienteAtual) {
+      document.getElementById('na-cliente-nome').value = clienteAtual.nome_empresa;
+      document.getElementById('na-cliente').value = clienteAtual.id;
+    }
+    preencherClienteNovaAtividade(false);
+    document.getElementById('na-equip').value = agendaItem.equipamento_id;
+    preencherNumeroSerieNovaAtividade();
+  } else {
+    selecionarClienteInicial('na-cliente', clientes);
+    preencherClienteNovaAtividade();
+  }
   atualizarTipoNovaAtividade();
+  atualizarGarantiaNovaAtividade();
+}
+
+function cancelarEdicaoOS() {
+  agendaEmEdicaoId = null;
+  document.getElementById('form-nova-atividade').innerHTML = '';
 }
 
 function atualizarTipoNovaAtividade() {
@@ -675,19 +697,22 @@ function preencherNumeroSerieNovaAtividade() {
   document.getElementById('na-data-fabricacao').value = equip ? (equip.data_fabricacao || '—') : '';
 }
 
-function preencherClienteNovaAtividade() {
+function preencherClienteNovaAtividade(sobrescreverContato) {
+  if (sobrescreverContato === undefined) sobrescreverContato = true;
   const clienteId = Number(document.getElementById('na-cliente').value);
   const cliente = (window._clientesCache || []).find((c) => c.id === clienteId) || {};
-  document.getElementById('na-contato').value = cliente.contato || '';
-  document.getElementById('na-telefone').value = cliente.telefone || '';
-  document.getElementById('na-email').value = cliente.email || '';
-  document.getElementById('na-setor-cliente').value = cliente.setor || '';
-  document.getElementById('na-endereco').value = cliente.endereco || '';
-  document.getElementById('na-numero').value = cliente.numero || '';
-  document.getElementById('na-bairro').value = cliente.bairro || '';
-  document.getElementById('na-cep').value = cliente.cep || '';
-  document.getElementById('na-cidade').value = cliente.cidade || '';
-  document.getElementById('na-estado').value = cliente.estado || '';
+  if (sobrescreverContato) {
+    document.getElementById('na-contato').value = cliente.contato || '';
+    document.getElementById('na-telefone').value = cliente.telefone || '';
+    document.getElementById('na-email').value = cliente.email || '';
+    document.getElementById('na-setor-cliente').value = cliente.setor || '';
+    document.getElementById('na-endereco').value = cliente.endereco || '';
+    document.getElementById('na-numero').value = cliente.numero || '';
+    document.getElementById('na-bairro').value = cliente.bairro || '';
+    document.getElementById('na-cep').value = cliente.cep || '';
+    document.getElementById('na-cidade').value = cliente.cidade || '';
+    document.getElementById('na-estado').value = cliente.estado || '';
+  }
 
   const equipDoCliente = (window._equipamentosCache || []).filter((e) => e.cliente_id === clienteId);
   document.getElementById('na-equip').innerHTML = equipDoCliente.length
@@ -697,7 +722,7 @@ function preencherClienteNovaAtividade() {
 }
 
 async function salvarNovaAtividade() {
-  if (!document.getElementById('na-cliente').value) return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista.');
+  if (!document.getElementById('na-cliente').value) return alert('Escolha uma empresa cadastrada na lista.');
   const equipId = document.getElementById('na-equip').value;
   if (!equipId) return alert('Nenhum equipamento disponível para esta empresa.');
   const tipoOS = document.getElementById('na-tipo').value;
@@ -727,7 +752,13 @@ async function salvarNovaAtividade() {
     garantia_obs: document.getElementById('na-garantia-obs').value,
   };
   try {
-    await api('/api/agenda', { method: 'POST', body });
+    if (agendaEmEdicaoId) {
+      await api(`/api/agenda/${agendaEmEdicaoId}`, { method: 'PUT', body });
+      agendaEmEdicaoId = null;
+      mostrarToast('Ordem de serviço atualizada.');
+    } else {
+      await api('/api/agenda', { method: 'POST', body });
+    }
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
     else renderAgenda();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
@@ -1718,12 +1749,15 @@ function cardOSAdmin(a, visita) {
   } else if (visita && visita.status_aprovacao === 'aprovado') {
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
-      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>`;
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
     acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else {
     acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
   }
+  acoes += `
+      <button class="btn-outline-sm" onclick="editarOS(${a.id})">Editar</button>
+      <button class="btn-outline-sm" onclick="excluirOS(${a.id})" style="color:var(--red); border-color:var(--red);">Excluir O.S.</button>`;
   const aberto = osAbertos.has(a.id);
   return `
     <div class="os-card" onclick="alternarOSAberta(${a.id})" style="cursor:pointer;">
@@ -1738,6 +1772,23 @@ function cardOSAdmin(a, visita) {
 function alternarOSAberta(id) {
   if (osAbertos.has(id)) osAbertos.delete(id); else osAbertos.add(id);
   desenharOrdemServico();
+}
+
+function editarOS(id) {
+  const item = (window._agendaCache || []).find((a) => a.id === id);
+  if (!item) return;
+  mostrarFormNovaAtividade(item);
+  document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function excluirOS(id) {
+  if (!confirm('Excluir esta Ordem de Serviço? O relatório e o registro de biblioteca vinculados (se houver) também serão excluídos. Esta ação não pode ser desfeita.')) return;
+  try {
+    await api(`/api/agenda/${id}`, { method: 'DELETE' });
+    mostrarToast('Ordem de serviço excluída.');
+    if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
+    else renderAgenda();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 function fmtDataHora(iso) {
@@ -2205,7 +2256,7 @@ async function renderClientes() {
     </div>
     <div id="form-cliente"></div>
     <div class="panel"><table>
-      <tr><th>Empresa</th><th>Contato</th><th>Telefone</th><th>E-mail</th><th>Cidade/UF</th></tr>
+      <tr><th>Empresa</th><th>Contato</th><th>Telefone</th><th>E-mail</th><th>Cidade/UF</th><th></th></tr>
       ${clientes.length ? clientes.map((c) => `
         <tr>
           <td>${esc(c.nome_empresa)}</td>
@@ -2213,28 +2264,49 @@ async function renderClientes() {
           <td>${esc(c.telefone || '—')}</td>
           <td>${esc(c.email || '—')}</td>
           <td>${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
-        </tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhum cliente cadastrado ainda.</td></tr>`}
+          <td style="white-space:nowrap;">
+            <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          </td>
+        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum cliente cadastrado ainda.</td></tr>`}
     </table></div>`;
 }
 
-function mostrarFormCliente() {
+let clienteEmEdicaoId = null;
+function mostrarFormCliente(cliente) {
+  clienteEmEdicaoId = cliente ? cliente.id : null;
   document.getElementById('form-cliente').innerHTML = `
-    <div class="panel"><div class="panel-head">Novo cliente</div>
+    <div class="panel"><div class="panel-head">${cliente ? 'Editar cliente' : 'Novo cliente'}</div>
       <div class="form-grid">
-        <div class="full"><label>Nome da empresa*</label><input id="nc-nome"></div>
-        <div><label>Contato</label><input id="nc-contato" placeholder="Nome do funcionário responsável"></div>
-        <div><label>Telefone</label><input id="nc-telefone"></div>
-        <div><label>E-mail</label><input id="nc-email"></div>
-        <div><label>Setor</label><input id="nc-setor"></div>
-        <div class="full"><label>Endereço</label><input id="nc-endereco"></div>
-        <div><label>Número</label><input id="nc-numero"></div>
-        <div><label>Bairro</label><input id="nc-bairro"></div>
-        <div><label>CEP</label><input id="nc-cep"></div>
-        <div><label>Cidade</label><input id="nc-cidade"></div>
-        <div><label>Estado</label><select id="nc-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
+        <div class="full"><label>Nome da empresa*</label><input id="nc-nome" value="${cliente ? esc(cliente.nome_empresa) : ''}"></div>
+        <div><label>Contato</label><input id="nc-contato" placeholder="Nome do funcionário responsável" value="${cliente ? esc(cliente.contato || '') : ''}"></div>
+        <div><label>Telefone</label><input id="nc-telefone" value="${cliente ? esc(cliente.telefone || '') : ''}"></div>
+        <div><label>E-mail</label><input id="nc-email" value="${cliente ? esc(cliente.email || '') : ''}"></div>
+        <div><label>Setor</label><input id="nc-setor" value="${cliente ? esc(cliente.setor || '') : ''}"></div>
+        <div class="full"><label>Endereço</label><input id="nc-endereco" value="${cliente ? esc(cliente.endereco || '') : ''}"></div>
+        <div><label>Número</label><input id="nc-numero" value="${cliente ? esc(cliente.numero || '') : ''}"></div>
+        <div><label>Bairro</label><input id="nc-bairro" value="${cliente ? esc(cliente.bairro || '') : ''}"></div>
+        <div><label>CEP</label><input id="nc-cep" value="${cliente ? esc(cliente.cep || '') : ''}"></div>
+        <div><label>Cidade</label><input id="nc-cidade" value="${cliente ? esc(cliente.cidade || '') : ''}"></div>
+        <div><label>Estado</label><select id="nc-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}" ${cliente && cliente.estado === uf ? 'selected' : ''}>${uf}</option>`).join('')}</select></div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarCliente()">Salvar cliente</button>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarCliente()">${cliente ? 'Salvar alterações' : 'Salvar cliente'}</button>
+        ${cliente ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoCliente()">Cancelar</button>` : ''}
+      </div>
     </div>`;
+}
+
+function editarCliente(id) {
+  const cliente = (window._clientesCache || []).find((c) => c.id === id);
+  if (!cliente) return;
+  mostrarFormCliente(cliente);
+  document.getElementById('form-cliente').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelarEdicaoCliente() {
+  clienteEmEdicaoId = null;
+  document.getElementById('form-cliente').innerHTML = '';
 }
 
 async function salvarCliente() {
@@ -2254,10 +2326,25 @@ async function salvarCliente() {
     estado: document.getElementById('nc-estado').value,
   };
   try {
-    await api('/api/clientes', { method: 'POST', body });
-    mostrarToast('Cliente cadastrado.');
+    if (clienteEmEdicaoId) {
+      await api(`/api/clientes/${clienteEmEdicaoId}`, { method: 'PUT', body });
+      clienteEmEdicaoId = null;
+      mostrarToast('Cliente atualizado.');
+    } else {
+      await api('/api/clientes', { method: 'POST', body });
+      mostrarToast('Cliente cadastrado.');
+    }
     renderClientes();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function excluirCliente(id) {
+  if (!confirm('Excluir este cliente? Esta ação não pode ser desfeita.')) return;
+  try {
+    await api(`/api/clientes/${id}`, { method: 'DELETE' });
+    mostrarToast('Cliente excluído.');
+    renderClientes();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- EQUIPAMENTOS ----------
@@ -2292,6 +2379,7 @@ async function verHistorico(id) {
 async function renderEquipamentosCadastrar() {
   const { equipamentos } = await api('/api/equipamentos');
   const catalogo = equipamentos.filter((e) => e.cliente_id === null);
+  window._catalogoCache = catalogo;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
@@ -2301,20 +2389,41 @@ async function renderEquipamentosCadastrar() {
     <p style="color:var(--ink-soft); font-size:13px; margin-top:-14px;">Cadastre aqui o tipo/modelo do equipamento. Depois, use "Atrelar equipamento" pra vincular uma unidade dessas a um cliente com o número de série dela.</p>
     <div id="form-equipamento-catalogo"></div>
     <div class="panel"><table>
-      <tr><th>Tipo</th><th>Modelo</th></tr>
-      ${catalogo.length ? catalogo.map((e) => `<tr><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhum equipamento no catálogo ainda.</td></tr>`}
+      <tr><th>Tipo</th><th>Modelo</th><th></th></tr>
+      ${catalogo.length ? catalogo.map((e) => `<tr><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
+          <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="3" class="empty">Nenhum equipamento no catálogo ainda.</td></tr>`}
     </table></div>`;
 }
 
-function mostrarFormEquipamentoCatalogo() {
+let equipamentoCatalogoEmEdicaoId = null;
+function mostrarFormEquipamentoCatalogo(equipamento) {
+  equipamentoCatalogoEmEdicaoId = equipamento ? equipamento.id : null;
   document.getElementById('form-equipamento-catalogo').innerHTML = `
-    <div class="panel"><div class="panel-head">Novo equipamento (catálogo)</div>
+    <div class="panel"><div class="panel-head">${equipamento ? 'Editar equipamento (catálogo)' : 'Novo equipamento (catálogo)'}</div>
       <div class="form-grid">
-        <div><label>Tipo*</label><input id="ec-tipo" placeholder="ex: Máquina de Gelo"></div>
-        <div><label>Modelo*</label><input id="ec-modelo"></div>
+        <div><label>Tipo*</label><input id="ec-tipo" placeholder="ex: Máquina de Gelo" value="${equipamento ? esc(equipamento.tipo) : ''}"></div>
+        <div><label>Modelo*</label><input id="ec-modelo" value="${equipamento ? esc(equipamento.modelo) : ''}"></div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarEquipamentoCatalogo()">Salvar no catálogo</button>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarEquipamentoCatalogo()">${equipamento ? 'Salvar alterações' : 'Salvar no catálogo'}</button>
+        ${equipamento ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoEquipamentoCatalogo()">Cancelar</button>` : ''}
+      </div>
     </div>`;
+}
+
+function editarEquipamentoCatalogo(id) {
+  const equipamento = (window._catalogoCache || []).find((e) => e.id === id);
+  if (!equipamento) return;
+  mostrarFormEquipamentoCatalogo(equipamento);
+  document.getElementById('form-equipamento-catalogo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelarEdicaoEquipamentoCatalogo() {
+  equipamentoCatalogoEmEdicaoId = null;
+  document.getElementById('form-equipamento-catalogo').innerHTML = '';
 }
 
 async function salvarEquipamentoCatalogo() {
@@ -2322,10 +2431,26 @@ async function salvarEquipamentoCatalogo() {
   const modelo = document.getElementById('ec-modelo').value.trim();
   if (!tipo || !modelo) return alert('Preencha tipo e modelo.');
   try {
-    await api('/api/equipamentos', { method: 'POST', body: { tipo, modelo } });
-    mostrarToast('Equipamento cadastrado no catálogo.');
+    if (equipamentoCatalogoEmEdicaoId) {
+      await api(`/api/equipamentos/${equipamentoCatalogoEmEdicaoId}`, { method: 'PUT', body: { tipo, modelo } });
+      equipamentoCatalogoEmEdicaoId = null;
+      mostrarToast('Equipamento atualizado.');
+    } else {
+      await api('/api/equipamentos', { method: 'POST', body: { tipo, modelo } });
+      mostrarToast('Equipamento cadastrado no catálogo.');
+    }
     renderEquipamentosCadastrar();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function excluirEquipamento(id) {
+  if (!confirm('Excluir este equipamento? Esta ação não pode ser desfeita.')) return;
+  try {
+    await api(`/api/equipamentos/${id}`, { method: 'DELETE' });
+    mostrarToast('Equipamento excluído.');
+    if (paginaAtual === 'equipamentos-atrelar') renderEquipamentosAtrelar();
+    else renderEquipamentosCadastrar();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----
@@ -2334,6 +2459,7 @@ async function renderEquipamentosAtrelar() {
   window._clientesCache = clientes;
   window._catalogoCache = equipamentos.filter((e) => e.cliente_id === null);
   const atrelados = equipamentos.filter((e) => e.cliente_id !== null);
+  window._atreladosCache = atrelados;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Atrelar equipamento</h1><p>${atrelados.length} atrelado(s) a clientes</p></div>
@@ -2347,15 +2473,57 @@ async function renderEquipamentosAtrelar() {
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarAtrelamento()">Atrelar ao cliente</button>
     </div>
+    <div id="form-editar-atrelado"></div>
     <div class="panel"><table>
       <tr><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Fabricação</th><th></th></tr>
       ${atrelados.length ? atrelados.map((e) => {
         const cliente = clientes.find((c) => c.id === e.cliente_id);
         return `<tr><td>${esc(cliente ? cliente.nome_empresa : '—')}</td><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td><td>${esc(e.numero_serie)}</td><td>${esc(e.data_fabricacao || '—')}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button></td></tr>`;
+        <td style="white-space:nowrap;">
+          <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
+          <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
+          <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`;
       }).join('') : `<tr><td colspan="6" class="empty">Nenhum equipamento atrelado a um cliente ainda.</td></tr>`}
     </table></div>
     <div id="historico-eq"></div>`;
+}
+
+function editarAtrelado(id) {
+  const equipamento = (window._atreladosCache || []).find((e) => e.id === id);
+  if (!equipamento) return;
+  const cliente = (window._clientesCache || []).find((c) => c.id === equipamento.cliente_id);
+  document.getElementById('form-editar-atrelado').innerHTML = `
+    <div class="panel"><div class="panel-head">Editar equipamento atrelado — ${esc(cliente ? cliente.nome_empresa : '—')}</div>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Tipo, modelo e cliente não podem ser alterados aqui — exclua e atrele novamente se precisar mudá-los.</p>
+      <div class="form-grid">
+        <div><label>Tipo</label><input value="${esc(equipamento.tipo)}" disabled></div>
+        <div><label>Modelo</label><input value="${esc(equipamento.modelo)}" disabled></div>
+        <div><label>Número de série*</label><input id="ea-numero-serie" value="${esc(equipamento.numero_serie)}"></div>
+        <div><label>Data de fabricação (MM/AAAA)</label><input id="ea-data-fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(equipamento.data_fabricacao || '')}"></div>
+        <div><label>Localização</label><input id="ea-localizacao" value="${esc(equipamento.localizacao || '')}"></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarEdicaoAtrelado(${equipamento.id})">Salvar alterações</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-editar-atrelado').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+  document.getElementById('form-editar-atrelado').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function salvarEdicaoAtrelado(id) {
+  const numeroSerie = document.getElementById('ea-numero-serie').value.trim();
+  if (!numeroSerie) return alert('Informe o número de série.');
+  const body = {
+    numero_serie: numeroSerie,
+    data_fabricacao: document.getElementById('ea-data-fabricacao').value,
+    localizacao: document.getElementById('ea-localizacao').value,
+  };
+  try {
+    await api(`/api/equipamentos/${id}`, { method: 'PUT', body });
+    mostrarToast('Equipamento atualizado.');
+    renderEquipamentosAtrelar();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 async function salvarAtrelamento() {
@@ -2381,6 +2549,7 @@ async function salvarAtrelamento() {
 async function renderUsuarios() {
   const [{ usuarios }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/clientes')]);
   window._clientesCache = clientes;
+  window._usuariosCache = usuarios;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
@@ -2398,23 +2567,48 @@ async function renderUsuarios() {
         </div>
         <span class="badge ${u.status === 'ativo' ? 'badge-ativo' : 'badge-convite'}">${u.status === 'ativo' ? 'Ativo' : 'Convite enviado'}</span>
         ${u.status !== 'ativo' ? `<button class="btn-outline-sm" onclick="reenviarConvite(${u.id})">Reenviar convite</button>` : ''}
+        <button class="btn-outline-sm" onclick="editarUsuario(${u.id})">Editar</button>
+        <button class="btn-outline-sm" onclick="excluirUsuario(${u.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
       </div>`).join('')}`;
 }
-function mostrarFormUsuario() {
+let usuarioEmEdicaoId = null;
+function mostrarFormUsuario(usuario) {
+  usuarioEmEdicaoId = usuario ? usuario.id : null;
   const clientes = window._clientesCache || [];
   document.getElementById('form-usuario').innerHTML = `
-    <div class="panel"><div class="panel-head">Novo usuário</div>
+    <div class="panel"><div class="panel-head">${usuario ? 'Editar usuário' : 'Novo usuário'}</div>
       <div class="form-grid">
-        <div><label>Nome</label><input id="nu-nome"></div>
-        <div><label>E-mail</label><input id="nu-email"></div>
-        <div><label>Cargo</label><input id="nu-cargo"></div>
-        <div><label>Setor</label><input id="nu-setor"></div>
-        <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()"><option value="tecnico">Técnico</option><option value="administrador">Administrador</option><option value="cliente">Cliente</option></select></div>
+        <div><label>Nome</label><input id="nu-nome" value="${usuario ? esc(usuario.nome) : ''}"></div>
+        <div><label>E-mail</label><input id="nu-email" value="${usuario ? esc(usuario.email) : ''}"></div>
+        <div><label>Cargo</label><input id="nu-cargo" value="${usuario ? esc(usuario.cargo || '') : ''}"></div>
+        <div><label>Setor</label><input id="nu-setor" value="${usuario ? esc(usuario.setor || '') : ''}"></div>
+        <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()">
+          <option value="tecnico" ${usuario && usuario.papel === 'tecnico' ? 'selected' : ''}>Técnico</option>
+          <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
+          <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
+        </select></div>
         <div id="campo-cliente"><label>Empresa (cliente)</label>${campoClienteHTML('nu-cliente', clientes)}</div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarUsuario()">Salvar e enviar convite</button>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarUsuario()">${usuario ? 'Salvar alterações' : 'Salvar e enviar convite'}</button>
+        ${usuario ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoUsuario()">Cancelar</button>` : ''}
+      </div>
     </div>`;
   alternarCampoCliente();
+  if (usuario && usuario.papel === 'cliente' && usuario.cliente_id) {
+    const cliente = clientes.find((c) => c.id === usuario.cliente_id);
+    if (cliente) { document.getElementById('nu-cliente-nome').value = cliente.nome_empresa; document.getElementById('nu-cliente').value = cliente.id; }
+  }
+}
+function editarUsuario(id) {
+  const usuario = (window._usuariosCache || []).find((u) => u.id === id);
+  if (!usuario) return;
+  mostrarFormUsuario(usuario);
+  document.getElementById('form-usuario').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function cancelarEdicaoUsuario() {
+  usuarioEmEdicaoId = null;
+  document.getElementById('form-usuario').innerHTML = '';
 }
 function alternarCampoCliente() {
   const papel = document.getElementById('nu-papel').value;
@@ -2423,7 +2617,7 @@ function alternarCampoCliente() {
 async function salvarUsuario() {
   const papel = document.getElementById('nu-papel').value;
   if (papel === 'cliente' && !document.getElementById('nu-cliente').value) {
-    return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista.');
+    return alert('Escolha uma empresa cadastrada na lista.');
   }
   const body = {
     nome: document.getElementById('nu-nome').value,
@@ -2434,9 +2628,24 @@ async function salvarUsuario() {
     cliente_id: papel === 'cliente' ? Number(document.getElementById('nu-cliente').value) : null,
   };
   try {
-    const { convite } = await api('/api/usuarios', { method: 'POST', body });
-    await renderUsuarios();
-    mostrarLinkConvite(convite);
+    if (usuarioEmEdicaoId) {
+      await api(`/api/usuarios/${usuarioEmEdicaoId}`, { method: 'PUT', body });
+      usuarioEmEdicaoId = null;
+      mostrarToast('Usuário atualizado.');
+      await renderUsuarios();
+    } else {
+      const { convite } = await api('/api/usuarios', { method: 'POST', body });
+      await renderUsuarios();
+      mostrarLinkConvite(convite);
+    }
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirUsuario(id) {
+  if (!confirm('Excluir este usuário? Esta ação não pode ser desfeita.')) return;
+  try {
+    await api(`/api/usuarios/${id}`, { method: 'DELETE' });
+    mostrarToast('Usuário excluído.');
+    renderUsuarios();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 async function reenviarConvite(id) {
