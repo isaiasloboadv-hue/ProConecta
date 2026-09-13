@@ -265,8 +265,8 @@ function campoClienteHTML(idPrefix, clientes, placeholder, onResolved) {
     <div class="combo-cliente" id="${idPrefix}-wrap">
       <input id="${idPrefix}-nome" autocomplete="off" placeholder="${esc(placeholder || 'Clique para escolher a empresa...')}"
         oninput="filtrarComboCliente('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})"
-        onfocus="this.select(); abrirComboCliente('${idPrefix}')"
-        onblur="resolverClienteDigitado('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})">
+        onfocus="this.select(); abrirComboCliente('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})"
+        onblur="setTimeout(() => resolverClienteDigitado('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''}), 250)">
       <div class="combo-lista" id="${idPrefix}-lista"></div>
       <input type="hidden" id="${idPrefix}">
     </div>`;
@@ -287,8 +287,8 @@ function renderComboClienteLista(idPrefix, itens, onResolved) {
 
 // abre o menu mostrando SEMPRE a lista completa (ignora o texto atual do campo, que pode ser
 // o nome já selecionado) — clicar na caixa é sempre um convite a navegar/pesquisar do zero.
-function abrirComboCliente(idPrefix) {
-  renderComboClienteLista(idPrefix, todosClientesOrdenados());
+function abrirComboCliente(idPrefix, onResolved) {
+  renderComboClienteLista(idPrefix, todosClientesOrdenados(), onResolved);
 }
 
 function filtrarComboCliente(idPrefix, onResolved) {
