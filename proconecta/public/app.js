@@ -349,7 +349,7 @@ async function clicarNotificacao(registroId, tipo) {
   if (tipo === 'alteracao_sugerida') {
     try { await api(`/api/registros/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
     ir('meus-registros');
-  } else if (tipo === 'os_aprovada') {
+  } else if (tipo === 'os_aprovada' || tipo === 'os_reprovada' || tipo === 'os_edicao_sugerida') {
     try { await api(`/api/visitas/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
     ir('agenda');
   } else if (tipo === 'os_atribuida') {
@@ -1755,7 +1755,9 @@ function acoesOS(a, visita) {
   let acoes;
   if (visita && visita.status_aprovacao === 'pendente') {
     acoes = `
-      <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id})">Aprovar${visita.relevante_biblioteca ? ' e incluir na biblioteca' : ''}</button>
+      <button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id})">Aprovar</button>
+      ${visita.relevante_biblioteca ? `<button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id}, true)">Aprovar e incluir na biblioteca</button>` : ''}
+      <button class="btn btn-ghost btn-sm" onclick="sugerirEdicaoVisita(${visita.id})">Sugerir edição</button>
       <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado') {
     acoes = `
@@ -1763,6 +1765,8 @@ function acoesOS(a, visita) {
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
     acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
+  } else if (visita && visita.status_aprovacao === 'alteracao_sugerida') {
+    acoes = `<span class="tag tag-amber">Edição sugerida${visita.comentario_edicao ? ': ' + esc(visita.comentario_edicao) : ''} — aguardando o técnico reenviar</span>`;
   } else {
     acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
   }
@@ -1926,11 +1930,23 @@ function detalheRelatorioVisita(v) {
   }
   return `<div class="kv"><b>Causa:</b> ${esc(v.causa)}</div><div class="kv"><b>Correção:</b> ${esc(v.correcao)}</div><div class="kv"><b>Resultado:</b> ${esc(v.resultado)}</div>`;
 }
-async function aprovarVisita(id) { await api(`/api/visitas/${id}/aprovar`, { method: 'POST' }); renderAprovacoesVisitas(); }
+async function aprovarVisita(id, incluirBiblioteca) {
+  await api(`/api/visitas/${id}/aprovar`, { method: 'POST', body: { incluir_biblioteca: !!incluirBiblioteca } });
+  renderAprovacoesVisitas();
+}
 async function reprovarVisita(id) {
   const comentario = prompt('Motivo da reprovação (opcional):') || '';
   await api(`/api/visitas/${id}/reprovar`, { method: 'POST', body: { comentario } });
   renderAprovacoesVisitas();
+}
+async function sugerirEdicaoVisita(id) {
+  const comentario = prompt('O que precisa ser corrigido no relatório? (obrigatório)');
+  if (!comentario || !comentario.trim()) return;
+  try {
+    await api(`/api/visitas/${id}/sugerir-edicao`, { method: 'POST', body: { comentario } });
+    mostrarToast('Edição solicitada — o técnico foi notificado.');
+    renderAprovacoesVisitas();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 async function reabrirVisita(id) {
   if (!confirm('Reabrir este relatório? Ele volta para a fila de aprovação e o técnico pode editá-lo novamente.')) return;

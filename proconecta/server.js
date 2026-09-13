@@ -546,19 +546,32 @@ rota('GET', /^\/api\/visitas$/, async (req, res) => {
   enviarJSON(res, 200, { visitas: lista });
 });
 
-// POST /api/visitas/:id/aprovar
+// POST /api/visitas/:id/aprovar — body.incluir_biblioteca (opcional) também aprova de uma vez
+// o registro de biblioteca vinculado (quando o técnico marcou o atendimento como relevante)
 rota('POST', /^\/api\/visitas\/(\d+)\/aprovar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador aprova.' });
+  const body = await lerCorpo(req);
   const data = db.load();
   const visita = data.visitas.find((v) => v.id === Number(m[1]));
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   visita.status_aprovacao = 'aprovado';
   visita.aprovado_por = user.id;
   visita.data_aprovacao = new Date().toISOString();
+  visita.lida_tecnico = false;
   // o caso na Biblioteca de Defeitos/Falhas (quando marcado como relevante) já foi criado no
-  // momento em que o técnico enviou o relatório — ver POST /api/visitas — e segue seu próprio
-  // fluxo de aprovação em Biblioteca > Aprovação, independente da aprovação da O.S. em si.
+  // momento em que o técnico enviou o relatório — ver POST /api/visitas — e por padrão segue seu
+  // próprio fluxo de aprovação em Biblioteca > Aprovação, independente da aprovação da O.S. em si;
+  // "incluir_biblioteca" deixa o administrador aprovar os dois de uma vez só.
+  if (body.incluir_biblioteca) {
+    const registro = data.registros.find((r) => r.origem === 'visita' && r.visita_id === visita.id);
+    if (registro) {
+      registro.status = 'aprovado';
+      registro.comentario_admin = null;
+      registro.aprovado_por = user.id;
+      registro.data_aprovacao = new Date().toISOString();
+    }
+  }
   db.save(data);
   enviarJSON(res, 200, { visita });
 });
@@ -575,6 +588,28 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reprovar$/, async (req, res, m) => {
   visita.comentario_reprovacao = body.comentario || '';
   visita.aprovado_por = user.id;
   visita.data_aprovacao = new Date().toISOString();
+  visita.lida_tecnico = false;
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
+// POST /api/visitas/:id/sugerir-edicao — administrador pede correção com comentário obrigatório;
+// a O.S. volta a ficar "pendente" pro técnico refazer e reenviar o relatório
+rota('POST', /^\/api\/visitas\/(\d+)\/sugerir-edicao$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador sugere edições.' });
+  const body = await lerCorpo(req);
+  if (!body.comentario || !body.comentario.trim()) return enviarJSON(res, 400, { erro: 'O comentário é obrigatório ao sugerir uma edição.' });
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  visita.status_aprovacao = 'alteracao_sugerida';
+  visita.comentario_edicao = body.comentario;
+  visita.aprovado_por = user.id;
+  visita.data_aprovacao = new Date().toISOString();
+  visita.lida_tecnico = false;
+  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  if (agendaItem) agendaItem.status = 'pendente';
   db.save(data);
   enviarJSON(res, 200, { visita });
 });
@@ -847,8 +882,16 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       .map((r) => ({ id: r.id, tipo: 'alteracao_sugerida', texto: `Alteração sugerida em "${r.titulo}"`, registro_id: r.id }));
     notificacoes = notificacoes.concat(
       data.visitas
-        .filter((v) => v.tecnico_id === user.id && v.status_aprovacao === 'aprovado' && !v.lida_tecnico)
-        .map((v) => ({ id: v.id, tipo: 'os_aprovada', texto: 'Relatório aprovado pelo administrador — gere o PDF na O.S.', registro_id: v.id }))
+        .filter((v) => v.tecnico_id === user.id && !v.lida_tecnico && ['aprovado', 'reprovado', 'alteracao_sugerida'].includes(v.status_aprovacao))
+        .map((v) => {
+          if (v.status_aprovacao === 'aprovado') {
+            return { id: v.id, tipo: 'os_aprovada', texto: 'Relatório aprovado pelo administrador — gere o PDF na O.S.', registro_id: v.id };
+          }
+          if (v.status_aprovacao === 'reprovado') {
+            return { id: v.id, tipo: 'os_reprovada', texto: `Relatório reprovado pelo administrador${v.comentario_reprovacao ? ': ' + v.comentario_reprovacao : ''}`, registro_id: v.id };
+          }
+          return { id: v.id, tipo: 'os_edicao_sugerida', texto: `Administrador pediu uma correção no relatório: ${v.comentario_edicao}`, registro_id: v.id };
+        })
     );
     notificacoes = notificacoes.concat(
       data.agenda
