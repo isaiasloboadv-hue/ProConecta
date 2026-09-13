@@ -433,10 +433,8 @@ function renderAgendaCalendario() {
       </div>
       <div class="cal-grid" id="cal-grid"></div>
     </div>
-    <div id="cal-dia-detalhe"></div>
   `;
   desenharGradeCalendario();
-  if (calDiaSelecionado) desenharDetalheDia(calDiaSelecionado);
 }
 
 function mudarMesCalendario(delta) {
@@ -444,8 +442,6 @@ function mudarMesCalendario(delta) {
   if (calMes < 0) { calMes = 11; calAno--; }
   if (calMes > 11) { calMes = 0; calAno++; }
   desenharGradeCalendario();
-  const detalhe = document.getElementById('cal-dia-detalhe');
-  if (detalhe) detalhe.innerHTML = '';
 }
 
 function irParaHojeCalendario() {
@@ -454,7 +450,6 @@ function irParaHojeCalendario() {
   calMes = hoje.getMonth();
   calDiaSelecionado = dataISOLocal(hoje);
   desenharGradeCalendario();
-  desenharDetalheDia(calDiaSelecionado);
 }
 
 function desenharGradeCalendario() {
@@ -499,34 +494,37 @@ function desenharGradeCalendario() {
 
 function selecionarDiaCalendario(iso) {
   calDiaSelecionado = iso;
-  desenharGradeCalendario();
-  desenharDetalheDia(iso);
+  renderDiaCalendario(iso);
 }
 
-let calDetalhesAbertos = new Set(); // ids de agenda abertos no detalhe do dia (calendário)
-
-function desenharDetalheDia(iso) {
+// tela separada (substitui o calendário) com só os cards de O.S. do dia escolhido
+function renderDiaCalendario(iso) {
   const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
-  const visitasPorAgenda = window._visitasPorAgenda || {};
   const [y, m, d] = iso.split('-');
-  const el = document.getElementById('cal-dia-detalhe');
-  el.innerHTML = `
-    <div class="page-head" style="margin-top:4px;"><h1 style="font-size:16px;">Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
+      <button class="btn-outline-sm" onclick="renderAgendaCalendario()">‹ Voltar ao calendário</button>
+    </div>
     ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOS(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
-    ${agenda.filter((a) => calDetalhesAbertos.has(a.id)).map((a) => `
-      <div class="os-detail-panel">
-        <div class="panel-head">OS-${String(a.id).padStart(6, '0')} · ${esc(a.cliente_nome || '—')}
-          <button class="btn-outline-sm" onclick="alternarDetalheCalendario(${a.id})">Fechar</button>
-        </div>
-        ${detalheCompletoOS(a, visitasPorAgenda[a.id])}
-      </div>`).join('')}
   `;
 }
 
-function alternarDetalheCalendario(id) {
-  if (calDetalhesAbertos.has(id)) calDetalhesAbertos.delete(id); else calDetalhesAbertos.add(id);
-  desenharDetalheDia(calDiaSelecionado);
+// tela separada (substitui a lista do dia) com só os detalhes de uma O.S.
+function abrirDetalheOSCalendario(id) {
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const visita = (window._visitasPorAgenda || {})[id];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="renderDiaCalendario('${calDiaSelecionado}')">‹ Voltar para o dia</button>
+    </div>
+    <div class="panel">${detalheCompletoOS(a, visita)}</div>
+  `;
 }
 
 const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído' };
@@ -573,12 +571,11 @@ function osCardCorpo(a) {
 }
 
 function cardOS(a) {
-  const aberto = calDetalhesAbertos.has(a.id);
   return `
-    <div class="os-card" onclick="alternarDetalheCalendario(${a.id})" style="cursor:pointer;">
+    <div class="os-card" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
-        <button class="os-card-toggle" onclick="alternarDetalheCalendario(${a.id})">${aberto ? '▴ Ocultar detalhes' : '▾ Ver detalhes completos'}</button>
+        <button class="os-card-toggle" onclick="abrirDetalheOSCalendario(${a.id})">Ver detalhes completos</button>
         ${a.visita_id ? `<button class="btn-outline-sm" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
       </div>
     </div>`;
