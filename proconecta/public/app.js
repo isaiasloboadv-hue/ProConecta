@@ -766,6 +766,7 @@ function diasEntre(isoInicio, isoFim) {
 function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
   if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
+  if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) return { label: 'Aguardando feedback', cor: 'pink' };
   if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
   if (visita) return { label: 'Relatório em análise', cor: 'orange' };
@@ -2048,13 +2049,18 @@ function acoesOS(a, visita) {
       ${visita.relevante_biblioteca ? `<button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id}, true)">Aprovar e incluir na biblioteca</button>` : ''}
       <button class="btn btn-ghost btn-sm" onclick="sugerirEdicaoVisita(${visita.id})">Sugerir edição</button>
       <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) {
+    acoes = `
+      <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
+      <button class="btn btn-primary btn-sm" onclick="registrarFeedbackOS(${a.id})">Cliente deu feedback</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado') {
     const umDiaMs = 24 * 60 * 60 * 1000;
     const podeFinalizar = visita.data_aprovacao && (Date.now() - new Date(visita.data_aprovacao).getTime()) >= umDiaMs;
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
-      ${podeFinalizar ? `<button class="btn btn-primary btn-sm" onclick="finalizarOS(${a.id})">Finalizar O.S.</button>` : ''}`;
+      ${podeFinalizar ? `<button class="btn btn-primary btn-sm" onclick="finalizarOS(${a.id})">Finalizar O.S.</button>` : `<span class="tag tag-amber">Aguarde 1 dia após a aprovação pra finalizar</span>`}`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
     acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else if (visita && visita.status_aprovacao === 'alteracao_sugerida') {
@@ -2080,6 +2086,14 @@ async function confirmarClienteOS(id) {
   if (!confirm('Confirma que o cliente já aceitou este agendamento? Isso libera o técnico para iniciar o deslocamento e executar a O.S.')) return;
   try { await api(`/api/agenda/${id}/confirmar-cliente`, { method: 'POST' }); mostrarToast('Cliente confirmado — o técnico já pode prosseguir.'); voltarListaOS(); }
   catch (e) { alert('Erro ao confirmar: ' + e.message); }
+}
+
+// passo entre a aprovação do relatório e a finalização da O.S.: o admin registra que o
+// cliente já deu o retorno sobre o serviço — só depois disso o botão Finalizar O.S. libera
+async function registrarFeedbackOS(id) {
+  if (!confirm('Confirma que o cliente já deu o retorno sobre o serviço prestado?')) return;
+  try { await api(`/api/agenda/${id}/registrar-feedback`, { method: 'POST' }); mostrarToast('Feedback do cliente registrado.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao registrar feedback: ' + e.message); }
 }
 
 function cardOSAdmin(a) {
@@ -2159,8 +2173,8 @@ function timelineOS(a, visita) {
     ? { label: 'Aprovado pelo gestor', data: visita.data_aprovacao, estado: 'feito' }
     : { label: 'Aguardando aprovação do gestor', data: null, estado: 'pendente' });
 
-  passos.push(a.finalizada
-    ? { label: 'Cliente deu o feedback final', data: a.finalizado_em, estado: 'feito' }
+  passos.push(a.feedback_cliente_em
+    ? { label: 'Cliente deu o feedback', data: a.feedback_cliente_em, estado: 'feito' }
     : { label: 'Aguardando feedback do cliente', data: null, estado: 'pendente' });
 
   passos.push(a.finalizada

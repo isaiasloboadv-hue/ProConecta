@@ -405,6 +405,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     deslocamento_iniciado_em: null,
     lembrete_deslocamento_enviado: false,
     confirmado_cliente_em: null,
+    feedback_cliente_em: null,
   };
   data.agenda.push(item);
   db.save(data);
@@ -465,10 +466,30 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
-// POST /api/agenda/:id/finalizar — administrador confirma que o cliente já deu o retorno e
-// concordou com o serviço prestado; a partir daqui a O.S. vira registro histórico, sem mais
-// alterações (um novo atendimento pede uma O.S. nova). Só pode finalizar depois de aprovada
-// e com pelo menos 1 dia completo desde a aprovação.
+// POST /api/agenda/:id/registrar-feedback — administrador marca que o cliente já deu o
+// retorno/feedback sobre o serviço prestado; é o passo anterior e obrigatório antes de poder
+// finalizar a O.S. (2 ações separadas: primeiro o feedback, depois a finalização em si).
+rota('POST', /^\/api\/agenda\/(\d+)\/registrar-feedback$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra o feedback do cliente.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  const visitaFeedback = data.visitas.find((v) => v.agenda_id === item.id);
+  if (!visitaFeedback || visitaFeedback.status_aprovacao !== 'aprovado') {
+    return enviarJSON(res, 400, { erro: 'Só é possível registrar o feedback depois do relatório aprovado.' });
+  }
+  if (item.feedback_cliente_em) return enviarJSON(res, 400, { erro: 'O feedback do cliente já foi registrado.' });
+  item.feedback_cliente_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/finalizar — administrador confirma o fechamento da O.S. depois do
+// feedback do cliente já registrado; a partir daqui a O.S. vira registro histórico, sem mais
+// alterações (um novo atendimento pede uma O.S. nova). Só pode finalizar depois de aprovada,
+// com o feedback já registrado, e com pelo menos 1 dia completo desde a aprovação.
 rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador finaliza ordens de serviço.' });
@@ -479,6 +500,9 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   const visita = data.visitas.find((v) => v.agenda_id === item.id);
   if (item.status !== 'concluida' || !visita || visita.status_aprovacao !== 'aprovado') {
     return enviarJSON(res, 400, { erro: 'Só é possível finalizar uma O.S. já concluída e aprovada.' });
+  }
+  if (!item.feedback_cliente_em) {
+    return enviarJSON(res, 400, { erro: 'Registre o feedback do cliente antes de finalizar esta O.S.' });
   }
   const umDiaEmMs = 24 * 60 * 60 * 1000;
   if (!visita.data_aprovacao || (Date.now() - new Date(visita.data_aprovacao).getTime()) < umDiaEmMs) {

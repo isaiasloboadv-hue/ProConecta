@@ -121,6 +121,14 @@ function migrar(data) {
       const jaAvancou = a.finalizada || a.deslocamento_iniciado_em || data.visitas.some((v) => v.agenda_id === a.id);
       a.confirmado_cliente_em = jaAvancou ? (a.criado_em || new Date().toISOString()) : null;
     }
+    if (a.feedback_cliente_em === undefined) {
+      // mesma lógica: O.S. que já estavam aprovadas (ou finalizadas) antes desse controle
+      // existir já passaram desse ponto na prática — só as aprovações novas, a partir de
+      // agora, exigem o registro explícito do feedback antes de finalizar.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
+      a.feedback_cliente_em = jaAprovado ? (a.finalizado_em || (visitaDoItem && visitaDoItem.data_aprovacao) || new Date().toISOString()) : null;
+    }
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
