@@ -3303,15 +3303,6 @@ function wTabelaFotosBloco(fotos) {
   return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: docx.TableBorders.NONE, rows: linhas });
 }
 
-// altura de uma folha A4 inteira, em twips — usada nas páginas de capa/contato, que
-// ficam numa seção própria com margem zero pra cor preencher a folha de ponta a ponta.
-// Reserva uma pequena folga (WORD_FOLGA_TABELA_PAGINA) porque o Word sempre exige um
-// parágrafo depois de uma tabela — sem essa folga esse parágrafo obrigatório transborda
-// pra uma folha extra em branco, já que a tabela sozinha já ocupa a página inteira.
-const WORD_FOLGA_TABELA_PAGINA = 300;
-const WORD_ALTURA_PAGINA_CHEIA = 16837;
-const WORD_ALTURA_TABELA_PAGINA = WORD_ALTURA_PAGINA_CHEIA - WORD_FOLGA_TABELA_PAGINA;
-
 // parágrafo praticamente invisível (linha de ~1pt), usado como fechamento explícito
 // depois das tabelas de capa/contato pra não depender do parágrafo automático do Word.
 // Pinta com a mesma cor de fundo da página, senão sobra uma tira branca descoberta
@@ -3340,17 +3331,16 @@ async function pintarFechoSecaoCapaWord(blob, fillHex) {
   return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
 }
 
-function wPaginaColorida(fillHex, conteudo) {
-  return new docx.Table({
-    width: { size: 100, type: docx.WidthType.PERCENTAGE },
-    borders: docx.TableBorders.NONE,
-    rows: [new docx.TableRow({
-      height: { value: WORD_ALTURA_TABELA_PAGINA, rule: docx.HeightRule.EXACT },
-      children: [new docx.TableCell({
-        shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
-        verticalAlign: docx.VerticalAlign.CENTER,
-        children: conteudo,
-      })],
+// uma linha de tabela colorida (usada em várias, formando uma página cheia dividida em
+// blocos topo/meio/base) — dividir em blocos pequenos em vez de uma única linha gigante
+// evita um bug do Word que às vezes não pinta o sombreamento de uma célula muito alta
+function wLinhaBlocoPagina(fillHex, conteudo, altura, alinhamento) {
+  return new docx.TableRow({
+    height: { value: altura, rule: docx.HeightRule.EXACT },
+    children: [new docx.TableCell({
+      shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
+      verticalAlign: alinhamento,
+      children: conteudo,
     })],
   });
 }
@@ -3398,22 +3388,13 @@ function wCapa(r, logoDataUri) {
     }),
   ];
 
-  const linhaBloco = (conteudo, altura, alinhamento) => new docx.TableRow({
-    height: { value: altura, rule: docx.HeightRule.EXACT },
-    children: [new docx.TableCell({
-      shading: { fill: WORD_COR.navy, type: docx.ShadingType.CLEAR, color: 'auto' },
-      verticalAlign: alinhamento,
-      children: conteudo,
-    })],
-  });
-
   return new docx.Table({
     width: { size: 100, type: docx.WidthType.PERCENTAGE },
     borders: docx.TableBorders.NONE,
     rows: [
-      linhaBloco(topo, 7375, docx.VerticalAlign.TOP),
-      linhaBloco(meio, 6431, docx.VerticalAlign.CENTER),
-      linhaBloco(base, 2731, docx.VerticalAlign.BOTTOM),
+      wLinhaBlocoPagina(WORD_COR.navy, topo, 7375, docx.VerticalAlign.TOP),
+      wLinhaBlocoPagina(WORD_COR.navy, meio, 6431, docx.VerticalAlign.CENTER),
+      wLinhaBlocoPagina(WORD_COR.navy, base, 2731, docx.VerticalAlign.BOTTOM),
     ],
   });
 }
@@ -3461,7 +3442,19 @@ function wPaginaContato(logoDataUri) {
       children: [new docx.TextRun({ text: email, color: WORD_COR.blue, size: 18 })],
     }));
   });
-  return wPaginaColorida('F2E9D8', conteudo);
+  // divide em 3 blocos (espaçador vazio / conteúdo / espaçador vazio) em vez de uma
+  // única célula gigante — igual a capa, que já comprovadamente pinta certo no Word
+  const BEGE = 'F2E9D8';
+  const vazio = [new docx.Paragraph({ children: [new docx.TextRun({ text: '' })] })];
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: docx.TableBorders.NONE,
+    rows: [
+      wLinhaBlocoPagina(BEGE, vazio, 2000, docx.VerticalAlign.CENTER),
+      wLinhaBlocoPagina(BEGE, conteudo, 12537, docx.VerticalAlign.CENTER),
+      wLinhaBlocoPagina(BEGE, vazio, 2000, docx.VerticalAlign.CENTER),
+    ],
+  });
 }
 
 async function gerarWordRelatorioManutencao(r, logoDataUri) {
