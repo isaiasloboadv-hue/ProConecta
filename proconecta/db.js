@@ -113,6 +113,14 @@ function migrar(data) {
     if (a.lida_tecnico === undefined) a.lida_tecnico = false;
     if (a.deslocamento_iniciado_em === undefined) a.deslocamento_iniciado_em = null;
     if (a.lembrete_deslocamento_enviado === undefined) a.lembrete_deslocamento_enviado = false;
+    if (a.confirmado_cliente_em === undefined) {
+      // O.S. que já tinham avançado (deslocamento, relatório ou já finalizadas) antes desse
+      // controle existir claramente já passaram do aceite do cliente na prática — não faz
+      // sentido bloquear elas retroativamente; só as que ainda nem começaram esperam a
+      // confirmação a partir de agora.
+      const jaAvancou = a.finalizada || a.deslocamento_iniciado_em || data.visitas.some((v) => v.agenda_id === a.id);
+      a.confirmado_cliente_em = jaAvancou ? (a.criado_em || new Date().toISOString()) : null;
+    }
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;

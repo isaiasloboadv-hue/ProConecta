@@ -404,6 +404,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     lida_tecnico: false,
     deslocamento_iniciado_em: null,
     lembrete_deslocamento_enviado: false,
+    confirmado_cliente_em: null,
   };
   data.agenda.push(item);
   db.save(data);
@@ -527,6 +528,27 @@ rota('POST', /^\/api\/agenda\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
+// POST /api/agenda/:id/confirmar-cliente — administrador confirma que o cliente já aceitou o
+// agendamento (2ª etapa da linha do tempo); libera o técnico pra iniciar o deslocamento e
+// executar a O.S. — sem essa confirmação, essas próximas fases ficam bloqueadas.
+rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-cliente$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador confirma o cliente.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'O cliente já foi confirmado para esta O.S.' });
+  item.confirmado_cliente_em = new Date().toISOString();
+  db.save(data);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Cliente confirmado',
+    corpo: `O cliente confirmou o atendimento da O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')} — já pode iniciar o deslocamento quando for a hora.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
 // POST /api/agenda/:id/iniciar-deslocamento — o técnico avisa que já está a caminho do cliente;
 // fica marcado na linha do tempo da O.S. e notifica o administrador
 rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m) => {
@@ -537,6 +559,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (!item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento.' });
   if (item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
   item.deslocamento_iniciado_em = new Date().toISOString();
   db.save(data);
@@ -561,6 +584,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   const agendaItem = data.agenda.find((a) => a.id === Number(body.agenda_id));
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
   if (agendaItem.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta atividade não é sua.' });
+  if (!agendaItem.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de executar esta O.S.' });
 
   // dados do atendimento (cliente, contato, endereço, equipamento, datas, técnico) são sempre os que o
   // administrador definiu na agenda — o que vier do técnico para esses campos é ignorado

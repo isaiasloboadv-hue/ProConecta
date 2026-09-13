@@ -603,7 +603,7 @@ async function renderAgenda() {
           <td data-label="Status">${a.status === 'concluida'
             ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
             : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${botaoDeslocamento(a)}${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
+          <td>${botaoDeslocamento(a)}${a.status !== 'concluida' && a.confirmado_cliente_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
             ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' ? (
               a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
                 ? `<span class="tag tag-amber">Reabertura solicitada</span>`
@@ -768,6 +768,7 @@ function faseAtualOS(a) {
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
   if (visita) return { label: 'Relatório em análise', cor: 'orange' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
+  if (!a.confirmado_cliente_em) return { label: 'Aguardando confirmação', cor: 'purple' };
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
   if (diaAtendimento > hojeISO) return { label: 'Aguardando serviço', cor: 'navy' };
@@ -2035,6 +2036,12 @@ function acoesOS(a, visita) {
   if (a.finalizada) {
     return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço. Abra uma nova O.S. se precisar de um novo atendimento.</span>`;
   }
+  if (!a.confirmado_cliente_em) {
+    return `
+      <button class="btn btn-primary btn-sm" onclick="confirmarClienteOS(${a.id})">✓ Confirmar cliente</button>
+      <button class="btn-outline-sm" onclick="editarOS(${a.id})">Editar</button>
+      <button class="btn-outline-sm" onclick="excluirOS(${a.id})" style="color:var(--red); border-color:var(--red);">Excluir O.S.</button>`;
+  }
   let acoes;
   if (visita && visita.status_aprovacao === 'pendente') {
     acoes = `
@@ -2066,6 +2073,14 @@ async function finalizarOS(id) {
   if (!confirm('Confirma que a empresa já deu o retorno concordando com o serviço prestado? Depois de finalizada, esta O.S. não pode mais ser alterada — um novo atendimento vai precisar de uma O.S. nova.')) return;
   try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST' }); mostrarToast('O.S. finalizada.'); voltarListaOS(); }
   catch (e) { alert('Erro ao finalizar: ' + e.message); }
+}
+
+// 2ª etapa da linha do tempo: o admin confirma que o cliente já aceitou o agendamento —
+// libera o técnico pra iniciar o deslocamento e executar a O.S. (ficam bloqueados até aqui)
+async function confirmarClienteOS(id) {
+  if (!confirm('Confirma que o cliente já aceitou este agendamento? Isso libera o técnico para iniciar o deslocamento e executar a O.S.')) return;
+  try { await api(`/api/agenda/${id}/confirmar-cliente`, { method: 'POST' }); mostrarToast('Cliente confirmado — o técnico já pode prosseguir.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao confirmar: ' + e.message); }
 }
 
 function cardOSAdmin(a) {
@@ -2121,6 +2136,11 @@ function fmtDataHora(iso) {
 // linha do tempo: abertura da O.S. -> relatório enviado -> aprovação/reprovação
 function timelineOS(a, visita) {
   const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
+  if (a.confirmado_cliente_em) {
+    passos.push({ label: 'Cliente confirmou o agendamento', data: a.confirmado_cliente_em, estado: 'feito' });
+  } else {
+    passos.push({ label: 'Aguardando confirmação do cliente', data: null, estado: 'pendente' });
+  }
   if (a.deslocamento_iniciado_em) {
     passos.push({ label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' });
   }
@@ -2274,6 +2294,7 @@ async function solicitarReaberturaVisita(id) {
 // a caminho. O administrador recebe uma notificação push quando o técnico toca nele.
 function botaoDeslocamento(a) {
   if (a.tecnico_id !== USER.id || a.finalizada || a.status === 'concluida') return '';
+  if (!a.confirmado_cliente_em) return `<span class="tag" style="background:var(--line); color:var(--ink-soft); margin-right:6px;">Aguardando confirmação do cliente</span>`;
   if (a.deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.deslocamento_iniciado_em)}</span>`;
   return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
 }
@@ -4099,7 +4120,7 @@ function acoesOSCalendarioTecnico(a, visita) {
     return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
   }
   if (a.status !== 'concluida') {
-    return `${botaoDeslocamento(a)}<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>`;
+    return `${botaoDeslocamento(a)}${a.confirmado_cliente_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;
   }
   if (a.visita_id && a.visita_status === 'aprovado') {
     return botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
