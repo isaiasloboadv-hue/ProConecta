@@ -132,6 +132,13 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .bell-item{display:block;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:9px 8px;font-family:inherit;font-size:13px;color:var(--ink);cursor:pointer;}
 .bell-item:hover{background:var(--blue-pale);}
 
+.combo-cliente{position:relative;}
+.combo-lista{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.16);padding:6px;z-index:70;}
+.combo-lista.show{display:block;}
+.combo-item{display:block;width:100%;text-align:left;background:none;border:none;border-radius:7px;padding:8px 10px;font-family:inherit;font-size:13.5px;color:var(--ink);cursor:pointer;}
+.combo-item:hover{background:var(--blue-pale);}
+.combo-empty{padding:9px 10px;color:var(--ink-soft);font-size:13px;}
+
 main{flex:1;padding:30px 36px 60px;max-width:1200px;}
 .page-head{margin-bottom:26px;}
 .page-head h1{font-size:23px;margin:0 0 4px;font-weight:800;color:var(--navy);}

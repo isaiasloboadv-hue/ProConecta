@@ -260,26 +260,67 @@ function badgeStatus(status) {
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
-// campo de empresa/cliente digitável com autocomplete (datalist) — em vez de um <select> puro.
-// idPrefix vira "<idPrefix>-nome" (o que o usuário digita) + "<idPrefix>" (hidden com o id resolvido).
+// campo de empresa/cliente com dropdown pesquisável (combobox) — em vez de um <select> puro.
+// idPrefix vira "<idPrefix>-nome" (o que o usuário digita/vê) + "<idPrefix>" (hidden com o id resolvido)
+// + "<idPrefix>-lista" (o menu suspenso). Clicar no campo mostra todas as empresas em ordem
+// alfabética; digitar filtra pelas que começam com o texto digitado.
 function campoClienteHTML(idPrefix, clientes, placeholder, onResolved) {
   return `
-    <input id="${idPrefix}-nome" list="${idPrefix}-lista" autocomplete="off" placeholder="${esc(placeholder || 'Digite o nome da empresa...')}" oninput="resolverClientePorNome('${idPrefix}')${onResolved ? `; ${onResolved}()` : ''}">
-    <datalist id="${idPrefix}-lista">${clientes.map((c) => `<option value="${esc(c.nome_empresa)}">`).join('')}</datalist>
-    <input type="hidden" id="${idPrefix}">`;
+    <div class="combo-cliente" id="${idPrefix}-wrap">
+      <input id="${idPrefix}-nome" autocomplete="off" placeholder="${esc(placeholder || 'Clique para escolher a empresa...')}"
+        oninput="filtrarComboCliente('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})"
+        onfocus="this.select(); abrirComboCliente('${idPrefix}')">
+      <div class="combo-lista" id="${idPrefix}-lista"></div>
+      <input type="hidden" id="${idPrefix}">
+    </div>`;
 }
 
-function resolverClientePorNome(idPrefix) {
-  const nome = document.getElementById(idPrefix + '-nome').value.trim().toLowerCase();
-  const cliente = (window._clientesCache || []).find((c) => c.nome_empresa.trim().toLowerCase() === nome);
-  document.getElementById(idPrefix).value = cliente ? cliente.id : '';
-  return cliente || null;
+function todosClientesOrdenados() {
+  return (window._clientesCache || []).slice().sort((a, b) => a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'));
 }
+
+function renderComboClienteLista(idPrefix, itens, onResolved) {
+  const lista = document.getElementById(idPrefix + '-lista');
+  if (!lista) return;
+  lista.innerHTML = itens.length
+    ? itens.map((c) => `<button type="button" class="combo-item" onmousedown="event.preventDefault(); selecionarClienteCombo('${idPrefix}', ${c.id}${onResolved ? `, '${onResolved}'` : ''})">${esc(c.nome_empresa)}</button>`).join('')
+    : `<div class="combo-empty">Nenhuma empresa encontrada — cadastre em Clientes.</div>`;
+  lista.classList.add('show');
+}
+
+// abre o menu mostrando SEMPRE a lista completa (ignora o texto atual do campo, que pode ser
+// o nome já selecionado) — clicar na caixa é sempre um convite a navegar/pesquisar do zero.
+function abrirComboCliente(idPrefix) {
+  renderComboClienteLista(idPrefix, todosClientesOrdenados());
+}
+
+function filtrarComboCliente(idPrefix, onResolved) {
+  document.getElementById(idPrefix).value = '';
+  const termo = document.getElementById(idPrefix + '-nome').value.trim().toLowerCase();
+  const itens = termo ? todosClientesOrdenados().filter((c) => c.nome_empresa.trim().toLowerCase().startsWith(termo)) : todosClientesOrdenados();
+  renderComboClienteLista(idPrefix, itens, onResolved);
+}
+
+function selecionarClienteCombo(idPrefix, clienteId, onResolved) {
+  const cliente = (window._clientesCache || []).find((c) => c.id === clienteId);
+  if (!cliente) return;
+  document.getElementById(idPrefix + '-nome').value = cliente.nome_empresa;
+  document.getElementById(idPrefix).value = cliente.id;
+  document.getElementById(idPrefix + '-lista').classList.remove('show');
+  if (onResolved && typeof window[onResolved] === 'function') window[onResolved]();
+}
+
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.combo-cliente .combo-lista.show').forEach((lista) => {
+    if (!lista.parentElement.contains(e.target)) lista.classList.remove('show');
+  });
+});
 
 function selecionarClienteInicial(idPrefix, clientes) {
   if (!clientes.length) return;
-  document.getElementById(idPrefix + '-nome').value = clientes[0].nome_empresa;
-  document.getElementById(idPrefix).value = clientes[0].id;
+  const ordenados = clientes.slice().sort((a, b) => a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'));
+  document.getElementById(idPrefix + '-nome').value = ordenados[0].nome_empresa;
+  document.getElementById(idPrefix).value = ordenados[0].id;
 }
 
 // ---------- sino de notificações ----------
