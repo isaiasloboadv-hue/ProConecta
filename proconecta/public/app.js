@@ -1679,7 +1679,6 @@ function gerarPdfLaudo(d, item) {
 }
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
-let osAbertos = new Set(); // ids de agenda abertos (mostrando o detalhe completo)
 let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
 
@@ -1747,18 +1746,12 @@ function desenharOrdemServico() {
         </tr>`).join('')}
     </table></div>` : ''}
 
-    ${doMes.length ? `<div class="os-grid">${doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('')}</div>` : `<div class="empty">Nenhuma O.S. neste mês.</div>`}
-
-    ${doMes.filter((a) => osAbertos.has(a.id)).map((a) => `
-        <div class="os-detail-panel">
-          <div class="panel-head">OS-${String(a.id).padStart(6, '0')} · ${esc(a.cliente_nome || '—')}
-            <button class="btn-outline-sm" onclick="alternarOSAberta(${a.id})">Fechar</button>
-          </div>
-          ${detalheCompletoOS(a, visitasPorAgenda[a.id])}
-        </div>`).join('')}`;
+    ${doMes.length ? `<div class="os-grid">${doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('')}</div>` : `<div class="empty">Nenhuma O.S. neste mês.</div>`}`;
 }
 
-function cardOSAdmin(a, visita) {
+// ações disponíveis pra uma O.S. (aprovar/reprovar/reabrir/excluir relatório + editar/excluir a própria O.S.)
+// — usadas tanto no card quanto na tela de detalhe.
+function acoesOS(a, visita) {
   let acoes;
   if (visita && visita.status_aprovacao === 'pendente') {
     acoes = `
@@ -1776,20 +1769,35 @@ function cardOSAdmin(a, visita) {
   acoes += `
       <button class="btn-outline-sm" onclick="editarOS(${a.id})">Editar</button>
       <button class="btn-outline-sm" onclick="excluirOS(${a.id})" style="color:var(--red); border-color:var(--red);">Excluir O.S.</button>`;
-  const aberto = osAbertos.has(a.id);
+  return acoes;
+}
+
+function cardOSAdmin(a, visita) {
   return `
-    <div class="os-card" onclick="alternarOSAberta(${a.id})" style="cursor:pointer;">
+    <div class="os-card" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
-        <button class="os-card-toggle" onclick="alternarOSAberta(${a.id})">${aberto ? '▴ Ocultar detalhes' : '▾ Ver detalhes completos'}</button>
-        ${acoes}
+        <button class="os-card-toggle" onclick="abrirDetalheOS(${a.id})">Ver detalhes completos</button>
+        ${acoesOS(a, visita)}
       </div>
     </div>`;
 }
 
-function alternarOSAberta(id) {
-  if (osAbertos.has(id)) osAbertos.delete(id); else osAbertos.add(id);
-  desenharOrdemServico();
+// tela separada (substitui a grade de cards do mês) com só os detalhes de uma O.S.
+function abrirDetalheOS(id) {
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const visita = (window._visitasPorAgenda || {})[id];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="desenharOrdemServico()">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOS(a, visita)}</div>
+      ${detalheCompletoOS(a, visita)}
+    </div>`;
 }
 
 function editarOS(id) {
