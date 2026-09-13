@@ -101,6 +101,9 @@ function load() {
     if (e.cliente_id === undefined) e.cliente_id = null;
     if (e.data_fabricacao === undefined) e.data_fabricacao = '';
   }
+  for (const v of data.visitas) {
+    if (v.lida_tecnico === undefined) v.lida_tecnico = false;
+  }
   return data;
 }
 

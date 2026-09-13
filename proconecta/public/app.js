@@ -308,6 +308,9 @@ async function clicarNotificacao(registroId, tipo) {
   if (tipo === 'alteracao_sugerida') {
     try { await api(`/api/registros/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
     ir('meus-registros');
+  } else if (tipo === 'os_aprovada') {
+    try { await api(`/api/visitas/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
+    ir('agenda');
   } else {
     ir('aprovacoes-biblioteca');
   }
@@ -1401,11 +1404,11 @@ async function renderLaudoTecnico(item) {
     </div>
 
     <div class="panel">
-      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do laudo preenchido é gerado e baixado automaticamente.</p>
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao finalizar, o laudo é enviado para aprovação do administrador. O PDF fica disponível para gerar assim que ele for aprovado.</p>
       <p id="lt-rascunho-status" style="font-size:12px; color:var(--green);">${salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="limparLaudo(${item.id})">Limpar formulário</button>
-        <button class="btn btn-primary btn-sm" onclick="concluirLaudoTecnico()">Concluir e gerar PDF</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirLaudoTecnico()">Finalizar</button>
       </div>
     </div>`;
   preencherCamposLaudo();
@@ -1487,7 +1490,6 @@ function limparLaudo(agendaId) {
 async function concluirLaudoTecnico() {
   atualizarRascunhoLaudo();
   const d = laudoDraft;
-  if (!d.garantia) return alert('Dado de garantia não preenchido pelo administrador na abertura desta OS. Peça para o administrador completar antes de enviar o laudo.');
   if (d.garantia === 'na' && !String(d.garantia_obs || '').trim()) return alert('O administrador marcou garantia "N/A" mas não especificou o motivo. Peça para completar antes de enviar o laudo.');
   if (!d.data_conclusao) return alert('Informe a data de conclusão.');
   if (!String(d.laudo_tecnico || '').trim()) return alert('Preencha o laudo técnico.');
@@ -1495,26 +1497,14 @@ async function concluirLaudoTecnico() {
   if (!d.fotos.length) return alert('Anexe ao menos uma foto no relatório fotográfico.');
 
   const body = { agenda_id: d.agenda_id, laudo: d, relevante_biblioteca: d.relevante_biblioteca };
-  let visita;
   try {
-    ({ visita } = await api('/api/visitas', { method: 'POST', body }));
+    await api('/api/visitas', { method: 'POST', body });
   } catch (e) {
     alert('Erro ao concluir: ' + e.message);
     return;
   }
   localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
-  let avisoExtra = '';
-  try {
-    const pdfDataUri = gerarPdfLaudo(d, laudoAgendaAtual);
-    const link = document.createElement('a');
-    link.href = pdfDataUri;
-    link.download = `laudo-tecnico-${visita.id}.pdf`;
-    document.body.appendChild(link); link.click(); link.remove();
-  } catch (e) {
-    console.error('Falha ao gerar o PDF localmente:', e);
-    avisoExtra = ' O laudo foi salvo, mas não foi possível gerar o PDF neste dispositivo.';
-  }
-  mostrarToast('Laudo concluído e enviado para aprovação do administrador.' + avisoExtra);
+  mostrarToast('Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
   renderAgenda();
 }
 
@@ -1540,7 +1530,7 @@ function gerarPdfLaudo(d, item) {
   titulo('Dados do atendimento');
   linha('Empresa', item.cliente_nome); linha('Contato', item.contato || item.cliente_contato); linha('Telefone', item.telefone || item.cliente_telefone);
   linha('Endereço', `${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`);
-  linha('Técnico', USER.nome);
+  linha('Técnico', item.tecnico_nome || USER.nome);
   linha('Equipamento', `${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''} (${item.equipamento_serie || '—'})`);
   y += 8;
 
@@ -1752,8 +1742,24 @@ function detalheCompletoOS(a, visita) {
       <div class="os-relatorio-box">
         <div class="os-relatorio-box-titulo">Relatório enviado pelo técnico</div>
         ${detalheRelatorioVisita(visita)}
+        ${visita.laudo && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfLaudoAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
       </div>` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
     ${timelineOS(a, visita)}`;
+}
+
+function baixarPdfLaudoAprovado(agendaId) {
+  const a = (window._agendaCache || []).find((x) => x.id === agendaId);
+  const v = (window._visitasPorAgenda || {})[agendaId];
+  if (!a || !v || !v.laudo) return alert('Não foi possível localizar o laudo aprovado desta O.S.');
+  try {
+    const pdfDataUri = gerarPdfLaudo(v.laudo, a);
+    const link = document.createElement('a');
+    link.href = pdfDataUri;
+    link.download = `laudo-tecnico-${v.id}.pdf`;
+    document.body.appendChild(link); link.click(); link.remove();
+  } catch (e) {
+    alert('Erro ao gerar o PDF: ' + e.message);
+  }
 }
 
 function detalheRelatorioVisita(v) {

@@ -176,7 +176,9 @@ function validarRelatorioSimples(r, exigirSerie) {
 // laudo técnico: usado em corretiva e preventiva (diagnóstico + serviço + peças + fotos, sem assinatura)
 function validarLaudoTecnico(l) {
   if (!l || typeof l !== 'object') return 'Laudo técnico é obrigatório para este tipo de atendimento.';
-  if (l.garantia !== 'sim' && l.garantia !== 'nao' && l.garantia !== 'na') return 'Informe se o equipamento está na garantia.';
+  // garantia é preenchida pelo administrador na abertura da OS; se ele não preencheu, o técnico
+  // não pode ficar bloqueado por isso — só validamos o valor quando ele existe.
+  if (l.garantia && !['sim', 'nao', 'na'].includes(l.garantia)) return 'Valor de garantia inválido.';
   if (l.garantia === 'na' && !String(l.garantia_obs || '').trim()) return 'Especifique o motivo do "N/A" na garantia.';
   if (!l.data_conclusao) return 'Informe a data de conclusão.';
   if (!String(l.laudo_tecnico || '').trim()) return 'O laudo técnico (o que foi analisado e encontrado) é obrigatório.';
@@ -368,6 +370,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     aprovado_por: null,
     data_aprovacao: null,
     solicitacao_reabertura: null,
+    lida_tecnico: false,
   };
 
   // se a atividade já tinha uma visita (reaberta pelo administrador), edita a mesma em vez de duplicar
@@ -498,6 +501,19 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reprovar$/, async (req, res, m) => {
   visita.comentario_reprovacao = body.comentario || '';
   visita.aprovado_por = user.id;
   visita.data_aprovacao = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
+// POST /api/visitas/:id/marcar-lida — o técnico marcou a notificação de aprovação como vista
+rota('POST', /^\/api\/visitas\/(\d+)\/marcar-lida$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
+  visita.lida_tecnico = true;
   db.save(data);
   enviarJSON(res, 200, { visita });
 });
@@ -755,6 +771,11 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
     notificacoes = data.registros
       .filter((r) => r.autor_id === user.id && r.status === 'alteracao_sugerida' && !r.lida)
       .map((r) => ({ id: r.id, tipo: 'alteracao_sugerida', texto: `Alteração sugerida em "${r.titulo}"`, registro_id: r.id }));
+    notificacoes = notificacoes.concat(
+      data.visitas
+        .filter((v) => v.tecnico_id === user.id && v.status_aprovacao === 'aprovado' && !v.lida_tecnico)
+        .map((v) => ({ id: v.id, tipo: 'os_aprovada', texto: 'Relatório aprovado pelo administrador — gere o PDF na O.S.', registro_id: v.id }))
+    );
   } else if (user.papel === 'administrador') {
     notificacoes = data.registros
       .filter((r) => r.status === 'em_analise')
