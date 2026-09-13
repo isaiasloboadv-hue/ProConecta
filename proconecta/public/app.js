@@ -761,6 +761,8 @@ function diasEntre(isoInicio, isoFim) {
 
 // diz em que ponto da linha do tempo a O.S. está agora — vira a tarja horizontal
 // no topo do card, pra dar pra ver o andamento de todos os cards sem abrir um por um
+// cada tarja corresponde exatamente a uma etapa em aberto da linha do tempo (timelineOS) —
+// mostra sempre a etapa mais adiantada que ainda está pendente.
 function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
   if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
@@ -769,9 +771,6 @@ function faseAtualOS(a) {
   if (visita) return { label: 'Relatório em análise', cor: 'orange' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
   if (!a.confirmado_cliente_em) return { label: 'Confirmação cliente', cor: 'purple' };
-  const hojeISO = dataISOLocal(new Date());
-  const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
-  if (diaAtendimento > hojeISO) return { label: 'Aguardando serviço', cor: 'navy' };
   return { label: 'Aguardando deslocamento', cor: 'amber' };
 }
 
@@ -2133,29 +2132,45 @@ function fmtDataHora(iso) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// linha do tempo: abertura da O.S. -> relatório enviado -> aprovação/reprovação
+// linha do tempo completa: abertura -> confirmação do cliente -> deslocamento -> relatório ->
+// aprovação do gestor -> feedback do cliente -> finalização da O.S. Cada etapa aparece sempre
+// (feita ou em aberto), na ordem — só a reprovação interrompe a sequência normal.
 function timelineOS(a, visita) {
   const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
-  if (a.confirmado_cliente_em) {
-    passos.push({ label: 'Cliente confirmou o agendamento', data: a.confirmado_cliente_em, estado: 'feito' });
-  } else {
-    passos.push({ label: 'Aguardando confirmação do cliente', data: null, estado: 'pendente' });
+
+  passos.push(a.confirmado_cliente_em
+    ? { label: 'Cliente confirmou o agendamento', data: a.confirmado_cliente_em, estado: 'feito' }
+    : { label: 'Aguardando confirmação do cliente', data: null, estado: 'pendente' });
+
+  passos.push(a.deslocamento_iniciado_em
+    ? { label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' }
+    : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
+
+  passos.push(visita
+    ? { label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' }
+    : { label: 'Aguardando o técnico preencher o relatório', data: null, estado: 'pendente' });
+
+  if (visita && visita.status_aprovacao === 'reprovado') {
+    passos.push({ label: 'Reprovado pelo gestor' + (visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''), data: visita.data_aprovacao, estado: 'reprovado' });
+    return renderizarTimelineOS(passos);
   }
-  if (a.deslocamento_iniciado_em) {
-    passos.push({ label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' });
-  }
-  if (visita) {
-    passos.push({ label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' });
-    if (visita.status_aprovacao === 'aprovado') {
-      passos.push({ label: 'Aprovado pelo administrador', data: visita.data_aprovacao, estado: 'feito' });
-    } else if (visita.status_aprovacao === 'reprovado') {
-      passos.push({ label: 'Reprovado pelo administrador' + (visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''), data: visita.data_aprovacao, estado: 'reprovado' });
-    } else {
-      passos.push({ label: 'Aguardando aprovação do administrador', data: null, estado: 'pendente' });
-    }
-  } else {
-    passos.push({ label: 'Aguardando o técnico preencher o relatório', data: null, estado: 'pendente' });
-  }
+
+  passos.push(visita && visita.status_aprovacao === 'aprovado'
+    ? { label: 'Aprovado pelo gestor', data: visita.data_aprovacao, estado: 'feito' }
+    : { label: 'Aguardando aprovação do gestor', data: null, estado: 'pendente' });
+
+  passos.push(a.finalizada
+    ? { label: 'Cliente deu o feedback final', data: a.finalizado_em, estado: 'feito' }
+    : { label: 'Aguardando feedback do cliente', data: null, estado: 'pendente' });
+
+  passos.push(a.finalizada
+    ? { label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' }
+    : { label: 'Aguardando finalização da O.S.', data: null, estado: 'pendente' });
+
+  return renderizarTimelineOS(passos);
+}
+
+function renderizarTimelineOS(passos) {
   return `
     <div class="os-card-title" style="margin-top:18px;">Linha do tempo</div>
     <ul class="os-timeline">
