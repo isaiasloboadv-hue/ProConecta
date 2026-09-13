@@ -345,6 +345,7 @@ tr:last-child td{border-bottom:none;}
   /* em telas estreitas a tabela vira uma lista de cartões (uma linha = um cartão), em vez de
      espremer colunas e forçar rolagem lateral */
   .panel table{display:block;width:100%;}
+  .panel table tbody{display:block;width:100%;}
   .panel table tr:first-child{display:none;}
   .panel table tr{display:block;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
   .panel table tr:last-child{margin-bottom:0;}

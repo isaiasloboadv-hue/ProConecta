@@ -3669,10 +3669,11 @@ async function salvarProcedimento(idParaReenvio) {
 // ---------- MEUS REGISTROS ----------
 async function renderMeusRegistros() {
   const { registros } = await api('/api/registros/meus');
+  window._meusRegistrosCache = registros;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Meus registros</h1><p>${registros.length} enviado(s) — acompanhe o status de aprovação</p></div>
-    ${registros.length ? registros.map((r) => `
+    ${registros.length ? registros.map((r, i) => `
       <div class="item-card">
         <div class="item-top">
           <div><div class="item-title">${esc(r.titulo)}</div>
@@ -3683,8 +3684,56 @@ async function renderMeusRegistros() {
         ${r.status === 'alteracao_sugerida' ? `
           <div class="admin-note"><b>Comentário do administrador</b>${esc(r.comentario_admin)}</div>
           <button class="btn btn-orange btn-outline-sm" style="margin-top:8px;" onclick="editarRegistro(${r.id})">Corrigir e reenviar</button>
-        ` : ''}
+        ` : `<button class="btn-outline-sm" style="margin-top:8px;" onclick="abrirDetalheMeuRegistro(${i})">Abrir</button>`}
       </div>`).join('') : `<div class="empty">Você ainda não enviou nenhum registro.</div>`}`;
+}
+
+function abrirDetalheMeuRegistro(i) {
+  const r = (window._meusRegistrosCache || [])[i];
+  if (!r) return;
+  carregarLogoDataUri();
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo || '')}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${r.status === 'aprovado' ? `<button class="btn btn-primary btn-sm" onclick="abrirPdfMeuRegistro(${i})">Abrir PDF</button>` : ''}
+        <button class="btn-outline-sm" onclick="renderMeusRegistros()">‹ Voltar</button>
+      </div>
+    </div>
+    ${r.status === 'alteracao_sugerida' ? `<div class="admin-note"><b>Comentário do administrador</b>${esc(r.comentario_admin)}</div>` : ''}
+    <div class="panel">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">${r.tipo === 'defeito' ? tag('Defeito/Falha', 'falha') : tag('Procedimento', 'preventiva')}${badgeStatus(r.status)}</div>
+      ${r.tipo === 'defeito' ? `
+        <div class="kv" style="margin-top:12px;"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
+        <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
+        <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
+        ${r.numero_serie ? `<div class="kv"><b>Nº de série:</b> ${esc(r.numero_serie)}</div>` : ''}
+        ${r.fotos && r.fotos.length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="item-step-photos">${r.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do defeito">`).join('')}</div>` : ''}
+      ` : `
+        <div style="margin-top:12px;">
+          ${r.periodicidade ? `<div class="kv"><b>Periodicidade:</b> ${esc(r.periodicidade)}</div>` : ''}
+          ${r.precaucoes ? `<div class="kv"><b>Precauções/EPIs:</b> ${esc(r.precaucoes)}</div>` : ''}
+          ${r.ferramentas ? `<div class="kv"><b>Ferramentas:</b> ${esc(r.ferramentas)}</div>` : ''}
+          <ol class="item-steps">
+            ${(r.passos || []).map((p) => `
+              <li>${esc(p.texto)}
+                ${p.fotos && p.fotos.length ? `<div class="item-step-photos">${p.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da etapa">`).join('')}</div>` : ''}
+              </li>`).join('')}
+          </ol>
+        </div>`}
+      <div class="item-autor" style="margin-top:14px;">Enviado em ${fmtData(r.criado_em)}</div>
+    </div>`;
+}
+
+async function abrirPdfMeuRegistro(i) {
+  const r = (window._meusRegistrosCache || [])[i];
+  if (!r) return;
+  try {
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfBiblioteca(r, r.tipo, logo);
+    window.open(url, '_blank');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
 async function editarRegistro(id) {
