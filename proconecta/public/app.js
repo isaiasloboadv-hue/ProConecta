@@ -2736,7 +2736,9 @@ async function renderRelatorioManutencao() {
           <td data-label="Empresa">${esc(r.empresa)}</td>
           <td data-label="Equipamento">${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''}</td>
           <td style="white-space:nowrap;">
-            <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">Abrir PDF</button>
+            <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
+            <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
+            <button class="btn-outline-sm" onclick="baixarXmlRelatorioManutencao(${i})">XML</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
         </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`}
@@ -3060,6 +3062,76 @@ async function abrirPdfRelatorioManutencao(i) {
     const url = gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+}
+
+function abrirFotosRelatorioManutencao(i) {
+  const r = (window._relatoriosManutCache || [])[i];
+  if (!r) return;
+  const blocos = r.fotos || [];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Fotos — ${esc(r.empresa)}</h1><p>${esc(r.equipamento)}</p></div>
+      <button class="btn-outline-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      ${blocos.length && blocos.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length)) ? blocos.map((entrada) => {
+        const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+        return (bloco.fotos || []).length ? `
+          <div style="margin-bottom:18px;">
+            <div class="item-step-photos">${bloco.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do relatório">`).join('')}</div>
+            ${bloco.comentario ? `<div style="margin-top:8px; font-size:13px; color:var(--ink-soft);">${bloco.comentario}</div>` : ''}
+          </div>` : '';
+      }).join('') : `<div class="empty">Nenhuma foto anexada neste relatório.</div>`}
+    </div>`;
+}
+
+function gerarXmlRelatorioManutencao(r) {
+  function escXml(v) { return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  const pecasXml = (r.pecas || []).map((p) => `    <peca>
+      <descricao>${escXml(p.descricao)}</descricao>
+      <codigoPmk>${escXml(p.codigo_pmk)}</codigoPmk>
+      <quantidade>${escXml(p.quantidade)}</quantidade>
+    </peca>`).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<relatorioManutencao id="${r.id}">
+  <criadoEm>${escXml(r.criado_em)}</criadoEm>
+  <empresa>${escXml(r.empresa)}</empresa>
+  <contato>${escXml(r.contato)}</contato>
+  <telefone>${escXml(r.telefone)}</telefone>
+  <tipoServico>${escXml(r.tipo_servico)}</tipoServico>
+  <tipoServicoOutros>${escXml(r.tipo_servico_outros)}</tipoServicoOutros>
+  <marca>${escXml(r.marca)}</marca>
+  <equipamento>${escXml(r.equipamento)}</equipamento>
+  <numeroSerie>${escXml(r.numero_serie)}</numeroSerie>
+  <garantia>${escXml(r.garantia)}</garantia>
+  <garantiaObs>${escXml(r.garantia_obs)}</garantiaObs>
+  <dataFabricacao>${escXml(r.data_fabricacao)}</dataFabricacao>
+  <acessorios>${escXml(r.acessorios)}</acessorios>
+  <defeitoInformado>${escXml(r.defeito_informado)}</defeitoInformado>
+  <tecnicoNome>${escXml(r.tecnico_nome)}</tecnicoNome>
+  <tecnicoEmail>${escXml(r.tecnico_email)}</tecnicoEmail>
+  <dataEntrada>${escXml(r.data_entrada)}</dataEntrada>
+  <dataConclusao>${escXml(r.data_conclusao)}</dataConclusao>
+  <laudoTecnico>${escXml(r.laudo_tecnico)}</laudoTecnico>
+  <servicoRealizado>${escXml(r.servico_realizado)}</servicoRealizado>
+  <pecas>
+${pecasXml}
+  </pecas>
+</relatorioManutencao>`;
+}
+
+function baixarXmlRelatorioManutencao(i) {
+  const r = (window._relatoriosManutCache || [])[i];
+  if (!r) return;
+  const xml = gerarXmlRelatorioManutencao(r);
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `relatorio-manutencao-${r.id}.xml`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 async function excluirRelatorioManutencao(id) {
