@@ -547,11 +547,11 @@ async function renderAgenda() {
       <tr><th>Data</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Status</th><th></th></tr>
       ${agenda.length ? agenda.map((a) => `
         <tr>
-          <td>${fmtData(a.data_hora_inicio)}</td>
-          <td>${a.cliente_nome || '—'}</td>
-          <td>${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
-          <td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
-          <td>${a.status === 'concluida'
+          <td data-label="Data">${fmtData(a.data_hora_inicio)}</td>
+          <td data-label="Cliente">${a.cliente_nome || '—'}</td>
+          <td data-label="Equipamento">${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
+          <td data-label="Tipo">${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
+          <td data-label="Status">${a.status === 'concluida'
             ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
             : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
           <td>${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
@@ -1950,9 +1950,9 @@ function desenharOrdemServico() {
       <tr><th>Equipamento</th><th>Técnico</th><th>Motivo</th><th></th></tr>
       ${reaberturas.map((v) => `
         <tr>
-          <td>${v.equipamento_tipo || '—'}</td>
-          <td>${v.tecnico_nome || '—'}</td>
-          <td>${esc(v.solicitacao_reabertura.motivo || '—')}</td>
+          <td data-label="Equipamento">${v.equipamento_tipo || '—'}</td>
+          <td data-label="Técnico">${v.tecnico_nome || '—'}</td>
+          <td data-label="Motivo">${esc(v.solicitacao_reabertura.motivo || '—')}</td>
           <td>
             <button class="btn btn-primary btn-sm" onclick="reabrirVisita(${v.id})">Aprovar e reabrir</button>
             <button class="btn btn-ghost btn-sm" onclick="recusarReabertura(${v.id})">Recusar</button>
@@ -2223,9 +2223,9 @@ async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
       <tr><th>Título</th><th>Equipamento</th><th>Nº de série</th><th></th></tr>
       ${registros.map((r, i) => `
         <tr style="cursor:pointer;" onclick="abrirDetalheDefeito(${i})">
-          <td>${esc(r.titulo)}</td>
-          <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
-          <td>${esc(r.numero_serie || '—')}</td>
+          <td data-label="Título">${esc(r.titulo)}</td>
+          <td data-label="Equipamento">${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
+          <td data-label="Nº de série">${esc(r.numero_serie || '—')}</td>
           <td style="white-space:nowrap;">
             <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheDefeito(${i})">Abrir</button>
             ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('defeito', ${i})">Excluir</button>` : ''}
@@ -2371,9 +2371,9 @@ async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
       <tr><th>Título</th><th>Equipamento</th><th>Periodicidade</th><th></th></tr>
       ${registros.map((r, i) => `
         <tr style="cursor:pointer;" onclick="abrirDetalheProcedimento(${i})">
-          <td>${esc(r.titulo)}</td>
-          <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
-          <td>${esc(r.periodicidade || '—')}</td>
+          <td data-label="Título">${esc(r.titulo)}</td>
+          <td data-label="Equipamento">${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
+          <td data-label="Periodicidade">${esc(r.periodicidade || '—')}</td>
           <td style="white-space:nowrap;">
             <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheProcedimento(${i})">Abrir</button>
             ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('procedimento', ${i})">Excluir</button>` : ''}
@@ -2983,11 +2983,11 @@ async function renderClientes() {
       <tr><th>Empresa</th><th>Contato</th><th>Telefone</th><th>E-mail</th><th>Cidade/UF</th><th></th></tr>
       ${clientes.length ? clientes.map((c) => `
         <tr>
-          <td>${esc(c.nome_empresa)}</td>
-          <td>${esc(c.contato || '—')}</td>
-          <td>${esc(c.telefone || '—')}</td>
-          <td>${esc(c.email || '—')}</td>
-          <td>${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
+          <td data-label="Empresa">${esc(c.nome_empresa)}</td>
+          <td data-label="Contato">${esc(c.contato || '—')}</td>
+          <td data-label="Telefone">${esc(c.telefone || '—')}</td>
+          <td data-label="E-mail">${esc(c.email || '—')}</td>
+          <td data-label="Cidade/UF">${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
           <td style="white-space:nowrap;">
             <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
@@ -3083,7 +3083,7 @@ async function renderMeusEquipamentos() {
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Localização</th><th></th></tr>
       ${equipamentos.length ? equipamentos.map((e) => `
-        <tr><td>${e.tipo}</td><td>${e.modelo}</td><td>${e.numero_serie}</td><td>${e.localizacao || '—'}</td>
+        <tr><td data-label="Tipo">${e.tipo}</td><td data-label="Modelo">${e.modelo}</td><td data-label="Nº de série">${e.numero_serie}</td><td data-label="Localização">${e.localizacao || '—'}</td>
         <td><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button></td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhum equipamento ainda.</td></tr>`}
     </table></div>
     <div id="historico-eq"></div>`;
@@ -3095,7 +3095,7 @@ async function verHistorico(id) {
     <div class="panel"><div class="panel-head">Histórico do equipamento</div>
     <table>
       <tr><th>Data</th><th>Tipo</th><th>Status</th></tr>
-      ${agenda.length ? agenda.map((a) => `<tr><td>${fmtData(a.data_hora_inicio)}</td><td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td>${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
+      ${agenda.length ? agenda.map((a) => `<tr><td data-label="Data">${fmtData(a.data_hora_inicio)}</td><td data-label="Tipo">${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td data-label="Status">${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
     </table></div>`;
 }
 
@@ -3114,7 +3114,7 @@ async function renderEquipamentosCadastrar() {
     <div id="form-equipamento-catalogo"></div>
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th></th></tr>
-      ${catalogo.length ? catalogo.map((e) => `<tr><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td>
+      ${catalogo.length ? catalogo.map((e) => `<tr><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td>
         <td style="white-space:nowrap;">
           <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
           <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
@@ -3202,7 +3202,7 @@ async function renderEquipamentosAtrelar() {
       <tr><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Fabricação</th><th></th></tr>
       ${atrelados.length ? atrelados.map((e) => {
         const cliente = clientes.find((c) => c.id === e.cliente_id);
-        return `<tr><td>${esc(cliente ? cliente.nome_empresa : '—')}</td><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td><td>${esc(e.numero_serie)}</td><td>${esc(e.data_fabricacao || '—')}</td>
+        return `<tr><td data-label="Cliente">${esc(cliente ? cliente.nome_empresa : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº de série">${esc(e.numero_serie)}</td><td data-label="Fabricação">${esc(e.data_fabricacao || '—')}</td>
         <td style="white-space:nowrap;">
           <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
           <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
@@ -3412,7 +3412,7 @@ async function renderChamados() {
     <div class="panel"><table>
       <tr><th>Data</th><th>Tipo</th><th>Equipamento</th><th>Status</th></tr>
       ${chamados.length ? chamados.map((c) => `
-        <tr><td>${fmtData(c.criado_em)}</td><td>${esc(c.tipo_servico)}</td><td>${esc(c.equipamento_tipo || '—')}</td><td>${tag(c.status === 'aberto' ? 'Aberto' : c.status, c.status === 'aberto' ? 'amber' : 'green')}</td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum chamado aberto ainda.</td></tr>`}
+        <tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Tipo">${esc(c.tipo_servico)}</td><td data-label="Equipamento">${esc(c.equipamento_tipo || '—')}</td><td data-label="Status">${tag(c.status === 'aberto' ? 'Aberto' : c.status, c.status === 'aberto' ? 'amber' : 'green')}</td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum chamado aberto ainda.</td></tr>`}
     </table></div>`;
 }
 async function abrirChamado() {

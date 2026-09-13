@@ -330,10 +330,16 @@ th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft)
 td{padding:12px 6px;border-bottom:1px solid var(--line);font-size:13px;}
 tr:last-child td{border-bottom:none;}
 @media(max-width:700px){
-  th{font-size:9.5px;padding:8px 4px;}
-  td{padding:8px 4px;font-size:11px;}
-  .panel{overflow-x:auto;}
-  .panel table{min-width:0;}
+  /* em telas estreitas a tabela vira uma lista de cartões (uma linha = um cartão), em vez de
+     espremer colunas e forçar rolagem lateral */
+  .panel table{display:block;width:100%;}
+  .panel table tr:first-child{display:none;}
+  .panel table tr{display:block;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .panel table tr:last-child{margin-bottom:0;}
+  .panel table td{display:block;width:auto;padding:4px 0;font-size:12.5px;border:none;}
+  .panel table td[data-label]::before{content:attr(data-label) ": ";font-weight:700;color:var(--ink-soft);font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:1px;}
+  .panel table td.empty{padding:16px 0;text-align:center;}
+  .panel table td:empty{display:none;}
 }
 
 .toast{
