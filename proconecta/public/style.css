@@ -70,13 +70,6 @@ header{
 .auth-strip{display:flex;gap:6px;margin:22px -34px -32px;border-radius:0 0 18px 18px;overflow:hidden;height:64px;}
 .auth-strip img{flex:1;width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.05);}
 .auth-error{background:#FDE8E5;color:#B3453A;font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:14px;}
-.demo-box{margin-top:22px;background:var(--blue-pale);border-radius:11px;padding:14px 16px;}
-.demo-box .dtitle{font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
-.demo-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:12.5px;color:var(--ink);border-top:1px solid #DCE9FA;}
-.demo-row:first-of-type{border-top:none;}
-.demo-row b{color:var(--navy);}
-.demo-row .demo-use{background:#fff;border:1.5px solid var(--line);color:var(--blue);font-family:inherit;font-weight:700;font-size:11.5px;padding:4px 10px;border-radius:7px;cursor:pointer;}
-.demo-row .demo-use:hover{border-color:var(--blue);}
 .auth-link{background:none;border:none;color:var(--blue);font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;padding:0;margin-top:16px;text-align:left;}
 
 /* ---------- USUÁRIOS (ADMIN) ---------- */

@@ -18,13 +18,25 @@ node server.js
 
 Abra **http://localhost:3000** no navegador.
 
-Contas de teste (senha para todas: `123456`):
+O banco começa **vazio** (sem usuários de exemplo) — veja "Primeiro acesso"
+logo abaixo para criar a conta de administrador inicial.
 
-| Papel | E-mail |
-|---|---|
-| Administrador | admin@proconecta.com.br |
-| Técnico | isaias@proconecta.com.br |
-| Cliente | cliente@abc.com.br |
+## Primeiro acesso (conta de administrador master)
+
+Como o banco começa vazio, ninguém consegue logar até existir ao menos um
+usuário. Pra criar automaticamente uma conta de administrador no primeiro
+boot, defina duas variáveis de ambiente antes de rodar o servidor:
+
+```
+ADMIN_EMAIL="seu@email.com.br" ADMIN_SENHA="uma-senha-forte" node server.js
+```
+
+(no Render, adicione as duas em **Environment**, igual à `DATABASE_URL`). O
+sistema cria essa conta só na primeira vez — depois disso pode remover as
+variáveis sem problema, ou deixar configuradas (elas não recriam nem alteram
+a conta se o e-mail já existir). A partir desse primeiro login, o próprio
+administrador cadastra os demais usuários pela tela **Usuários** (convite de
+primeiro acesso por e-mail — veja "E-mail de convite de verdade" abaixo).
 
 ## O que já funciona de verdade
 
@@ -61,9 +73,10 @@ do mesmo jeito.
 
 ## Onde ficam os dados
 
-Tudo fica em `data.json`, criado automaticamente na primeira vez que você roda
-o servidor (com os dados de teste acima). Para começar do zero, apague esse
-arquivo e rode `node server.js` de novo.
+Tudo fica em `data.json`, criado automaticamente (vazio, ou já com a conta
+master se `ADMIN_EMAIL`/`ADMIN_SENHA` estiverem definidas) na primeira vez que
+você roda o servidor. Para começar do zero, apague esse arquivo e rode
+`node server.js` de novo.
 
 ## Estrutura do projeto
 

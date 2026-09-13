@@ -26,48 +26,39 @@ function gerarTokenConvite() {
   return crypto.randomBytes(24).toString('hex');
 }
 
+// banco novo começa vazio — o primeiro acesso vem do bootstrap de admin master
+// (ADMIN_EMAIL/ADMIN_SENHA) ou de um convite criado manualmente por quem tiver acesso ao banco.
 function seed() {
-  const senhaPadrao = hashSenha('123456');
   return {
-    usuarios: [
-      { id: 1, nome: 'Marcos Andrade', email: 'admin@proconecta.com.br', papel: 'administrador', cargo: 'Gerente de Operações', setor: 'Administração', celular: '(12) 99999-0001', cliente_id: null, status: 'ativo', convite_token: null, ...senhaPadrao },
-      { id: 2, nome: 'Isaías Lobo', email: 'isaias@proconecta.com.br', papel: 'tecnico', cargo: 'Técnico de Campo', setor: 'Manutenção', celular: '(12) 99999-0002', cliente_id: null, status: 'ativo', convite_token: null, ...senhaPadrao },
-      { id: 3, nome: 'Renata Alves', email: 'renata@proconecta.com.br', papel: 'tecnico', cargo: 'Técnica de Campo', setor: 'Manutenção', celular: '(12) 99999-0003', cliente_id: null, status: 'ativo', convite_token: null, ...senhaPadrao },
-      { id: 4, nome: 'Cliente ABC', email: 'cliente@abc.com.br', papel: 'cliente', cargo: 'Responsável pela manutenção', setor: 'Facilities', celular: '(12) 99999-0004', cliente_id: 1, status: 'ativo', convite_token: null, ...senhaPadrao },
-    ],
-    clientes: [
-      {
-        id: 1, nome_empresa: 'Cliente ABC Ltda', contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', nivel_acesso: 'completo',
-        setor: 'Produção', endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial',
-        cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
-      },
-    ],
-    // equipamentos com cliente_id null são o "catálogo" (tipo/modelo genérico, sem cliente ainda);
-    // com cliente_id preenchido são a unidade física de fato instalada num cliente (nº de série próprio)
-    equipamentos: [
-      { id: 1, cliente_id: 1, tipo: 'Máquina de Gelo', modelo: 'Promarking MP5-80P', numero_serie: '2301013587', data_fabricacao: '11/2022', localizacao: 'Cozinha' },
-      { id: 2, cliente_id: 1, tipo: 'Torre de Bebidas', modelo: 'TB-200', numero_serie: 'TB200-887', data_fabricacao: '02/2023', localizacao: 'Salão' },
-      { id: 3, cliente_id: null, tipo: 'Máquina de Marcação a Laser', modelo: 'PM-Laser 3000', numero_serie: '', data_fabricacao: '', localizacao: '' },
-    ],
-    agenda: [
-      {
-        id: 1, tecnico_id: 2, cliente_id: 1, equipamento_id: 1,
-        data_hora_inicio: '2026-09-12T08:00:00', data_hora_fim: '2026-09-12T11:00:00',
-        tipo: 'corretiva', categoria: 'inloco', problema: 'Perda de referência do eixo Y',
-        contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', setor_cliente: 'Produção',
-        endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial', cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
-        garantia: 'nao', garantia_obs: '',
-        status: 'pendente', valor_servico: null, retrabalho: false, criado_em: '2026-09-05T09:00:00.000Z',
-        lida_tecnico: false,
-      },
-    ],
+    usuarios: [],
+    clientes: [],
+    equipamentos: [],
+    agenda: [],
     visitas: [],
-    // biblioteca técnica: registros de Defeitos/Falhas e Manual de Procedimentos,
-    // com fluxo de aprovação (em_analise -> aprovado | alteracao_sugerida -> em_analise ...)
     registros: [],
     chamados: [],
-    _seq: { usuarios: 5, clientes: 2, equipamentos: 4, agenda: 2, visitas: 1, registros: 1, chamados: 1 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1 },
   };
+}
+
+// se as variáveis de ambiente ADMIN_EMAIL/ADMIN_SENHA estiverem definidas e ainda não existir
+// usuário com esse e-mail, cria um administrador ativo — assim a senha nunca precisa ficar
+// escrita em código/commit, só no painel de variáveis de ambiente do hospedeiro (Render etc.).
+// Roda a cada carregamento (idempotente: só cria uma vez). Devolve true se criou alguém.
+function bootstrapAdminMaster(data) {
+  const email = process.env.ADMIN_EMAIL;
+  const senha = process.env.ADMIN_SENHA;
+  if (!email || !senha) return false;
+  if (data.usuarios.some((u) => u.email === email)) return false;
+  const { salt, hash } = hashSenha(senha);
+  data.usuarios.push({
+    id: nextId(data, 'usuarios'),
+    nome: 'Administrador', email, papel: 'administrador',
+    cargo: '', setor: '', celular: '', cliente_id: null,
+    status: 'ativo', convite_token: null, salt, hash,
+  });
+  console.log(`[db] Conta master criada automaticamente: ${email}`);
+  return true;
 }
 
 // migração leve: bancos criados antes destes campos existirem ganham valores padrão.
@@ -111,10 +102,13 @@ function migrar(data) {
 function carregarDoArquivo() {
   if (!fs.existsSync(DB_PATH)) {
     const data = seed();
+    bootstrapAdminMaster(data);
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
     return data;
   }
-  return migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
+  const data = migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
+  if (bootstrapAdminMaster(data)) salvarNoArquivo(data);
+  return data;
 }
 
 function salvarNoArquivo(data) {
@@ -142,10 +136,15 @@ async function inicializarPostgres() {
   const r = await p.query('SELECT data FROM app_state WHERE id = 1');
   if (r.rows.length === 0) {
     const data = seed();
+    bootstrapAdminMaster(data);
     await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
     cache = data;
   } else {
-    cache = migrar(r.rows[0].data);
+    const data = migrar(r.rows[0].data);
+    if (bootstrapAdminMaster(data)) {
+      await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);
+    }
+    cache = data;
   }
   console.log('Conectado ao Postgres — os dados persistem entre reinícios.');
 }

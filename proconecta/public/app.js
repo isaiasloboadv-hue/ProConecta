@@ -53,12 +53,6 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function preencherDemo(email) {
-  document.getElementById('login-email').value = email;
-  document.getElementById('login-senha').value = '123456';
-  fazerLogin();
-}
-
 async function fazerLogin() {
   const email = document.getElementById('login-email').value;
   const senha = document.getElementById('login-senha').value;
