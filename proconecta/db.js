@@ -40,9 +40,12 @@ function seed() {
         cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
       },
     ],
+    // equipamentos com cliente_id null são o "catálogo" (tipo/modelo genérico, sem cliente ainda);
+    // com cliente_id preenchido são a unidade física de fato instalada num cliente (nº de série próprio)
     equipamentos: [
-      { id: 1, cliente_id: 1, tipo: 'Máquina de Gelo', modelo: 'Promarking MP5-80P', numero_serie: '2301013587', localizacao: 'Cozinha' },
-      { id: 2, cliente_id: 1, tipo: 'Torre de Bebidas', modelo: 'TB-200', numero_serie: 'TB200-887', localizacao: 'Salão' },
+      { id: 1, cliente_id: 1, tipo: 'Máquina de Gelo', modelo: 'Promarking MP5-80P', numero_serie: '2301013587', data_fabricacao: '11/2022', localizacao: 'Cozinha' },
+      { id: 2, cliente_id: 1, tipo: 'Torre de Bebidas', modelo: 'TB-200', numero_serie: 'TB200-887', data_fabricacao: '02/2023', localizacao: 'Salão' },
+      { id: 3, cliente_id: null, tipo: 'Máquina de Marcação a Laser', modelo: 'PM-Laser 3000', numero_serie: '', data_fabricacao: '', localizacao: '' },
     ],
     agenda: [
       {
@@ -51,7 +54,7 @@ function seed() {
         tipo: 'corretiva', categoria: 'inloco', problema: 'Perda de referência do eixo Y',
         contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', setor_cliente: 'Produção',
         endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial', cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
-        numero_serie: '2301013587', data_fabricacao: '11/2022', garantia: 'nao', garantia_obs: '',
+        garantia: 'nao', garantia_obs: '',
         status: 'pendente', valor_servico: null, retrabalho: false, criado_em: '2026-09-05T09:00:00.000Z',
       },
     ],
@@ -60,7 +63,7 @@ function seed() {
     // com fluxo de aprovação (em_analise -> aprovado | alteracao_sugerida -> em_analise ...)
     registros: [],
     chamados: [],
-    _seq: { usuarios: 5, clientes: 2, equipamentos: 3, agenda: 2, visitas: 1, registros: 1, chamados: 1 },
+    _seq: { usuarios: 5, clientes: 2, equipamentos: 4, agenda: 2, visitas: 1, registros: 1, chamados: 1 },
   };
 }
 
@@ -90,9 +93,13 @@ function load() {
   for (const a of data.agenda) {
     if (a.email === undefined) a.email = '';
     if (a.criado_em === undefined) a.criado_em = a.data_hora_inicio || new Date().toISOString();
-    for (const campo of ['numero_serie', 'data_fabricacao', 'garantia', 'garantia_obs']) {
+    for (const campo of ['garantia', 'garantia_obs']) {
       if (a[campo] === undefined) a[campo] = '';
     }
+  }
+  for (const e of data.equipamentos) {
+    if (e.cliente_id === undefined) e.cliente_id = null;
+    if (e.data_fabricacao === undefined) e.data_fabricacao = '';
   }
   return data;
 }

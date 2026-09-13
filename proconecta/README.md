@@ -47,7 +47,7 @@ Contas de teste (senha para todas: `123456`):
 - **Notificações (sino no cabeçalho)**: técnico é avisado quando o administrador sugere alteração num dos seus registros; administrador vê quantos itens aguardam aprovação. Clicar num item leva direto para a tela correspondente.
 - **Menu em cascata** na lateral, com os caminhos certos abrindo automaticamente (ex.: ao clicar numa notificação).
 - **Clientes**: tela de cadastro de novas empresas-cliente (nome, contato, telefone, e-mail, setor, endereço) — sem ela não havia como abrir uma O.S. pra um cliente novo, já que o campo "Empresa" na Nova OS e no cadastro de usuário exige digitar o nome de um cliente já cadastrado.
-- **Equipamentos**: cadastro (empresa, tipo, modelo, nº de série, localização) e histórico (agenda + visitas) por equipamento
+- **Equipamentos** (submenu com duas telas): **Cadastrar equipamento** cria um item de catálogo (só tipo/modelo, sem cliente ainda); **Atrelar equipamento** vincula um item do catálogo a um cliente específico — aqui os campos Cliente e Equipamento são menus suspensos (não digitação), e nº de série/data de fabricação/localização são digitados manualmente na hora de atrelar. Um mesmo item de catálogo pode ser atrelado a vários clientes, cada vínculo virando uma unidade física própria com seu próprio nº de série. Ao selecionar um cliente na Nova OS, só aparecem os equipamentos já atrelados a ele, com nº de série e data de fabricação pré-preenchidos e bloqueados (vêm do cadastro, não são digitados na OS). Histórico (agenda + visitas) por unidade atrelada.
 - **Usuários**: administrador cadastra novos técnicos/perfis
 
 Tudo isso é validado no servidor, não só na tela — se você abrir o DevTools do

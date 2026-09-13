@@ -84,7 +84,8 @@ function agendaComDetalhes(data, item) {
     cliente_estado: cliente ? cliente.estado : null,
     equipamento_tipo: equipamento ? equipamento.tipo : null,
     equipamento_modelo: equipamento ? equipamento.modelo : null,
-    equipamento_serie: item.numero_serie || (equipamento ? equipamento.numero_serie : null),
+    equipamento_serie: equipamento ? equipamento.numero_serie : null,
+    equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
   };
 }
 
@@ -126,8 +127,8 @@ function dadosAtendimentoBloqueados(data, agendaItem, user) {
     data_final: (agendaItem.data_hora_fim || '').slice(0, 10),
     equipamento_tipo: equipamento ? equipamento.tipo : '',
     modelo_maquina: equipamento ? equipamento.modelo : '',
-    numero_serie: agendaItem.numero_serie || (equipamento ? equipamento.numero_serie : ''),
-    data_fabricacao: agendaItem.data_fabricacao || '',
+    numero_serie: equipamento ? equipamento.numero_serie : '',
+    data_fabricacao: equipamento ? equipamento.data_fabricacao : '',
     garantia: agendaItem.garantia || '',
     garantia_obs: agendaItem.garantia_obs || '',
     defeito_informado: agendaItem.problema || '',
@@ -272,8 +273,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   // treinamento online não exige deslocamento até o cliente, então não pede endereço
   const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
   if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
-  // corretiva/preventiva usam o Laudo Técnico, que depende desses dados do equipamento
-  if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('numero_serie', 'data_fabricacao', 'garantia');
+  // corretiva/preventiva usam o Laudo Técnico, que depende da garantia do equipamento
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('garantia');
   for (const campo of obrig) {
     if (!body[campo] || !String(body[campo]).trim()) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
   }
@@ -281,6 +282,10 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
   }
   const data = db.load();
+  const equipamentoEscolhido = data.equipamentos.find((e) => e.id === Number(body.equipamento_id));
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
+    return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
+  }
   const item = {
     id: nextId(data, 'agenda'),
     tecnico_id: Number(body.tecnico_id),
@@ -295,8 +300,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
     endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
-    // dados do equipamento (relevantes pro Laudo Técnico de corretiva/preventiva) — também travados pro técnico
-    numero_serie: body.numero_serie || '', data_fabricacao: body.data_fabricacao || '',
+    // garantia definida pelo administrador na abertura da OS — o técnico só visualiza no Laudo Técnico
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     status: 'pendente',
     valor_servico: body.valor_servico || null,
@@ -846,16 +850,47 @@ rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   enviarJSON(res, 200, { equipamentos: lista });
 });
 
-// POST /api/equipamentos
+// POST /api/equipamentos — cadastra um tipo/modelo no catálogo (ainda sem cliente nem nº de série)
 rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra equipamentos.' });
   const body = await lerCorpo(req);
+  if (!body.tipo || !String(body.tipo).trim() || !body.modelo || !String(body.modelo).trim()) {
+    return enviarJSON(res, 400, { erro: 'Tipo e modelo são obrigatórios.' });
+  }
   const data = db.load();
   const item = {
     id: nextId(data, 'equipamentos'),
-    cliente_id: Number(body.cliente_id),
-    tipo: body.tipo, modelo: body.modelo, numero_serie: body.numero_serie, localizacao: body.localizacao || '',
+    cliente_id: null,
+    tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
+  };
+  data.equipamentos.push(item);
+  db.save(data);
+  enviarJSON(res, 201, { equipamento: item });
+});
+
+// POST /api/equipamentos/:id/atrelar — vincula um equipamento do catálogo a um cliente,
+// criando a unidade física de fato (com nº de série próprio)
+rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador atrela equipamentos.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const catalogo = data.equipamentos.find((e) => e.id === Number(m[1]) && e.cliente_id === null);
+  if (!catalogo) return enviarJSON(res, 404, { erro: 'Equipamento do catálogo não encontrado.' });
+  if (!body.cliente_id || !body.numero_serie || !String(body.numero_serie).trim()) {
+    return enviarJSON(res, 400, { erro: 'Cliente e número de série são obrigatórios.' });
+  }
+  const cliente = data.clientes.find((c) => c.id === Number(body.cliente_id));
+  if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
+  const item = {
+    id: nextId(data, 'equipamentos'),
+    cliente_id: cliente.id,
+    tipo: catalogo.tipo,
+    modelo: catalogo.modelo,
+    numero_serie: body.numero_serie.trim(),
+    data_fabricacao: body.data_fabricacao || '',
+    localizacao: body.localizacao || '',
   };
   data.equipamentos.push(item);
   db.save(data);

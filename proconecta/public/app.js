@@ -164,7 +164,10 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'clientes', label: 'Clientes', page: 'clientes' },
-    { key: 'equipamentos', label: 'Equipamentos', page: 'equipamentos' },
+    { key: 'equipamentos', label: 'Equipamentos', children: [
+      { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
+      { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+    ]},
     { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
   ],
   cliente: [
@@ -238,7 +241,9 @@ async function ir(pagina) {
     if (pagina === 'meus-registros') return renderMeusRegistros();
     if (pagina === 'aprovacoes-biblioteca') return renderAprovacoesBiblioteca();
     if (pagina === 'clientes') return renderClientes();
-    if (pagina === 'equipamentos') return renderEquipamentos();
+    if (pagina === 'equipamentos') return renderMeusEquipamentos();
+    if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
+    if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
   } catch (e) {
@@ -577,8 +582,8 @@ async function mostrarFormNovaAtividade() {
         <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito..."></textarea></div>
       </div>
       <div class="form-grid" id="na-laudo-equip-wrap">
-        <div><label>Número de série*</label><input id="na-numero-serie"></div>
-        <div><label>Data de fabricação (MM/AAAA)*</label><input id="na-data-fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
+        <div><label>Número de série</label><input id="na-numero-serie" disabled></div>
+        <div><label>Data de fabricação</label><input id="na-data-fabricacao" disabled></div>
         <div class="full">
           <label>Está na garantia?*</label>
           <div style="display:flex; gap:18px; margin-bottom:10px;">
@@ -623,6 +628,7 @@ function preencherNumeroSerieNovaAtividade() {
   const equipId = Number(document.getElementById('na-equip').value);
   const equip = (window._equipamentosCache || []).find((e) => e.id === equipId);
   document.getElementById('na-numero-serie').value = equip ? equip.numero_serie : '';
+  document.getElementById('na-data-fabricacao').value = equip ? (equip.data_fabricacao || '—') : '';
 }
 
 function preencherClienteNovaAtividade() {
@@ -648,7 +654,13 @@ function preencherClienteNovaAtividade() {
 
 async function salvarNovaAtividade() {
   if (!document.getElementById('na-cliente').value) return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista.');
-  if (!document.getElementById('na-equip').value) return alert('Nenhum equipamento disponível para esta empresa.');
+  const equipId = document.getElementById('na-equip').value;
+  if (!equipId) return alert('Nenhum equipamento disponível para esta empresa.');
+  const tipoOS = document.getElementById('na-tipo').value;
+  if (TIPOS_LAUDO_TECNICO.includes(tipoOS)) {
+    const equip = (window._equipamentosCache || []).find((e) => e.id === Number(equipId));
+    if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
+  }
   const body = {
     tecnico_id: document.getElementById('na-tecnico').value,
     equipamento_id: document.getElementById('na-equip').value,
@@ -667,8 +679,6 @@ async function salvarNovaAtividade() {
     cep: document.getElementById('na-cep').value,
     cidade: document.getElementById('na-cidade').value,
     estado: document.getElementById('na-estado').value,
-    numero_serie: document.getElementById('na-numero-serie').value,
-    data_fabricacao: document.getElementById('na-data-fabricacao').value,
     garantia: (document.querySelector('input[name="na-garantia"]:checked') || {}).value || '',
     garantia_obs: document.getElementById('na-garantia-obs').value,
   };
@@ -1259,7 +1269,7 @@ function chaveRascunhoLaudo(agendaId) { return `pc_rascunho_laudo_${agendaId}`; 
 function laudoPadrao(item) {
   return {
     agenda_id: item.id,
-    marca: '', data_fabricacao: item.data_fabricacao || '',
+    marca: '', data_fabricacao: item.equipamento_data_fabricacao || '',
     garantia: item.garantia || '', garantia_obs: item.garantia_obs || '',
     acessorios: '', defeito_informado: item.problema || item.servico || '',
     data_entrada: (item.data_hora_inicio || '').slice(0, 10),
@@ -2204,24 +2214,23 @@ async function salvarCliente() {
 }
 
 // ---------- EQUIPAMENTOS ----------
-async function renderEquipamentos() {
-  const [{ equipamentos }, { clientes }] = await Promise.all([api('/api/equipamentos'), api('/api/clientes')]);
-  window._clientesCache = clientes;
+// "cliente_id == null" = catálogo (tipo/modelo genérico, ainda sem unidade física);
+// "cliente_id" preenchido = unidade atrelada de fato a um cliente, com nº de série próprio.
+
+async function renderMeusEquipamentos() {
+  const { equipamentos } = await api('/api/equipamentos');
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
-      <div><h1>Equipamentos</h1><p>${equipamentos.length} cadastrado(s)</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormEquipamento()">+ Novo equipamento</button>
-    </div>
-    <div id="form-equipamento"></div>
+    <div class="page-head"><h1>Meus equipamentos</h1><p>${equipamentos.length} cadastrado(s)</p></div>
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Localização</th><th></th></tr>
-      ${equipamentos.map((e) => `
+      ${equipamentos.length ? equipamentos.map((e) => `
         <tr><td>${e.tipo}</td><td>${e.modelo}</td><td>${e.numero_serie}</td><td>${e.localizacao || '—'}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button></td></tr>`).join('')}
+        <td><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button></td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhum equipamento ainda.</td></tr>`}
     </table></div>
     <div id="historico-eq"></div>`;
 }
+
 async function verHistorico(id) {
   const { agenda } = await api(`/api/equipamentos/${id}/historico`);
   document.getElementById('historico-eq').innerHTML = `
@@ -2232,37 +2241,93 @@ async function verHistorico(id) {
     </table></div>`;
 }
 
-function mostrarFormEquipamento() {
-  const clientes = window._clientesCache || [];
-  document.getElementById('form-equipamento').innerHTML = `
-    <div class="panel"><div class="panel-head">Novo equipamento</div>
+// ---- Cadastrar equipamento (catálogo: tipo/modelo, sem cliente ainda) ----
+async function renderEquipamentosCadastrar() {
+  const { equipamentos } = await api('/api/equipamentos');
+  const catalogo = equipamentos.filter((e) => e.cliente_id === null);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Cadastrar equipamento</h1><p>${catalogo.length} no catálogo</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormEquipamentoCatalogo()">+ Novo equipamento</button>
+    </div>
+    <p style="color:var(--ink-soft); font-size:13px; margin-top:-14px;">Cadastre aqui o tipo/modelo do equipamento. Depois, use "Atrelar equipamento" pra vincular uma unidade dessas a um cliente com o número de série dela.</p>
+    <div id="form-equipamento-catalogo"></div>
+    <div class="panel"><table>
+      <tr><th>Tipo</th><th>Modelo</th></tr>
+      ${catalogo.length ? catalogo.map((e) => `<tr><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhum equipamento no catálogo ainda.</td></tr>`}
+    </table></div>`;
+}
+
+function mostrarFormEquipamentoCatalogo() {
+  document.getElementById('form-equipamento-catalogo').innerHTML = `
+    <div class="panel"><div class="panel-head">Novo equipamento (catálogo)</div>
       <div class="form-grid">
-        <div class="full"><label>Empresa (cliente)*</label>${campoClienteHTML('ne-cliente', clientes)}</div>
-        <div><label>Tipo*</label><input id="ne-tipo" placeholder="ex: Máquina de Gelo"></div>
-        <div><label>Modelo*</label><input id="ne-modelo"></div>
-        <div><label>Nº de série*</label><input id="ne-numero-serie"></div>
-        <div><label>Localização</label><input id="ne-localizacao" placeholder="ex: Cozinha"></div>
+        <div><label>Tipo*</label><input id="ec-tipo" placeholder="ex: Máquina de Gelo"></div>
+        <div><label>Modelo*</label><input id="ec-modelo"></div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarEquipamento()">Salvar equipamento</button>
+      <button class="btn btn-primary btn-sm" onclick="salvarEquipamentoCatalogo()">Salvar no catálogo</button>
     </div>`;
 }
 
-async function salvarEquipamento() {
-  const clienteId = document.getElementById('ne-cliente').value;
-  if (!clienteId) return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista. Se o cliente ainda não existe, cadastre-o primeiro em Clientes.');
-  const tipo = document.getElementById('ne-tipo').value.trim();
-  const modelo = document.getElementById('ne-modelo').value.trim();
-  const numeroSerie = document.getElementById('ne-numero-serie').value.trim();
-  if (!tipo || !modelo || !numeroSerie) return alert('Preencha tipo, modelo e número de série.');
+async function salvarEquipamentoCatalogo() {
+  const tipo = document.getElementById('ec-tipo').value.trim();
+  const modelo = document.getElementById('ec-modelo').value.trim();
+  if (!tipo || !modelo) return alert('Preencha tipo e modelo.');
+  try {
+    await api('/api/equipamentos', { method: 'POST', body: { tipo, modelo } });
+    mostrarToast('Equipamento cadastrado no catálogo.');
+    renderEquipamentosCadastrar();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+// ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----
+async function renderEquipamentosAtrelar() {
+  const [{ equipamentos }, { clientes }] = await Promise.all([api('/api/equipamentos'), api('/api/clientes')]);
+  window._clientesCache = clientes;
+  window._catalogoCache = equipamentos.filter((e) => e.cliente_id === null);
+  const atrelados = equipamentos.filter((e) => e.cliente_id !== null);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Atrelar equipamento</h1><p>${atrelados.length} atrelado(s) a clientes</p></div>
+    <div class="panel"><div class="panel-head">Atrelar a um cliente</div>
+      <div class="form-grid">
+        <div><label>Cliente*</label><select id="ae-cliente">${clientes.length ? clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('') : '<option value="">Nenhum cliente cadastrado</option>'}</select></div>
+        <div><label>Equipamento (catálogo)*</label><select id="ae-equipamento">${window._catalogoCache.length ? window._catalogoCache.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('') : '<option value="">Nenhum equipamento no catálogo</option>'}</select></div>
+        <div><label>Número de série*</label><input id="ae-numero-serie"></div>
+        <div><label>Data de fabricação (MM/AAAA)</label><input id="ae-data-fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
+        <div><label>Localização</label><input id="ae-localizacao" placeholder="ex: Cozinha"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarAtrelamento()">Atrelar ao cliente</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Fabricação</th><th></th></tr>
+      ${atrelados.length ? atrelados.map((e) => {
+        const cliente = clientes.find((c) => c.id === e.cliente_id);
+        return `<tr><td>${esc(cliente ? cliente.nome_empresa : '—')}</td><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td><td>${esc(e.numero_serie)}</td><td>${esc(e.data_fabricacao || '—')}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button></td></tr>`;
+      }).join('') : `<tr><td colspan="6" class="empty">Nenhum equipamento atrelado a um cliente ainda.</td></tr>`}
+    </table></div>
+    <div id="historico-eq"></div>`;
+}
+
+async function salvarAtrelamento() {
+  const equipamentoId = document.getElementById('ae-equipamento').value;
+  const clienteId = document.getElementById('ae-cliente').value;
+  const numeroSerie = document.getElementById('ae-numero-serie').value.trim();
+  if (!clienteId) return alert('Cadastre um cliente primeiro em Clientes.');
+  if (!equipamentoId) return alert('Cadastre um equipamento no catálogo primeiro em Cadastrar equipamento.');
+  if (!numeroSerie) return alert('Informe o número de série.');
   const body = {
-    cliente_id: clienteId, tipo, modelo, numero_serie: numeroSerie,
-    localizacao: document.getElementById('ne-localizacao').value,
+    cliente_id: clienteId, numero_serie: numeroSerie,
+    data_fabricacao: document.getElementById('ae-data-fabricacao').value,
+    localizacao: document.getElementById('ae-localizacao').value,
   };
   try {
-    await api('/api/equipamentos', { method: 'POST', body });
-    mostrarToast('Equipamento cadastrado.');
-    renderEquipamentos();
-  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+    await api(`/api/equipamentos/${equipamentoId}/atrelar`, { method: 'POST', body });
+    mostrarToast('Equipamento atrelado ao cliente.');
+    renderEquipamentosAtrelar();
+  } catch (e) { alert('Erro ao atrelar: ' + e.message); }
 }
 
 // ---------- USUÁRIOS (cadastro por convite) ----------
