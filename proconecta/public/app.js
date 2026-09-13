@@ -395,9 +395,11 @@ async function renderAgenda() {
           <td>${a.cliente_nome || '—'}</td>
           <td>${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
           <td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
-          <td>${a.status === 'concluida' ? tag('Concluída', 'green') : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
+          <td>${a.status === 'concluida'
+            ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
+            : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
           <td>${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
-            ${a.status === 'concluida' && a.visita_id ? (
+            ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' ? (
               a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
                 ? `<span class="tag tag-amber">Reabertura solicitada</span>`
                 : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`
