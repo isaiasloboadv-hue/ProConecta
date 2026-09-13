@@ -1328,8 +1328,10 @@ const server = http.createServer(async (req, res) => {
   servirEstatico(req, res, pathname);
 });
 
-server.listen(PORT, () => {
-  console.log(`Pro Conecta rodando em http://localhost:${PORT}`);
-  console.log(`Banco de dados: ${db.DB_PATH}`);
-  console.log('Login de teste: admin@proconecta.com.br / isaias@proconecta.com.br / cliente@abc.com.br — senha: 123456');
+db.pronto.then(() => {
+  server.listen(PORT, () => {
+    console.log(`Pro Conecta rodando em http://localhost:${PORT}`);
+    console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
+    console.log('Login de teste: admin@proconecta.com.br / isaias@proconecta.com.br / cliente@abc.com.br — senha: 123456');
+  });
 });

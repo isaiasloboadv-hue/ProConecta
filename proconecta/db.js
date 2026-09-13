@@ -1,12 +1,14 @@
-// db.js — "banco de dados" simples em arquivo JSON.
-// Sem dependências externas: usa só o módulo nativo "fs" do Node.
-// Troque por SQLite/Postgres depois sem mudar a API (routes/*.js só chamam as funções daqui).
+// db.js — "banco de dados". Por padrão, um arquivo JSON local (sem dependências externas).
+// Se a variável de ambiente DATABASE_URL estiver definida, usa Postgres (ex.: Supabase) —
+// guarda o mesmo objeto inteiro como um único registro JSONB, então nenhuma outra parte do
+// sistema precisa mudar (load()/save() continuam funcionando exatamente igual).
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
 const DB_PATH = path.join(__dirname, 'data.json');
+const usaPostgres = !!process.env.DATABASE_URL;
 
 function hashSenha(senha, salt) {
   salt = salt || crypto.randomBytes(16).toString('hex');
@@ -68,14 +70,9 @@ function seed() {
   };
 }
 
-function load() {
-  if (!fs.existsSync(DB_PATH)) {
-    const data = seed();
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
-    return data;
-  }
-  const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-  // migração leve: bancos criados antes destes campos existirem ganham valores padrão
+// migração leve: bancos criados antes destes campos existirem ganham valores padrão.
+// Roda uma vez ao carregar (seja do arquivo ou do Postgres) — mutila e devolve o mesmo objeto.
+function migrar(data) {
   if (!data.registros) data.registros = [];
   if (!data.chamados) data.chamados = [];
   if (!data._seq.registros) data._seq.registros = 1;
@@ -109,8 +106,73 @@ function load() {
   return data;
 }
 
-function save(data) {
+// ---------- modo arquivo (padrão, sem DATABASE_URL) ----------
+
+function carregarDoArquivo() {
+  if (!fs.existsSync(DB_PATH)) {
+    const data = seed();
+    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+    return data;
+  }
+  return migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
+}
+
+function salvarNoArquivo(data) {
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+}
+
+// ---------- modo Postgres (opcional, via DATABASE_URL) ----------
+// Guarda tudo como um único registro JSONB — mantém load()/save() síncronos com um cache em
+// memória (populado uma vez no boot), pra não precisar tornar todo o server.js assíncrono.
+
+let pool = null;
+function obterPool() {
+  if (!pool) {
+    const { Pool } = require('pg');
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10000 });
+  }
+  return pool;
+}
+
+let cache = null;
+
+async function inicializarPostgres() {
+  const p = obterPool();
+  await p.query('CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)');
+  const r = await p.query('SELECT data FROM app_state WHERE id = 1');
+  if (r.rows.length === 0) {
+    const data = seed();
+    await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
+    cache = data;
+  } else {
+    cache = migrar(r.rows[0].data);
+  }
+  console.log('Conectado ao Postgres — os dados persistem entre reinícios.');
+}
+
+// server.js aguarda essa promise antes de abrir a porta. No modo arquivo, resolve na hora.
+// Se a conexão com o Postgres falhar, cai pro arquivo local em vez de derrubar o servidor.
+const pronto = usaPostgres
+  ? inicializarPostgres().catch((e) => {
+      console.error('Falha ao conectar no Postgres — usando o arquivo local como reserva:', e.message);
+      cache = null;
+    })
+  : Promise.resolve();
+
+function load() {
+  if (usaPostgres && cache) return cache;
+  return carregarDoArquivo();
+}
+
+function save(data) {
+  if (usaPostgres && cache) {
+    cache = data;
+    obterPool()
+      .query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)])
+      .catch((e) => console.error('Erro ao salvar no Postgres:', e.message));
+    return;
+  }
+  salvarNoArquivo(data);
 }
 
 function nextId(data, tabela) {
@@ -118,4 +180,8 @@ function nextId(data, tabela) {
   return id;
 }
 
-module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH };
+function estaUsandoPostgres() {
+  return usaPostgres && !!cache;
+}
+
+module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres };

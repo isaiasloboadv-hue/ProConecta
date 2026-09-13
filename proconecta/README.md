@@ -7,8 +7,9 @@ no servidor.
 ## Como rodar
 
 Só precisa ter o **Node.js** instalado (download em https://nodejs.org — versão
-18 ou mais recente). Não precisa instalar nenhum pacote extra: o projeto não
-usa `npm install`.
+18 ou mais recente). No modo padrão (arquivo `data.json` local) não precisa de
+nenhum pacote extra — só se for usar um banco Postgres de verdade (veja
+"Banco de dados persistente" abaixo) é que entra o `npm install`.
 
 ```
 cd proconecta
@@ -101,23 +102,53 @@ A opção mais simples sem cartão de crédito é o **Render** (render.com):
    comando)
 3. Crie uma conta grátis no **Render** (render.com) — não pede cartão
 4. No painel do Render: **New +** → **Web Service** → conecte esse repositório
-5. Configuração: **Runtime = Node**, **Build Command** deixe em branco,
+5. Configuração: **Runtime = Node**, **Build Command** = `npm install`,
    **Start Command** = `node server.js`
 6. Clique em **Deploy** — em alguns minutos você recebe um link tipo
    `https://proconecta.onrender.com` que funciona de qualquer lugar
 
 **Importante sobre o plano grátis do Render:** ele não tem "disco
-persistente" — ou seja, o arquivo `data.json` (onde ficam salvos os
-usuários, agenda, etc.) pode ser resetado sempre que você atualizar o
-código. Ótimo pra testar e mostrar pra outras pessoas; quando for para uso
-real do dia a dia, aí sim vale migrar para um banco de dados de verdade
-(Postgres, que o próprio Render oferece com um plano pago barato) — troca só
-em `db.js`, o resto do sistema não muda. O plano grátis também "dorme" depois
-de 15 minutos sem uso e demora uns 30-60 segundos pra acordar no primeiro
-acesso seguinte — depois disso funciona normal.
+persistente" — ou seja, sem um banco externo configurado (veja a seção
+abaixo), o arquivo `data.json` (onde ficam salvos os usuários, agenda etc.)
+é resetado sempre que o serviço reinicia — o que acontece a cada
+atualização de código e também sozinho depois de 15 minutos sem uso (o
+plano grátis "dorme" e demora uns 30-60 segundos pra acordar no primeiro
+acesso seguinte — depois disso funciona normal).
 
 Alternativas parecidas, também sem cartão: **Railway** (railway.app) e
 **Fly.io** (fly.io) — o processo de deploy é bem parecido.
+
+## Banco de dados persistente (pra não perder os dados a cada reinício)
+
+Por padrão o sistema guarda tudo em `data.json`, que some sempre que o Render
+reinicia (ver acima). Pra resolver isso de graça, o `db.js` já vem pronto pra
+usar um banco **Postgres** de verdade (por exemplo, o gratuito do
+[supabase.com](https://supabase.com)) — sem mudar mais nada no resto do
+sistema.
+
+1. Crie um projeto grátis no Supabase e pegue a **connection string** do
+   modo **Session pooler** (funciona em rede IPv4, que é o que o Render usa —
+   o modo "Direct connection" pede um complemento pago pra isso)
+2. No painel do Render, vá em **Environment** e adicione uma variável:
+   - Nome: `DATABASE_URL`
+   - Valor: a connection string do Supabase, com a senha do banco já no lugar
+     de `[YOUR-PASSWORD]` (se a senha tiver caracteres especiais como `/` ou
+     `?`, eles precisam estar "percent-encoded" — ex.: `/` vira `%2F`)
+3. Salve — o Render reinicia o serviço sozinho com a variável nova
+
+A partir daí, os dados ficam no Supabase e sobrevivem a qualquer reinício,
+atualização de código ou período de inatividade. Se a variável `DATABASE_URL`
+não estiver definida, ou se a conexão falhar por qualquer motivo, o sistema
+cai automaticamente de volta pro arquivo local — nunca fica fora do ar por
+causa disso.
+
+Pra rodar localmente com o mesmo banco (opcional, só se quiser testar antes
+de configurar no Render):
+```
+cd proconecta
+npm install
+DATABASE_URL="sua-connection-string-aqui" node server.js
+```
 
 ## E-mail de convite de verdade
 
