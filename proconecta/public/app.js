@@ -3295,15 +3295,26 @@ function wTabelaFotosBloco(fotos) {
 }
 
 // altura de uma folha A4 inteira, em twips — usada nas páginas de capa/contato, que
-// ficam numa seção própria com margem zero pra cor preencher a folha de ponta a ponta
+// ficam numa seção própria com margem zero pra cor preencher a folha de ponta a ponta.
+// Reserva uma pequena folga (WORD_FOLGA_TABELA_PAGINA) porque o Word sempre exige um
+// parágrafo depois de uma tabela — sem essa folga esse parágrafo obrigatório transborda
+// pra uma folha extra em branco, já que a tabela sozinha já ocupa a página inteira.
+const WORD_FOLGA_TABELA_PAGINA = 300;
 const WORD_ALTURA_PAGINA_CHEIA = 16837;
+const WORD_ALTURA_TABELA_PAGINA = WORD_ALTURA_PAGINA_CHEIA - WORD_FOLGA_TABELA_PAGINA;
+
+// parágrafo praticamente invisível (linha de ~1pt), usado como fechamento explícito
+// depois das tabelas de capa/contato pra não depender do parágrafo automático do Word
+function wEspacoInvisivel() {
+  return new docx.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: docx.LineRuleType.EXACT } });
+}
 
 function wPaginaColorida(fillHex, conteudo) {
   return new docx.Table({
     width: { size: 100, type: docx.WidthType.PERCENTAGE },
     borders: docx.TableBorders.NONE,
     rows: [new docx.TableRow({
-      height: { value: WORD_ALTURA_PAGINA_CHEIA, rule: docx.HeightRule.EXACT },
+      height: { value: WORD_ALTURA_TABELA_PAGINA, rule: docx.HeightRule.EXACT },
       children: [new docx.TableCell({
         shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
         verticalAlign: docx.VerticalAlign.CENTER,
@@ -3371,7 +3382,7 @@ function wCapa(r, logoDataUri) {
     rows: [
       linhaBloco(topo, 7375, docx.VerticalAlign.TOP),
       linhaBloco(meio, 6431, docx.VerticalAlign.CENTER),
-      linhaBloco(base, 3031, docx.VerticalAlign.BOTTOM),
+      linhaBloco(base, 2731, docx.VerticalAlign.BOTTOM),
     ],
   });
 }
@@ -3503,7 +3514,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
     sections: [
       {
         properties: { page: { size: tamanhoPagina, margin: semMargem } },
-        children: [wCapa(r, logoDataUri)],
+        children: [wCapa(r, logoDataUri), wEspacoInvisivel()],
       },
       {
         properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
@@ -3511,7 +3522,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
       },
       {
         properties: { page: { size: tamanhoPagina, margin: semMargem } },
-        children: [wPaginaContato(logoDataUri)],
+        children: [wPaginaContato(logoDataUri), wEspacoInvisivel()],
       },
     ],
   });
