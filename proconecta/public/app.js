@@ -3117,84 +3117,214 @@ async function baixarTodasFotosRelatorioManutencao(i) {
   } catch (e) { alert('Erro ao baixar as fotos: ' + e.message); }
 }
 
-function gerarWordHtmlRelatorioManutencao(r) {
-  function escHtml(v) { return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function campo(label, valor) { return `<p style="margin:0 0 6px;"><b>${escHtml(label)}:</b> ${escHtml(valor) || '—'}</p>`; }
-  function blocoTexto(titulo, texto) {
-    return `<h2 style="color:#0B3D91;font-size:13pt;">${escHtml(titulo)}</h2>
-      <p style="border:1px solid #ccc;padding:8px;white-space:pre-wrap;">${escHtml(texto) || '—'}</p>`;
-  }
-  const TIPO_SERVICO_LABEL = { amostra: 'Amostra', analise: 'Análise', preventiva: 'Preventiva', corretiva: 'Corretiva', outros: r.tipo_servico_outros || 'Outros' };
-  const GARANTIA_LABEL = { sim: 'Sim', nao: 'Não', outros: 'Outros' };
+const WORD_COR = { navy: '0A2647', blue: '1467D6', ink: '101826', inkSoft: '4A5568', line: 'DCE4EF' };
 
-  const pecasHtml = (r.pecas && r.pecas.length)
-    ? `<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%;">
-        <tr style="background:#0B3D91;color:#fff;"><th>Item</th><th>Descrição da peça</th><th>Código PMK</th><th>Qtd.</th></tr>
-        ${r.pecas.map((p, i) => `<tr><td>${i + 1}</td><td>${escHtml(p.descricao) || '—'}</td><td>${escHtml(p.codigo_pmk) || '—'}</td><td>${escHtml(p.quantidade) || '—'}</td></tr>`).join('')}
-      </table>`
-    : `<p><i>Nenhuma peça informada</i></p>`;
-
-  const blocosFoto = r.fotos || [];
-  const fotosHtml = blocosFoto.length && blocosFoto.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length))
-    ? blocosFoto.map((entrada) => {
-        const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
-        const imgs = (bloco.fotos || []).map((f) => `<img src="${f}" style="max-width:260px;margin:4px;">`).join('');
-        return `<div style="margin-bottom:14px;">${imgs}${bloco.comentario ? `<div style="margin-top:6px;">${bloco.comentario}</div>` : ''}</div>`;
-      }).join('')
-    : `<p><i>Nenhuma foto anexada.</i></p>`;
-
-  return `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head><meta charset="utf-8"><title>Relatório Técnico</title></head>
-<body style="font-family:Calibri, Arial, sans-serif; font-size:11pt; color:#1a2433;">
-  <h1 style="color:#0B3D91;">PRO Marking — Relatório Técnico</h1>
-
-  <h2 style="color:#0B3D91;font-size:13pt;">Dados do cliente</h2>
-  ${campo('Empresa', r.empresa)}
-  ${campo('Contato', r.contato)}
-  ${campo('Telefone', r.telefone)}
-
-  <h2 style="color:#0B3D91;font-size:13pt;">Tipo de serviço</h2>
-  ${campo('Tipo', TIPO_SERVICO_LABEL[r.tipo_servico] || '—')}
-
-  <h2 style="color:#0B3D91;font-size:13pt;">Dados do equipamento</h2>
-  ${campo('Marca', r.marca)}
-  ${campo('Equipamento', r.equipamento)}
-  ${campo('Nº Série', r.numero_serie)}
-  ${campo('Garantia', GARANTIA_LABEL[r.garantia] || '—')}
-  ${campo('Data de fabricação', r.data_fabricacao)}
-  ${campo('Acessórios', r.acessorios)}
-  ${campo('Defeito informado', r.defeito_informado)}
-
-  <h2 style="color:#0B3D91;font-size:13pt;">Técnico responsável</h2>
-  ${campo('Nome', r.tecnico_nome)}
-  ${campo('E-mail', r.tecnico_email)}
-  ${campo('Entrada', r.data_entrada)}
-  ${campo('Conclusão', r.data_conclusao)}
-  ${campo('Período', periodoManut(r.data_entrada, r.data_conclusao))}
-
-  ${blocoTexto('Laudo técnico', r.laudo_tecnico)}
-  ${blocoTexto('Serviços realizados', r.servico_realizado)}
-
-  <h2 style="color:#0B3D91;font-size:13pt;">Peças fornecidas</h2>
-  ${pecasHtml}
-
-  <h2 style="color:#0B3D91;font-size:13pt;">Relatório fotográfico</h2>
-  ${fotosHtml}
-</body>
-</html>`;
+function corCssParaHexWord(cor) {
+  const rgb = corCssParaRgb(cor);
+  if (!rgb) return null;
+  return rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
 }
 
-function baixarWordRelatorioManutencao(i) {
+function dataUriParaUint8Array(dataUri) {
+  const base64 = (String(dataUri).split(',')[1] || '').replace(/\s/g, '');
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function wTitulo(texto) {
+  return new docx.Paragraph({
+    spacing: { before: 260, after: 140 },
+    border: { bottom: { color: WORD_COR.blue, space: 4, style: docx.BorderStyle.SINGLE, size: 6 } },
+    children: [new docx.TextRun({ text: String(texto).toUpperCase(), bold: true, color: WORD_COR.blue, size: 22 })],
+  });
+}
+
+function wCampo(label, valor) {
+  return new docx.Paragraph({
+    spacing: { after: 60 },
+    children: [
+      new docx.TextRun({ text: label.toUpperCase() + ': ', bold: true, color: WORD_COR.ink, size: 20 }),
+      new docx.TextRun({ text: valor ? String(valor) : '—', color: WORD_COR.ink, size: 20 }),
+    ],
+  });
+}
+
+function wLinhaOpcoes(opcoes, selecionado) {
+  const runs = [];
+  opcoes.forEach(([v, l], idx) => {
+    if (idx > 0) runs.push(new docx.TextRun({ text: '     ', size: 20 }));
+    runs.push(new docx.TextRun({ text: (v === selecionado ? '☑ ' : '☐ ') + l, bold: true, size: 18, color: WORD_COR.ink }));
+  });
+  return new docx.Paragraph({ spacing: { after: 100 }, children: runs });
+}
+
+function wBlocoTexto(texto) {
+  const linha = { style: docx.BorderStyle.SINGLE, size: 4, color: WORD_COR.line };
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha },
+    rows: [new docx.TableRow({ children: [new docx.TableCell({
+      margins: { top: 120, bottom: 120, left: 140, right: 140 },
+      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: texto ? String(texto) : '—', size: 20, color: WORD_COR.ink })] })],
+    })] })],
+  });
+}
+
+function wTabelaPecas(pecas) {
+  const linha = { style: docx.BorderStyle.SINGLE, size: 4, color: WORD_COR.line };
+  const margins = { top: 80, bottom: 80, left: 100, right: 100 };
+  const headerCell = (t) => new docx.TableCell({
+    shading: { fill: WORD_COR.navy, type: docx.ShadingType.CLEAR, color: 'auto' },
+    margins,
+    children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, bold: true, color: 'FFFFFF', size: 18 })] })],
+  });
+  const cell = (t) => new docx.TableCell({ margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, size: 18, color: WORD_COR.ink })] })] });
+  const linhas = [new docx.TableRow({ children: [headerCell('Item'), headerCell('Descrição da peça'), headerCell('Código PMK'), headerCell('Qtd.')] })];
+  if (!pecas.length) {
+    linhas.push(new docx.TableRow({ children: [new docx.TableCell({ columnSpan: 4, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma peça informada', italics: true, color: WORD_COR.inkSoft, size: 18 })] })] })] }));
+  } else {
+    pecas.forEach((p, i) => {
+      linhas.push(new docx.TableRow({ children: [cell(String(i + 1)), cell(p.descricao || '—'), cell(p.codigo_pmk || '—'), cell(String(p.quantidade || '—'))] }));
+    });
+  }
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha },
+    rows: linhas,
+  });
+}
+
+function wRunsComentario(html) {
+  const palavras = extrairPalavrasComEstilo(html);
+  const runs = [];
+  palavras.forEach((p) => {
+    if (p.quebra) { runs.push(new docx.TextRun({ text: '', break: 1 })); return; }
+    if (!p.texto) return;
+    runs.push(new docx.TextRun({
+      text: p.texto + ' ',
+      bold: !!p.negrito,
+      italics: !!p.italico,
+      underline: p.sublinhado ? {} : undefined,
+      color: corCssParaHexWord(p.cor) || WORD_COR.ink,
+      size: 20,
+      font: p.fonte === 'times' ? 'Times New Roman' : p.fonte === 'courier' ? 'Courier New' : 'Calibri',
+    }));
+  });
+  return runs.length ? runs : [new docx.TextRun({ text: '—', size: 20, italics: true, color: WORD_COR.inkSoft })];
+}
+
+function wTabelaFotosBloco(fotos) {
+  const linhas = [];
+  for (let i = 0; i < fotos.length; i += 2) {
+    const par = [fotos[i], fotos[i + 1]];
+    linhas.push(new docx.TableRow({ children: par.map((f) => {
+      if (!f) return new docx.TableCell({ children: [new docx.Paragraph('')] });
+      try {
+        return new docx.TableCell({
+          margins: { top: 60, bottom: 60, left: 60, right: 60 },
+          children: [new docx.Paragraph({ children: [new docx.ImageRun({ data: dataUriParaUint8Array(f), transformation: { width: 235, height: 160 } })] })],
+        });
+      } catch (e) { return new docx.TableCell({ children: [new docx.Paragraph('')] }); }
+    }) }));
+  }
+  return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: docx.TableBorders.NONE, rows: linhas });
+}
+
+async function gerarWordRelatorioManutencao(r, logoDataUri) {
+  const children = [];
+
+  if (logoDataUri) {
+    try {
+      children.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 60 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 46, height: 53 } })],
+      }));
+    } catch (e) {}
+  }
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 20 },
+    children: [new docx.TextRun({ text: 'PRO Marking', bold: true, color: WORD_COR.navy, size: 24 })],
+  }));
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 220 },
+    border: { bottom: { color: WORD_COR.blue, space: 6, style: docx.BorderStyle.SINGLE, size: 8 } },
+    children: [new docx.TextRun({ text: 'Relatório Técnico', bold: true, color: WORD_COR.ink, size: 30 })],
+  }));
+
+  children.push(wTitulo('Dados do cliente'));
+  children.push(wCampo('Empresa', r.empresa));
+  children.push(wCampo('Contato', r.contato));
+  children.push(wCampo('Telefone', r.telefone));
+
+  children.push(wTitulo('Tipo de serviço'));
+  children.push(wLinhaOpcoes([
+    ['amostra', 'AMOSTRA'], ['analise', 'ANÁLISE'], ['preventiva', 'PREVENTIVA'], ['corretiva', 'CORRETIVA'],
+    ['outros', 'OUTROS' + (r.tipo_servico === 'outros' && r.tipo_servico_outros ? ': ' + r.tipo_servico_outros : '')],
+  ], r.tipo_servico));
+
+  children.push(wTitulo('Dados do equipamento'));
+  children.push(wCampo('Marca', r.marca));
+  children.push(wCampo('Equipamento', r.equipamento));
+  children.push(wCampo('Nº Série', r.numero_serie));
+  children.push(wLinhaOpcoes([['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']], r.garantia));
+  children.push(wCampo('Data de fabricação', r.data_fabricacao));
+  children.push(wCampo('Acessórios', r.acessorios));
+  children.push(wCampo('Defeito informado', r.defeito_informado));
+
+  children.push(wTitulo('Técnico responsável'));
+  children.push(wCampo('Nome', r.tecnico_nome));
+  children.push(wCampo('E-mail', r.tecnico_email));
+  children.push(wCampo('Entrada', r.data_entrada));
+  children.push(wCampo('Conclusão', r.data_conclusao));
+  children.push(wCampo('Período', periodoManut(r.data_entrada, r.data_conclusao)));
+
+  children.push(wTitulo('Laudo técnico'));
+  children.push(wBlocoTexto(r.laudo_tecnico));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Serviços realizados'));
+  children.push(wBlocoTexto(r.servico_realizado));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Peças fornecidas'));
+  children.push(wTabelaPecas(r.pecas || []));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Relatório fotográfico'));
+  const blocosFoto = r.fotos || [];
+  const temFotos = blocosFoto.length && blocosFoto.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length));
+  if (temFotos) {
+    blocosFoto.forEach((entrada) => {
+      const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+      if ((bloco.fotos || []).length) children.push(wTabelaFotosBloco(bloco.fotos));
+      children.push(new docx.Paragraph({ spacing: { before: 60, after: 160 }, children: wRunsComentario(bloco.comentario) }));
+    });
+  } else {
+    children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma foto anexada.', italics: true, color: WORD_COR.inkSoft, size: 20 })] }));
+  }
+
+  const doc = new docx.Document({ sections: [{ properties: {}, children }] });
+  return docx.Packer.toBlob(doc);
+}
+
+async function baixarWordRelatorioManutencao(i) {
   const r = (window._relatoriosManutCache || [])[i];
   if (!r) return;
-  const html = gerarWordHtmlRelatorioManutencao(r);
-  const blob = new Blob(['﻿', html], { type: 'application/msword' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `relatorio-manutencao-${r.id}.doc`;
-  document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  try {
+    const logo = await carregarLogoDataUri();
+    const blob = await gerarWordRelatorioManutencao(r, logo);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `relatorio-manutencao-${r.id}.docx`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { alert('Erro ao gerar o Word: ' + e.message); }
 }
 
 async function excluirRelatorioManutencao(id) {
