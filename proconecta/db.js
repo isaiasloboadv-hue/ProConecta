@@ -37,7 +37,8 @@ function seed() {
     visitas: [],
     registros: [],
     chamados: [],
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1 },
+    relatorios_manutencao: [],
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1 },
   };
 }
 
@@ -79,8 +80,10 @@ function protegerAdminMaster(data) {
 function migrar(data) {
   if (!data.registros) data.registros = [];
   if (!data.chamados) data.chamados = [];
+  if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
+  if (!data._seq.relatorios_manutencao) data._seq.relatorios_manutencao = 1;
   for (const u of data.usuarios) {
     if (!u.status) u.status = 'ativo';
     if (u.convite_token === undefined) u.convite_token = null;
