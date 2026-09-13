@@ -1341,7 +1341,7 @@ function chaveRascunhoLaudo(agendaId) { return `pc_rascunho_laudo_${agendaId}`; 
 function laudoPadrao(item) {
   return {
     agenda_id: item.id,
-    marca: '', data_fabricacao: item.equipamento_data_fabricacao || '',
+    data_fabricacao: item.equipamento_data_fabricacao || '',
     garantia: item.garantia || '', garantia_obs: item.garantia_obs || '',
     acessorios: '', defeito_informado: item.problema || item.servico || '',
     data_entrada: (item.data_hora_inicio || '').slice(0, 16),
@@ -1414,7 +1414,7 @@ async function renderLaudoTecnico(item) {
       <h2>Dados do equipamento</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Nº de série, data de fabricação, defeito informado e garantia são definidos pelo administrador na abertura da OS — não podem ser alterados aqui.</p>
       <div class="form-grid">
-        <div><label>Marca</label><input id="lt-marca" placeholder="Marca do equipamento" oninput="atualizarRascunhoLaudo()"></div>
+        <div><label>Equipamento</label><input value="${esc(`${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''}`)}" disabled></div>
         <div><label>Data de fabricação</label><input id="lt-data_fabricacao" disabled></div>
         <div class="full"><label>Acessórios recebidos</label><input id="lt-acessorios" placeholder="ex: cabo de força, fonte, controle..." oninput="atualizarRascunhoLaudo()"></div>
         <div class="full"><label>Defeito informado pelo cliente</label><input id="lt-defeito_informado" disabled></div>
@@ -1501,7 +1501,7 @@ async function renderLaudoTecnico(item) {
 
 function preencherCamposLaudo() {
   const d = laudoDraft;
-  ['marca', 'data_fabricacao', 'acessorios', 'defeito_informado', 'garantia_obs', 'data_conclusao', 'laudo_tecnico', 'servico_realizado', 'observacoes'].forEach((campo) => {
+  ['data_fabricacao', 'acessorios', 'defeito_informado', 'garantia_obs', 'data_conclusao', 'laudo_tecnico', 'servico_realizado', 'observacoes'].forEach((campo) => {
     const el = document.getElementById('lt-' + campo);
     if (el) el.value = d[campo] || '';
   });
@@ -1548,7 +1548,7 @@ function removerFotoLaudo(j) { laudoDraft.fotos.splice(j, 1); renderFotosLaudo()
 function atualizarRascunhoLaudo(semLerCampos) {
   if (!semLerCampos) {
     const d = laudoDraft;
-    ['marca', 'data_fabricacao', 'acessorios', 'defeito_informado', 'garantia_obs', 'data_conclusao', 'laudo_tecnico', 'servico_realizado', 'observacoes'].forEach((campo) => {
+    ['data_fabricacao', 'acessorios', 'defeito_informado', 'garantia_obs', 'data_conclusao', 'laudo_tecnico', 'servico_realizado', 'observacoes'].forEach((campo) => {
       const el = document.getElementById('lt-' + campo);
       if (el) d[campo] = el.value;
     });
@@ -1618,7 +1618,7 @@ function gerarPdfLaudo(d, item) {
   y += 8;
 
   titulo('Dados do equipamento');
-  linha('Marca', d.marca); linha('Data de fabricação', d.data_fabricacao);
+  linha('Data de fabricação', d.data_fabricacao);
   linha('Garantia', d.garantia === 'sim' ? 'Sim' : d.garantia === 'nao' ? 'Não' : `N/A — ${d.garantia_obs}`);
   linha('Acessórios recebidos', d.acessorios); linha('Defeito informado', d.defeito_informado);
   y += 8;
@@ -1898,7 +1898,7 @@ function detalheRelatorioVisita(v) {
     return `
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
       <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
-      <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')}) <span class="sep">·</span> <b>Marca:</b> ${esc(l.marca || '—')}</div>
+      <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
       <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
       <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
       <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
