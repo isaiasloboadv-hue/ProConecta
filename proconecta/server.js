@@ -856,6 +856,52 @@ rota('POST', /^\/api\/registros\/(\d+)\/sugerir-alteracao$/, async (req, res, m)
   enviarJSON(res, 200, { registro });
 });
 
+// PUT /api/registros/:id — administrador edita um registro (inclusive já aprovado) diretamente,
+// sem passar pelo fluxo de reenvio/aprovação — registra quem e quando foi a última atualização.
+rota('PUT', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita diretamente.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  const erro = validarRegistro({ ...registro, ...body, tipo: registro.tipo });
+  if (erro) return enviarJSON(res, 400, { erro });
+  Object.assign(registro, montarCamposRegistro({ ...registro, ...body, tipo: registro.tipo }));
+  registro.atualizado_em = new Date().toISOString();
+  registro.atualizado_por_nome = user.nome;
+  registro.solicitacao_edicao = null;
+  db.save(data);
+  enviarJSON(res, 200, { registro: registroComAutor(data, registro) });
+});
+
+// POST /api/registros/:id/solicitar-edicao — técnico pede ao administrador uma correção num
+// caso já publicado na biblioteca (não é dono do registro, por isso não pode editar direto)
+rota('POST', /^\/api\/registros\/(\d+)\/solicitar-edicao$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita edição.' });
+  const body = await lerCorpo(req);
+  if (!body.comentario || !body.comentario.trim()) return enviarJSON(res, 400, { erro: 'Descreva o que precisa ser corrigido.' });
+  const data = db.load();
+  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  registro.solicitacao_edicao = { comentario: body.comentario, solicitante_id: user.id, solicitante_nome: user.nome, criado_em: new Date().toISOString() };
+  db.save(data);
+  enviarJSON(res, 200, { registro: registroComAutor(data, registro) });
+});
+
+// GET /api/registros/solicitacoes-edicao — administrador: casos publicados com pedido de correção pendente
+rota('GET', /^\/api\/registros\/solicitacoes-edicao$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê as solicitações de edição.' });
+  const data = db.load();
+  const lista = data.registros
+    .filter((r) => r.solicitacao_edicao)
+    .map((r) => registroComAutor(data, r))
+    .sort((a, b) => (b.solicitacao_edicao.criado_em || '').localeCompare(a.solicitacao_edicao.criado_em || ''));
+  enviarJSON(res, 200, { registros: lista });
+});
+
 // DELETE /api/registros/:id — administrador exclui um registro de biblioteca (pendente ou já aprovado)
 rota('DELETE', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
@@ -925,6 +971,11 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
           const tecnico = data.usuarios.find((u) => u.id === v.tecnico_id);
           return { id: v.id, tipo: 'relatorio_pendente', texto: `Relatório de ${tecnico ? tecnico.nome : 'um técnico'} aguardando aprovação`, registro_id: v.id };
         })
+    );
+    notificacoes = notificacoes.concat(
+      data.registros
+        .filter((r) => r.solicitacao_edicao)
+        .map((r) => ({ id: r.id, tipo: 'edicao_solicitada_biblioteca', texto: `${r.solicitacao_edicao.solicitante_nome} pediu uma edição no caso "${r.titulo}" da biblioteca`, registro_id: r.id }))
     );
   }
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });

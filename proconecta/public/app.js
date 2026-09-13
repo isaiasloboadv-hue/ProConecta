@@ -157,6 +157,7 @@ const NAV = {
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
       ]},
       { key: 'aprovacao', label: 'Aprovação', page: 'aprovacoes-biblioteca' },
+      { key: 'solicitacoes-edicao', label: 'Solicitações de edição', page: 'solicitacoes-edicao-biblioteca' },
       { key: 'adicionar', label: 'Adicionar', children: [
         { key: 'adicionar-defeito', label: 'Defeitos/Falhas', page: 'add-defeito' },
         { key: 'adicionar-procedimento', label: 'Manual de Procedimentos', page: 'add-procedimento' },
@@ -240,6 +241,7 @@ async function ir(pagina) {
     if (pagina === 'add-procedimento') return renderFormProcedimento(main, null);
     if (pagina === 'meus-registros') return renderMeusRegistros();
     if (pagina === 'aprovacoes-biblioteca') return renderAprovacoesBiblioteca();
+    if (pagina === 'solicitacoes-edicao-biblioteca') return renderSolicitacoesEdicao();
     if (pagina === 'clientes') return renderClientes();
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
@@ -357,6 +359,8 @@ async function clicarNotificacao(registroId, tipo) {
     ir('agenda');
   } else if (tipo === 'relatorio_pendente') {
     ir('aprovacoes-visitas');
+  } else if (tipo === 'edicao_solicitada_biblioteca') {
+    ir('solicitacoes-edicao-biblioteca');
   } else {
     ir('aprovacoes-biblioteca');
   }
@@ -809,7 +813,7 @@ async function finalizarDiario(agendaId) {
   };
   try {
     await api('/api/visitas', { method: 'POST', body });
-    mostrarToast('Atividade finalizada e enviada para aprovação do administrador.');
+    mostrarModalSucesso('Atividade finalizada e enviada para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro: ' + e.message); }
 }
@@ -1225,7 +1229,7 @@ async function concluirRelatorio() {
     console.error('Falha ao gerar o PDF localmente:', e);
     avisoExtra = ' O relatório foi salvo, mas não foi possível gerar o PDF neste dispositivo.';
   }
-  mostrarToast('Relatório concluído e enviado para aprovação do administrador.' + avisoExtra);
+  mostrarModalSucesso('Relatório concluído e enviado para aprovação do administrador.' + avisoExtra);
   renderAgenda();
 }
 
@@ -1338,7 +1342,7 @@ async function concluirRelatorioSimples(exigirSerie) {
   }
   try {
     await api('/api/visitas', { method: 'POST', body: { agenda_id: relatorioAgendaAtual.id, relatorio_simples } });
-    mostrarToast('Atendimento concluído e enviado para aprovação do administrador.');
+    mostrarModalSucesso('Atendimento concluído e enviado para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro ao concluir: ' + e.message); }
 }
@@ -1597,7 +1601,7 @@ async function concluirLaudoTecnico() {
     return;
   }
   localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
-  mostrarToast('Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
+  mostrarModalSucesso('Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
   renderAgenda();
 }
 
@@ -2015,18 +2019,23 @@ function filtrarDefeitos() {
   };
   renderBibliotecaDefeitos(filtros, true);
 }
-function abrirDetalheDefeito(i) {
+function abrirDetalheDefeito(i, origem) {
   const r = (window._defeitosCache || [])[i];
   if (!r) return;
+  carregarLogoDataUri();
   const main = document.getElementById('main');
+  const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)';
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}${r.numero_serie ? ' · Nº série ' + esc(r.numero_serie) : ''}</p></div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="abrirPdfBiblioteca('defeito', ${i})">Abrir PDF</button>
-        <button class="btn-outline-sm" onclick="renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)">‹ Voltar</button>
+        ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="abrirEditarDefeito(${i}, '${origem || ''}')">Editar</button>` : ''}
+        ${USER.papel === 'tecnico' ? `<button class="btn-outline-sm" onclick="solicitarEdicaoBiblioteca('defeito', ${i})">Solicitar edição</button>` : ''}
+        <button class="btn-outline-sm" onclick="${voltar}">‹ Voltar</button>
       </div>
     </div>
+    ${USER.papel === 'administrador' && r.solicitacao_edicao ? `<div class="admin-note"><b>${esc(r.solicitacao_edicao.solicitante_nome)} pediu uma edição</b>${esc(r.solicitacao_edicao.comentario)}</div>` : ''}
     <div class="panel">
       <span class="tag tag-falha">Defeito</span>
       <div class="kv" style="margin-top:12px;"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
@@ -2035,6 +2044,77 @@ function abrirDetalheDefeito(i) {
       ${r.fotos && r.fotos.length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="item-step-photos">${r.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do defeito">`).join('')}</div>` : ''}
       <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
     </div>`;
+}
+
+function abrirEditarDefeito(i, origem) {
+  const r = (window._defeitosCache || [])[i];
+  if (!r) return;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Editar caso — Defeitos/Falhas</h1><p>Alteração direta: o caso continua publicado imediatamente após salvar.</p></div>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Título resumo</label><input id="fd-titulo" value="${esc(r.titulo)}"></div>
+        <div><label>Equipamento</label><input id="fd-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
+        <div><label>Modelo</label><input id="fd-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
+        <div><label>Número de série (opcional)</label><input id="fd-serie" value="${esc(r.numero_serie || '')}"></div>
+        <div class="full"><label>Defeito/sintoma encontrado</label><textarea id="fd-sintoma">${esc(r.sintoma)}</textarea></div>
+        <div class="full"><label>Causa identificada</label><textarea id="fd-causa">${esc(r.causa)}</textarea></div>
+        <div class="full"><label>Solução aplicada</label><textarea id="fd-solucao">${esc(r.solucao)}</textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarEdicaoDefeito(${r.id}, ${i}, '${origem || ''}')">Salvar alterações</button>
+      <button class="btn-outline-sm" onclick="abrirDetalheDefeito(${i}, '${origem || ''}')">Cancelar</button>
+    </div>`;
+}
+async function salvarEdicaoDefeito(id, i, origem) {
+  const body = {
+    titulo: document.getElementById('fd-titulo').value,
+    equipamento_tipo: document.getElementById('fd-equip-tipo').value,
+    equipamento_modelo: document.getElementById('fd-equip-modelo').value,
+    numero_serie: document.getElementById('fd-serie').value,
+    sintoma: document.getElementById('fd-sintoma').value,
+    causa: document.getElementById('fd-causa').value,
+    solucao: document.getElementById('fd-solucao').value,
+  };
+  try {
+    const { registro } = await api(`/api/registros/${id}`, { method: 'PUT', body });
+    mostrarToast('Alterações salvas.');
+    if (origem === 'solicitacoes') { renderSolicitacoesEdicao(); return; }
+    window._defeitosCache[i] = registro;
+    abrirDetalheDefeito(i, origem);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function solicitarEdicaoBiblioteca(tipo, i) {
+  const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
+  if (!r) return;
+  const comentario = prompt('O que precisa ser corrigido nesse caso da biblioteca? (obrigatório)');
+  if (!comentario || !comentario.trim()) return;
+  try {
+    await api(`/api/registros/${r.id}/solicitar-edicao`, { method: 'POST', body: { comentario } });
+    mostrarToast('Solicitação enviada — o administrador foi notificado.');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function renderSolicitacoesEdicao() {
+  const { registros } = await api('/api/registros/solicitacoes-edicao');
+  window._solicitacoesCache = registros;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Solicitações de edição</h1><p>Casos já publicados na biblioteca que um técnico pediu para corrigir</p></div>
+    ${registros.length ? registros.map((r, i) => `
+      <div class="item-card">
+        <span class="tag ${r.tipo === 'defeito' ? 'tag-falha' : 'tag-preventiva'}">${r.tipo === 'defeito' ? 'Defeito' : 'Procedimento'}</span>
+        <div class="item-title" style="margin-top:8px;">${esc(r.titulo)}</div>
+        <div class="item-meta">Solicitado por <b>${esc(r.solicitacao_edicao.solicitante_nome)}</b> · ${fmtData(r.solicitacao_edicao.criado_em)}</div>
+        <div class="kv" style="margin-top:6px;"><b>Comentário:</b> ${esc(r.solicitacao_edicao.comentario)}</div>
+        <button class="btn-outline-sm" style="margin-top:10px;" onclick="abrirDeSolicitacao(${i})">Abrir</button>
+      </div>`).join('') : `<div class="empty">Nenhuma solicitação de edição pendente.</div>`}`;
+}
+function abrirDeSolicitacao(i) {
+  const r = (window._solicitacoesCache || [])[i];
+  if (!r) return;
+  if (r.tipo === 'defeito') { window._defeitosCache = [r]; window._defeitosFiltros = {}; abrirDetalheDefeito(0, 'solicitacoes'); }
+  else { window._procedimentosCache = [r]; window._procedimentosFiltros = {}; abrirDetalheProcedimento(0, 'solicitacoes'); }
 }
 
 async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
@@ -2072,18 +2152,23 @@ function filtrarProcedimentos() {
   };
   renderBibliotecaProcedimentos(filtros, true);
 }
-function abrirDetalheProcedimento(i) {
+function abrirDetalheProcedimento(i, origem) {
   const r = (window._procedimentosCache || [])[i];
   if (!r) return;
+  carregarLogoDataUri();
   const main = document.getElementById('main');
+  const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)';
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}${r.periodicidade ? ' · Periodicidade: ' + esc(r.periodicidade) : ''}</p></div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="abrirPdfBiblioteca('procedimento', ${i})">Abrir PDF</button>
-        <button class="btn-outline-sm" onclick="renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)">‹ Voltar</button>
+        ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="abrirEditarProcedimento(${i}, '${origem || ''}')">Editar</button>` : ''}
+        ${USER.papel === 'tecnico' ? `<button class="btn-outline-sm" onclick="solicitarEdicaoBiblioteca('procedimento', ${i})">Solicitar edição</button>` : ''}
+        <button class="btn-outline-sm" onclick="${voltar}">‹ Voltar</button>
       </div>
     </div>
+    ${USER.papel === 'administrador' && r.solicitacao_edicao ? `<div class="admin-note"><b>${esc(r.solicitacao_edicao.solicitante_nome)} pediu uma edição</b>${esc(r.solicitacao_edicao.comentario)}</div>` : ''}
     <div class="panel">
       <span class="tag tag-preventiva">Procedimento</span>
       <div style="margin-top:12px;">
@@ -2100,123 +2185,258 @@ function abrirDetalheProcedimento(i) {
     </div>`;
 }
 
-function abrirPdfBiblioteca(tipo, i) {
+function abrirEditarProcedimento(i, origem) {
+  const r = (window._procedimentosCache || [])[i];
+  if (!r) return;
+  procDraft = r.passos && r.passos.length ? JSON.parse(JSON.stringify(r.passos)) : [{ texto: '', fotos: [] }];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Editar procedimento</h1><p>Alteração direta: o procedimento continua publicado imediatamente após salvar.</p></div>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Título do procedimento</label><input id="fp-titulo" value="${esc(r.titulo)}"></div>
+        <div><label>Equipamento</label><input id="fp-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
+        <div><label>Modelo</label><input id="fp-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
+        <div><label>Periodicidade</label>
+          <select id="fp-periodicidade">
+            ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${r.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        <div class="full"><label>Precauções/EPIs</label><textarea id="fp-precaucoes">${esc(r.precaucoes || '')}</textarea></div>
+        <div class="full"><label>Ferramentas necessárias</label><textarea id="fp-ferramentas">${esc(r.ferramentas || '')}</textarea></div>
+      </div>
+      <label>Passo a passo</label>
+      <div class="steps-list" id="steps-list"></div>
+      <button class="btn btn-ghost btn-sm" style="margin-bottom:18px;" onclick="adicionarPasso()">+ Adicionar passo</button>
+      <br>
+      <button class="btn btn-primary btn-sm" onclick="salvarEdicaoProcedimento(${r.id}, ${i}, '${origem || ''}')">Salvar alterações</button>
+      <button class="btn-outline-sm" onclick="abrirDetalheProcedimento(${i}, '${origem || ''}')">Cancelar</button>
+    </div>`;
+  renderPassosDraft();
+}
+async function salvarEdicaoProcedimento(id, i, origem) {
+  const body = {
+    titulo: document.getElementById('fp-titulo').value,
+    equipamento_tipo: document.getElementById('fp-equip-tipo').value,
+    equipamento_modelo: document.getElementById('fp-equip-modelo').value,
+    periodicidade: document.getElementById('fp-periodicidade').value,
+    precaucoes: document.getElementById('fp-precaucoes').value,
+    ferramentas: document.getElementById('fp-ferramentas').value,
+    passos: procDraft,
+  };
+  try {
+    const { registro } = await api(`/api/registros/${id}`, { method: 'PUT', body });
+    mostrarToast('Alterações salvas.');
+    if (origem === 'solicitacoes') { renderSolicitacoesEdicao(); return; }
+    window._procedimentosCache[i] = registro;
+    abrirDetalheProcedimento(i, origem);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// paleta da marca Pro Conecta (mesmas cores de style.css), em RGB pra uso no jsPDF
+const PDF_COR = {
+  navy: [10, 38, 71], navyDeep: [7, 26, 51], blue: [20, 103, 214], blueBright: [46, 134, 255],
+  bluePale: [234, 242, 252], ink: [16, 24, 38], inkSoft: [74, 85, 104], line: [220, 228, 239],
+  green: [23, 114, 69], greenBg: [225, 243, 233], red: [179, 38, 30], redBg: [250, 227, 225], white: [255, 255, 255],
+};
+
+let _logoDataUriPromise = null;
+function carregarLogoDataUri() {
+  if (!_logoDataUriPromise) {
+    _logoDataUriPromise = fetch('/logo.png')
+      .then((resp) => resp.blob())
+      .then((blob) => new Promise((resolve, reject) => {
+        const leitor = new FileReader();
+        leitor.onload = () => resolve(leitor.result);
+        leitor.onerror = reject;
+        leitor.readAsDataURL(blob);
+      }))
+      .catch(() => null);
+  }
+  return _logoDataUriPromise;
+}
+
+async function abrirPdfBiblioteca(tipo, i) {
   const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
   if (!r) return;
   try {
-    const url = gerarPdfBiblioteca(r, tipo);
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfBiblioteca(r, tipo, logo);
     window.open(url, '_blank');
   } catch (e) {
     alert('Erro ao gerar o PDF: ' + e.message);
   }
 }
 
-// PDF em duas colunas (ficha técnica ilustrada, no estilo de um manual de procedimento impresso):
-// coluna esquerda com foto de destaque/ferramentas/periodicidade, coluna direita com o conteúdo.
-function gerarPdfBiblioteca(r, tipo) {
+// PDF em duas colunas (ficha técnica ilustrada), com a identidade visual do Pro Conecta:
+// faixa de cabeçalho com logo + nome, coluna esquerda tintada com foto de destaque/ferramentas/
+// periodicidade/última atualização, coluna direita com o conteúdo completo.
+function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margem = 30;
   const colEsqLargura = 150;
-  const colDirX = margem + colEsqLargura + 20;
+  const colDirX = margem + colEsqLargura + 24;
   const colDirLargura = pageW - colDirX - margem;
-
-  doc.setDrawColor(20, 103, 214);
-  doc.setLineWidth(1.2);
-  doc.rect(margem, margem, pageW - margem * 2, pageH - margem * 2);
-  doc.setDrawColor(210, 214, 222);
-  doc.setLineWidth(0.6);
-  doc.line(margem + colEsqLargura + 10, margem + 10, margem + colEsqLargura + 10, pageH - margem - 10);
+  const corTipo = tipo === 'procedimento' ? PDF_COR.green : PDF_COR.red;
+  const corTipoBg = tipo === 'procedimento' ? PDF_COR.greenBg : PDF_COR.redBg;
 
   function foto(f) {
     if (!f) return null;
     const m = /^data:image\/(\w+);/.exec(f);
     return m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
   }
+  function cor(c) { return c; }
 
-  // ----- coluna esquerda -----
-  let ye = margem + 24;
-  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-  doc.text('PRO CONECTA', margem + 14, ye); ye += 16;
-  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
-  const eqLinhas = doc.splitTextToSize(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colEsqLargura - 20);
-  doc.text(eqLinhas, margem + 14, ye); ye += eqLinhas.length * 11 + 10;
+  // ----- moldura + faixa de cabeçalho (navy, com o logo e o nome Pro Conecta) -----
+  doc.setFillColor(...PDF_COR.bluePale);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  const alturaFaixa = 56;
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, alturaFaixa, 'F');
+  if (logoDataUri) {
+    try { doc.addImage(logoDataUri, 'PNG', margem, 11, 32, 37); } catch (e) {}
+  }
+  const xNome = logoDataUri ? margem + 42 : margem;
+  doc.setFontSize(17); doc.setFont(undefined, 'bold');
+  doc.setTextColor(...PDF_COR.blueBright); doc.text('Pro', xNome, 30);
+  const wPro = doc.getTextWidth('Pro ');
+  doc.setTextColor(...PDF_COR.white); doc.text('Conecta', xNome + wPro, 30);
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text('Biblioteca técnica', xNome, 44);
+
+  const tagTexto = tipo === 'procedimento' ? 'PROCEDIMENTO' : 'DEFEITO/FALHA';
+  doc.setFontSize(9); doc.setFont(undefined, 'bold');
+  const wTag = doc.getTextWidth(tagTexto) + 18;
+  doc.setFillColor(...corTipo);
+  doc.roundedRect(pageW - margem - wTag, 18, wTag, 20, 4, 4, 'F');
+  doc.setTextColor(...PDF_COR.white);
+  doc.text(tagTexto, pageW - margem - wTag / 2, 31, { align: 'center' });
+
+  const topoConteudo = alturaFaixa + 22;
+
+  // ----- coluna esquerda (painel tintado) -----
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(margem, topoConteudo, colEsqLargura, pageH - topoConteudo - margem, 8, 8, 'F');
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+  doc.roundedRect(margem, topoConteudo, colEsqLargura, pageH - topoConteudo - margem, 8, 8, 'S');
+  doc.setFillColor(...PDF_COR.blue);
+  doc.rect(margem, topoConteudo, colEsqLargura, 4, 'F');
+
+  let ye = topoConteudo + 22;
+  function rotuloEsq(t) {
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem + 14, ye); ye += 12;
+  }
+  function valorEsq(t) {
+    doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    const linhas = doc.splitTextToSize(String(t || '—'), colEsqLargura - 26);
+    doc.text(linhas, margem + 14, ye); ye += linhas.length * 11 + 12;
+  }
+
+  rotuloEsq('EQUIPAMENTO');
+  valorEsq(`${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`);
 
   const primeiraFoto = tipo === 'procedimento' ? ((r.passos || []).find((p) => p.fotos && p.fotos.length) || {}).fotos?.[0] : (r.fotos || [])[0];
   if (primeiraFoto) {
-    try { doc.addImage(primeiraFoto, foto(primeiraFoto), margem + 14, ye, colEsqLargura - 28, 90); ye += 100; } catch (e) {}
+    try {
+      doc.setDrawColor(...PDF_COR.line);
+      doc.roundedRect(margem + 14, ye, colEsqLargura - 28, 90, 4, 4, 'S');
+      doc.addImage(primeiraFoto, foto(primeiraFoto), margem + 15, ye + 1, colEsqLargura - 30, 88);
+      ye += 100;
+    } catch (e) {}
   }
 
   if (tipo === 'procedimento') {
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-    doc.text('Periodicidade:', margem + 14, ye); ye += 12;
-    doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
-    doc.text(r.periodicidade || '—', margem + 14, ye); ye += 18;
+    rotuloEsq('PERIODICIDADE');
+    valorEsq(r.periodicidade);
     if (r.ferramentas) {
-      doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-      doc.text('Ferramentas:', margem + 14, ye); ye += 12;
-      doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+      rotuloEsq('FERRAMENTAS');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       r.ferramentas.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).forEach((fnome) => {
-        const linhas = doc.splitTextToSize('✓ ' + fnome, colEsqLargura - 20);
+        const linhas = doc.splitTextToSize('✓ ' + fnome, colEsqLargura - 26);
         doc.text(linhas, margem + 14, ye); ye += linhas.length * 11;
       });
+      ye += 10;
     }
   } else {
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-    doc.text('Nº de série:', margem + 14, ye); ye += 12;
-    doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
-    doc.text(r.numero_serie || '—', margem + 14, ye); ye += 18;
+    rotuloEsq('Nº DE SÉRIE');
+    valorEsq(r.numero_serie);
   }
 
-  doc.setFontSize(7); doc.setTextColor(150, 160, 175);
+  // ----- rodapé da coluna esquerda: última atualização + marca -----
+  const yUpdate = pageH - margem - 58;
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+  doc.line(margem + 14, yUpdate - 10, margem + colEsqLargura - 14, yUpdate - 10);
+  doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('ÚLTIMA ATUALIZAÇÃO', margem + 14, yUpdate);
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  const dataAtt = fmtData(r.atualizado_em || r.criado_em);
+  const quemAtt = r.atualizado_por_nome || r.autor_nome || '—';
+  const linhasAtt = doc.splitTextToSize(`${dataAtt} · ${quemAtt}`, colEsqLargura - 26);
+  doc.text(linhasAtt, margem + 14, yUpdate + 12);
+
+  doc.setFontSize(7); doc.setTextColor(...PDF_COR.inkSoft);
   doc.text('PRO Marking', margem + 14, pageH - margem - 16);
   doc.text('promarking.com.br', margem + 14, pageH - margem - 6);
 
   // ----- coluna direita -----
-  let y2 = margem + 24;
-  doc.setFontSize(15); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+  let y2 = topoConteudo + 8;
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   const tituloLinhas = doc.splitTextToSize(r.titulo || '—', colDirLargura);
-  doc.text(tituloLinhas, colDirX, y2); y2 += tituloLinhas.length * 18 + 4;
+  doc.text(tituloLinhas, colDirX, y2); y2 += tituloLinhas.length * 19 + 4;
 
-  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
-  doc.text(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colDirX, y2); y2 += 16;
-  doc.setDrawColor(20, 103, 214); doc.line(colDirX, y2, colDirX + colDirLargura, y2); y2 += 16;
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colDirX, y2); y2 += 14;
+  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.4); doc.line(colDirX, y2, colDirX + colDirLargura, y2); y2 += 18;
 
   function tituloSecao(t) {
-    if (y2 > pageH - margem - 40) { doc.addPage(); y2 = margem + 20; }
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-    doc.text(t, colDirX, y2); y2 += 14;
+    if (y2 > pageH - margem - 40) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; }
+    doc.setFillColor(...PDF_COR.blue);
+    doc.rect(colDirX, y2 - 9, 4, 12, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, colDirX + 10, y2); y2 += 15;
   }
   function paragrafo(texto) {
     if (!texto) return;
-    if (y2 > pageH - margem - 40) { doc.addPage(); y2 = margem + 20; }
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
+    if (y2 > pageH - margem - 40) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; }
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     const linhas = doc.splitTextToSize(texto, colDirLargura);
     doc.text(linhas, colDirX, y2); y2 += linhas.length * 12 + 10;
+  }
+  function pintarFundoPagina() {
+    doc.setFillColor(...PDF_COR.bluePale);
+    doc.rect(0, 0, pageW, pageH, 'F');
   }
 
   if (tipo === 'procedimento') {
     if (r.precaucoes) { tituloSecao('Precaução'); paragrafo(r.precaucoes); }
     tituloSecao('Passo a passo');
     (r.passos || []).forEach((p, i) => {
-      if (y2 > pageH - margem - 60) { doc.addPage(); y2 = margem + 20; }
-      doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(16, 24, 38);
-      doc.text(`${i + 1}.`, colDirX, y2);
-      doc.setFont(undefined, 'normal');
-      const linhas = doc.splitTextToSize(p.texto || '', colDirLargura - 16);
-      doc.text(linhas, colDirX + 16, y2); y2 += linhas.length * 12 + 4;
+      if (y2 > pageH - margem - 60) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; }
+      doc.setFillColor(...PDF_COR.blue);
+      doc.circle(colDirX + 6, y2 - 3, 7, 'F');
+      doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+      doc.text(String(i + 1), colDirX + 6, y2, { align: 'center' });
+      doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+      const linhas = doc.splitTextToSize(p.texto || '', colDirLargura - 20);
+      doc.text(linhas, colDirX + 18, y2); y2 += linhas.length * 12 + 4;
       if (p.fotos && p.fotos.length) {
-        const wImg = 90, hImg = 68; let x = colDirX + 16;
+        const wImg = 90, hImg = 68; let x = colDirX + 18;
         p.fotos.forEach((f) => {
-          if (x + wImg > colDirX + colDirLargura) { x = colDirX + 16; y2 += hImg + 8; }
-          if (y2 + hImg > pageH - margem - 20) { doc.addPage(); y2 = margem + 20; x = colDirX + 16; }
-          try { doc.addImage(f, foto(f), x, y2, wImg, hImg); } catch (e) {}
+          if (x + wImg > colDirX + colDirLargura) { x = colDirX + 18; y2 += hImg + 8; }
+          if (y2 + hImg > pageH - margem - 20) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; x = colDirX + 18; }
+          try {
+            doc.setDrawColor(...PDF_COR.line);
+            doc.roundedRect(x - 1, y2 - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+            doc.addImage(f, foto(f), x, y2, wImg, hImg);
+          } catch (e) {}
           x += wImg + 10;
         });
         y2 += hImg + 14;
-      } else y2 += 6;
+      } else y2 += 8;
     });
   } else {
     tituloSecao('Sintoma'); paragrafo(r.sintoma);
@@ -2227,15 +2447,19 @@ function gerarPdfBiblioteca(r, tipo) {
       const wImg = 150, hImg = 110; let x = colDirX;
       r.fotos.forEach((f) => {
         if (x + wImg > colDirX + colDirLargura) { x = colDirX; y2 += hImg + 10; }
-        if (y2 + hImg > pageH - margem - 20) { doc.addPage(); y2 = margem + 20; x = colDirX; }
-        try { doc.addImage(f, foto(f), x, y2, wImg, hImg); } catch (e) {}
+        if (y2 + hImg > pageH - margem - 20) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; x = colDirX; }
+        try {
+          doc.setDrawColor(...PDF_COR.line);
+          doc.roundedRect(x - 1, y2 - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+          doc.addImage(f, foto(f), x, y2, wImg, hImg);
+        } catch (e) {}
         x += wImg + 12;
       });
       y2 += hImg + 14;
     }
   }
 
-  doc.setFontSize(8); doc.setTextColor(150, 160, 175);
+  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
   doc.text(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`, colDirX, pageH - margem - 10);
 
   return doc.output('bloburl');
@@ -2969,6 +3193,25 @@ async function abrirChamado() {
 }
 
 // ---------- toast ----------
+function mostrarModalSucesso(mensagem) {
+  let modal = document.getElementById('modal-sucesso');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-sucesso';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:360px; text-align:center;">
+      <div class="modal-sucesso-icone">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h3 style="margin-top:16px;">${esc(mensagem)}</h3>
+      <button class="btn btn-primary" style="width:100%; margin-top:18px;" onclick="document.getElementById('modal-sucesso').classList.remove('show')">Ok</button>
+    </div>`;
+}
+
 function mostrarToast(texto) {
   const toast = document.getElementById('toast');
   toast.textContent = texto;

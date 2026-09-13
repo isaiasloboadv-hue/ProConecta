@@ -96,6 +96,7 @@ header{
 .modal-card p{margin:0 0 16px;font-size:13px;color:var(--ink-soft);line-height:1.55;}
 .modal-link{background:var(--blue-pale-2);border:1px dashed #B7C6DC;border-radius:9px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--blue);word-break:break-all;margin-bottom:16px;}
 .modal-actions{display:flex;gap:10px;flex-wrap:wrap;}
+.modal-sucesso-icone{width:60px;height:60px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;margin:0 auto;}
 
 /* ---------- LAYOUT ---------- */
 .shell{display:flex;min-height:calc(100vh - 68px);}
