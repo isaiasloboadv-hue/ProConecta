@@ -768,7 +768,7 @@ function faseAtualOS(a) {
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
   if (visita) return { label: 'Relatório em análise', cor: 'orange' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
-  if (!a.confirmado_cliente_em) return { label: 'Aguardando confirmação', cor: 'purple' };
+  if (!a.confirmado_cliente_em) return { label: 'Confirmação cliente', cor: 'purple' };
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
   if (diaAtendimento > hojeISO) return { label: 'Aguardando serviço', cor: 'navy' };
