@@ -254,13 +254,16 @@ rota('POST', /^\/api\/convite\/([a-f0-9]+)\/ativar$/, async (req, res, m) => {
   enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
 });
 
-// GET /api/agenda
+// GET /api/agenda?todas=1 — o técnico normalmente só vê a própria agenda ("Minha agenda"); o
+// parâmetro "todas" libera pra ele ver as O.S. de todos os técnicos (usado no menu Calendário),
+// só pra consulta — quem pode executar continua sendo decidido no front pelo tecnico_id.
 rota('GET', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = data.agenda;
-  if (user.papel === 'tecnico') {
+  if (user.papel === 'tecnico' && query.todas !== '1') {
     lista = lista.filter((a) => a.tecnico_id === user.id);
   } else if (user.papel === 'cliente') {
     lista = lista.filter((a) => a.cliente_id === user.cliente_id);
@@ -587,7 +590,7 @@ rota('GET', /^\/api\/visitas$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = data.visitas;
-  if (user.papel === 'tecnico') lista = lista.filter((v) => v.tecnico_id === user.id);
+  if (user.papel === 'tecnico' && query.todas !== '1') lista = lista.filter((v) => v.tecnico_id === user.id);
   if (query.status) lista = lista.filter((v) => v.status_aprovacao === query.status);
   lista = lista.map((v) => {
     const eq = data.equipamentos.find((e) => e.id === v.equipamento_id);

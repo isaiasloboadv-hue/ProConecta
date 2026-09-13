@@ -254,6 +254,7 @@ const NAV = {
   tecnico: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
     { key: 'relatorio-manutencao', label: 'Criar Relatório', page: 'relatorio-manutencao' },
+    { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -372,6 +373,7 @@ async function ir(pagina) {
   try {
     if (pagina === 'agenda') return renderAgenda();
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
+    if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
     if (pagina === 'biblioteca-procedimentos') return renderBibliotecaProcedimentos();
@@ -3354,6 +3356,162 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   });
 
   return doc.output('bloburl');
+}
+
+// ---------- CALENDÁRIO (técnico): vê todas as O.S. de todos os técnicos, igual o administrador
+// vê na Agenda geral — pode abrir e visualizar qualquer uma, mas só consegue executar (preencher
+// relatório) as que estiverem designadas a ele mesmo. Reaproveita as funções de visualização já
+// existentes (osCardCorpo, detalheCompletoOS, o estado do calendário) sem alterar nada do que já
+// existe pro administrador — as ações de administrador (aprovar/reprovar/editar/excluir O.S.)
+// não aparecem aqui.
+
+async function renderCalendarioTecnico() {
+  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda?todas=1'), api('/api/visitas?todas=1')]);
+  window._agendaCache = agenda;
+  window._visitasPorAgenda = {};
+  visitas.forEach((v) => { window._visitasPorAgenda[v.agenda_id] = v; });
+  renderAgendaCalendarioTecnico();
+}
+
+function renderAgendaCalendarioTecnico() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Calendário</h1><p>${(window._agendaCache || []).length} O.S. de todos os técnicos — você pode abrir e visualizar qualquer uma, mas só executa as que estiverem designadas a você</p></div>
+    <div class="panel">
+      <div class="cal-head">
+        <div class="cal-nav">
+          <button onclick="mudarMesCalendarioTecnico(-1)">‹</button>
+          <div class="cal-mes-label" id="cal-mes-label"></div>
+          <button onclick="mudarMesCalendarioTecnico(1)">›</button>
+        </div>
+        <button class="btn-outline-sm" onclick="irParaHojeCalendarioTecnico()">Hoje</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+  `;
+  desenharGradeCalendarioTecnico();
+}
+
+function mudarMesCalendarioTecnico(delta) {
+  calMes += delta;
+  if (calMes < 0) { calMes = 11; calAno--; }
+  if (calMes > 11) { calMes = 0; calAno++; }
+  desenharGradeCalendarioTecnico();
+}
+
+function irParaHojeCalendarioTecnico() {
+  const hoje = new Date();
+  calAno = hoje.getFullYear();
+  calMes = hoje.getMonth();
+  calDiaSelecionado = dataISOLocal(hoje);
+  desenharGradeCalendarioTecnico();
+}
+
+function desenharGradeCalendarioTecnico() {
+  const label = document.getElementById('cal-mes-label');
+  if (label) label.textContent = `${MES_LABEL[calMes]} de ${calAno}`;
+  const grid = document.getElementById('cal-grid');
+  if (!grid) return;
+  const agenda = window._agendaCache || [];
+  const contagemPorDia = {};
+  agenda.forEach((a) => {
+    const dia = (a.data_hora_inicio || '').slice(0, 10);
+    if (!dia) return;
+    contagemPorDia[dia] = (contagemPorDia[dia] || 0) + 1;
+  });
+
+  const inicioSemana = new Date(calAno, calMes, 1).getDay();
+  const diasNoMes = new Date(calAno, calMes + 1, 0).getDate();
+  const hojeISO = dataISOLocal(new Date());
+
+  const celulas = [];
+  for (let i = 0; i < inicioSemana; i++) celulas.push(new Date(calAno, calMes, 1 - (inicioSemana - i)));
+  for (let dia = 1; dia <= diasNoMes; dia++) celulas.push(new Date(calAno, calMes, dia));
+  while (celulas.length % 7 !== 0) {
+    const ultima = celulas[celulas.length - 1];
+    celulas.push(new Date(ultima.getFullYear(), ultima.getMonth(), ultima.getDate() + 1));
+  }
+
+  grid.innerHTML = DOW_LABEL.map((d) => `<div class="cal-dow">${d}</div>`).join('') +
+    celulas.map((data) => {
+      const iso = dataISOLocal(data);
+      const qtd = contagemPorDia[iso] || 0;
+      const classes = ['cal-day'];
+      if (data.getMonth() !== calMes) classes.push('fora-mes');
+      if (iso === hojeISO) classes.push('hoje');
+      if (iso === calDiaSelecionado) classes.push('selecionado');
+      return `<div class="${classes.join(' ')}" onclick="selecionarDiaCalendarioTecnico('${iso}')">
+        <div class="cal-day-num">${data.getDate()}</div>
+        ${qtd ? `<div class="cal-day-badge">${qtd}</div>` : ''}
+      </div>`;
+    }).join('');
+}
+
+function selecionarDiaCalendarioTecnico(iso) {
+  calDiaSelecionado = iso;
+  renderDiaCalendarioTecnico(iso);
+}
+
+function renderDiaCalendarioTecnico(iso) {
+  const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
+    .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  const [y, m, d] = iso.split('-');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
+      <button class="btn-outline-sm" onclick="renderAgendaCalendarioTecnico()">‹ Voltar ao calendário</button>
+    </div>
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSCalendarioTecnico(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+  `;
+}
+
+function cardOSCalendarioTecnico(a) {
+  return `
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSCalendarioTecnico(${a.id})" style="cursor:pointer;">
+      ${osCardCorpo(a)}
+      <div class="os-card-actions" onclick="event.stopPropagation()">
+        <button class="os-card-toggle" onclick="abrirDetalheOSCalendarioTecnico(${a.id})">Abrir</button>
+      </div>
+    </div>`;
+}
+
+// tela separada com o detalhe completo de uma O.S. — mesma visualização do administrador
+// (detalheCompletoOS), mas com as ações limitadas ao que o técnico logado pode de fato fazer.
+function abrirDetalheOSCalendarioTecnico(id) {
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const visita = (window._visitasPorAgenda || {})[id];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="renderDiaCalendarioTecnico('${calDiaSelecionado}')">‹ Voltar para o dia</button>
+    </div>
+    <div class="panel">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOSCalendarioTecnico(a, visita)}</div>
+      ${detalheCompletoOS(a, visita)}
+    </div>`;
+}
+
+// só a O.S. designada ao técnico logado ganha um botão de ação (executar / solicitar
+// reabertura) — as demais ficam só pra consulta, sem nenhuma ação de administrador.
+function acoesOSCalendarioTecnico(a, visita) {
+  if (a.finalizada) {
+    return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço.</span>`;
+  }
+  if (a.tecnico_id !== USER.id) {
+    return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
+  }
+  if (a.status !== 'concluida') {
+    return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>`;
+  }
+  if (a.visita_id && a.visita_status === 'aprovado') {
+    return a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
+      ? `<span class="tag tag-amber">Reabertura solicitada</span>`
+      : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`;
+  }
+  return `<span style="font-size:11.5px; color:var(--ink-soft);">Em análise — aguardando aprovação do administrador.</span>`;
 }
 
 // ---------- RANKING DE TÉCNICOS ----------
