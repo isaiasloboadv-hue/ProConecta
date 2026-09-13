@@ -763,15 +763,15 @@ function diasEntre(isoInicio, isoFim) {
 // no topo do card, pra dar pra ver o andamento de todos os cards sem abrir um por um
 function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
-  if (a.finalizada) return { label: 'Finalizada — cliente confirmou', cor: 'green' };
-  if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando confirmação do cliente', cor: 'teal' };
-  if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado — aguardando correção', cor: 'red' };
-  if (visita) return { label: 'Relatório enviado — em análise', cor: 'orange' };
+  if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
+  if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando confirmação', cor: 'teal' };
+  if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
+  if (visita) return { label: 'Relatório em análise', cor: 'orange' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
-  if (diaAtendimento > hojeISO) return { label: 'Aguardando dia do serviço', cor: 'navy' };
-  return { label: 'Aguardando início do deslocamento', cor: 'amber' };
+  if (diaAtendimento > hojeISO) return { label: 'Aguardando serviço', cor: 'navy' };
+  return { label: 'Aguardando deslocamento', cor: 'amber' };
 }
 
 function osCardCorpo(a) {
