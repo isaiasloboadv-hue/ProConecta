@@ -163,6 +163,7 @@ const NAV = {
       ]},
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
+    { key: 'clientes', label: 'Clientes', page: 'clientes' },
     { key: 'equipamentos', label: 'Equipamentos', page: 'equipamentos' },
     { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
   ],
@@ -236,6 +237,7 @@ async function ir(pagina) {
     if (pagina === 'add-procedimento') return renderFormProcedimento(main, null);
     if (pagina === 'meus-registros') return renderMeusRegistros();
     if (pagina === 'aprovacoes-biblioteca') return renderAprovacoesBiblioteca();
+    if (pagina === 'clientes') return renderClientes();
     if (pagina === 'equipamentos') return renderEquipamentos();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
@@ -2134,12 +2136,84 @@ async function confirmarSugestao(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
-// ---------- EQUIPAMENTOS ----------
-async function renderEquipamentos() {
-  const { equipamentos } = await api('/api/equipamentos');
+// ---------- CLIENTES ----------
+async function renderClientes() {
+  const { clientes } = await api('/api/clientes');
+  window._clientesCache = clientes;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Equipamentos</h1><p>${equipamentos.length} cadastrado(s)</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Clientes</h1><p>${clientes.length} cadastrado(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormCliente()">+ Novo cliente</button>
+    </div>
+    <div id="form-cliente"></div>
+    <div class="panel"><table>
+      <tr><th>Empresa</th><th>Contato</th><th>Telefone</th><th>E-mail</th><th>Cidade/UF</th></tr>
+      ${clientes.length ? clientes.map((c) => `
+        <tr>
+          <td>${esc(c.nome_empresa)}</td>
+          <td>${esc(c.contato || '—')}</td>
+          <td>${esc(c.telefone || '—')}</td>
+          <td>${esc(c.email || '—')}</td>
+          <td>${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
+        </tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhum cliente cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+
+function mostrarFormCliente() {
+  document.getElementById('form-cliente').innerHTML = `
+    <div class="panel"><div class="panel-head">Novo cliente</div>
+      <div class="form-grid">
+        <div class="full"><label>Nome da empresa*</label><input id="nc-nome"></div>
+        <div><label>Contato</label><input id="nc-contato" placeholder="Nome do funcionário responsável"></div>
+        <div><label>Telefone</label><input id="nc-telefone"></div>
+        <div><label>E-mail</label><input id="nc-email"></div>
+        <div><label>Setor</label><input id="nc-setor"></div>
+        <div class="full"><label>Endereço</label><input id="nc-endereco"></div>
+        <div><label>Número</label><input id="nc-numero"></div>
+        <div><label>Bairro</label><input id="nc-bairro"></div>
+        <div><label>CEP</label><input id="nc-cep"></div>
+        <div><label>Cidade</label><input id="nc-cidade"></div>
+        <div><label>Estado</label><select id="nc-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}">${uf}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarCliente()">Salvar cliente</button>
+    </div>`;
+}
+
+async function salvarCliente() {
+  const nome = document.getElementById('nc-nome').value.trim();
+  if (!nome) return alert('Informe o nome da empresa.');
+  const body = {
+    nome_empresa: nome,
+    contato: document.getElementById('nc-contato').value,
+    telefone: document.getElementById('nc-telefone').value,
+    email: document.getElementById('nc-email').value,
+    setor: document.getElementById('nc-setor').value,
+    endereco: document.getElementById('nc-endereco').value,
+    numero: document.getElementById('nc-numero').value,
+    bairro: document.getElementById('nc-bairro').value,
+    cep: document.getElementById('nc-cep').value,
+    cidade: document.getElementById('nc-cidade').value,
+    estado: document.getElementById('nc-estado').value,
+  };
+  try {
+    await api('/api/clientes', { method: 'POST', body });
+    mostrarToast('Cliente cadastrado.');
+    renderClientes();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+// ---------- EQUIPAMENTOS ----------
+async function renderEquipamentos() {
+  const [{ equipamentos }, { clientes }] = await Promise.all([api('/api/equipamentos'), api('/api/clientes')]);
+  window._clientesCache = clientes;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Equipamentos</h1><p>${equipamentos.length} cadastrado(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormEquipamento()">+ Novo equipamento</button>
+    </div>
+    <div id="form-equipamento"></div>
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Localização</th><th></th></tr>
       ${equipamentos.map((e) => `
@@ -2156,6 +2230,39 @@ async function verHistorico(id) {
       <tr><th>Data</th><th>Tipo</th><th>Status</th></tr>
       ${agenda.length ? agenda.map((a) => `<tr><td>${fmtData(a.data_hora_inicio)}</td><td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td>${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
     </table></div>`;
+}
+
+function mostrarFormEquipamento() {
+  const clientes = window._clientesCache || [];
+  document.getElementById('form-equipamento').innerHTML = `
+    <div class="panel"><div class="panel-head">Novo equipamento</div>
+      <div class="form-grid">
+        <div class="full"><label>Empresa (cliente)*</label>${campoClienteHTML('ne-cliente', clientes)}</div>
+        <div><label>Tipo*</label><input id="ne-tipo" placeholder="ex: Máquina de Gelo"></div>
+        <div><label>Modelo*</label><input id="ne-modelo"></div>
+        <div><label>Nº de série*</label><input id="ne-numero-serie"></div>
+        <div><label>Localização</label><input id="ne-localizacao" placeholder="ex: Cozinha"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarEquipamento()">Salvar equipamento</button>
+    </div>`;
+}
+
+async function salvarEquipamento() {
+  const clienteId = document.getElementById('ne-cliente').value;
+  if (!clienteId) return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista. Se o cliente ainda não existe, cadastre-o primeiro em Clientes.');
+  const tipo = document.getElementById('ne-tipo').value.trim();
+  const modelo = document.getElementById('ne-modelo').value.trim();
+  const numeroSerie = document.getElementById('ne-numero-serie').value.trim();
+  if (!tipo || !modelo || !numeroSerie) return alert('Preencha tipo, modelo e número de série.');
+  const body = {
+    cliente_id: clienteId, tipo, modelo, numero_serie: numeroSerie,
+    localizacao: document.getElementById('ne-localizacao').value,
+  };
+  try {
+    await api('/api/equipamentos', { method: 'POST', body });
+    mostrarToast('Equipamento cadastrado.');
+    renderEquipamentos();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 // ---------- USUÁRIOS (cadastro por convite) ----------

@@ -46,7 +46,8 @@ Contas de teste (senha para todas: `123456`):
 - **Abertura de chamado**: cliente escolhe tipo de serviço, equipamento e descreve o problema; fica com status "Aberto" e aparece na lista dos próprios chamados.
 - **Notificações (sino no cabeçalho)**: técnico é avisado quando o administrador sugere alteração num dos seus registros; administrador vê quantos itens aguardam aprovação. Clicar num item leva direto para a tela correspondente.
 - **Menu em cascata** na lateral, com os caminhos certos abrindo automaticamente (ex.: ao clicar numa notificação).
-- **Equipamentos**: cadastro e histórico (agenda + visitas) por equipamento
+- **Clientes**: tela de cadastro de novas empresas-cliente (nome, contato, telefone, e-mail, setor, endereço) — sem ela não havia como abrir uma O.S. pra um cliente novo, já que o campo "Empresa" na Nova OS e no cadastro de usuário exige digitar o nome de um cliente já cadastrado.
+- **Equipamentos**: cadastro (empresa, tipo, modelo, nº de série, localização) e histórico (agenda + visitas) por equipamento
 - **Usuários**: administrador cadastra novos técnicos/perfis
 
 Tudo isso é validado no servidor, não só na tela — se você abrir o DevTools do

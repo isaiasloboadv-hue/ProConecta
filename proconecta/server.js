@@ -807,6 +807,35 @@ rota('GET', /^\/api\/clientes$/, async (req, res) => {
   enviarJSON(res, 200, { clientes: data.clientes });
 });
 
+// POST /api/clientes — administrador cadastra uma nova empresa-cliente
+rota('POST', /^\/api\/clientes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra clientes.' });
+  const body = await lerCorpo(req);
+  if (!body.nome_empresa || !String(body.nome_empresa).trim()) {
+    return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  }
+  const data = db.load();
+  const item = {
+    id: nextId(data, 'clientes'),
+    nome_empresa: body.nome_empresa.trim(),
+    contato: body.contato || '',
+    telefone: body.telefone || '',
+    email: body.email || '',
+    nivel_acesso: 'completo',
+    setor: body.setor || '',
+    endereco: body.endereco || '',
+    numero: body.numero || '',
+    bairro: body.bairro || '',
+    cep: body.cep || '',
+    cidade: body.cidade || '',
+    estado: body.estado || '',
+  };
+  data.clientes.push(item);
+  db.save(data);
+  enviarJSON(res, 201, { cliente: item });
+});
+
 // GET /api/equipamentos
 rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
