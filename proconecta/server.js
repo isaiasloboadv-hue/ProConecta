@@ -267,6 +267,15 @@ rota('GET', /^\/api\/agenda$/, async (req, res) => {
   enviarJSON(res, 200, { agenda: lista });
 });
 
+// GET /api/agenda/proximo-numero — sugestão de nº de O.S. pro formulário de criação
+// (o administrador pode aceitar ou digitar outro número antes de salvar)
+rota('GET', /^\/api\/agenda\/proximo-numero$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cria ordens de serviço.' });
+  const data = db.load();
+  enviarJSON(res, 200, { numero: `OS-${String(data._seq.agenda).padStart(6, '0')}` });
+});
+
 // POST /api/agenda  (administrador cria atividade)
 rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -288,8 +297,14 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
+  const numeroOSDigitado = String(body.numero_os || '').trim();
+  if (numeroOSDigitado && data.agenda.some((a) => (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado)) {
+    return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
+  }
+  const novoId = nextId(data, 'agenda');
   const item = {
-    id: nextId(data, 'agenda'),
+    id: novoId,
+    numero_os: numeroOSDigitado || `OS-${String(novoId).padStart(6, '0')}`,
     tecnico_id: Number(body.tecnico_id),
     cliente_id: Number(body.cliente_id),
     equipamento_id: Number(body.equipamento_id),
@@ -336,9 +351,15 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
+  const numeroOSDigitado = String(body.numero_os || '').trim();
+  if (numeroOSDigitado) {
+    const jaExisteEmOutra = data.agenda.some((a) => a.id !== item.id && (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado);
+    if (jaExisteEmOutra) return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
+  }
   // se o técnico designado mudou, ele ainda não viu essa atribuição — reabre a notificação
   const trocouTecnico = Number(body.tecnico_id) !== item.tecnico_id;
   Object.assign(item, {
+    numero_os: numeroOSDigitado || item.numero_os || `OS-${String(item.id).padStart(6, '0')}`,
     tecnico_id: Number(body.tecnico_id),
     cliente_id: Number(body.cliente_id),
     equipamento_id: Number(body.equipamento_id),

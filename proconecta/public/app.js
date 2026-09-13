@@ -255,6 +255,7 @@ function badgeStatus(status) {
   return `<span class="badge badge-pendente">Em análise</span>`;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function numeroOS(a) { return a.numero_os || `OS-${String(a.id).padStart(6, '0')}`; }
 
 // campo de empresa/cliente com dropdown pesquisável (combobox) — em vez de um <select> puro.
 // idPrefix vira "<idPrefix>-nome" (o que o usuário digita/vê) + "<idPrefix>" (hidden com o id resolvido)
@@ -311,14 +312,19 @@ function selecionarClienteCombo(idPrefix, clienteId, onResolved) {
 // clicar numa sugestão da lista, o id oculto fica vazio mesmo com o texto certo na tela —
 // ao sair do campo, tenta casar o texto com uma empresa cadastrada e resolve sozinho.
 function resolverClienteDigitado(idPrefix, onResolved) {
-  if (document.getElementById(idPrefix).value) return;
-  const texto = document.getElementById(idPrefix + '-nome').value.trim().toLowerCase();
+  // o formulário pode já ter sido salvo/fechado antes do atraso de 250ms acabar — se os
+  // campos não existem mais no DOM, não há nada a resolver.
+  const campoOculto = document.getElementById(idPrefix);
+  const campoNome = document.getElementById(idPrefix + '-nome');
+  if (!campoOculto || !campoNome) return;
+  if (campoOculto.value) return;
+  const texto = campoNome.value.trim().toLowerCase();
   if (!texto) return;
   const cliente = (window._clientesCache || []).find((c) => c.nome_empresa.trim().toLowerCase() === texto);
   if (cliente) {
     selecionarClienteCombo(idPrefix, cliente.id, onResolved);
   } else {
-    document.getElementById(idPrefix + '-nome').value = '';
+    campoNome.value = '';
   }
 }
 
@@ -534,7 +540,7 @@ function abrirDetalheOSCalendario(id) {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="renderDiaCalendario('${calDiaSelecionado}')">‹ Voltar para o dia</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -577,7 +583,7 @@ function osCardCorpo(a) {
       </div>
       <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
       <div class="os-card-fields">
-        <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">OS-${String(a.id).padStart(6, '0')}</span></div>
+        <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">${esc(numeroOS(a))}</span></div>
         <div class="os-field"><span class="os-field-label">Contato</span><span class="os-field-value">${esc(a.contato || a.cliente_contato || '—')}</span></div>
         <div class="os-field"><span class="os-field-label">E-mail</span><span class="os-field-value">${esc(a.email || a.cliente_email || '—')}</span></div>
         <div class="os-field"><span class="os-field-label">Telefone</span><span class="os-field-value">${esc(a.telefone || a.cliente_telefone || '—')}</span></div>
@@ -601,7 +607,10 @@ function cardOS(a) {
 let agendaEmEdicaoId = null;
 async function mostrarFormNovaAtividade(agendaItem) {
   agendaEmEdicaoId = agendaItem ? agendaItem.id : null;
-  const [{ usuarios }, { equipamentos }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes')]);
+  const [{ usuarios }, { equipamentos }, { clientes }, sugestaoNumero] = await Promise.all([
+    api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes'),
+    agendaItem ? Promise.resolve(null) : api('/api/agenda/proximo-numero'),
+  ]);
   const tecnicos = usuarios.filter((u) => u.papel === 'tecnico');
   window._clientesCache = clientes;
   window._equipamentosCache = equipamentos;
@@ -609,7 +618,8 @@ async function mostrarFormNovaAtividade(agendaItem) {
     <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço'}</div>
       <h2 style="margin-top:0;">Tipo de serviço</h2>
       <div class="form-grid">
-        <div class="full"><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
+        <div><label>Nº da O.S.</label><input id="na-numero-os" value="${esc(agendaItem ? numeroOS(agendaItem) : sugestaoNumero.numero)}"></div>
+        <div><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
           <option value="corretiva" ${agendaItem && agendaItem.tipo === 'corretiva' ? 'selected' : ''}>Corretiva</option>
           <option value="preventiva" ${agendaItem && agendaItem.tipo === 'preventiva' ? 'selected' : ''}>Preventiva</option>
           <option value="treinamento_online" ${agendaItem && agendaItem.tipo === 'treinamento_online' ? 'selected' : ''}>Treinamento online</option>
@@ -781,6 +791,7 @@ async function salvarNovaAtividade() {
     if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
   }
   const body = {
+    numero_os: document.getElementById('na-numero-os').value,
     tecnico_id: document.getElementById('na-tecnico').value,
     equipamento_id: document.getElementById('na-equip').value,
     cliente_id: document.getElementById('na-cliente').value,
@@ -1840,7 +1851,7 @@ function abrirDetalheOS(id) {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="desenharOrdemServico()">‹ Voltar</button>
     </div>
     <div id="form-nova-atividade"></div>
