@@ -3280,18 +3280,22 @@ function wPaginaColorida(fillHex, conteudo) {
 }
 
 function wCapa(r, logoDataUri) {
+  const DESLOC_TOPO = 1134; // ~2cm — empurra logo/"PRO Marking" pra baixo, mais perto do centro
+  const DESLOC_BASE = 567; // ~1cm — sobe o slogan, tirando ele da borda inferior
+
   const topo = [];
   if (logoDataUri) {
     try {
       topo.push(new docx.Paragraph({
         alignment: docx.AlignmentType.CENTER,
-        spacing: { before: 160, after: 160 },
+        spacing: { before: DESLOC_TOPO, after: 160 },
         children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 70, height: 81 } })],
       }));
     } catch (e) {}
   }
   topo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
+    spacing: logoDataUri ? undefined : { before: DESLOC_TOPO },
     children: [
       new docx.TextRun({ text: 'PRO', bold: true, color: '2E86FF', size: 40 }),
       new docx.TextRun({ text: 'Marking', bold: true, color: 'FFFFFF', size: 40 }),
@@ -3313,7 +3317,7 @@ function wCapa(r, logoDataUri) {
   const base = [
     new docx.Paragraph({
       alignment: docx.AlignmentType.CENTER,
-      spacing: { after: 240 },
+      spacing: { after: DESLOC_BASE },
       children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
     }),
   ];
