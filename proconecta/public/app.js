@@ -3527,7 +3527,7 @@ async function baixarWordRelatorioManutencao(i) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `relatorio-manutencao-${r.id}.docx`;
+    link.download = `${nomeArquivoRelatorioManutencao(r)}.docx`;
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   } catch (e) { alert('Erro ao gerar o Word: ' + e.message); }
@@ -3549,12 +3549,22 @@ function periodoManut(dIni, dFim) {
   return `${dias} DIA${dias === 1 ? '' : 'S'}${dias === 0 ? ' (MESMO DIA)' : ''}`;
 }
 
+// nome de arquivo "empresa - número de série" pro PDF/Word do relatório de manutenção,
+// ex.: relatório da Montreal com nº série 12345678 vira "Montreal - 12345678"
+function nomeArquivoRelatorioManutencao(r) {
+  function limpar(v) { return String(v || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim(); }
+  const empresa = limpar(r.empresa) || 'relatorio';
+  const serie = limpar(r.numero_serie);
+  return serie ? `${empresa} - ${serie}` : empresa;
+}
+
 // PDF em duas partes: capa (navy, cheia página) + páginas de conteúdo com o mesmo layout do
 // modelo em papel da PRO Marking (caixas com borda, checkboxes, tabela de peças, fotos 2 por
 // linha) + página final de contato — pro relatório de manutenção interna gerado pelo técnico.
 function gerarPdfRelatorioManutencao(r, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margem = 40;
