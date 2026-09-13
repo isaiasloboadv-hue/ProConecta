@@ -211,6 +211,7 @@ function montarSidebar() {
   const nav = NAV[USER.papel] || [];
   document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
   renderHeaderRight();
+  aplicarEstadoMenuMobile();
 }
 
 function alternarGrupo(key) {
@@ -218,10 +219,28 @@ function alternarGrupo(key) {
   montarSidebar();
 }
 
+// menu lateral vira uma gaveta deslizante no celular (aberta pelo botão hamburger no cabeçalho)
+let menuMobileAberto = false;
+function aplicarEstadoMenuMobile() {
+  const nav = document.getElementById('sideNav');
+  const backdrop = document.getElementById('navBackdrop');
+  if (nav) nav.classList.toggle('open', menuMobileAberto);
+  if (backdrop) backdrop.classList.toggle('show', menuMobileAberto);
+}
+function alternarMenuMobile() {
+  menuMobileAberto = !menuMobileAberto;
+  aplicarEstadoMenuMobile();
+}
+function fecharMenuMobile() {
+  menuMobileAberto = false;
+  aplicarEstadoMenuMobile();
+}
+
 async function ir(pagina) {
   paginaAtual = pagina;
   const caminho = buscarCaminho(NAV[USER.papel] || [], pagina, []);
   if (caminho) caminho.forEach((k) => navAbertos.add(k));
+  fecharMenuMobile();
   montarSidebar();
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">Carregando...</div>';

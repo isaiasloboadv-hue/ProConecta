@@ -34,13 +34,19 @@
 
 <div id="appView" style="display:none">
   <header>
-    <div class="brand">
-      <div class="brand-mark chip"><img src="/logo.png" alt="Pro Conecta" style="height:28px;width:auto;display:block;"></div>
-      <div class="wordmark inline"><span class="pro">Pro</span><span class="conecta">Conecta</span></div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <button class="hamburger-btn" id="btn-hamburger" onclick="alternarMenuMobile()" aria-label="Abrir menu">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <div class="brand">
+        <div class="brand-mark chip"><img src="/logo.png" alt="Pro Conecta" style="height:28px;width:auto;display:block;"></div>
+        <div class="wordmark inline"><span class="pro">Pro</span><span class="conecta">Conecta</span></div>
+      </div>
     </div>
     <div class="header-right" id="headerRight"></div>
   </header>
 
+  <div class="nav-backdrop" id="navBackdrop" onclick="fecharMenuMobile()"></div>
   <div class="shell">
     <nav class="side" id="sideNav"></nav>
     <main id="main"></main>
