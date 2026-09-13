@@ -1266,6 +1266,9 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const alvo = data.usuarios.find((u) => u.id === Number(m[1]));
   if (!alvo) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  if (alvo.protegido && alvo.id !== user.id) {
+    return enviarJSON(res, 403, { erro: 'Esta conta é protegida e só pode ser editada por ela mesma.' });
+  }
   if (data.usuarios.some((u) => u.id !== alvo.id && u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
@@ -1287,6 +1290,9 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const idx = data.usuarios.findIndex((u) => u.id === id);
   if (idx === -1) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  if (data.usuarios[idx].protegido) {
+    return enviarJSON(res, 403, { erro: 'Esta conta é protegida e não pode ser excluída.' });
+  }
   data.usuarios.splice(idx, 1);
   db.save(data);
   enviarJSON(res, 200, { ok: true });

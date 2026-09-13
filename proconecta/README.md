@@ -33,10 +33,14 @@ ADMIN_EMAIL="seu@email.com.br" ADMIN_SENHA="uma-senha-forte" node server.js
 
 (no Render, adicione as duas em **Environment**, igual à `DATABASE_URL`). O
 sistema cria essa conta só na primeira vez — depois disso pode remover as
-variáveis sem problema, ou deixar configuradas (elas não recriam nem alteram
-a conta se o e-mail já existir). A partir desse primeiro login, o próprio
-administrador cadastra os demais usuários pela tela **Usuários** (convite de
-primeiro acesso por e-mail — veja "E-mail de convite de verdade" abaixo).
+variáveis sem problema, ou deixar configuradas (elas não recriam a conta se
+o e-mail já existir). Essa conta ("Desenvolvedor") fica marcada como
+**protegida**: nenhum outro administrador consegue editá-la ou excluí-la
+pela tela de Usuários (nem forçando a chamada à API diretamente) — só ela
+mesma pode editar os próprios dados. A partir desse primeiro login, o
+próprio administrador cadastra os demais usuários pela tela **Usuários**
+(convite de primeiro acesso por e-mail — veja "E-mail de convite de
+verdade" abaixo).
 
 ## O que já funciona de verdade
 

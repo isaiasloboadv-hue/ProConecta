@@ -3061,13 +3061,13 @@ async function renderUsuarios() {
       <div class="user-row">
         <div class="u-avatar-lg">${initials(u.nome)}</div>
         <div class="u-info">
-          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(u.papel)}</span></div>
+          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(u.papel)}</span>${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
           <div class="u-line2">${esc(u.email)} ${u.cargo ? '· ' + esc(u.cargo) : ''} ${u.setor ? '· ' + esc(u.setor) : ''}</div>
         </div>
         <span class="badge ${u.status === 'ativo' ? 'badge-ativo' : 'badge-convite'}">${u.status === 'ativo' ? 'Ativo' : 'Convite enviado'}</span>
         ${u.status !== 'ativo' ? `<button class="btn-outline-sm" onclick="reenviarConvite(${u.id})">Reenviar convite</button>` : ''}
-        <button class="btn-outline-sm" onclick="editarUsuario(${u.id})">Editar</button>
-        <button class="btn-outline-sm" onclick="excluirUsuario(${u.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        ${!u.protegido || u.id === USER.id ? `<button class="btn-outline-sm" onclick="editarUsuario(${u.id})">Editar</button>` : ''}
+        ${!u.protegido ? `<button class="btn-outline-sm" onclick="excluirUsuario(${u.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>` : ''}
       </div>`).join('')}`;
 }
 let usuarioEmEdicaoId = null;

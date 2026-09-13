@@ -53,12 +53,25 @@ function bootstrapAdminMaster(data) {
   const { salt, hash } = hashSenha(senha);
   data.usuarios.push({
     id: nextId(data, 'usuarios'),
-    nome: 'Administrador', email, papel: 'administrador',
+    nome: 'Desenvolvedor', email, papel: 'administrador',
     cargo: '', setor: '', celular: '', cliente_id: null,
     status: 'ativo', convite_token: null, salt, hash,
+    protegido: true,
   });
   console.log(`[db] Conta master criada automaticamente: ${email}`);
   return true;
+}
+
+// garante que a conta master (e-mail em ADMIN_EMAIL) fique sempre marcada como protegida —
+// cobre também quem já existia antes dessa flag existir, ou foi criado numa corrida em que
+// bootstrapAdminMaster ainda não tinha essa marca. Roda a cada carregamento (idempotente).
+function protegerAdminMaster(data) {
+  const email = process.env.ADMIN_EMAIL;
+  if (!email) return;
+  const master = data.usuarios.find((u) => u.email === email);
+  if (!master) return;
+  if (master.nome === 'Administrador') master.nome = 'Desenvolvedor';
+  master.protegido = true;
 }
 
 // migração leve: bancos criados antes destes campos existirem ganham valores padrão.
@@ -94,6 +107,7 @@ function migrar(data) {
   for (const v of data.visitas) {
     if (v.lida_tecnico === undefined) v.lida_tecnico = false;
   }
+  protegerAdminMaster(data);
   return data;
 }
 
