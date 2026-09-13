@@ -38,6 +38,8 @@ function seed() {
     registros: [],
     chamados: [],
     relatorios_manutencao: [],
+    push_subscriptions: [],
+    vapid: null,
     _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1 },
   };
 }
@@ -79,6 +81,13 @@ function protegerAdminMaster(data) {
 // Roda uma vez ao carregar (seja do arquivo ou do Postgres) — mutila e devolve o mesmo objeto.
 function migrar(data) {
   if (!data.registros) data.registros = [];
+  if (!data.push_subscriptions) data.push_subscriptions = [];
+  // gera o par de chaves VAPID (push notification) uma única vez e guarda no próprio banco,
+  // assim não depende de configurar variável de ambiente manualmente no hospedeiro
+  if (!data.vapid) {
+    const { publicKey, privateKey } = require('web-push').generateVAPIDKeys();
+    data.vapid = { publicKey, privateKey };
+  }
   if (!data.chamados) data.chamados = [];
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
   if (!data._seq.registros) data._seq.registros = 1;
@@ -102,6 +111,8 @@ function migrar(data) {
       if (a[campo] === undefined) a[campo] = '';
     }
     if (a.lida_tecnico === undefined) a.lida_tecnico = false;
+    if (a.deslocamento_iniciado_em === undefined) a.deslocamento_iniciado_em = null;
+    if (a.lembrete_deslocamento_enviado === undefined) a.lembrete_deslocamento_enviado = false;
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;

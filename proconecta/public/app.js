@@ -199,6 +199,40 @@ async function atualizarBadgeSincronizar() {
 
 window.addEventListener('online', sincronizarFilaOffline);
 
+// ---------- notificação push (barra de notificação do celular) ----------
+// pede permissão ao navegador e inscreve este aparelho pra receber notificação de verdade
+// (O.S. atribuída, cliente confirmou, técnico a caminho) mesmo com o app fechado. Silencioso:
+// se o navegador não suportar, ou a pessoa negar a permissão, o app continua funcionando
+// normalmente — só sem a notificação na barra (o sino dentro do app continua funcionando).
+function urlBase64ParaUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const bruto = atob(base64);
+  const saida = new Uint8Array(bruto.length);
+  for (let i = 0; i < bruto.length; i++) saida[i] = bruto.charCodeAt(i);
+  return saida;
+}
+
+async function ativarNotificacoesPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
+    const registration = await navigator.serviceWorker.ready;
+    let inscricao = await registration.pushManager.getSubscription();
+    if (!inscricao) {
+      const permissao = await Notification.requestPermission();
+      if (permissao !== 'granted') return;
+      const { chave } = await api('/api/push/chave-publica');
+      inscricao = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ParaUint8Array(chave),
+      });
+    }
+    const json = inscricao.toJSON();
+    await api('/api/push/inscrever', { method: 'POST', body: { endpoint: json.endpoint, keys: json.keys } });
+  } catch (e) { /* notificação push é um extra — nunca deve travar o login */ }
+}
+
 function entrarNoApp() {
   document.getElementById('authView').style.display = 'none';
   document.getElementById('appView').style.display = 'block';
@@ -207,6 +241,7 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
+  if (USER.papel === 'tecnico' || USER.papel === 'administrador') ativarNotificacoesPush();
   const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
@@ -568,7 +603,7 @@ async function renderAgenda() {
           <td data-label="Status">${a.status === 'concluida'
             ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
             : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
+          <td>${botaoDeslocamento(a)}${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
             ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' ? (
               a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
                 ? `<span class="tag tag-amber">Reabertura solicitada</span>`
@@ -2069,6 +2104,9 @@ function fmtDataHora(iso) {
 // linha do tempo: abertura da O.S. -> relatório enviado -> aprovação/reprovação
 function timelineOS(a, visita) {
   const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
+  if (a.deslocamento_iniciado_em) {
+    passos.push({ label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' });
+  }
   if (visita) {
     passos.push({ label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' });
     if (visita.status_aprovacao === 'aprovado') {
@@ -2212,6 +2250,29 @@ async function solicitarReaberturaVisita(id) {
   const motivo = prompt('Por que você precisa reabrir este relatório?') || '';
   try { await api(`/api/visitas/${id}/solicitar-reabertura`, { method: 'POST', body: { motivo } }); mostrarToast('Solicitação enviada ao administrador.'); renderAgenda(); }
   catch (e) { alert('Erro: ' + e.message); }
+}
+
+// botão "Iniciar deslocamento": só aparece pro técnico designado, numa O.S. ainda em aberto
+// (não finalizada), e some depois de marcado — vira uma tag mostrando desde quando ele está
+// a caminho. O administrador recebe uma notificação push quando o técnico toca nele.
+function botaoDeslocamento(a) {
+  if (a.tecnico_id !== USER.id || a.finalizada) return '';
+  if (a.deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.deslocamento_iniciado_em)}</span>`;
+  return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
+}
+
+async function iniciarDeslocamento(id) {
+  if (!confirm('Confirma que você está saindo agora para este atendimento? O administrador vai ser avisado.')) return;
+  try {
+    const { agenda } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
+    mostrarToast('Deslocamento iniciado — o administrador foi avisado.');
+    if (Array.isArray(window._agendaCache)) {
+      const idx = window._agendaCache.findIndex((a) => a.id === id);
+      if (idx !== -1) window._agendaCache[idx] = agenda;
+    }
+    if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
+    else renderAgenda();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- BIBLIOTECA: ACESSAR ----------
@@ -4021,12 +4082,12 @@ function acoesOSCalendarioTecnico(a, visita) {
     return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
   }
   if (a.status !== 'concluida') {
-    return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>`;
+    return `${botaoDeslocamento(a)}<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>`;
   }
   if (a.visita_id && a.visita_status === 'aprovado') {
-    return a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
+    return botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
       ? `<span class="tag tag-amber">Reabertura solicitada</span>`
-      : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`;
+      : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`);
   }
   return `<span style="font-size:11.5px; color:var(--ink-soft);">Em análise — aguardando aprovação do administrador.</span>`;
 }

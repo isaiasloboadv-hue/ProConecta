@@ -33,3 +33,32 @@ self.addEventListener('fetch', (event) => {
       .catch(() => caches.match(event.request))
   );
 });
+
+// notificação push (barra de notificação do celular) — o servidor manda um JSON
+// { titulo, corpo, url } e aqui a gente transforma isso numa notificação de verdade
+self.addEventListener('push', (event) => {
+  let dados = { titulo: 'Pro Conecta', corpo: 'Você tem uma novidade no Pro Conecta.', url: '/' };
+  try { dados = { ...dados, ...event.data.json() }; } catch (e) {}
+  event.waitUntil(
+    self.registration.showNotification(dados.titulo, {
+      body: dados.corpo,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url: dados.url || '/' },
+    })
+  );
+});
+
+// ao tocar na notificação: foca uma aba já aberta do app (se tiver) ou abre uma nova
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const destino = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((lista) => {
+      for (const janela of lista) {
+        if ('focus' in janela) return janela.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(destino);
+    })
+  );
+});

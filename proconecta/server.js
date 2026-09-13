@@ -8,6 +8,7 @@ const path = require('path');
 const url = require('url');
 const db = require('./db');
 const email = require('./email');
+const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
 
@@ -90,6 +91,77 @@ function agendaComDetalhes(data, item) {
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
     equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
   };
+}
+
+// "2026-09-20T14:00" -> "20/09 às 14:00", pro texto das notificações push
+function fmtDataHoraCurta(isoDataHora) {
+  if (!isoDataHora) return '';
+  const [dataParte, horaParte] = String(isoDataHora).split('T');
+  if (!dataParte) return '';
+  const [ano, mes, dia] = dataParte.split('-');
+  const hora = (horaParte || '').slice(0, 5);
+  return hora ? `${dia}/${mes} às ${hora}` : `${dia}/${mes}`;
+}
+
+// ---------- notificação push (barra de notificação do celular) ----------
+
+let vapidConfigurado = false;
+function garantirVapidConfigurado(data) {
+  if (vapidConfigurado) return;
+  webpush.setVapidDetails('mailto:contato@promarking.com.br', data.vapid.publicKey, data.vapid.privateKey);
+  vapidConfigurado = true;
+}
+
+// manda uma notificação push pra todas as inscrições (dispositivos) de um usuário. Silenciosa:
+// nunca derruba a rota que chamou — só registra erro e, se a inscrição não existe mais no
+// aparelho (410/404), remove ela do banco pra não tentar de novo à toa.
+async function enviarPush(data, usuarioId, payload) {
+  garantirVapidConfigurado(data);
+  const inscricoes = data.push_subscriptions.filter((s) => s.usuario_id === usuarioId);
+  if (!inscricoes.length) return;
+  let mudou = false;
+  await Promise.all(inscricoes.map(async (sub) => {
+    try {
+      await webpush.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, JSON.stringify(payload));
+    } catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) {
+        data.push_subscriptions = data.push_subscriptions.filter((s) => s.endpoint !== sub.endpoint);
+        mudou = true;
+      } else {
+        console.error('[push] falha ao enviar:', e.message);
+      }
+    }
+  }));
+  if (mudou) db.save(data);
+}
+
+// lembrete do dia do atendimento: pra cada O.S. de hoje que já passou do horário marcado e
+// o técnico ainda não avisou que está a caminho, manda um push uma única vez (lembrete_deslocamento_enviado
+// evita repetir). Não é um cron de verdade — só funciona enquanto o processo do servidor
+// estiver de pé; num plano que "dorme" por inatividade isso pode não disparar.
+async function verificarLembretesDeslocamento() {
+  try {
+    const data = db.load();
+    const agora = new Date();
+    const hojeISO = agora.toISOString().slice(0, 10);
+    let mudou = false;
+    for (const item of data.agenda) {
+      if (item.finalizada || item.deslocamento_iniciado_em || item.lembrete_deslocamento_enviado) continue;
+      if (!item.data_hora_inicio || !item.data_hora_inicio.startsWith(hojeISO)) continue;
+      if (agora < new Date(item.data_hora_inicio)) continue; // só lembra a partir do horário marcado
+      const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+      await enviarPush(data, item.tecnico_id, {
+        titulo: 'Atendimento hoje',
+        corpo: `Não esqueça: ${cliente ? cliente.nome_empresa : 'seu atendimento'} hoje (${fmtDataHoraCurta(item.data_hora_inicio)}). Toque pra marcar "Iniciar deslocamento".`,
+        url: '/',
+      });
+      item.lembrete_deslocamento_enviado = true;
+      mudou = true;
+    }
+    if (mudou) db.save(data);
+  } catch (e) {
+    console.error('[lembrete] erro ao verificar deslocamentos:', e.message);
+  }
 }
 
 // ---------- relatório técnico de atendimento corretivo ----------
@@ -330,9 +402,17 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     retrabalho: false,
     criado_em: new Date().toISOString(),
     lida_tecnico: false,
+    deslocamento_iniciado_em: null,
+    lembrete_deslocamento_enviado: false,
   };
   data.agenda.push(item);
   db.save(data);
+  const clienteNovaOS = data.clientes.find((c) => c.id === item.cliente_id);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Nova O.S. atribuída',
+    corpo: `${clienteNovaOS ? clienteNovaOS.nome_empresa : 'Novo atendimento'} — ${fmtDataHoraCurta(item.data_hora_inicio)}.`,
+    url: '/',
+  }).catch(() => {});
   enviarJSON(res, 201, { agenda: agendaComDetalhes(data, item) });
 });
 
@@ -406,6 +486,12 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   item.finalizada = true;
   item.finalizado_em = new Date().toISOString();
   db.save(data);
+  const clienteFinal = data.clientes.find((c) => c.id === item.cliente_id);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Serviço confirmado pelo cliente',
+    corpo: `${clienteFinal ? clienteFinal.nome_empresa : 'O atendimento'} confirmou e a O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')} foi finalizada.`,
+    url: '/',
+  }).catch(() => {});
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
@@ -438,6 +524,31 @@ rota('POST', /^\/api\/agenda\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   item.lida_tecnico = true;
   db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/iniciar-deslocamento — o técnico avisa que já está a caminho do cliente;
+// fica marcado na linha do tempo da O.S. e notifica o administrador
+rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado inicia o deslocamento.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
+  item.deslocamento_iniciado_em = new Date().toISOString();
+  db.save(data);
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  admins.forEach((admin) => {
+    enviarPush(data, admin.id, {
+      titulo: 'Técnico a caminho',
+      corpo: `${user.nome} iniciou o deslocamento para ${cliente ? cliente.nome_empresa : 'o cliente'} (${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}).`,
+      url: '/',
+    }).catch(() => {});
+  });
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
@@ -981,6 +1092,48 @@ rota('POST', /^\/api\/registros\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   enviarJSON(res, 200, { registro });
 });
 
+// ---------- notificação push (inscrição do dispositivo) ----------
+
+// GET /api/push/chave-publica — chave VAPID pública, usada no navegador pra inscrever o
+// dispositivo (pushManager.subscribe). Não precisa de login: é uma chave pública mesmo.
+rota('GET', /^\/api\/push\/chave-publica$/, async (req, res) => {
+  const data = db.load();
+  enviarJSON(res, 200, { chave: data.vapid.publicKey });
+});
+
+// POST /api/push/inscrever — guarda a inscrição (endpoint + chaves) desse dispositivo pro
+// usuário logado, pra poder mandar notificação push pra ele depois
+rota('POST', /^\/api\/push\/inscrever$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const body = await lerCorpo(req);
+  if (!body.endpoint || !body.keys || !body.keys.p256dh || !body.keys.auth) {
+    return enviarJSON(res, 400, { erro: 'Inscrição de notificação inválida.' });
+  }
+  const data = db.load();
+  data.push_subscriptions = data.push_subscriptions.filter((s) => s.endpoint !== body.endpoint);
+  data.push_subscriptions.push({
+    usuario_id: user.id,
+    endpoint: body.endpoint,
+    keys: { p256dh: body.keys.p256dh, auth: body.keys.auth },
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// POST /api/push/desinscrever — remove a inscrição desse dispositivo (usuário desativou nas
+// configurações do navegador, ou trocou de conta)
+rota('POST', /^\/api\/push\/desinscrever$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  data.push_subscriptions = data.push_subscriptions.filter((s) => !(s.usuario_id === user.id && s.endpoint === body.endpoint));
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // ---------- notificações ----------
 
 // GET /api/notificacoes
@@ -1464,4 +1617,6 @@ db.pronto.then(() => {
     console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
     if (process.env.ADMIN_EMAIL) console.log(`Conta de administrador: ${process.env.ADMIN_EMAIL}`);
   });
+  verificarLembretesDeslocamento();
+  setInterval(verificarLembretesDeslocamento, 15 * 60 * 1000);
 });
