@@ -1344,20 +1344,35 @@ function laudoPadrao(item) {
     marca: '', data_fabricacao: item.equipamento_data_fabricacao || '',
     garantia: item.garantia || '', garantia_obs: item.garantia_obs || '',
     acessorios: '', defeito_informado: item.problema || item.servico || '',
-    data_entrada: (item.data_hora_inicio || '').slice(0, 10),
-    data_conclusao: new Date().toISOString().slice(0, 10),
+    data_entrada: (item.data_hora_inicio || '').slice(0, 16),
+    data_conclusao: agoraLocalDatetime(),
     laudo_tecnico: '', servico_realizado: '',
     pecas: [], fotos: [], observacoes: '',
     relevante_biblioteca: false,
   };
 }
 
+function agoraLocalDatetime() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// calcula o período de reparo em dias e horas (a maioria dos atendimentos termina no mesmo dia,
+// então mostrar só a diferença em dias arredondaria pra "0 dias" e esconderia a duração real)
 function periodoReparo(d) {
   if (!d.data_entrada || !d.data_conclusao) return '—';
-  const ini = new Date(d.data_entrada + 'T00:00:00');
-  const fim = new Date(d.data_conclusao + 'T00:00:00');
-  const dias = Math.max(0, Math.round((fim - ini) / 86400000));
-  return `${dias} dia${dias === 1 ? '' : 's'}`;
+  const ini = new Date(d.data_entrada);
+  const fim = new Date(d.data_conclusao);
+  const diffMin = Math.max(0, Math.round((fim - ini) / 60000));
+  const dias = Math.floor(diffMin / 1440);
+  const horas = Math.floor((diffMin % 1440) / 60);
+  const minutos = diffMin % 60;
+  const partes = [];
+  if (dias > 0) partes.push(`${dias} dia${dias === 1 ? '' : 's'}`);
+  if (horas > 0) partes.push(`${horas}h`);
+  if (minutos > 0) partes.push(`${minutos}min`);
+  return partes.length ? partes.join(' ') : '0min';
 }
 
 async function renderLaudoTecnico(item) {
@@ -1390,8 +1405,7 @@ async function renderLaudoTecnico(item) {
         <div><label>Telefone</label><input value="${esc(item.telefone || item.cliente_telefone || '')}" disabled></div>
         <div class="full"><label>Endereço</label><input value="${esc(`${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`)}" disabled></div>
         <div><label>Técnico</label><input value="${esc(USER.nome)}" disabled></div>
-        <div><label>Equipamento</label><input value="${esc(item.equipamento_tipo || '')}" disabled></div>
-        <div><label>Modelo</label><input value="${esc(item.equipamento_modelo || '')}" disabled></div>
+        <div><label>Equipamento</label><input value="${esc(`${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''}`)}" disabled></div>
         <div><label>Nº de série</label><input value="${esc(item.equipamento_serie || '')}" disabled></div>
       </div>
     </div>
@@ -1417,8 +1431,8 @@ async function renderLaudoTecnico(item) {
     <div class="panel">
       <h2>Técnico responsável</h2>
       <div class="form-grid">
-        <div><label>Data de entrada</label><input id="lt-data_entrada" type="date" disabled></div>
-        <div><label>Data de conclusão*</label><input id="lt-data_conclusao" type="date" oninput="atualizarRascunhoLaudo()"></div>
+        <div><label>Data de início</label><input id="lt-data_entrada" type="datetime-local" disabled></div>
+        <div><label>Data de conclusão*</label><input id="lt-data_conclusao" type="datetime-local" oninput="atualizarRascunhoLaudo()"></div>
         <div><label>Período de reparo</label><input id="lt-periodo" disabled></div>
       </div>
     </div>
@@ -1610,7 +1624,7 @@ function gerarPdfLaudo(d, item) {
   y += 8;
 
   titulo('Técnico responsável');
-  linha('Data de entrada', d.data_entrada); linha('Data de conclusão', d.data_conclusao); linha('Período de reparo', periodoReparo(d));
+  linha('Data de início', fmtData(d.data_entrada)); linha('Data de conclusão', fmtData(d.data_conclusao)); linha('Período de reparo', periodoReparo(d));
   y += 8;
 
   titulo('Laudo técnico');
@@ -1888,7 +1902,7 @@ function detalheRelatorioVisita(v) {
       <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
       <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
       <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
-      <div class="kv"><b>Data de entrada:</b> ${esc(l.data_entrada || '—')} <span class="sep">·</span> <b>Data de conclusão:</b> ${esc(l.data_conclusao || '—')} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
+      <div class="kv"><b>Data de início:</b> ${l.data_entrada ? fmtData(l.data_entrada) : '—'} <span class="sep">·</span> <b>Data de conclusão:</b> ${l.data_conclusao ? fmtData(l.data_conclusao) : '—'} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
       <div class="kv"><b>Laudo técnico:</b> ${esc(l.laudo_tecnico || '')}</div>
       <div class="kv"><b>Serviço realizado:</b> ${esc(l.servico_realizado || '')}</div>
       ${(l.pecas || []).length ? `<div class="kv"><b>Peças fornecidas:</b></div><ol class="item-steps">${l.pecas.map((p) => `<li>${esc(p.descricao || '—')}${p.quantidade ? ' (qtd: ' + esc(p.quantidade) + ')' : ''}</li>`).join('')}</ol>` : ''}
