@@ -651,6 +651,7 @@ async function mostrarFormNovaAtividade(agendaItem) {
             <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="nao" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'nao' ? 'checked' : ''} style="width:auto;"> Não</label>
             <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="na" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'na' ? 'checked' : ''} style="width:auto;"> N/A</label>
           </div>
+          <div id="na-garantia-hint" style="color:var(--ink-soft); font-size:13px; margin-top:-8px; margin-bottom:10px;"></div>
         </div>
         <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
       </div>
@@ -708,6 +709,40 @@ function preencherNumeroSerieNovaAtividade() {
   const equip = (window._equipamentosCache || []).find((e) => e.id === equipId);
   document.getElementById('na-numero-serie').value = equip ? equip.numero_serie : '';
   document.getElementById('na-data-fabricacao').value = equip ? (equip.data_fabricacao || '—') : '';
+  atualizarGarantiaAutomatica(equip ? equip.data_fabricacao : '');
+}
+
+// garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA). Dentro desse prazo,
+// a garantia é automática — trava em "Sim" pra evitar erro de preenchimento. Passado o prazo,
+// libera pro admin escolher (pode ter sido feita uma corretiva com um novo prazo de garantia).
+function dentroDaGarantiaDeFabrica(dataFabricacao) {
+  const m = /^(\d{2})\/(\d{4})$/.exec((dataFabricacao || '').trim());
+  if (!m) return null;
+  const limite = new Date(Number(m[2]), Number(m[1]) - 1, 1);
+  limite.setFullYear(limite.getFullYear() + 1);
+  return new Date() <= limite;
+}
+
+function atualizarGarantiaAutomatica(dataFabricacao) {
+  const radios = document.querySelectorAll('input[name="na-garantia"]');
+  if (!radios.length) return;
+  const dentroDoAno = dentroDaGarantiaDeFabrica(dataFabricacao);
+  const radioSim = document.querySelector('input[name="na-garantia"][value="sim"]');
+  if (dentroDoAno) {
+    radios.forEach((r) => { r.disabled = true; });
+    if (radioSim) { radioSim.checked = true; radioSim.dataset.auto = '1'; }
+  } else {
+    radios.forEach((r) => { r.disabled = false; });
+    // só limpa o "Sim" se ele veio do preenchimento automático (equipamento anterior) —
+    // se já era uma escolha manual salva (ex: editando uma O.S. existente), preserva.
+    if (radioSim && radioSim.dataset.auto === '1') {
+      radioSim.checked = false;
+      delete radioSim.dataset.auto;
+    }
+  }
+  const hint = document.getElementById('na-garantia-hint');
+  if (hint) hint.textContent = dentroDoAno ? 'Preenchido automaticamente: equipamento ainda dentro de 1 ano de fabricação.' : '';
+  atualizarGarantiaNovaAtividade();
 }
 
 function preencherClienteNovaAtividade(sobrescreverContato) {
