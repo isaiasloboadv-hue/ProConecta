@@ -3232,8 +3232,108 @@ function wTabelaFotosBloco(fotos) {
   return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: docx.TableBorders.NONE, rows: linhas });
 }
 
+function wPaginaColorida(fillHex, conteudo) {
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: docx.TableBorders.NONE,
+    rows: [new docx.TableRow({
+      height: { value: 15200, rule: docx.HeightRule.EXACT },
+      children: [new docx.TableCell({
+        shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
+        verticalAlign: docx.VerticalAlign.CENTER,
+        children: conteudo,
+      })],
+    })],
+  });
+}
+
+function wCapa(r, logoDataUri) {
+  const conteudo = [];
+  if (logoDataUri) {
+    try {
+      conteudo.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 240 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 84, height: 97 } })],
+      }));
+    } catch (e) {}
+  }
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 300 },
+    children: [
+      new docx.TextRun({ text: 'PRO', bold: true, color: '2E86FF', size: 44 }),
+      new docx.TextRun({ text: 'Marking', bold: true, color: 'FFFFFF', size: 44 }),
+    ],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 180 },
+    children: [new docx.TextRun({ text: 'RELATÓRIO TÉCNICO', bold: true, color: 'FFFFFF', size: 36 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 1200 },
+    children: [new docx.TextRun({ text: (r.empresa ? String(r.empresa) : '—').toUpperCase(), color: 'C8D8EC', size: 24 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
+  }));
+  return wPaginaColorida(WORD_COR.navy, conteudo);
+}
+
+function wPaginaContato(logoDataUri) {
+  const conteudo = [];
+  if (logoDataUri) {
+    try {
+      conteudo.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 220 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 40, height: 46 } })],
+      }));
+    } catch (e) {}
+  }
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 260 },
+    children: [new docx.TextRun({ text: 'PRO Marking', bold: true, color: WORD_COR.navy, size: 26 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 180 },
+    children: [new docx.TextRun({ text: 'Entre em contato conosco através:', bold: true, color: WORD_COR.ink, size: 20 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 60 },
+    children: [new docx.TextRun({ text: 'WhatsApp: 12 99718-7506', color: WORD_COR.ink, size: 18 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 220 },
+    children: [new docx.TextRun({ text: 'Telefone: 12 3902-3453', color: WORD_COR.ink, size: 18 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 100 },
+    children: [new docx.TextRun({ text: 'E-mail:', bold: true, color: WORD_COR.ink, size: 18 })],
+  }));
+  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email) => {
+    conteudo.push(new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { after: 40 },
+      children: [new docx.TextRun({ text: email, color: WORD_COR.blue, size: 18 })],
+    }));
+  });
+  return wPaginaColorida('F2E9D8', conteudo);
+}
+
 async function gerarWordRelatorioManutencao(r, logoDataUri) {
   const children = [];
+
+  children.push(wCapa(r, logoDataUri));
+  children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
 
   if (logoDataUri) {
     try {
@@ -3308,7 +3408,20 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
     children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma foto anexada.', italics: true, color: WORD_COR.inkSoft, size: 20 })] }));
   }
 
-  const doc = new docx.Document({ sections: [{ properties: {}, children }] });
+  children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
+  children.push(wPaginaContato(logoDataUri));
+
+  const doc = new docx.Document({
+    sections: [{
+      properties: {
+        page: {
+          size: { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) },
+          margin: { top: 500, bottom: 500, left: 500, right: 500 },
+        },
+      },
+      children,
+    }],
+  });
   return docx.Packer.toBlob(doc);
 }
 
