@@ -3068,14 +3068,18 @@ function abrirFotosRelatorioManutencao(i) {
   const r = (window._relatoriosManutCache || [])[i];
   if (!r) return;
   const blocos = r.fotos || [];
+  const temFotos = blocos.length && blocos.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length));
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Fotos — ${esc(r.empresa)}</h1><p>${esc(r.equipamento)}</p></div>
-      <button class="btn-outline-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${temFotos ? `<button class="btn btn-primary btn-sm" onclick="baixarTodasFotosRelatorioManutencao(${i})">⬇ Baixar todas as fotos</button>` : ''}
+        <button class="btn-outline-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
+      </div>
     </div>
     <div class="panel">
-      ${blocos.length && blocos.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length)) ? blocos.map((entrada) => {
+      ${temFotos ? blocos.map((entrada) => {
         const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
         return (bloco.fotos || []).length ? `
           <div style="margin-bottom:18px;">
@@ -3084,6 +3088,33 @@ function abrirFotosRelatorioManutencao(i) {
           </div>` : '';
       }).join('') : `<div class="empty">Nenhuma foto anexada neste relatório.</div>`}
     </div>`;
+}
+
+async function baixarTodasFotosRelatorioManutencao(i) {
+  const r = (window._relatoriosManutCache || [])[i];
+  if (!r) return;
+  const fotos = [];
+  (r.fotos || []).forEach((entrada) => {
+    const bloco = typeof entrada === 'string' ? { fotos: [entrada] } : entrada;
+    (bloco.fotos || []).forEach((f) => fotos.push(f));
+  });
+  if (!fotos.length) return;
+  try {
+    const zip = new JSZip();
+    fotos.forEach((f, idx) => {
+      const m = /^data:image\/(\w+);base64,(.*)$/.exec(f);
+      if (!m) return;
+      const ext = m[1].toLowerCase().replace('jpeg', 'jpg');
+      zip.file(`foto-${String(idx + 1).padStart(2, '0')}.${ext}`, m[2], { base64: true });
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `fotos-relatorio-${r.id}.zip`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { alert('Erro ao baixar as fotos: ' + e.message); }
 }
 
 function gerarWordHtmlRelatorioManutencao(r) {
