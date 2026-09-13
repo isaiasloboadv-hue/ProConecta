@@ -2256,7 +2256,7 @@ async function solicitarReaberturaVisita(id) {
 // (não finalizada), e some depois de marcado — vira uma tag mostrando desde quando ele está
 // a caminho. O administrador recebe uma notificação push quando o técnico toca nele.
 function botaoDeslocamento(a) {
-  if (a.tecnico_id !== USER.id || a.finalizada) return '';
+  if (a.tecnico_id !== USER.id || a.finalizada || a.status === 'concluida') return '';
   if (a.deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.deslocamento_iniciado_em)}</span>`;
   return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
 }
