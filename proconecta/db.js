@@ -110,6 +110,14 @@ function migrar(data) {
   for (const v of data.visitas) {
     if (v.lida_tecnico === undefined) v.lida_tecnico = false;
   }
+  // relatórios de manutenção criados antes do e-mail do técnico ser buscado corretamente
+  // ficaram com esse campo em branco — preenche retroativamente a partir do cadastro atual
+  for (const r of data.relatorios_manutencao) {
+    if (!r.tecnico_email) {
+      const autor = data.usuarios.find((u) => u.id === r.autor_id);
+      if (autor && autor.email) r.tecnico_email = autor.email;
+    }
+  }
   protegerAdminMaster(data);
   return data;
 }
