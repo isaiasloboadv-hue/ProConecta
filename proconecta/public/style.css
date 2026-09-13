@@ -136,7 +136,7 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .combo-item:hover{background:var(--blue-pale);}
 .combo-empty{padding:9px 10px;color:var(--ink-soft);font-size:13px;}
 
-main{flex:1;padding:30px 36px 60px;max-width:1200px;}
+main{flex:1;padding:30px 36px 60px;max-width:1600px;}
 .page-head{margin-bottom:26px;}
 .page-head h1{font-size:23px;margin:0 0 4px;font-weight:800;color:var(--navy);}
 .page-head p{margin:0;color:var(--ink-soft);font-size:14.5px;}

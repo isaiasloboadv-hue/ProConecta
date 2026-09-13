@@ -1759,6 +1759,7 @@ function gerarPdfLaudo(d, item) {
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
 let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
+let osSomenteHoje = false;
 
 async function renderAprovacoesVisitas() {
   await carregarAgendaComVisitas();
@@ -1766,6 +1767,7 @@ async function renderAprovacoesVisitas() {
 }
 
 function mudarMesOS(delta) {
+  osSomenteHoje = false;
   osMes += delta;
   if (osMes < 0) { osMes = 11; osAno--; }
   if (osMes > 11) { osMes = 0; osAno++; }
@@ -1776,24 +1778,27 @@ function irParaHojeOS() {
   const hoje = new Date();
   osAno = hoje.getFullYear();
   osMes = hoje.getMonth();
+  osSomenteHoje = !osSomenteHoje;
   desenharOrdemServico();
 }
 
 function desenharOrdemServico() {
   const agenda = window._agendaCache || [];
   const visitasPorAgenda = window._visitasPorAgenda || {};
-  const doMes = agenda
+  const hojeISO = dataISOLocal(new Date());
+  let doMes = agenda
     .filter((a) => {
       const d = new Date(a.data_hora_inicio);
       return d.getFullYear() === osAno && d.getMonth() === osMes;
     })
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  if (osSomenteHoje) doMes = doMes.filter((a) => (a.data_hora_inicio || '').slice(0, 10) === hojeISO);
   const reaberturas = Object.values(visitasPorAgenda).filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
 
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Ordem de Serviço</h1><p>${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}</p></div>
+      <div><h1>Ordem de Serviço</h1><p>${osSomenteHoje ? `${doMes.length} O.S. hoje` : `${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}`}</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -1804,7 +1809,7 @@ function desenharOrdemServico() {
           <div class="cal-mes-label">${MES_LABEL[osMes]} de ${osAno}</div>
           <button onclick="mudarMesOS(1)">›</button>
         </div>
-        <button class="btn-outline-sm" onclick="irParaHojeOS()">Hoje</button>
+        <button class="btn-outline-sm ${osSomenteHoje ? 'active' : ''}" style="${osSomenteHoje ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="irParaHojeOS()">${osSomenteHoje ? '✓ Só hoje' : 'Hoje'}</button>
       </div>
     </div>
 
@@ -3308,7 +3313,7 @@ function mostrarModalSucesso(mensagem) {
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <h3 style="margin-top:16px;">${esc(mensagem)}</h3>
-      <button class="btn btn-primary" style="width:100%; margin-top:18px;" onclick="document.getElementById('modal-sucesso').classList.remove('show')">Ok</button>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:18px;" onclick="document.getElementById('modal-sucesso').classList.remove('show')">Ok</button>
     </div>`;
 }
 
