@@ -398,6 +398,16 @@ function badgeStatus(status) {
   return `<span class="badge badge-pendente">Em análise</span>`;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// as fontes padrão do jsPDF (Helvetica) só sabem desenhar o intervalo Latin-1 — emoji e outros
+// símbolos fora dele (digitados por autocorreção do teclado do celular, por ex.) viram
+// caracteres corrompidos no PDF em vez de sumirem, então tiram esses símbolos antes de imprimir.
+function limparPdf(s) {
+  return String(s == null ? '' : s)
+    .replace(/[✅✓•]/g, '-')
+    .replace(/[^\x00-\xFF]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
 function numeroOS(a) { return a.numero_os || `OS-${String(a.id).padStart(6, '0')}`; }
 
 // campo de empresa/cliente com dropdown pesquisável (combobox) — em vez de um <select> puro.
@@ -1444,7 +1454,7 @@ function gerarPdfRelatorio(d, item) {
     if (y > 760) { doc.addPage(); y = 50; }
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
     doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(String(valor || '—'), largura - 130);
+    const linhas = doc.splitTextToSize(limparPdf(valor) || '—', largura - 130);
     doc.text(linhas, margem + 130, y);
     y += Math.max(14, linhas.length * 12);
   }
@@ -1466,13 +1476,13 @@ function gerarPdfRelatorio(d, item) {
     if (y > 760) { doc.addPage(); y = 50; }
     const r = c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A';
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(16, 24, 38);
-    doc.text(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${r}`, margem, y); y += 13;
-    if (c.observacao) { doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104); const linhas = doc.splitTextToSize('Obs: ' + c.observacao, largura - 10); doc.text(linhas, margem + 12, y); y += linhas.length * 12; }
+    doc.text(limparPdf(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${r}`), margem, y); y += 13;
+    if (c.observacao) { doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104); const linhas = doc.splitTextToSize(limparPdf('Obs: ' + c.observacao), largura - 10); doc.text(linhas, margem + 12, y); y += linhas.length * 12; }
   });
   y += 8;
 
   titulo('Observações');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.observacoes, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
 
   titulo('Aceite e avaliação');
   linha('Aceite', d.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito');
@@ -1485,8 +1495,8 @@ function gerarPdfRelatorio(d, item) {
   titulo('Assinaturas');
   const wImg = 220, hImg = 90;
   doc.setFontSize(10); doc.setTextColor(16, 24, 38);
-  doc.text(`Cliente: ${d.assinatura_cliente_nome}`, margem, y);
-  doc.text(`Técnico: ${d.assinatura_tecnico_nome}`, margem + largura / 2, y);
+  doc.text(limparPdf(`Cliente: ${d.assinatura_cliente_nome}`), margem, y);
+  doc.text(limparPdf(`Técnico: ${d.assinatura_tecnico_nome}`), margem + largura / 2, y);
   y += 8;
   try { doc.addImage(d.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
   try { doc.addImage(d.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
@@ -1817,7 +1827,7 @@ function gerarPdfLaudo(d, item) {
     if (y > 760) { doc.addPage(); y = 50; }
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
     doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(String(valor || '—'), largura - 130);
+    const linhas = doc.splitTextToSize(limparPdf(valor) || '—', largura - 130);
     doc.text(linhas, margem + 130, y);
     y += Math.max(14, linhas.length * 12);
   }
@@ -1844,17 +1854,17 @@ function gerarPdfLaudo(d, item) {
   y += 8;
 
   titulo('Laudo técnico');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.laudo_tecnico, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(limparPdf(d.laudo_tecnico), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
 
   titulo('Serviço realizado');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.servico_realizado, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(limparPdf(d.servico_realizado), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
 
   if (d.pecas.length) {
     titulo('Peças fornecidas');
     d.pecas.forEach((p) => {
       if (y > 760) { doc.addPage(); y = 50; }
       doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-      doc.text(`• ${p.descricao || '—'}${p.quantidade ? ' (qtd: ' + p.quantidade + ')' : ''}`, margem, y); y += 13;
+      doc.text(limparPdf(`- ${p.descricao || '—'}${p.quantidade ? ' (qtd: ' + p.quantidade + ')' : ''}`), margem, y); y += 13;
     });
     y += 8;
   }
@@ -1863,7 +1873,7 @@ function gerarPdfLaudo(d, item) {
     titulo('Observações');
     if (y > 740) { doc.addPage(); y = 50; }
     doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(d.observacoes, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8;
+    const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8;
   }
 
   if (d.fotos.length) {
@@ -2568,7 +2578,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   }
   function valorEsq(t) {
     doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-    const linhas = doc.splitTextToSize(String(t || '—'), colEsqLargura - 26);
+    const linhas = doc.splitTextToSize(limparPdf(t) || '—', colEsqLargura - 26);
     doc.text(linhas, margem + 14, ye); ye += linhas.length * 11 + 12;
   }
 
@@ -2592,7 +2602,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
       rotuloEsq('FERRAMENTAS');
       doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       r.ferramentas.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).forEach((fnome) => {
-        const linhas = doc.splitTextToSize('✓ ' + fnome, colEsqLargura - 26);
+        const linhas = doc.splitTextToSize(limparPdf('✓ ' + fnome), colEsqLargura - 26);
         doc.text(linhas, margem + 14, ye); ye += linhas.length * 11;
       });
       ye += 10;
@@ -2611,7 +2621,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
   const dataAtt = fmtData(r.atualizado_em || r.criado_em);
   const quemAtt = r.atualizado_por_nome || r.autor_nome || '—';
-  const linhasAtt = doc.splitTextToSize(`${dataAtt} · ${quemAtt}`, colEsqLargura - 26);
+  const linhasAtt = doc.splitTextToSize(limparPdf(`${dataAtt} · ${quemAtt}`), colEsqLargura - 26);
   doc.text(linhasAtt, margem + 14, yUpdate + 12);
 
   doc.setFontSize(7); doc.setTextColor(...PDF_COR.inkSoft);
@@ -2621,11 +2631,11 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   // ----- coluna direita -----
   let y2 = topoConteudo + 8;
   doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  const tituloLinhas = doc.splitTextToSize(r.titulo || '—', colDirLargura);
+  const tituloLinhas = doc.splitTextToSize(limparPdf(r.titulo) || '—', colDirLargura);
   doc.text(tituloLinhas, colDirX, y2); y2 += tituloLinhas.length * 19 + 4;
 
   doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colDirX, y2); y2 += 14;
+  doc.text(limparPdf(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`), colDirX, y2); y2 += 14;
   doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.4); doc.line(colDirX, y2, colDirX + colDirLargura, y2); y2 += 18;
 
   function tituloSecao(t) {
@@ -2636,6 +2646,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
     doc.text(t, colDirX + 10, y2); y2 += 15;
   }
   function paragrafo(texto) {
+    texto = limparPdf(texto);
     if (!texto) return;
     if (y2 > pageH - margem - 40) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; }
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -2657,7 +2668,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
       doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
       doc.text(String(i + 1), colDirX + 6, y2, { align: 'center' });
       doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-      const linhas = doc.splitTextToSize(p.texto || '', colDirLargura - 20);
+      const linhas = doc.splitTextToSize(limparPdf(p.texto), colDirLargura - 20);
       doc.text(linhas, colDirX + 18, y2); y2 += linhas.length * 12 + 4;
       if (p.fotos && p.fotos.length) {
         const wImg = 90, hImg = 68; let x = colDirX + 18;
@@ -2696,7 +2707,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   }
 
   doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`, colDirX, pageH - margem - 10);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), colDirX, pageH - margem - 10);
 
   return doc.output('bloburl');
 }
