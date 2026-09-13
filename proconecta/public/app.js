@@ -530,7 +530,11 @@ function abrirDetalheOSCalendario(id) {
       <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="renderDiaCalendario('${calDiaSelecionado}')">‹ Voltar para o dia</button>
     </div>
-    <div class="panel">${detalheCompletoOS(a, visita)}</div>
+    <div id="form-nova-atividade"></div>
+    <div class="panel">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOS(a, visita)}</div>
+      ${detalheCompletoOS(a, visita)}
+    </div>
   `;
 }
 
@@ -582,8 +586,7 @@ function cardOS(a) {
     <div class="os-card" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
-        <button class="os-card-toggle" onclick="abrirDetalheOSCalendario(${a.id})">Ver detalhes completos</button>
-        ${a.visita_id ? `<button class="btn-outline-sm" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
+        <button class="os-card-toggle" onclick="abrirDetalheOSCalendario(${a.id})">Abrir</button>
       </div>
     </div>`;
 }
@@ -1776,13 +1779,12 @@ function acoesOS(a, visita) {
   return acoes;
 }
 
-function cardOSAdmin(a, visita) {
+function cardOSAdmin(a) {
   return `
     <div class="os-card" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
-        <button class="os-card-toggle" onclick="abrirDetalheOS(${a.id})">Ver detalhes completos</button>
-        ${acoesOS(a, visita)}
+        <button class="os-card-toggle" onclick="abrirDetalheOS(${a.id})">Abrir</button>
       </div>
     </div>`;
 }
@@ -1798,6 +1800,7 @@ function abrirDetalheOS(id) {
       <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="desenharOrdemServico()">‹ Voltar</button>
     </div>
+    <div id="form-nova-atividade"></div>
     <div class="panel">
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOS(a, visita)}</div>
       ${detalheCompletoOS(a, visita)}
@@ -1932,12 +1935,18 @@ function detalheRelatorioVisita(v) {
 }
 async function aprovarVisita(id, incluirBiblioteca) {
   await api(`/api/visitas/${id}/aprovar`, { method: 'POST', body: { incluir_biblioteca: !!incluirBiblioteca } });
-  renderAprovacoesVisitas();
+  voltarListaOS();
+}
+// depois de qualquer ação sobre uma visita, volta pra tela de onde ela foi disparada
+// (Ordem de Serviço ou o calendário da Agenda geral) em vez de sempre ir pra Ordem de Serviço
+function voltarListaOS() {
+  if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
+  else renderAgenda();
 }
 async function reprovarVisita(id) {
   const comentario = prompt('Motivo da reprovação (opcional):') || '';
   await api(`/api/visitas/${id}/reprovar`, { method: 'POST', body: { comentario } });
-  renderAprovacoesVisitas();
+  voltarListaOS();
 }
 async function sugerirEdicaoVisita(id) {
   const comentario = prompt('O que precisa ser corrigido no relatório? (obrigatório)');
@@ -1945,21 +1954,21 @@ async function sugerirEdicaoVisita(id) {
   try {
     await api(`/api/visitas/${id}/sugerir-edicao`, { method: 'POST', body: { comentario } });
     mostrarToast('Edição solicitada — o técnico foi notificado.');
-    renderAprovacoesVisitas();
+    voltarListaOS();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 async function reabrirVisita(id) {
   if (!confirm('Reabrir este relatório? Ele volta para a fila de aprovação e o técnico pode editá-lo novamente.')) return;
-  try { await api(`/api/visitas/${id}/reabrir`, { method: 'POST' }); mostrarToast('Relatório reaberto.'); renderAprovacoesVisitas(); }
+  try { await api(`/api/visitas/${id}/reabrir`, { method: 'POST' }); mostrarToast('Relatório reaberto.'); voltarListaOS(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
 async function recusarReabertura(id) {
-  try { await api(`/api/visitas/${id}/recusar-reabertura`, { method: 'POST' }); mostrarToast('Solicitação de reabertura recusada.'); renderAprovacoesVisitas(); }
+  try { await api(`/api/visitas/${id}/recusar-reabertura`, { method: 'POST' }); mostrarToast('Solicitação de reabertura recusada.'); voltarListaOS(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
 async function excluirVisita(id) {
   if (!confirm('Excluir este relatório definitivamente? Se ele já tiver entrado na biblioteca, o caso também é removido. Essa ação não pode ser desfeita.')) return;
-  try { await api(`/api/visitas/${id}`, { method: 'DELETE' }); mostrarToast('Relatório excluído.'); renderAprovacoesVisitas(); }
+  try { await api(`/api/visitas/${id}`, { method: 'DELETE' }); mostrarToast('Relatório excluído.'); voltarListaOS(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
 async function solicitarReaberturaVisita(id) {
