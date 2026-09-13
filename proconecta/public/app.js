@@ -764,7 +764,7 @@ function diasEntre(isoInicio, isoFim) {
 function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
   if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
-  if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando confirmação', cor: 'teal' };
+  if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
   if (visita) return { label: 'Relatório em análise', cor: 'orange' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
