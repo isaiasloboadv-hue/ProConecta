@@ -2738,7 +2738,7 @@ async function renderRelatorioManutencao() {
           <td style="white-space:nowrap;">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
-            <button class="btn-outline-sm" onclick="baixarXmlRelatorioManutencao(${i})">XML</button>
+            <button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
         </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`}
@@ -3086,50 +3086,82 @@ function abrirFotosRelatorioManutencao(i) {
     </div>`;
 }
 
-function gerarXmlRelatorioManutencao(r) {
-  function escXml(v) { return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  const pecasXml = (r.pecas || []).map((p) => `    <peca>
-      <descricao>${escXml(p.descricao)}</descricao>
-      <codigoPmk>${escXml(p.codigo_pmk)}</codigoPmk>
-      <quantidade>${escXml(p.quantidade)}</quantidade>
-    </peca>`).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<relatorioManutencao id="${r.id}">
-  <criadoEm>${escXml(r.criado_em)}</criadoEm>
-  <empresa>${escXml(r.empresa)}</empresa>
-  <contato>${escXml(r.contato)}</contato>
-  <telefone>${escXml(r.telefone)}</telefone>
-  <tipoServico>${escXml(r.tipo_servico)}</tipoServico>
-  <tipoServicoOutros>${escXml(r.tipo_servico_outros)}</tipoServicoOutros>
-  <marca>${escXml(r.marca)}</marca>
-  <equipamento>${escXml(r.equipamento)}</equipamento>
-  <numeroSerie>${escXml(r.numero_serie)}</numeroSerie>
-  <garantia>${escXml(r.garantia)}</garantia>
-  <garantiaObs>${escXml(r.garantia_obs)}</garantiaObs>
-  <dataFabricacao>${escXml(r.data_fabricacao)}</dataFabricacao>
-  <acessorios>${escXml(r.acessorios)}</acessorios>
-  <defeitoInformado>${escXml(r.defeito_informado)}</defeitoInformado>
-  <tecnicoNome>${escXml(r.tecnico_nome)}</tecnicoNome>
-  <tecnicoEmail>${escXml(r.tecnico_email)}</tecnicoEmail>
-  <dataEntrada>${escXml(r.data_entrada)}</dataEntrada>
-  <dataConclusao>${escXml(r.data_conclusao)}</dataConclusao>
-  <laudoTecnico>${escXml(r.laudo_tecnico)}</laudoTecnico>
-  <servicoRealizado>${escXml(r.servico_realizado)}</servicoRealizado>
-  <pecas>
-${pecasXml}
-  </pecas>
-</relatorioManutencao>`;
+function gerarWordHtmlRelatorioManutencao(r) {
+  function escHtml(v) { return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function campo(label, valor) { return `<p style="margin:0 0 6px;"><b>${escHtml(label)}:</b> ${escHtml(valor) || '—'}</p>`; }
+  function blocoTexto(titulo, texto) {
+    return `<h2 style="color:#0B3D91;font-size:13pt;">${escHtml(titulo)}</h2>
+      <p style="border:1px solid #ccc;padding:8px;white-space:pre-wrap;">${escHtml(texto) || '—'}</p>`;
+  }
+  const TIPO_SERVICO_LABEL = { amostra: 'Amostra', analise: 'Análise', preventiva: 'Preventiva', corretiva: 'Corretiva', outros: r.tipo_servico_outros || 'Outros' };
+  const GARANTIA_LABEL = { sim: 'Sim', nao: 'Não', outros: 'Outros' };
+
+  const pecasHtml = (r.pecas && r.pecas.length)
+    ? `<table border="1" cellpadding="6" style="border-collapse:collapse;width:100%;">
+        <tr style="background:#0B3D91;color:#fff;"><th>Item</th><th>Descrição da peça</th><th>Código PMK</th><th>Qtd.</th></tr>
+        ${r.pecas.map((p, i) => `<tr><td>${i + 1}</td><td>${escHtml(p.descricao) || '—'}</td><td>${escHtml(p.codigo_pmk) || '—'}</td><td>${escHtml(p.quantidade) || '—'}</td></tr>`).join('')}
+      </table>`
+    : `<p><i>Nenhuma peça informada</i></p>`;
+
+  const blocosFoto = r.fotos || [];
+  const fotosHtml = blocosFoto.length && blocosFoto.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length))
+    ? blocosFoto.map((entrada) => {
+        const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+        const imgs = (bloco.fotos || []).map((f) => `<img src="${f}" style="max-width:260px;margin:4px;">`).join('');
+        return `<div style="margin-bottom:14px;">${imgs}${bloco.comentario ? `<div style="margin-top:6px;">${bloco.comentario}</div>` : ''}</div>`;
+      }).join('')
+    : `<p><i>Nenhuma foto anexada.</i></p>`;
+
+  return `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset="utf-8"><title>Relatório Técnico</title></head>
+<body style="font-family:Calibri, Arial, sans-serif; font-size:11pt; color:#1a2433;">
+  <h1 style="color:#0B3D91;">PRO Marking — Relatório Técnico</h1>
+
+  <h2 style="color:#0B3D91;font-size:13pt;">Dados do cliente</h2>
+  ${campo('Empresa', r.empresa)}
+  ${campo('Contato', r.contato)}
+  ${campo('Telefone', r.telefone)}
+
+  <h2 style="color:#0B3D91;font-size:13pt;">Tipo de serviço</h2>
+  ${campo('Tipo', TIPO_SERVICO_LABEL[r.tipo_servico] || '—')}
+
+  <h2 style="color:#0B3D91;font-size:13pt;">Dados do equipamento</h2>
+  ${campo('Marca', r.marca)}
+  ${campo('Equipamento', r.equipamento)}
+  ${campo('Nº Série', r.numero_serie)}
+  ${campo('Garantia', GARANTIA_LABEL[r.garantia] || '—')}
+  ${campo('Data de fabricação', r.data_fabricacao)}
+  ${campo('Acessórios', r.acessorios)}
+  ${campo('Defeito informado', r.defeito_informado)}
+
+  <h2 style="color:#0B3D91;font-size:13pt;">Técnico responsável</h2>
+  ${campo('Nome', r.tecnico_nome)}
+  ${campo('E-mail', r.tecnico_email)}
+  ${campo('Entrada', r.data_entrada)}
+  ${campo('Conclusão', r.data_conclusao)}
+  ${campo('Período', periodoManut(r.data_entrada, r.data_conclusao))}
+
+  ${blocoTexto('Laudo técnico', r.laudo_tecnico)}
+  ${blocoTexto('Serviços realizados', r.servico_realizado)}
+
+  <h2 style="color:#0B3D91;font-size:13pt;">Peças fornecidas</h2>
+  ${pecasHtml}
+
+  <h2 style="color:#0B3D91;font-size:13pt;">Relatório fotográfico</h2>
+  ${fotosHtml}
+</body>
+</html>`;
 }
 
-function baixarXmlRelatorioManutencao(i) {
+function baixarWordRelatorioManutencao(i) {
   const r = (window._relatoriosManutCache || [])[i];
   if (!r) return;
-  const xml = gerarXmlRelatorioManutencao(r);
-  const blob = new Blob([xml], { type: 'application/xml' });
+  const html = gerarWordHtmlRelatorioManutencao(r);
+  const blob = new Blob(['﻿', html], { type: 'application/msword' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `relatorio-manutencao-${r.id}.xml`;
+  link.download = `relatorio-manutencao-${r.id}.doc`;
   document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
