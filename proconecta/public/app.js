@@ -3320,7 +3320,24 @@ function wEspacoInvisivel(fillHex) {
   return new docx.Paragraph({
     shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
     spacing: { before: 0, after: 0, line: 20, lineRule: docx.LineRuleType.EXACT },
+    // um parágrafo sem nenhum "run" às vezes não pinta o sombreado no Word — um
+    // texto vazio garante que a cor realmente seja desenhada
+    children: [new docx.TextRun({ text: '' })],
   });
+}
+
+// o Word sempre insere um parágrafo "de fechamento" (sem formatação nenhuma) entre a
+// primeira seção (capa) e a seção seguinte, pra guardar a quebra de seção — e não tem
+// como colorir esse parágrafo específico pela API do docx.js. Depois de gerar o .docx,
+// abre o arquivo (é um .zip) e pinta esse parágrafo direto no XML, senão sobra uma tira
+// branca entre a capa e a borda da folha.
+async function pintarFechoSecaoCapaWord(blob, fillHex) {
+  const zip = await JSZip.loadAsync(blob);
+  const caminho = 'word/document.xml';
+  let xml = await zip.file(caminho).async('string');
+  xml = xml.replace('<w:p><w:pPr><w:sectPr', `<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="${fillHex}"/><w:sectPr`);
+  zip.file(caminho, xml);
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
 }
 
 function wPaginaColorida(fillHex, conteudo) {
@@ -3540,7 +3557,8 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
       },
     ],
   });
-  return docx.Packer.toBlob(doc);
+  const blob = await docx.Packer.toBlob(doc);
+  return pintarFechoSecaoCapaWord(blob, WORD_COR.navy);
 }
 
 async function baixarWordRelatorioManutencao(i) {
