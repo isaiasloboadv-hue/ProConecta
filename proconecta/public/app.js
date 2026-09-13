@@ -551,9 +551,10 @@ function abrirDetalheOSCalendario(id) {
   `;
 }
 
-const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído' };
+const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído', finalizada: 'Finalizada' };
 
 function statusOS(a) {
+  if (a.finalizada) return 'finalizada';
   if (a.status === 'concluida') return a.visita_status === 'aprovado' ? 'concluido' : 'pendente';
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
@@ -573,6 +574,7 @@ function osCardCorpo(a) {
   const diaAbertura = (a.criado_em || a.data_hora_inicio || '').slice(0, 10);
   const diffVenc = diasEntre(hojeISO, diaAtendimento);
   const vencRelativo = diffVenc === 0 ? 'hoje' : diffVenc > 0 ? `em ${diffVenc} dia${diffVenc === 1 ? '' : 's'}` : `há ${-diffVenc} dia${diffVenc === -1 ? '' : 's'}`;
+  const vencClasse = diffVenc < 0 ? 'os-venc-vencido' : diffVenc === 0 ? 'os-venc-hoje' : 'os-venc-futuro';
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
@@ -589,14 +591,14 @@ function osCardCorpo(a) {
         <div class="os-field"><span class="os-field-label">Telefone</span><span class="os-field-value">${esc(a.telefone || a.cliente_telefone || '—')}</span></div>
       </div>
       <div class="os-card-footer">
-        <span class="os-venc">Venc ${vd}/${vm} · ${vencRelativo}</span>
+        <span class="os-venc ${vencClasse}">Venc ${vd}/${vm} · ${vencRelativo}</span>
         <span class="os-dias-abertura">${diasAbertura} dia${diasAbertura === 1 ? '' : 's'} desde a abertura</span>
       </div>`;
 }
 
 function cardOS(a) {
   return `
-    <div class="os-card" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOSCalendario(${a.id})">Abrir</button>
@@ -1809,6 +1811,9 @@ function desenharOrdemServico() {
 // ações disponíveis pra uma O.S. (aprovar/reprovar/reabrir/excluir relatório + editar/excluir a própria O.S.)
 // — usadas tanto no card quanto na tela de detalhe.
 function acoesOS(a, visita) {
+  if (a.finalizada) {
+    return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço. Abra uma nova O.S. se precisar de um novo atendimento.</span>`;
+  }
   let acoes;
   if (visita && visita.status_aprovacao === 'pendente') {
     acoes = `
@@ -1817,9 +1822,12 @@ function acoesOS(a, visita) {
       <button class="btn btn-ghost btn-sm" onclick="sugerirEdicaoVisita(${visita.id})">Sugerir edição</button>
       <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado') {
+    const umDiaMs = 24 * 60 * 60 * 1000;
+    const podeFinalizar = visita.data_aprovacao && (Date.now() - new Date(visita.data_aprovacao).getTime()) >= umDiaMs;
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
-      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>`;
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
+      ${podeFinalizar ? `<button class="btn btn-primary btn-sm" onclick="finalizarOS(${a.id})">Finalizar O.S.</button>` : ''}`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
     acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else if (visita && visita.status_aprovacao === 'alteracao_sugerida') {
@@ -1833,9 +1841,15 @@ function acoesOS(a, visita) {
   return acoes;
 }
 
+async function finalizarOS(id) {
+  if (!confirm('Confirma que a empresa já deu o retorno concordando com o serviço prestado? Depois de finalizada, esta O.S. não pode mais ser alterada — um novo atendimento vai precisar de uma O.S. nova.')) return;
+  try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST' }); mostrarToast('O.S. finalizada.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao finalizar: ' + e.message); }
+}
+
 function cardOSAdmin(a) {
   return `
-    <div class="os-card" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOS(${a.id})">Abrir</button>

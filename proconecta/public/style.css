@@ -273,10 +273,13 @@ textarea{resize:vertical;min-height:64px;}
 
 .os-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(195px, 1fr));gap:12px;align-items:stretch;margin-bottom:22px;}
 .os-card{position:relative;display:flex;flex-direction:column;height:100%;border:1px solid var(--line);border-radius:12px;padding:12px 13px 11px;background:#fff;min-width:0;}
+.os-card-finalizada{background:#EBEEF2;opacity:.7;filter:saturate(.5);}
+.os-card-finalizada:hover{opacity:.9;}
 .os-tarja{display:inline-block;align-self:flex-start;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 8px;border-radius:6px;margin-bottom:8px;}
 .os-tarja-agendado{background:var(--green-bg);color:var(--green);}
 .os-tarja-pendente{background:var(--amber-bg);color:var(--amber);}
 .os-tarja-concluido{background:var(--blue-pale);color:var(--blue);}
+.os-tarja-finalizada{background:var(--line);color:var(--ink-soft);}
 .os-card-top{display:flex;gap:4px;flex-wrap:nowrap;align-items:center;margin-bottom:7px;}
 .os-card-top .tag{font-size:9.5px;padding:2px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .os-tag-tipo{flex:1 1 auto;min-width:0;}
@@ -287,7 +290,10 @@ textarea{resize:vertical;min-height:64px;}
 .os-field-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8E9DB3;}
 .os-field-value{font-size:12px;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .os-card-footer{display:flex;flex-direction:column;align-items:flex-start;gap:5px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--line);}
-.os-venc{font-size:10.5px;font-weight:700;color:var(--red);background:#FDE8E5;padding:2px 8px;border-radius:6px;}
+.os-venc{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:6px;}
+.os-venc-vencido{color:var(--red);background:#FDE8E5;}
+.os-venc-hoje{color:var(--amber);background:var(--amber-bg);}
+.os-venc-futuro{color:var(--green);background:var(--green-bg);}
 .os-dias-abertura{font-size:10.5px;color:var(--ink-soft);}
 .os-card-actions{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:9px;border-top:1px dashed var(--line);}
 .os-card-actions .btn,.os-card-actions .btn-outline-sm,.os-card-actions .btn-ghost{width:100%;text-align:center;}

@@ -68,7 +68,10 @@ function agendaComDetalhes(data, item) {
     ...item,
     visita_id: visita ? visita.id : null,
     visita_status: visita ? visita.status_aprovacao : null,
+    visita_data_aprovacao: visita ? visita.data_aprovacao : null,
     visita_solicitacao_reabertura: visita ? visita.solicitacao_reabertura : null,
+    finalizada: item.finalizada || false,
+    finalizado_em: item.finalizado_em || null,
     tecnico_nome: tecnico ? tecnico.nome : null,
     tecnico_setor: tecnico ? tecnico.setor : null,
     cliente_nome: cliente ? cliente.nome_empresa : null,
@@ -338,6 +341,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 403, { erro: 'Esta O.S. já foi finalizada e não pode mais ser alterada. Abra uma nova O.S. se for necessário um novo atendimento.' });
   const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
   if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('garantia');
@@ -373,6 +377,31 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
   });
   if (trocouTecnico) item.lida_tecnico = false;
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/finalizar — administrador confirma que o cliente já deu o retorno e
+// concordou com o serviço prestado; a partir daqui a O.S. vira registro histórico, sem mais
+// alterações (um novo atendimento pede uma O.S. nova). Só pode finalizar depois de aprovada
+// e com pelo menos 1 dia completo desde a aprovação.
+rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador finaliza ordens de serviço.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já está finalizada.' });
+  const visita = data.visitas.find((v) => v.agenda_id === item.id);
+  if (item.status !== 'concluida' || !visita || visita.status_aprovacao !== 'aprovado') {
+    return enviarJSON(res, 400, { erro: 'Só é possível finalizar uma O.S. já concluída e aprovada.' });
+  }
+  const umDiaEmMs = 24 * 60 * 60 * 1000;
+  if (!visita.data_aprovacao || (Date.now() - new Date(visita.data_aprovacao).getTime()) < umDiaEmMs) {
+    return enviarJSON(res, 400, { erro: 'Aguarde pelo menos 1 dia após a conclusão para finalizar esta O.S.' });
+  }
+  item.finalizada = true;
+  item.finalizado_em = new Date().toISOString();
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -672,11 +701,12 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reabrir$/, async (req, res, m) => {
   const data = db.load();
   const visita = data.visitas.find((v) => v.id === Number(m[1]));
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  if (agendaItem && agendaItem.finalizada) return enviarJSON(res, 403, { erro: 'Esta O.S. já foi finalizada e não pode mais ser reaberta.' });
   visita.status_aprovacao = 'pendente';
   visita.aprovado_por = null;
   visita.data_aprovacao = null;
   if (visita.solicitacao_reabertura) visita.solicitacao_reabertura.status = 'aprovada';
-  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
   if (agendaItem) agendaItem.status = 'pendente';
   db.save(data);
   enviarJSON(res, 200, { visita });
