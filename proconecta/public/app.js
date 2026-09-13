@@ -113,6 +113,9 @@ function renderHeaderRight() {
         <span class="u-role">${PAPEL_LABEL[USER.papel] || USER.papel}</span>
       </div>
     </div>
+    <button class="btn-bell" id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
     <div class="bell-wrap">
       <button class="btn-bell" id="btn-bell" onclick="alternarSino()">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3a6 6 0 0 0-6 6v3.3c0 .6-.2 1.2-.6 1.7L4 16h16l-1.4-2a2.6 2.6 0 0 1-.6-1.7V9a6 6 0 0 0-6-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -122,6 +125,14 @@ function renderHeaderRight() {
     </div>
     <button class="btn-logout" onclick="sair()">Sair</button>
   `;
+}
+
+// força buscar a versão mais nova do sistema e dos dados — útil no app instalado (PWA),
+// que pode ficar aberto em segundo plano por dias sem recarregar sozinho.
+function sincronizarApp() {
+  const btn = document.getElementById('btn-sync');
+  if (btn) btn.classList.add('girando');
+  location.reload();
 }
 
 // ---------- menu em cascata ----------
