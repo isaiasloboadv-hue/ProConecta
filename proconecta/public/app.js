@@ -312,13 +312,6 @@ document.addEventListener('click', (e) => {
   });
 });
 
-function selecionarClienteInicial(idPrefix, clientes) {
-  if (!clientes.length) return;
-  const ordenados = clientes.slice().sort((a, b) => a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'));
-  document.getElementById(idPrefix + '-nome').value = ordenados[0].nome_empresa;
-  document.getElementById(idPrefix).value = ordenados[0].id;
-}
-
 // ---------- sino de notificações ----------
 
 async function atualizarSino() {
@@ -672,7 +665,6 @@ async function mostrarFormNovaAtividade(agendaItem) {
     document.getElementById('na-equip').value = agendaItem.equipamento_id;
     preencherNumeroSerieNovaAtividade();
   } else {
-    selecionarClienteInicial('na-cliente', clientes);
     preencherClienteNovaAtividade();
   }
   atualizarTipoNovaAtividade();
@@ -719,10 +711,12 @@ function preencherClienteNovaAtividade(sobrescreverContato) {
     document.getElementById('na-estado').value = cliente.estado || '';
   }
 
-  const equipDoCliente = (window._equipamentosCache || []).filter((e) => e.cliente_id === clienteId);
-  document.getElementById('na-equip').innerHTML = equipDoCliente.length
-    ? equipDoCliente.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')
-    : `<option value="">Nenhum equipamento cadastrado para este cliente</option>`;
+  const equipDoCliente = clienteId ? (window._equipamentosCache || []).filter((e) => e.cliente_id === clienteId) : [];
+  document.getElementById('na-equip').innerHTML = !clienteId
+    ? `<option value="">Escolha uma empresa primeiro</option>`
+    : equipDoCliente.length
+      ? equipDoCliente.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')
+      : `<option value="">Nenhum equipamento cadastrado para este cliente</option>`;
   preencherNumeroSerieNovaAtividade();
 }
 
