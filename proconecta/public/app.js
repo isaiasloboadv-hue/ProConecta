@@ -2007,7 +2007,10 @@ async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
           <td>${esc(r.titulo)}</td>
           <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
           <td>${esc(r.numero_serie || '—')}</td>
-          <td><button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheDefeito(${i})">Abrir</button></td>
+          <td style="white-space:nowrap;">
+            <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheDefeito(${i})">Abrir</button>
+            ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('defeito', ${i})">Excluir</button>` : ''}
+          </td>
         </tr>`).join('')}
     </table></div>` : `<div class="empty">Nenhum caso aprovado com esses filtros ainda.</div>`}`;
 }
@@ -2094,6 +2097,17 @@ async function solicitarEdicaoBiblioteca(tipo, i) {
     mostrarToast('Solicitação enviada — o administrador foi notificado.');
   } catch (e) { alert('Erro: ' + e.message); }
 }
+async function excluirRegistroBiblioteca(tipo, i) {
+  const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
+  if (!r) return;
+  if (!confirm(`Excluir "${r.titulo}" definitivamente? Essa ação não pode ser desfeita.`)) return;
+  try {
+    await api(`/api/registros/${r.id}`, { method: 'DELETE' });
+    mostrarToast('Registro excluído.');
+    if (tipo === 'procedimento') renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true);
+    else renderBibliotecaDefeitos(window._defeitosFiltros || {}, true);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
 
 async function renderSolicitacoesEdicao() {
   const { registros } = await api('/api/registros/solicitacoes-edicao');
@@ -2141,7 +2155,10 @@ async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
           <td>${esc(r.titulo)}</td>
           <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
           <td>${esc(r.periodicidade || '—')}</td>
-          <td><button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheProcedimento(${i})">Abrir</button></td>
+          <td style="white-space:nowrap;">
+            <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheProcedimento(${i})">Abrir</button>
+            ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('procedimento', ${i})">Excluir</button>` : ''}
+          </td>
         </tr>`).join('')}
     </table></div>` : `<div class="empty">Nenhum procedimento aprovado com esses filtros ainda.</div>`}`;
 }
