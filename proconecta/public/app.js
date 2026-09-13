@@ -2022,13 +2022,17 @@ function abrirDetalheDefeito(i) {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}${r.numero_serie ? ' · Nº série ' + esc(r.numero_serie) : ''}</p></div>
-      <button class="btn-outline-sm" onclick="renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)">‹ Voltar</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="abrirPdfBiblioteca('defeito', ${i})">Abrir PDF</button>
+        <button class="btn-outline-sm" onclick="renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)">‹ Voltar</button>
+      </div>
     </div>
     <div class="panel">
       <span class="tag tag-falha">Defeito</span>
       <div class="kv" style="margin-top:12px;"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
       <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
       <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
+      ${r.fotos && r.fotos.length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="item-step-photos">${r.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do defeito">`).join('')}</div>` : ''}
       <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
     </div>`;
 }
@@ -2075,7 +2079,10 @@ function abrirDetalheProcedimento(i) {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}${r.periodicidade ? ' · Periodicidade: ' + esc(r.periodicidade) : ''}</p></div>
-      <button class="btn-outline-sm" onclick="renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)">‹ Voltar</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="abrirPdfBiblioteca('procedimento', ${i})">Abrir PDF</button>
+        <button class="btn-outline-sm" onclick="renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)">‹ Voltar</button>
+      </div>
     </div>
     <div class="panel">
       <span class="tag tag-preventiva">Procedimento</span>
@@ -2091,6 +2098,147 @@ function abrirDetalheProcedimento(i) {
         <div class="item-autor">Autor: <b>${esc(r.autor_nome || '—')}</b> · ${fmtData(r.criado_em)}</div>
       </div>
     </div>`;
+}
+
+function abrirPdfBiblioteca(tipo, i) {
+  const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
+  if (!r) return;
+  try {
+    const url = gerarPdfBiblioteca(r, tipo);
+    window.open(url, '_blank');
+  } catch (e) {
+    alert('Erro ao gerar o PDF: ' + e.message);
+  }
+}
+
+// PDF em duas colunas (ficha técnica ilustrada, no estilo de um manual de procedimento impresso):
+// coluna esquerda com foto de destaque/ferramentas/periodicidade, coluna direita com o conteúdo.
+function gerarPdfBiblioteca(r, tipo) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 30;
+  const colEsqLargura = 150;
+  const colDirX = margem + colEsqLargura + 20;
+  const colDirLargura = pageW - colDirX - margem;
+
+  doc.setDrawColor(20, 103, 214);
+  doc.setLineWidth(1.2);
+  doc.rect(margem, margem, pageW - margem * 2, pageH - margem * 2);
+  doc.setDrawColor(210, 214, 222);
+  doc.setLineWidth(0.6);
+  doc.line(margem + colEsqLargura + 10, margem + 10, margem + colEsqLargura + 10, pageH - margem - 10);
+
+  function foto(f) {
+    if (!f) return null;
+    const m = /^data:image\/(\w+);/.exec(f);
+    return m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+  }
+
+  // ----- coluna esquerda -----
+  let ye = margem + 24;
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+  doc.text('PRO CONECTA', margem + 14, ye); ye += 16;
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+  const eqLinhas = doc.splitTextToSize(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colEsqLargura - 20);
+  doc.text(eqLinhas, margem + 14, ye); ye += eqLinhas.length * 11 + 10;
+
+  const primeiraFoto = tipo === 'procedimento' ? ((r.passos || []).find((p) => p.fotos && p.fotos.length) || {}).fotos?.[0] : (r.fotos || [])[0];
+  if (primeiraFoto) {
+    try { doc.addImage(primeiraFoto, foto(primeiraFoto), margem + 14, ye, colEsqLargura - 28, 90); ye += 100; } catch (e) {}
+  }
+
+  if (tipo === 'procedimento') {
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+    doc.text('Periodicidade:', margem + 14, ye); ye += 12;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+    doc.text(r.periodicidade || '—', margem + 14, ye); ye += 18;
+    if (r.ferramentas) {
+      doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+      doc.text('Ferramentas:', margem + 14, ye); ye += 12;
+      doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+      r.ferramentas.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).forEach((fnome) => {
+        const linhas = doc.splitTextToSize('✓ ' + fnome, colEsqLargura - 20);
+        doc.text(linhas, margem + 14, ye); ye += linhas.length * 11;
+      });
+    }
+  } else {
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+    doc.text('Nº de série:', margem + 14, ye); ye += 12;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+    doc.text(r.numero_serie || '—', margem + 14, ye); ye += 18;
+  }
+
+  doc.setFontSize(7); doc.setTextColor(150, 160, 175);
+  doc.text('PRO Marking', margem + 14, pageH - margem - 16);
+  doc.text('promarking.com.br', margem + 14, pageH - margem - 6);
+
+  // ----- coluna direita -----
+  let y2 = margem + 24;
+  doc.setFontSize(15); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+  const tituloLinhas = doc.splitTextToSize(r.titulo || '—', colDirLargura);
+  doc.text(tituloLinhas, colDirX, y2); y2 += tituloLinhas.length * 18 + 4;
+
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
+  doc.text(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colDirX, y2); y2 += 16;
+  doc.setDrawColor(20, 103, 214); doc.line(colDirX, y2, colDirX + colDirLargura, y2); y2 += 16;
+
+  function tituloSecao(t) {
+    if (y2 > pageH - margem - 40) { doc.addPage(); y2 = margem + 20; }
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
+    doc.text(t, colDirX, y2); y2 += 14;
+  }
+  function paragrafo(texto) {
+    if (!texto) return;
+    if (y2 > pageH - margem - 40) { doc.addPage(); y2 = margem + 20; }
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
+    const linhas = doc.splitTextToSize(texto, colDirLargura);
+    doc.text(linhas, colDirX, y2); y2 += linhas.length * 12 + 10;
+  }
+
+  if (tipo === 'procedimento') {
+    if (r.precaucoes) { tituloSecao('Precaução'); paragrafo(r.precaucoes); }
+    tituloSecao('Passo a passo');
+    (r.passos || []).forEach((p, i) => {
+      if (y2 > pageH - margem - 60) { doc.addPage(); y2 = margem + 20; }
+      doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(16, 24, 38);
+      doc.text(`${i + 1}.`, colDirX, y2);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(p.texto || '', colDirLargura - 16);
+      doc.text(linhas, colDirX + 16, y2); y2 += linhas.length * 12 + 4;
+      if (p.fotos && p.fotos.length) {
+        const wImg = 90, hImg = 68; let x = colDirX + 16;
+        p.fotos.forEach((f) => {
+          if (x + wImg > colDirX + colDirLargura) { x = colDirX + 16; y2 += hImg + 8; }
+          if (y2 + hImg > pageH - margem - 20) { doc.addPage(); y2 = margem + 20; x = colDirX + 16; }
+          try { doc.addImage(f, foto(f), x, y2, wImg, hImg); } catch (e) {}
+          x += wImg + 10;
+        });
+        y2 += hImg + 14;
+      } else y2 += 6;
+    });
+  } else {
+    tituloSecao('Sintoma'); paragrafo(r.sintoma);
+    tituloSecao('Causa'); paragrafo(r.causa);
+    tituloSecao('Solução'); paragrafo(r.solucao);
+    if (r.fotos && r.fotos.length) {
+      tituloSecao('Relatório fotográfico');
+      const wImg = 150, hImg = 110; let x = colDirX;
+      r.fotos.forEach((f) => {
+        if (x + wImg > colDirX + colDirLargura) { x = colDirX; y2 += hImg + 10; }
+        if (y2 + hImg > pageH - margem - 20) { doc.addPage(); y2 = margem + 20; x = colDirX; }
+        try { doc.addImage(f, foto(f), x, y2, wImg, hImg); } catch (e) {}
+        x += wImg + 12;
+      });
+      y2 += hImg + 14;
+    }
+  }
+
+  doc.setFontSize(8); doc.setTextColor(150, 160, 175);
+  doc.text(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`, colDirX, pageH - margem - 10);
+
+  return doc.output('bloburl');
 }
 
 // ---------- RANKING DE TÉCNICOS ----------

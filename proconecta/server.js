@@ -473,6 +473,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
       causa: camposVisita.causa,
       solucao: camposVisita.correcao,
       resultado: camposVisita.resultado,
+      fotos: (camposVisita.laudo && Array.isArray(camposVisita.laudo.fotos)) ? camposVisita.laudo.fotos : [],
     };
     if (registroExistente) {
       Object.assign(registroExistente, campos);
