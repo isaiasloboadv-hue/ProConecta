@@ -3141,13 +3141,45 @@ function wTitulo(texto) {
   });
 }
 
-function wCampo(label, valor) {
-  return new docx.Paragraph({
-    spacing: { after: 60 },
-    children: [
-      new docx.TextRun({ text: label.toUpperCase() + ': ', bold: true, color: WORD_COR.ink, size: 20 }),
-      new docx.TextRun({ text: valor ? String(valor) : '—', color: WORD_COR.ink, size: 20 }),
-    ],
+function wBordaFinaTabela() {
+  const linha = { style: docx.BorderStyle.SINGLE, size: 4, color: WORD_COR.line };
+  return { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha };
+}
+
+// caixas lado a lado dentro de uma linha de tabela, igual ao layout do PDF (linhaCampos)
+function wLinhaCampos(campos) {
+  const margins = { top: 70, bottom: 70, left: 100, right: 100 };
+  const cells = campos.map((c) => new docx.TableCell({
+    width: { size: Math.round(c.frac * 100), type: docx.WidthType.PERCENTAGE },
+    margins,
+    children: [new docx.Paragraph({
+      children: [
+        new docx.TextRun({ text: c.label.toUpperCase() + ': ', bold: true, color: WORD_COR.ink, size: 18 }),
+        new docx.TextRun({ text: c.valor ? String(c.valor) : '—', color: WORD_COR.ink, size: 18 }),
+      ],
+    })],
+  }));
+  return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: wBordaFinaTabela(), rows: [new docx.TableRow({ children: cells })] });
+}
+
+// caixa "GARANTIA" (com as opções sim/não/outros) ao lado da caixa "DATA DE FABRICAÇÃO", igual ao PDF
+function wLinhaGarantiaData(garantia, dataFabricacao) {
+  const margins = { top: 70, bottom: 70, left: 100, right: 100 };
+  const runsGarantia = [new docx.TextRun({ text: 'GARANTIA: ', bold: true, color: WORD_COR.ink, size: 18 })];
+  [['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']].forEach(([v, l], idx) => {
+    if (idx > 0) runsGarantia.push(new docx.TextRun({ text: '   ', size: 18 }));
+    runsGarantia.push(new docx.TextRun({ text: (v === garantia ? '☑ ' : '☐ ') + l, bold: true, color: WORD_COR.ink, size: 18 }));
+  });
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: wBordaFinaTabela(),
+    rows: [new docx.TableRow({ children: [
+      new docx.TableCell({ width: { size: 62, type: docx.WidthType.PERCENTAGE }, margins, children: [new docx.Paragraph({ children: runsGarantia })] }),
+      new docx.TableCell({ width: { size: 38, type: docx.WidthType.PERCENTAGE }, margins, children: [new docx.Paragraph({ children: [
+        new docx.TextRun({ text: 'DATA DE FABRICAÇÃO: ', bold: true, color: WORD_COR.ink, size: 18 }),
+        new docx.TextRun({ text: dataFabricacao ? String(dataFabricacao) : '—', color: WORD_COR.ink, size: 18 }),
+      ] })] }),
+    ] })],
   });
 }
 
@@ -3237,7 +3269,7 @@ function wPaginaColorida(fillHex, conteudo) {
     width: { size: 100, type: docx.WidthType.PERCENTAGE },
     borders: docx.TableBorders.NONE,
     rows: [new docx.TableRow({
-      height: { value: 15200, rule: docx.HeightRule.EXACT },
+      height: { value: 15600, rule: docx.HeightRule.EXACT },
       children: [new docx.TableCell({
         shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
         verticalAlign: docx.VerticalAlign.CENTER,
@@ -3357,9 +3389,10 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
   }));
 
   children.push(wTitulo('Dados do cliente'));
-  children.push(wCampo('Empresa', r.empresa));
-  children.push(wCampo('Contato', r.contato));
-  children.push(wCampo('Telefone', r.telefone));
+  children.push(wLinhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]));
+  children.push(wLinhaCampos([{ label: 'Contato', valor: r.contato, frac: 1 }]));
+  children.push(wLinhaCampos([{ label: 'Telefone', valor: r.telefone, frac: 1 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
 
   children.push(wTitulo('Tipo de serviço'));
   children.push(wLinhaOpcoes([
@@ -3368,20 +3401,15 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
   ], r.tipo_servico));
 
   children.push(wTitulo('Dados do equipamento'));
-  children.push(wCampo('Marca', r.marca));
-  children.push(wCampo('Equipamento', r.equipamento));
-  children.push(wCampo('Nº Série', r.numero_serie));
-  children.push(wLinhaOpcoes([['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']], r.garantia));
-  children.push(wCampo('Data de fabricação', r.data_fabricacao));
-  children.push(wCampo('Acessórios', r.acessorios));
-  children.push(wCampo('Defeito informado', r.defeito_informado));
+  children.push(wLinhaCampos([{ label: 'Marca', valor: r.marca, frac: 0.34 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.4 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.26 }]));
+  children.push(wLinhaGarantiaData(r.garantia, r.data_fabricacao));
+  children.push(wLinhaCampos([{ label: 'Acessórios', valor: r.acessorios, frac: 1 }]));
+  children.push(wLinhaCampos([{ label: 'Defeito informado', valor: r.defeito_informado, frac: 1 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
 
   children.push(wTitulo('Técnico responsável'));
-  children.push(wCampo('Nome', r.tecnico_nome));
-  children.push(wCampo('E-mail', r.tecnico_email));
-  children.push(wCampo('Entrada', r.data_entrada));
-  children.push(wCampo('Conclusão', r.data_conclusao));
-  children.push(wCampo('Período', periodoManut(r.data_entrada, r.data_conclusao)));
+  children.push(wLinhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.5 }, { label: 'E-mail', valor: r.tecnico_email, frac: 0.5 }]));
+  children.push(wLinhaCampos([{ label: 'Entrada', valor: r.data_entrada, frac: 0.26 }, { label: 'Conclusão', valor: r.data_conclusao, frac: 0.26 }, { label: 'Período', valor: periodoManut(r.data_entrada, r.data_conclusao), frac: 0.48 }]));
 
   children.push(wTitulo('Laudo técnico'));
   children.push(wBlocoTexto(r.laudo_tecnico));
@@ -3416,7 +3444,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
       properties: {
         page: {
           size: { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) },
-          margin: { top: 500, bottom: 500, left: 500, right: 500 },
+          margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 },
         },
       },
       children,
