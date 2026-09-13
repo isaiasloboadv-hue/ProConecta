@@ -3307,7 +3307,7 @@ function wPaginaColorida(fillHex, conteudo) {
 }
 
 function wCapa(r, logoDataUri) {
-  const DESLOC_TOPO = 1134; // ~2cm — empurra logo/"PRO Marking" pra baixo, mais perto do centro
+  const DESLOC_TOPO = 3969; // ~7cm — empurra logo/"PRO Marking" pra baixo, mais perto do centro
   const DESLOC_BASE = 567; // ~1cm — sobe o slogan, tirando ele da borda inferior
 
   const topo = [];
@@ -3362,8 +3362,8 @@ function wCapa(r, logoDataUri) {
     width: { size: 100, type: docx.WidthType.PERCENTAGE },
     borders: docx.TableBorders.NONE,
     rows: [
-      linhaBloco(topo, 4000, docx.VerticalAlign.TOP),
-      linhaBloco(meio, 8800, docx.VerticalAlign.CENTER),
+      linhaBloco(topo, 6835, docx.VerticalAlign.TOP),
+      linhaBloco(meio, 5965, docx.VerticalAlign.CENTER),
       linhaBloco(base, 2800, docx.VerticalAlign.BOTTOM),
     ],
   });
