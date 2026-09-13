@@ -308,6 +308,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     valor_servico: body.valor_servico || null,
     retrabalho: false,
     criado_em: new Date().toISOString(),
+    lida_tecnico: false,
   };
   data.agenda.push(item);
   db.save(data);
@@ -335,6 +336,8 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
+  // se o técnico designado mudou, ele ainda não viu essa atribuição — reabre a notificação
+  const trocouTecnico = Number(body.tecnico_id) !== item.tecnico_id;
   Object.assign(item, {
     tecnico_id: Number(body.tecnico_id),
     cliente_id: Number(body.cliente_id),
@@ -348,6 +351,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
   });
+  if (trocouTecnico) item.lida_tecnico = false;
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -369,6 +373,19 @@ rota('DELETE', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   data.agenda.splice(idx, 1);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
+});
+
+// POST /api/agenda/:id/marcar-lida — o técnico marcou a notificação de nova O.S. atribuída como vista
+rota('POST', /^\/api\/agenda\/(\d+)\/marcar-lida$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
+  item.lida_tecnico = true;
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
 // POST /api/visitas  (técnico registra o diário técnico de uma atividade)
@@ -833,10 +850,26 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
         .filter((v) => v.tecnico_id === user.id && v.status_aprovacao === 'aprovado' && !v.lida_tecnico)
         .map((v) => ({ id: v.id, tipo: 'os_aprovada', texto: 'Relatório aprovado pelo administrador — gere o PDF na O.S.', registro_id: v.id }))
     );
+    notificacoes = notificacoes.concat(
+      data.agenda
+        .filter((a) => a.tecnico_id === user.id && !a.lida_tecnico)
+        .map((a) => {
+          const cliente = data.clientes.find((c) => c.id === a.cliente_id);
+          return { id: a.id, tipo: 'os_atribuida', texto: `Nova Ordem de Serviço atribuída a você${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: a.id };
+        })
+    );
   } else if (user.papel === 'administrador') {
     notificacoes = data.registros
       .filter((r) => r.status === 'em_analise')
       .map((r) => ({ id: r.id, tipo: 'aprovacao_pendente', texto: `"${r.titulo}" aguardando aprovação`, registro_id: r.id }));
+    notificacoes = notificacoes.concat(
+      data.visitas
+        .filter((v) => v.status_aprovacao === 'pendente')
+        .map((v) => {
+          const tecnico = data.usuarios.find((u) => u.id === v.tecnico_id);
+          return { id: v.id, tipo: 'relatorio_pendente', texto: `Relatório de ${tecnico ? tecnico.nome : 'um técnico'} aguardando aprovação`, registro_id: v.id };
+        })
+    );
   }
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });
 });

@@ -56,6 +56,7 @@ function seed() {
         endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial', cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
         garantia: 'nao', garantia_obs: '',
         status: 'pendente', valor_servico: null, retrabalho: false, criado_em: '2026-09-05T09:00:00.000Z',
+        lida_tecnico: false,
       },
     ],
     visitas: [],
@@ -96,6 +97,7 @@ function load() {
     for (const campo of ['garantia', 'garantia_obs']) {
       if (a[campo] === undefined) a[campo] = '';
     }
+    if (a.lida_tecnico === undefined) a.lida_tecnico = false;
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;

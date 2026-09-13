@@ -352,6 +352,11 @@ async function clicarNotificacao(registroId, tipo) {
   } else if (tipo === 'os_aprovada') {
     try { await api(`/api/visitas/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
     ir('agenda');
+  } else if (tipo === 'os_atribuida') {
+    try { await api(`/api/agenda/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
+    ir('agenda');
+  } else if (tipo === 'relatorio_pendente') {
+    ir('aprovacoes-visitas');
   } else {
     ir('aprovacoes-biblioteca');
   }
