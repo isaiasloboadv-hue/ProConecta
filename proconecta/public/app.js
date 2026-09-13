@@ -3181,6 +3181,15 @@ function wLinhaCampos(campos) {
 }
 
 // caixa "GARANTIA" (com as opções sim/não/outros) ao lado da caixa "DATA DE FABRICAÇÃO", igual ao PDF
+// checkbox de verdade (Structured Document Tag do Word), clicável/editável direto no
+// Word — em vez de só desenhar ☑/☐ como texto fixo, que ninguém consegue alterar depois
+function wCheckboxOpcao(marcado, label, size) {
+  return [
+    new docx.CheckBox({ checked: !!marcado }),
+    new docx.TextRun({ text: ' ' + label, bold: true, color: WORD_COR.ink, size: size || 18 }),
+  ];
+}
+
 function wLinhaGarantiaData(garantia, dataFabricacao) {
   const margins = { top: 70, bottom: 70, left: 100, right: 100 };
   const larguraTotal = wLarguraConteudo();
@@ -3189,7 +3198,7 @@ function wLinhaGarantiaData(garantia, dataFabricacao) {
   const runsGarantia = [new docx.TextRun({ text: 'GARANTIA: ', bold: true, color: WORD_COR.ink, size: 18 })];
   [['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']].forEach(([v, l], idx) => {
     if (idx > 0) runsGarantia.push(new docx.TextRun({ text: '   ', size: 18 }));
-    runsGarantia.push(new docx.TextRun({ text: (v === garantia ? '☑ ' : '☐ ') + l, bold: true, color: WORD_COR.ink, size: 18 }));
+    runsGarantia.push(...wCheckboxOpcao(v === garantia, l));
   });
   return new docx.Table({
     width: { size: larguraTotal, type: docx.WidthType.DXA },
@@ -3210,7 +3219,7 @@ function wLinhaOpcoes(opcoes, selecionado) {
   const runs = [];
   opcoes.forEach(([v, l], idx) => {
     if (idx > 0) runs.push(new docx.TextRun({ text: '     ', size: 20 }));
-    runs.push(new docx.TextRun({ text: (v === selecionado ? '☑ ' : '☐ ') + l, bold: true, size: 18, color: WORD_COR.ink }));
+    runs.push(...wCheckboxOpcao(v === selecionado, l));
   });
   return new docx.Paragraph({ spacing: { after: 100 }, children: runs });
 }
@@ -3304,9 +3313,14 @@ const WORD_ALTURA_PAGINA_CHEIA = 16837;
 const WORD_ALTURA_TABELA_PAGINA = WORD_ALTURA_PAGINA_CHEIA - WORD_FOLGA_TABELA_PAGINA;
 
 // parágrafo praticamente invisível (linha de ~1pt), usado como fechamento explícito
-// depois das tabelas de capa/contato pra não depender do parágrafo automático do Word
-function wEspacoInvisivel() {
-  return new docx.Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: docx.LineRuleType.EXACT } });
+// depois das tabelas de capa/contato pra não depender do parágrafo automático do Word.
+// Pinta com a mesma cor de fundo da página, senão sobra uma tira branca descoberta
+// entre o fim da tabela colorida e a borda da folha.
+function wEspacoInvisivel(fillHex) {
+  return new docx.Paragraph({
+    shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
+    spacing: { before: 0, after: 0, line: 20, lineRule: docx.LineRuleType.EXACT },
+  });
 }
 
 function wPaginaColorida(fillHex, conteudo) {
@@ -3514,7 +3528,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
     sections: [
       {
         properties: { page: { size: tamanhoPagina, margin: semMargem } },
-        children: [wCapa(r, logoDataUri), wEspacoInvisivel()],
+        children: [wCapa(r, logoDataUri), wEspacoInvisivel(WORD_COR.navy)],
       },
       {
         properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
@@ -3522,7 +3536,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
       },
       {
         properties: { page: { size: tamanhoPagina, margin: semMargem } },
-        children: [wPaginaContato(logoDataUri), wEspacoInvisivel()],
+        children: [wPaginaContato(logoDataUri), wEspacoInvisivel('F2E9D8')],
       },
     ],
   });
