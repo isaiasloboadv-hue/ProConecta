@@ -253,6 +253,28 @@ function badgeStatus(status) {
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+// campo de empresa/cliente digitável com autocomplete (datalist) — em vez de um <select> puro.
+// idPrefix vira "<idPrefix>-nome" (o que o usuário digita) + "<idPrefix>" (hidden com o id resolvido).
+function campoClienteHTML(idPrefix, clientes, placeholder, onResolved) {
+  return `
+    <input id="${idPrefix}-nome" list="${idPrefix}-lista" autocomplete="off" placeholder="${esc(placeholder || 'Digite o nome da empresa...')}" oninput="resolverClientePorNome('${idPrefix}')${onResolved ? `; ${onResolved}()` : ''}">
+    <datalist id="${idPrefix}-lista">${clientes.map((c) => `<option value="${esc(c.nome_empresa)}">`).join('')}</datalist>
+    <input type="hidden" id="${idPrefix}">`;
+}
+
+function resolverClientePorNome(idPrefix) {
+  const nome = document.getElementById(idPrefix + '-nome').value.trim().toLowerCase();
+  const cliente = (window._clientesCache || []).find((c) => c.nome_empresa.trim().toLowerCase() === nome);
+  document.getElementById(idPrefix).value = cliente ? cliente.id : '';
+  return cliente || null;
+}
+
+function selecionarClienteInicial(idPrefix, clientes) {
+  if (!clientes.length) return;
+  document.getElementById(idPrefix + '-nome').value = clientes[0].nome_empresa;
+  document.getElementById(idPrefix).value = clientes[0].id;
+}
+
 // ---------- sino de notificações ----------
 
 async function atualizarSino() {
@@ -292,10 +314,20 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- AGENDA ----------
+async function carregarAgendaComVisitas() {
+  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
+  window._agendaCache = agenda;
+  window._visitasPorAgenda = {};
+  visitas.forEach((v) => { window._visitasPorAgenda[v.agenda_id] = v; });
+}
+
 async function renderAgenda() {
+  if (USER.papel === 'administrador') {
+    await carregarAgendaComVisitas();
+    return renderAgendaCalendario();
+  }
   const { agenda } = await api('/api/agenda');
   window._agendaCache = agenda;
-  if (USER.papel === 'administrador') return renderAgendaCalendario();
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
@@ -420,15 +452,30 @@ function selecionarDiaCalendario(iso) {
   desenharDetalheDia(iso);
 }
 
+let calDetalhesAbertos = new Set(); // ids de agenda abertos no detalhe do dia (calendário)
+
 function desenharDetalheDia(iso) {
   const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  const visitasPorAgenda = window._visitasPorAgenda || {};
   const [y, m, d] = iso.split('-');
   const el = document.getElementById('cal-dia-detalhe');
   el.innerHTML = `
     <div class="page-head" style="margin-top:4px;"><h1 style="font-size:16px;">Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
     ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOS(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+    ${agenda.filter((a) => calDetalhesAbertos.has(a.id)).map((a) => `
+      <div class="os-detail-panel">
+        <div class="panel-head">OS-${String(a.id).padStart(6, '0')} · ${esc(a.cliente_nome || '—')}
+          <button class="btn-outline-sm" onclick="alternarDetalheCalendario(${a.id})">Fechar</button>
+        </div>
+        ${detalheCompletoOS(a, visitasPorAgenda[a.id])}
+      </div>`).join('')}
   `;
+}
+
+function alternarDetalheCalendario(id) {
+  if (calDetalhesAbertos.has(id)) calDetalhesAbertos.delete(id); else calDetalhesAbertos.add(id);
+  desenharDetalheDia(calDiaSelecionado);
 }
 
 const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído' };
@@ -475,10 +522,12 @@ function osCardCorpo(a) {
 }
 
 function cardOS(a) {
+  const aberto = calDetalhesAbertos.has(a.id);
   return `
-    <div class="os-card">
+    <div class="os-card" onclick="alternarDetalheCalendario(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
-      <div class="os-card-actions">
+      <div class="os-card-actions" onclick="event.stopPropagation()">
+        <button class="os-card-toggle" onclick="alternarDetalheCalendario(${a.id})">${aberto ? '▴ Ocultar detalhes' : '▾ Ver detalhes completos'}</button>
         ${a.visita_id ? `<button class="btn-outline-sm" onclick="ir('aprovacoes-visitas')">Ver na Ordem de Serviço</button>` : `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`}
       </div>
     </div>`;
@@ -505,10 +554,10 @@ async function mostrarFormNovaAtividade() {
       <h2>Dados do cliente</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pré-preenchido a partir do cadastro do cliente — ajuste se for diferente para este atendimento. Fica travado para o técnico.</p>
       <div class="form-grid">
-        <div class="full"><label>Empresa (cliente)</label><select id="na-cliente" onchange="preencherClienteNovaAtividade()">${clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('')}</select></div>
+        <div class="full"><label>Empresa (cliente)</label>${campoClienteHTML('na-cliente', clientes, 'Digite o nome da empresa...', 'preencherClienteNovaAtividade')}</div>
         <div><label>Contato*</label><input id="na-contato" placeholder="Nome do funcionário responsável por receber o técnico"></div>
         <div><label>Telefone*</label><input id="na-telefone"></div>
-        <div><label>E-mail*</label><input id="na-email" type="email"></div>
+        <div><label>E-mail*</label><input id="na-email"></div>
         <div><label>Setor do cliente</label><input id="na-setor-cliente"></div>
       </div>
       <div class="form-grid" id="na-endereco-wrap">
@@ -522,8 +571,21 @@ async function mostrarFormNovaAtividade() {
 
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
-        <div class="full"><label>Equipamento</label><select id="na-equip"></select></div>
+        <div class="full"><label>Equipamento</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
         <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito..."></textarea></div>
+      </div>
+      <div class="form-grid" id="na-laudo-equip-wrap">
+        <div><label>Número de série*</label><input id="na-numero-serie"></div>
+        <div><label>Data de fabricação (MM/AAAA)*</label><input id="na-data-fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
+        <div class="full">
+          <label>Está na garantia?*</label>
+          <div style="display:flex; gap:18px; margin-bottom:10px;">
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="sim" onchange="atualizarGarantiaNovaAtividade()" style="width:auto;"> Sim</label>
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="nao" onchange="atualizarGarantiaNovaAtividade()" style="width:auto;"> Não</label>
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="na" onchange="atualizarGarantiaNovaAtividade()" style="width:auto;"> N/A</label>
+          </div>
+        </div>
+        <div class="full hidden" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..."></div>
       </div>
 
       <h2>Data e horário</h2>
@@ -539,6 +601,7 @@ async function mostrarFormNovaAtividade() {
 
       <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">Salvar Ordem de Serviço</button>
     </div>`;
+  selecionarClienteInicial('na-cliente', clientes);
   preencherClienteNovaAtividade();
   atualizarTipoNovaAtividade();
 }
@@ -546,6 +609,18 @@ async function mostrarFormNovaAtividade() {
 function atualizarTipoNovaAtividade() {
   const tipo = document.getElementById('na-tipo').value;
   document.getElementById('na-endereco-wrap').classList.toggle('hidden', tipo === 'treinamento_online');
+  document.getElementById('na-laudo-equip-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
+}
+
+function atualizarGarantiaNovaAtividade() {
+  const garantia = document.querySelector('input[name="na-garantia"]:checked');
+  document.getElementById('na-garantia-obs-wrap').classList.toggle('hidden', !garantia || garantia.value !== 'na');
+}
+
+function preencherNumeroSerieNovaAtividade() {
+  const equipId = Number(document.getElementById('na-equip').value);
+  const equip = (window._equipamentosCache || []).find((e) => e.id === equipId);
+  document.getElementById('na-numero-serie').value = equip ? equip.numero_serie : '';
 }
 
 function preencherClienteNovaAtividade() {
@@ -566,9 +641,12 @@ function preencherClienteNovaAtividade() {
   document.getElementById('na-equip').innerHTML = equipDoCliente.length
     ? equipDoCliente.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')
     : `<option value="">Nenhum equipamento cadastrado para este cliente</option>`;
+  preencherNumeroSerieNovaAtividade();
 }
 
 async function salvarNovaAtividade() {
+  if (!document.getElementById('na-cliente').value) return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista.');
+  if (!document.getElementById('na-equip').value) return alert('Nenhum equipamento disponível para esta empresa.');
   const body = {
     tecnico_id: document.getElementById('na-tecnico').value,
     equipamento_id: document.getElementById('na-equip').value,
@@ -587,10 +665,15 @@ async function salvarNovaAtividade() {
     cep: document.getElementById('na-cep').value,
     cidade: document.getElementById('na-cidade').value,
     estado: document.getElementById('na-estado').value,
+    numero_serie: document.getElementById('na-numero-serie').value,
+    data_fabricacao: document.getElementById('na-data-fabricacao').value,
+    garantia: (document.querySelector('input[name="na-garantia"]:checked') || {}).value || '',
+    garantia_obs: document.getElementById('na-garantia-obs').value,
   };
   try {
     await api('/api/agenda', { method: 'POST', body });
-    renderAgenda();
+    if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
+    else renderAgenda();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
@@ -1174,8 +1257,8 @@ function chaveRascunhoLaudo(agendaId) { return `pc_rascunho_laudo_${agendaId}`; 
 function laudoPadrao(item) {
   return {
     agenda_id: item.id,
-    marca: '', data_fabricacao: '',
-    garantia: '', garantia_obs: '',
+    marca: '', data_fabricacao: item.data_fabricacao || '',
+    garantia: item.garantia || '', garantia_obs: item.garantia_obs || '',
     acessorios: '', defeito_informado: item.problema || item.servico || '',
     data_entrada: (item.data_hora_inicio || '').slice(0, 10),
     data_conclusao: new Date().toISOString().slice(0, 10),
@@ -1231,19 +1314,20 @@ async function renderLaudoTecnico(item) {
 
     <div class="panel">
       <h2>Dados do equipamento</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Nº de série, data de fabricação, defeito informado e garantia são definidos pelo administrador na abertura da OS — não podem ser alterados aqui.</p>
       <div class="form-grid">
         <div><label>Marca</label><input id="lt-marca" placeholder="Marca do equipamento" oninput="atualizarRascunhoLaudo()"></div>
-        <div><label>Data de fabricação</label><input id="lt-data_fabricacao" type="date" oninput="atualizarRascunhoLaudo()"></div>
+        <div><label>Data de fabricação</label><input id="lt-data_fabricacao" disabled></div>
         <div class="full"><label>Acessórios recebidos</label><input id="lt-acessorios" placeholder="ex: cabo de força, fonte, controle..." oninput="atualizarRascunhoLaudo()"></div>
-        <div class="full"><label>Defeito informado pelo cliente</label><input id="lt-defeito_informado" oninput="atualizarRascunhoLaudo()"></div>
+        <div class="full"><label>Defeito informado pelo cliente</label><input id="lt-defeito_informado" disabled></div>
       </div>
-      <label>Equipamento está na garantia?*</label>
+      <label>Equipamento está na garantia?</label>
       <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
-        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="sim" onchange="atualizarRascunhoLaudo()" style="width:auto;"> Sim</label>
-        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="nao" onchange="atualizarRascunhoLaudo()" style="width:auto;"> Não</label>
-        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="outros" onchange="atualizarRascunhoLaudo()" style="width:auto;"> Outros</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="sim" disabled style="width:auto;"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="nao" disabled style="width:auto;"> Não</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="lt-garantia" value="na" disabled style="width:auto;"> N/A</label>
       </div>
-      <input id="lt-garantia_obs" placeholder="Especifique (obrigatório se 'Outros')" oninput="atualizarRascunhoLaudo()">
+      ${laudoDraft.garantia === 'na' ? `<input id="lt-garantia_obs" disabled>` : ''}
     </div>
 
     <div class="panel">
@@ -1391,8 +1475,8 @@ function limparLaudo(agendaId) {
 async function concluirLaudoTecnico() {
   atualizarRascunhoLaudo();
   const d = laudoDraft;
-  if (!d.garantia) return alert('Informe se o equipamento está na garantia.');
-  if (d.garantia === 'outros' && !String(d.garantia_obs || '').trim()) return alert('Especifique a garantia em "Outros".');
+  if (!d.garantia) return alert('Dado de garantia não preenchido pelo administrador na abertura desta OS. Peça para o administrador completar antes de enviar o laudo.');
+  if (d.garantia === 'na' && !String(d.garantia_obs || '').trim()) return alert('O administrador marcou garantia "N/A" mas não especificou o motivo. Peça para completar antes de enviar o laudo.');
   if (!d.data_conclusao) return alert('Informe a data de conclusão.');
   if (!String(d.laudo_tecnico || '').trim()) return alert('Preencha o laudo técnico.');
   if (!String(d.servico_realizado || '').trim()) return alert('Descreva o serviço realizado.');
@@ -1450,7 +1534,7 @@ function gerarPdfLaudo(d, item) {
 
   titulo('Dados do equipamento');
   linha('Marca', d.marca); linha('Data de fabricação', d.data_fabricacao);
-  linha('Garantia', d.garantia === 'sim' ? 'Sim' : d.garantia === 'nao' ? 'Não' : `Outros — ${d.garantia_obs}`);
+  linha('Garantia', d.garantia === 'sim' ? 'Sim' : d.garantia === 'nao' ? 'Não' : `N/A — ${d.garantia_obs}`);
   linha('Acessórios recebidos', d.acessorios); linha('Defeito informado', d.defeito_informado);
   y += 8;
 
@@ -1508,10 +1592,7 @@ let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
 
 async function renderAprovacoesVisitas() {
-  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
-  window._osAgendaCache = agenda;
-  window._osVisitasPorAgenda = {};
-  visitas.forEach((v) => { window._osVisitasPorAgenda[v.agenda_id] = v; });
+  await carregarAgendaComVisitas();
   desenharOrdemServico();
 }
 
@@ -1530,8 +1611,8 @@ function irParaHojeOS() {
 }
 
 function desenharOrdemServico() {
-  const agenda = window._osAgendaCache || [];
-  const visitasPorAgenda = window._osVisitasPorAgenda || {};
+  const agenda = window._agendaCache || [];
+  const visitasPorAgenda = window._visitasPorAgenda || {};
   const doMes = agenda
     .filter((a) => {
       const d = new Date(a.data_hora_inicio);
@@ -1542,7 +1623,11 @@ function desenharOrdemServico() {
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Ordem de Serviço</h1><p>${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Ordem de Serviço</h1><p>${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
+    </div>
+    <div id="form-nova-atividade"></div>
     <div class="panel" style="padding:14px 18px; margin-bottom:22px;">
       <div class="cal-head" style="margin-bottom:0;">
         <div class="cal-nav">
@@ -1651,7 +1736,11 @@ function detalheCompletoOS(a, visita) {
     <div class="kv"><b>Equipamento:</b> ${esc(a.equipamento_tipo || '—')} — ${esc(a.equipamento_modelo || '—')}${a.equipamento_serie ? ' (' + esc(a.equipamento_serie) + ')' : ''}</div>
     <div class="kv"><b>Problema relatado / serviço:</b> ${esc(a.problema || '—')}</div>
     <div class="kv"><b>Técnico designado:</b> ${esc(a.tecnico_nome || '—')} <span class="sep">·</span> <b>Início previsto:</b> ${fmtData(a.data_hora_inicio)} <span class="sep">·</span> <b>Fim previsto:</b> ${fmtData(a.data_hora_fim)}</div>
-    ${visita ? `<div class="os-card-title" style="margin-top:18px;">Relatório enviado pelo técnico</div>${detalheRelatorioVisita(visita)}` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
+    ${visita ? `
+      <div class="os-relatorio-box">
+        <div class="os-relatorio-box-titulo">Relatório enviado pelo técnico</div>
+        ${detalheRelatorioVisita(visita)}
+      </div>` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
     ${timelineOS(a, visita)}`;
 }
 
@@ -1689,7 +1778,7 @@ function detalheRelatorioVisita(v) {
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
       <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
       <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')}) <span class="sep">·</span> <b>Marca:</b> ${esc(l.marca || '—')}</div>
-      <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `Outros — ${esc(l.garantia_obs || '')}`}</div>
+      <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
       <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
       <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
       <div class="kv"><b>Data de entrada:</b> ${esc(l.data_entrada || '—')} <span class="sep">·</span> <b>Data de conclusão:</b> ${esc(l.data_conclusao || '—')} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
@@ -2102,7 +2191,7 @@ function mostrarFormUsuario() {
         <div><label>Cargo</label><input id="nu-cargo"></div>
         <div><label>Setor</label><input id="nu-setor"></div>
         <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()"><option value="tecnico">Técnico</option><option value="administrador">Administrador</option><option value="cliente">Cliente</option></select></div>
-        <div id="campo-cliente"><label>Empresa (cliente)</label><select id="nu-cliente">${clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('')}</select></div>
+        <div id="campo-cliente"><label>Empresa (cliente)</label>${campoClienteHTML('nu-cliente', clientes)}</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarUsuario()">Salvar e enviar convite</button>
     </div>`;
@@ -2114,6 +2203,9 @@ function alternarCampoCliente() {
 }
 async function salvarUsuario() {
   const papel = document.getElementById('nu-papel').value;
+  if (papel === 'cliente' && !document.getElementById('nu-cliente').value) {
+    return alert('Digite o nome de uma empresa cadastrada e escolha uma das sugestões da lista.');
+  }
   const body = {
     nome: document.getElementById('nu-nome').value,
     email: document.getElementById('nu-email').value,

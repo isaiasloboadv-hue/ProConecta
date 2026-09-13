@@ -84,7 +84,7 @@ function agendaComDetalhes(data, item) {
     cliente_estado: cliente ? cliente.estado : null,
     equipamento_tipo: equipamento ? equipamento.tipo : null,
     equipamento_modelo: equipamento ? equipamento.modelo : null,
-    equipamento_serie: equipamento ? equipamento.numero_serie : null,
+    equipamento_serie: item.numero_serie || (equipamento ? equipamento.numero_serie : null),
   };
 }
 
@@ -126,7 +126,11 @@ function dadosAtendimentoBloqueados(data, agendaItem, user) {
     data_final: (agendaItem.data_hora_fim || '').slice(0, 10),
     equipamento_tipo: equipamento ? equipamento.tipo : '',
     modelo_maquina: equipamento ? equipamento.modelo : '',
-    numero_serie: equipamento ? equipamento.numero_serie : '',
+    numero_serie: agendaItem.numero_serie || (equipamento ? equipamento.numero_serie : ''),
+    data_fabricacao: agendaItem.data_fabricacao || '',
+    garantia: agendaItem.garantia || '',
+    garantia_obs: agendaItem.garantia_obs || '',
+    defeito_informado: agendaItem.problema || '',
     servico: agendaItem.problema || '',
     tecnico_nome: user.nome,
     tecnico_email: usuarioCompleto ? usuarioCompleto.email : '',
@@ -171,8 +175,8 @@ function validarRelatorioSimples(r, exigirSerie) {
 // laudo técnico: usado em corretiva e preventiva (diagnóstico + serviço + peças + fotos, sem assinatura)
 function validarLaudoTecnico(l) {
   if (!l || typeof l !== 'object') return 'Laudo técnico é obrigatório para este tipo de atendimento.';
-  if (l.garantia !== 'sim' && l.garantia !== 'nao' && l.garantia !== 'outros') return 'Informe se o equipamento está na garantia.';
-  if (l.garantia === 'outros' && !String(l.garantia_obs || '').trim()) return 'Especifique a garantia em "Outros".';
+  if (l.garantia !== 'sim' && l.garantia !== 'nao' && l.garantia !== 'na') return 'Informe se o equipamento está na garantia.';
+  if (l.garantia === 'na' && !String(l.garantia_obs || '').trim()) return 'Especifique o motivo do "N/A" na garantia.';
   if (!l.data_conclusao) return 'Informe a data de conclusão.';
   if (!String(l.laudo_tecnico || '').trim()) return 'O laudo técnico (o que foi analisado e encontrado) é obrigatório.';
   if (!String(l.servico_realizado || '').trim()) return 'Descreva o serviço realizado.';
@@ -268,8 +272,13 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   // treinamento online não exige deslocamento até o cliente, então não pede endereço
   const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
   if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
+  // corretiva/preventiva usam o Laudo Técnico, que depende desses dados do equipamento
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('numero_serie', 'data_fabricacao', 'garantia');
   for (const campo of obrig) {
     if (!body[campo] || !String(body[campo]).trim()) return enviarJSON(res, 400, { erro: `Campo obrigatório faltando: ${campo}` });
+  }
+  if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && body.garantia === 'na' && !String(body.garantia_obs || '').trim()) {
+    return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
   }
   const data = db.load();
   const item = {
@@ -286,6 +295,9 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
     endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
+    // dados do equipamento (relevantes pro Laudo Técnico de corretiva/preventiva) — também travados pro técnico
+    numero_serie: body.numero_serie || '', data_fabricacao: body.data_fabricacao || '',
+    garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,
@@ -363,6 +375,47 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     data.visitas.push(visita);
   }
   agendaItem.status = 'concluida';
+
+  // marcado como relevante: entra na fila de aprovação da Biblioteca de Defeitos/Falhas assim que o
+  // técnico envia o relatório — o administrador vê na tela de Biblioteca > Aprovação e no sino, sem
+  // depender de já ter aprovado a O.S. em si
+  const registroExistente = data.registros.find((r) => r.origem === 'visita' && r.visita_id === visita.id);
+  if (camposVisita.relevante_biblioteca) {
+    const eq = data.equipamentos.find((e) => e.id === visita.equipamento_id);
+    const titulo = agendaItem.problema || 'Caso técnico';
+    const campos = {
+      titulo,
+      equipamento_tipo: eq ? eq.tipo : 'Equipamento',
+      equipamento_modelo: eq ? eq.modelo : '',
+      numero_serie: eq ? eq.numero_serie : '',
+      sintoma: titulo,
+      causa: camposVisita.causa,
+      solucao: camposVisita.correcao,
+      resultado: camposVisita.resultado,
+    };
+    if (registroExistente) {
+      Object.assign(registroExistente, campos);
+    } else {
+      data.registros.push({
+        id: nextId(data, 'registros'),
+        tipo: 'defeito',
+        origem: 'visita',
+        visita_id: visita.id,
+        autor_id: user.id,
+        ...campos,
+        status: 'em_analise',
+        comentario_admin: null,
+        lida: true,
+        aprovado_por: null,
+        data_aprovacao: null,
+        criado_em: new Date().toISOString(),
+      });
+    }
+  } else if (registroExistente && registroExistente.status === 'em_analise') {
+    // o técnico desmarcou "relevante" antes de qualquer decisão do administrador — sai da fila
+    data.registros = data.registros.filter((r) => r !== registroExistente);
+  }
+
   db.save(data);
   enviarJSON(res, 201, { visita });
 });
@@ -422,33 +475,9 @@ rota('POST', /^\/api\/visitas\/(\d+)\/aprovar$/, async (req, res, m) => {
   visita.status_aprovacao = 'aprovado';
   visita.aprovado_por = user.id;
   visita.data_aprovacao = new Date().toISOString();
-
-  // se o técnico marcou como relevante, o caso já nasce aprovado na biblioteca de Defeitos/Falhas
-  if (visita.relevante_biblioteca) {
-    const eq = data.equipamentos.find((e) => e.id === visita.equipamento_id);
-    const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
-    data.registros.push({
-      id: nextId(data, 'registros'),
-      tipo: 'defeito',
-      origem: 'visita',
-      visita_id: visita.id,
-      autor_id: visita.tecnico_id,
-      titulo: agendaItem ? agendaItem.problema : 'Caso técnico',
-      equipamento_tipo: eq ? eq.tipo : 'Equipamento',
-      equipamento_modelo: eq ? eq.modelo : '',
-      numero_serie: eq ? eq.numero_serie : '',
-      sintoma: agendaItem ? agendaItem.problema : '',
-      causa: visita.causa,
-      solucao: visita.correcao,
-      resultado: visita.resultado,
-      status: 'aprovado',
-      comentario_admin: null,
-      lida: true,
-      aprovado_por: user.id,
-      data_aprovacao: new Date().toISOString(),
-      criado_em: new Date().toISOString(),
-    });
-  }
+  // o caso na Biblioteca de Defeitos/Falhas (quando marcado como relevante) já foi criado no
+  // momento em que o técnico enviou o relatório — ver POST /api/visitas — e segue seu próprio
+  // fluxo de aprovação em Biblioteca > Aprovação, independente da aprovação da O.S. em si.
   db.save(data);
   enviarJSON(res, 200, { visita });
 });

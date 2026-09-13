@@ -51,6 +51,7 @@ function seed() {
         tipo: 'corretiva', categoria: 'inloco', problema: 'Perda de referência do eixo Y',
         contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', setor_cliente: 'Produção',
         endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial', cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
+        numero_serie: '2301013587', data_fabricacao: '11/2022', garantia: 'nao', garantia_obs: '',
         status: 'pendente', valor_servico: null, retrabalho: false, criado_em: '2026-09-05T09:00:00.000Z',
       },
     ],
@@ -89,6 +90,9 @@ function load() {
   for (const a of data.agenda) {
     if (a.email === undefined) a.email = '';
     if (a.criado_em === undefined) a.criado_em = a.data_hora_inicio || new Date().toISOString();
+    for (const campo of ['numero_serie', 'data_fabricacao', 'garantia', 'garantia_obs']) {
+      if (a[campo] === undefined) a[campo] = '';
+    }
   }
   return data;
 }

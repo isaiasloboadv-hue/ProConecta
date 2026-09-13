@@ -304,6 +304,8 @@ textarea{resize:vertical;min-height:64px;}
 .os-timeline-item.reprovado::before{background:var(--red);}
 .os-timeline-label{font-weight:700;font-size:13px;color:var(--navy);}
 .os-timeline-data{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+.os-relatorio-box{margin-top:16px;padding:16px 18px;background:var(--blue-pale-2);border:1px solid var(--line);border-radius:12px;}
+.os-relatorio-box-titulo{font-size:13.5px;font-weight:800;color:var(--navy);margin-bottom:12px;}
 
 table{width:100%;border-collapse:collapse;}
 th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft);padding:10px 6px;border-bottom:1px solid var(--line);}
