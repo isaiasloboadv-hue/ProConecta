@@ -7,6 +7,7 @@
 // (ativo() = false).
 
 const ia = require('./ia');
+const presenca = require('./presenca');
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
@@ -83,7 +84,7 @@ const mensagensProcessadas = new Set();
 
 // registra as duas rotas do webhook no roteador do server.js. Recebe as peças do server.js como
 // parâmetro (em vez de reimportar) pra não duplicar a lógica de resposta/leitura de corpo.
-function registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db }) {
+function registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db, enviarPush }) {
   // GET — handshake de verificação que a Meta faz quando você configura a URL do webhook
   rota('GET', /^\/api\/whatsapp\/webhook$/, async (req, res) => {
     const { query } = url.parse(req.url, true);
@@ -113,7 +114,7 @@ function registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db }) {
             const de = mensagem.from;
             const texto = mensagem.text.body;
             if (!de || !texto) continue;
-            processarMensagemRecebida(db, de, texto).catch((e) => console.error('Erro no assistente de WhatsApp:', e.message));
+            processarMensagemRecebida(db, de, texto, enviarPush).catch((e) => console.error('Erro no assistente de WhatsApp:', e.message));
           }
         }
       }
@@ -123,7 +124,7 @@ function registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db }) {
   });
 }
 
-async function processarMensagemRecebida(db, telefone, texto) {
+async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
   const data = db.load();
   const chamado = encontrarOuCriarChamado(data, db.nextId, telefone);
   chamado.mensagens.push({ autor: 'cliente', texto, criado_em: new Date().toISOString() });
@@ -131,12 +132,27 @@ async function processarMensagemRecebida(db, telefone, texto) {
 
   if (chamado.status === 'ia') {
     const resposta = await ia.processarTurno(data, chamado);
+    if (chamado.status === 'aguardando_tecnico') {
+      const tecnico = presenca.proximoTecnicoOnline(data);
+      const cliente = encontrarClientePorTelefone(data, telefone);
+      if (tecnico) {
+        chamado.tecnico_id = tecnico.id;
+        chamado.lida_tecnico = false;
+        if (enviarPush) enviarPush(data, tecnico.id, { titulo: 'Novo atendimento pra você', corpo: cliente ? cliente.nome_empresa : 'Um cliente do WhatsApp precisa de ajuda.', url: '/' }).catch(() => {});
+      } else if (enviarPush) {
+        const tecnicos = data.usuarios.filter((u) => u.papel === 'tecnico');
+        await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente do WhatsApp precisa de ajuda.', url: '/' }).catch(() => {})));
+      }
+    }
     db.save(data);
     await enviarMensagemWhatsApp(telefone, resposta);
   } else {
     // já está com um técnico (ou esperando um) — só guarda a mensagem, o técnico responde
     // pelo chat do Pro Conecta (que manda de volta pro WhatsApp via enviarMensagemWhatsApp)
     chamado.lida_tecnico = false;
+    if (enviarPush && chamado.tecnico_id) {
+      enviarPush(data, chamado.tecnico_id, { titulo: 'Nova mensagem no atendimento', corpo: texto.slice(0, 120), url: '/' }).catch(() => {});
+    }
     db.save(data);
   }
 }

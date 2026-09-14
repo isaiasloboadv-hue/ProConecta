@@ -122,6 +122,13 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .nav-group-header .chevron{display:inline-block;font-size:10px;color:#7E97BC;transition:transform .15s;flex-shrink:0;}
 .nav-group-header .chevron.open{transform:rotate(90deg);color:#fff;}
 
+.btn-presenca{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;padding:0 12px;height:36px;font-family:inherit;font-weight:700;font-size:12.5px;cursor:pointer;}
+.btn-presenca:hover{background:rgba(255,255,255,0.2);}
+.btn-presenca:disabled{opacity:.6;cursor:default;}
+.btn-presenca .presenca-bolinha{width:8px;height:8px;border-radius:50%;background:#8B98AE;flex-shrink:0;}
+.btn-presenca.online .presenca-bolinha{background:var(--green);box-shadow:0 0 0 3px rgba(23,114,69,.35);}
+.btn-presenca.offline .presenca-bolinha{background:#8B98AE;}
+
 .bell-wrap{position:relative;}
 .btn-bell{position:relative;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .btn-bell:hover{background:rgba(255,255,255,0.2);}
@@ -415,6 +422,8 @@ tr:last-child td{border-bottom:none;}
   .row2,.row3,.form-grid{grid-template-columns:1fr;}
   header{padding:0 14px;}
   .user-meta{display:none;}
+  .btn-presenca{padding:0;width:36px;justify-content:center;}
+  .btn-presenca .presenca-label{display:none;}
   .filtros-row{flex-direction:column;align-items:stretch;}
 }
 @media(max-width:520px){

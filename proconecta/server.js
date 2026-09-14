@@ -10,6 +10,7 @@ const db = require('./db');
 const email = require('./email');
 const ia = require('./ia');
 const whatsapp = require('./whatsapp');
+const presenca = require('./presenca');
 const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
@@ -1347,7 +1348,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
     if (user.papel === 'tecnico') {
       notificacoes = notificacoes.concat(
         data.chamados
-          .filter((c) => c.status === 'aguardando_tecnico')
+          .filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id)
           .map((c) => {
             const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
             return { id: c.id, tipo: 'chamado_fila', texto: `Atendimento aguardando técnico${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: c.id };
@@ -1790,6 +1791,19 @@ async function enviarPushTecnicos(data, payload) {
   await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, payload).catch(() => {})));
 }
 
+// atribuirTecnico — quando um chamado cai na fila, distribui pro próximo técnico online
+// (round-robin, ver presenca.js) e já notifica ele direto. Se ninguém estiver online, devolve
+// null e o chamado fica no pool esperando alguém assumir manualmente.
+function atribuirTecnico(data, chamado) {
+  const tecnico = presenca.proximoTecnicoOnline(data);
+  if (!tecnico) return null;
+  chamado.tecnico_id = tecnico.id;
+  chamado.lida_tecnico = false;
+  const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
+  enviarPush(data, tecnico.id, { titulo: 'Novo atendimento pra você', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+  return tecnico;
+}
+
 // POST /api/chamados — o cliente (logado no ProConecta) inicia um atendimento com a primeira
 // mensagem. Se a IA estiver configurada ela já responde; senão cai direto pra fila do técnico
 // (a funcionalidade continua utilizável mesmo sem a IA ligada).
@@ -1831,8 +1845,11 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
     chamado.mensagens.push({ autor: 'sistema', texto: 'Assistente automático indisponível no momento — um técnico vai te atender em breve.', criado_em: new Date().toISOString() });
   }
   if (chamado.status === 'aguardando_tecnico') {
-    const cliente = data.clientes.find((c) => c.id === user.cliente_id);
-    enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+    const tecnico = atribuirTecnico(data, chamado);
+    if (!tecnico) {
+      const cliente = data.clientes.find((c) => c.id === user.cliente_id);
+      enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+    }
   }
   db.save(data);
   enviarJSON(res, 201, { chamado: chamadoComDetalhes(data, chamado) });
@@ -1875,7 +1892,7 @@ rota('GET', /^\/api\/chamados$/, async (req, res) => {
   if (user.papel === 'administrador') {
     lista = query.status ? data.chamados.filter((c) => c.status === query.status) : data.chamados.filter((c) => c.status !== 'encerrado');
   } else if (query.fila === '1') {
-    lista = data.chamados.filter((c) => c.status === 'aguardando_tecnico');
+    lista = data.chamados.filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id);
   } else {
     lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status !== 'encerrado');
   }
@@ -1934,8 +1951,11 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
       chamado.mensagens.push({ autor: 'sistema', texto: 'Assistente automático indisponível no momento — um técnico vai te atender em breve.', criado_em: new Date().toISOString() });
     }
     if (chamado.status === 'aguardando_tecnico') {
-      const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
-      enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+      const tecnico = atribuirTecnico(data, chamado);
+      if (!tecnico) {
+        const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
+        enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+      }
     }
   } else if (autor === 'cliente') {
     chamado.lida_tecnico = false;
@@ -2051,10 +2071,27 @@ rota('GET', /^\/api\/chamados\/stats$/, async (req, res) => {
   });
 });
 
+// POST /api/tecnico/online — técnico liga/desliga a presença dele na fila de atendimento.
+// Fica online só quem tá realmente disponível pra receber atendimento agora.
+rota('POST', /^\/api\/tecnico\/online$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só técnico controla a própria presença.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const usuario = data.usuarios.find((u) => u.id === user.id);
+  if (!usuario) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  const novoOnline = !!body.online;
+  if (novoOnline && !usuario.online) usuario.online_desde = new Date().toISOString();
+  if (!novoOnline) usuario.online_desde = null;
+  usuario.online = novoOnline;
+  db.save(data);
+  enviarJSON(res, 200, { usuario: usuarioPublico(usuario) });
+});
+
 // ---------- assistente de suporte via WhatsApp (opcional) ----------
 // só funciona se as variáveis de ambiente estiverem configuradas (WHATSAPP_TOKEN,
 // WHATSAPP_PHONE_ID, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY) — ver whatsapp.js
-whatsapp.registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db });
+whatsapp.registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db, enviarPush });
 
 // ---------- arquivos estáticos (frontend) ----------
 

@@ -37,6 +37,7 @@ function seed() {
     visitas: [],
     registros: [],
     chamados: [],
+    chamados_rr_index: 0,
     relatorios_manutencao: [],
     push_subscriptions: [],
     vapid: null,
@@ -89,6 +90,7 @@ function migrar(data) {
     data.vapid = { publicKey, privateKey };
   }
   if (!data.chamados) data.chamados = [];
+  if (data.chamados_rr_index === undefined) data.chamados_rr_index = 0;
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
   // "chamados" virou o atendimento por chat (IA -> técnico), unificando o que antes era
   // conversas_whatsapp (histórico solto por telefone) com o antigo chamado (só criado quando a
@@ -116,6 +118,10 @@ function migrar(data) {
     if (u.convite_token === undefined) u.convite_token = null;
     if (u.cargo === undefined) u.cargo = '';
     if (u.setor === undefined) u.setor = '';
+    // presença do técnico pra fila de atendimento (round-robin) — online_desde marca quando
+    // ele ficou online pela última vez, e decide a ordem da fila entre quem está online agora
+    if (u.online === undefined) u.online = false;
+    if (u.online_desde === undefined) u.online_desde = null;
   }
   for (const c of data.clientes) {
     for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado', 'email']) {

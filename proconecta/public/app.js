@@ -277,6 +277,10 @@ function initials(nome) {
 function renderHeaderRight() {
   const el = document.getElementById('headerRight');
   el.innerHTML = `
+    ${USER.papel === 'tecnico' ? `
+    <button class="btn-presenca ${USER.online ? 'online' : 'offline'}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
+      <span class="presenca-bolinha"></span><span class="presenca-label">${USER.online ? 'Online' : 'Offline'}</span>
+    </button>` : ''}
     <div class="user-chip">
       <div class="user-avatar">${initials(USER.nome)}</div>
       <div class="user-meta">
@@ -297,6 +301,20 @@ function renderHeaderRight() {
     </div>
     <button class="btn-logout" onclick="sair()">Sair</button>
   `;
+}
+
+// liga/desliga a presença do técnico na fila de atendimento — só quem está online entra
+// no rodízio (round-robin) que distribui os atendimentos novos.
+async function alternarPresenca() {
+  const btn = document.getElementById('btn-presenca');
+  if (btn) btn.disabled = true;
+  try {
+    const { usuario } = await api('/api/tecnico/online', { method: 'POST', body: { online: !USER.online } });
+    USER.online = usuario.online;
+    USER.online_desde = usuario.online_desde;
+    renderHeaderRight();
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 // força buscar a versão mais nova do sistema e dos dados — útil no app instalado (PWA),
