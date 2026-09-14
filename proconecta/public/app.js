@@ -2020,8 +2020,13 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     if (sub) {
       doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      // títulos sem subtítulo (Dados do cliente, Tipo de serviço, Dados do equipamento,
+      // Técnico responsável) vêm seguidos direto pelas caixas de campos — um respiro maior
+      // aqui evita o título ficar colado na primeira caixa.
+      y += 10;
     }
-    y += 4;
   }
 
   function tituloEsquerda(t) {
@@ -4175,8 +4180,13 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     if (sub) {
       doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      // títulos sem subtítulo (Dados do cliente, Tipo de serviço, Dados do equipamento,
+      // Técnico responsável) vêm seguidos direto pelas caixas de campos — um respiro maior
+      // aqui evita o título ficar colado na primeira caixa.
+      y += 10;
     }
-    y += 4;
   }
 
   function tituloEsquerda(t) {
