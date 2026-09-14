@@ -1810,10 +1810,16 @@ async function renderLaudoTecnico(item) {
       <h2>Relatório fotográfico*</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Anexe ao menos uma foto do equipamento/serviço realizado.</p>
       <div class="step-photos" id="lt-fotos"></div>
-      <label class="photo-add" style="margin-top:10px;">
-        <span class="plus">+</span>Foto
-        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosLaudo(event)">
-      </label>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotosLaudo(event)">
+        </label>
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">+</span>Galeria
+          <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosLaudo(event)">
+        </label>
+      </div>
     </div>
 
     <div class="panel">
@@ -3415,10 +3421,16 @@ function renderBlocosFotosRelatorioManut() {
             <button class="photo-rm" onclick="removerFotoDoBlocoRelatorioManut(${i}, ${j})">×</button>
           </div>`).join('')}
       </div>
-      <label class="photo-add" style="margin-top:8px;">
-        <span class="plus">+</span>Foto
-        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosNoBlocoRelatorioManut(event, ${i})">
-      </label>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotosNoBlocoRelatorioManut(event, ${i})">
+        </label>
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">+</span>Galeria
+          <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosNoBlocoRelatorioManut(event, ${i})">
+        </label>
+      </div>
       <div class="rt-toolbar">
         <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'bold')" title="Negrito"><b>B</b></button>
         <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'italic')" title="Itálico"><i>I</i></button>
@@ -4712,7 +4724,10 @@ function renderFotoDestaque() {
   alvo.innerHTML = fotoDestaqueDraft
     ? `<div class="photo-thumb"><img src="${fotoDestaqueDraft}" onclick="abrirLightbox('${fotoDestaqueDraft}')" alt="Foto de destaque">
          <button class="photo-rm" onclick="removerFotoDestaque()">×</button></div>`
-    : `<label class="photo-add"><span class="plus">+</span>Foto<input type="file" accept="image/*" style="display:none" onchange="adicionarFotoDestaque(event)"></label>`;
+    : `<div style="display:flex; gap:8px;">
+         <label class="photo-add"><span class="plus">📷</span>Câmera<input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotoDestaque(event)"></label>
+         <label class="photo-add"><span class="plus">+</span>Galeria<input type="file" accept="image/*" style="display:none" onchange="adicionarFotoDestaque(event)"></label>
+       </div>`;
 }
 function adicionarFotoDestaque(event) {
   const arquivo = (event.target.files || [])[0];
@@ -4735,7 +4750,11 @@ function renderPassosDraft() {
             <button class="photo-rm" onclick="removerFoto(${i}, ${j})">×</button>
           </div>`).join('')}
         <label class="photo-add">
-          <span class="plus">+</span>Foto
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotos(event, ${i})">
+        </label>
+        <label class="photo-add">
+          <span class="plus">+</span>Galeria
           <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotos(event, ${i})">
         </label>
       </div>
