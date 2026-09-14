@@ -362,6 +362,12 @@ textarea{resize:vertical;min-height:64px;}
 .relatorio-secao-titulo{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--blue);padding-bottom:6px;margin-bottom:9px;border-bottom:1.5px solid var(--blue-pale);}
 .relatorio-secao-texto{font-size:13px;line-height:1.55;color:var(--ink);white-space:pre-wrap;}
 
+/* célula de ações (Abrir/Editar/Excluir...) das tabelas — em telas largas os botões ficam numa
+   linha só; em telas estreitas (ver media query abaixo) quebram em várias linhas dentro do
+   cartão, em vez de vazar pra fora da borda. */
+.td-acoes{white-space:nowrap;}
+.td-acoes .btn,.td-acoes .btn-outline-sm,.td-acoes .btn-ghost{margin:2px 4px 2px 0;}
+
 table{width:100%;border-collapse:collapse;}
 th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft);padding:10px 6px;border-bottom:1px solid var(--line);}
 td{padding:12px 6px;border-bottom:1px solid var(--line);font-size:13px;}
@@ -378,6 +384,10 @@ tr:last-child td{border-bottom:none;}
   .panel table td[data-label]::before{content:attr(data-label) ": ";font-weight:700;color:var(--ink-soft);font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:1px;}
   .panel table td.empty{padding:16px 0;text-align:center;}
   .panel table td:empty{display:none;}
+  /* os botões de ação não cabem todos numa linha só num cartão estreito — deixa quebrar em
+     várias linhas em vez de vazar pra fora da borda do cartão. */
+  .panel table td.td-acoes{white-space:normal;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+  .panel table td.td-acoes .btn,.panel table td.td-acoes .btn-outline-sm,.panel table td.td-acoes .btn-ghost{margin:0;}
 }
 
 .toast{

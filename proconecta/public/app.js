@@ -2764,7 +2764,7 @@ async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
           <td data-label="Título">${esc(r.titulo)}</td>
           <td data-label="Equipamento">${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
           <td data-label="Nº de série">${esc(r.numero_serie || '—')}</td>
-          <td style="white-space:nowrap;">
+          <td class="td-acoes">
             <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheDefeito(${i})">Abrir</button>
             ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('defeito', ${i})">Excluir</button>` : ''}
           </td>
@@ -2912,7 +2912,7 @@ async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
           <td data-label="Título">${esc(r.titulo)}</td>
           <td data-label="Equipamento">${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
           <td data-label="Periodicidade">${esc(r.periodicidade || '—')}</td>
-          <td style="white-space:nowrap;">
+          <td class="td-acoes">
             <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheProcedimento(${i})">Abrir</button>
             ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('procedimento', ${i})">Excluir</button>` : ''}
           </td>
@@ -3259,7 +3259,7 @@ async function renderRelatorioManutencao() {
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Empresa">${esc(r.empresa)}</td>
           <td data-label="Equipamento">${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''}</td>
-          <td style="white-space:nowrap;">
+          <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
             <button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>
@@ -4925,7 +4925,7 @@ async function renderClientes() {
           <td data-label="Telefone">${esc(c.telefone || '—')}</td>
           <td data-label="E-mail">${esc(c.email || '—')}</td>
           <td data-label="Cidade/UF">${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
-          <td style="white-space:nowrap;">
+          <td class="td-acoes">
             ${USER.papel === 'administrador' ? `
               <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
               <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
@@ -5054,7 +5054,7 @@ async function renderEquipamentosCadastrar() {
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th></th></tr>
       ${catalogo.length ? catalogo.map((e) => `<tr><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td>
-        <td style="white-space:nowrap;">
+        <td class="td-acoes">
           ${USER.papel === 'administrador' ? `
             <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
@@ -5144,7 +5144,7 @@ async function renderEquipamentosAtrelar() {
       ${atrelados.length ? atrelados.map((e) => {
         const cliente = clientes.find((c) => c.id === e.cliente_id);
         return `<tr><td data-label="Cliente">${esc(cliente ? cliente.nome_empresa : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº de série">${esc(e.numero_serie)}</td><td data-label="Fabricação">${esc(e.data_fabricacao || '—')}</td>
-        <td style="white-space:nowrap;">
+        <td class="td-acoes">
           <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
           ${USER.papel === 'administrador' ? `
             <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
