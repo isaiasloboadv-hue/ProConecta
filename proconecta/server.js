@@ -2088,6 +2088,33 @@ rota('POST', /^\/api\/tecnico\/online$/, async (req, res) => {
   enviarJSON(res, 200, { usuario: usuarioPublico(usuario) });
 });
 
+// soma o tamanho (em caracteres) de todo texto dentro de um objeto, sem nunca montar uma string
+// gigante nova (JSON.stringify de um objeto grande dobraria o uso de memória na hora — isso aqui
+// só soma números, é seguro mesmo com o processo já perto do limite de RAM).
+function tamanhoTextoRecursivo(valor) {
+  if (typeof valor === 'string') return valor.length;
+  if (Array.isArray(valor)) return valor.reduce((soma, v) => soma + tamanhoTextoRecursivo(v), 0);
+  if (valor && typeof valor === 'object') return Object.values(valor).reduce((soma, v) => soma + tamanhoTextoRecursivo(v), 0);
+  return 0;
+}
+
+// GET /api/admin/diagnostico-memoria — administrador: quanto texto (aproximadamente MB) tem em
+// cada parte do banco, pra achar o que está pesando na memória do processo (limite de RAM do
+// plano do Render). Temporário, só pra diagnóstico — remover depois de resolver.
+rota('GET', /^\/api\/admin\/diagnostico-memoria$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acessa isso.' });
+  const data = db.load();
+  const partes = Object.keys(data)
+    .map((k) => ({ chave: k, mb_aprox: +(tamanhoTextoRecursivo(data[k]) / 1024 / 1024).toFixed(2) }))
+    .sort((a, b) => b.mb_aprox - a.mb_aprox);
+  const mem = process.memoryUsage();
+  enviarJSON(res, 200, {
+    partes,
+    memoria_processo_mb: { rss: +(mem.rss / 1024 / 1024).toFixed(1), heapUsed: +(mem.heapUsed / 1024 / 1024).toFixed(1) },
+  });
+});
+
 // ---------- assistente de suporte via WhatsApp (opcional) ----------
 // só funciona se as variáveis de ambiente estiverem configuradas (WHATSAPP_TOKEN,
 // WHATSAPP_PHONE_ID, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY) — ver whatsapp.js
