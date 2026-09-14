@@ -263,33 +263,8 @@ function entrarNoApp() {
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
   if (USER.papel === 'tecnico' || USER.papel === 'administrador' || USER.papel === 'producao') ativarNotificacoesPush();
-  if (USER.papel === 'administrador') atualizarStatusBanco();
   const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
   ir(paginaInicial);
-}
-
-// mostra pro administrador, sempre visível no cabeçalho, se os dados estão indo pro Postgres
-// (persistente) ou só pro arquivo local (some a cada reinício do Render sem banco configurado)
-// — pra nunca ficar na dúvida se um teste em andamento corre risco de sumir. Guarda em cache
-// porque o cabeçalho é remontado a cada navegação (montarSidebar/ir) — sem isso, a consulta
-// precisaria repetir toda hora e o selo piscaria vazio a cada clique no menu.
-let _bancoStatusCache = null;
-async function atualizarStatusBanco() {
-  try {
-    const { banco } = await api('/api/status');
-    _bancoStatusCache = banco;
-  } catch (e) { /* silencioso — não é crítico a ponto de atrapalhar o resto do app */ }
-  renderHeaderRight();
-}
-function bancoStatusHtml() {
-  if (USER.papel !== 'administrador') return '';
-  if (_bancoStatusCache === 'postgres') {
-    return `<span class="tag tag-green" title="Os dados ficam salvos no Postgres — sobrevivem a reinício, atualização ou período de inatividade.">🗄 Postgres conectado</span>`;
-  }
-  if (_bancoStatusCache === 'arquivo') {
-    return `<span class="tag tag-falha" title="DATABASE_URL não configurada — os dados ficam só neste processo e somem a cada reinício do Render (deploy novo ou 15 min sem uso). Configure o Postgres antes de testes que importam.">⚠️ Sem banco permanente</span>`;
-  }
-  return '';
 }
 
 function initials(nome) {
@@ -299,7 +274,6 @@ function initials(nome) {
 function renderHeaderRight() {
   const el = document.getElementById('headerRight');
   el.innerHTML = `
-    ${bancoStatusHtml()}
     <div class="user-chip">
       <div class="user-avatar">${initials(USER.nome)}</div>
       <div class="user-meta">
