@@ -2426,19 +2426,20 @@ async function solicitarReaberturaVisita(id) {
 }
 
 // botão "Iniciar deslocamento": só aparece pro técnico designado, numa O.S. ainda em aberto
-// (não finalizada), e some depois de marcado — vira uma tag mostrando desde quando ele está
-// a caminho. O administrador recebe uma notificação push quando o técnico toca nele.
+// (não finalizada). Assim que ele toca no botão, o botão Executar (ou Enviar retorno) já
+// aparece no lugar dele — não fica os dois juntos ocupando espaço. O administrador recebe uma
+// notificação push quando o técnico toca nele.
 function botaoDeslocamento(a) {
   if (a.tecnico_id !== USER.id || a.finalizada) return '';
   // retorno pendente: o técnico precisa se deslocar de novo antes de enviar o relatório de
   // retorno — o mesmo botão/rótulo do deslocamento original, só que num segundo momento
   if (a.retorno_pendente_tecnico) {
-    if (a.retorno_deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.retorno_deslocamento_iniciado_em)}</span>`;
+    if (a.retorno_deslocamento_iniciado_em) return '';
     return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
   }
   if (a.status === 'concluida') return '';
   if (!a.confirmado_cliente_em) return `<span class="tag" style="background:var(--line); color:var(--ink-soft); margin-right:6px;">Aguardando confirmação do cliente</span>`;
-  if (a.deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.deslocamento_iniciado_em)}</span>`;
+  if (a.deslocamento_iniciado_em) return '';
   return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
 }
 
