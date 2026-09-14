@@ -1759,6 +1759,11 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- assistente de suporte via WhatsApp (opcional) ----------
+// só funciona se as variáveis de ambiente estiverem configuradas (WHATSAPP_TOKEN,
+// WHATSAPP_PHONE_ID, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY) — ver whatsapp.js
+require('./whatsapp').registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db });
+
 // ---------- arquivos estáticos (frontend) ----------
 
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };

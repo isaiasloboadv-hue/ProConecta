@@ -38,6 +38,7 @@ function seed() {
     registros: [],
     chamados: [],
     relatorios_manutencao: [],
+    conversas_whatsapp: [],
     push_subscriptions: [],
     vapid: null,
     _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1 },
@@ -90,6 +91,7 @@ function migrar(data) {
   }
   if (!data.chamados) data.chamados = [];
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
+  if (!data.conversas_whatsapp) data.conversas_whatsapp = [];
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
   if (!data._seq.relatorios_manutencao) data._seq.relatorios_manutencao = 1;

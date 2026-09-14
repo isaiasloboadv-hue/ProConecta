@@ -183,6 +183,32 @@ node server.js
 
 Nenhuma outra mudança é necessária — veja `email.js`.
 
+## Assistente de suporte técnico pelo WhatsApp (opcional)
+
+Um assistente de IA que conversa com o cliente pelo WhatsApp, consulta a Biblioteca de
+Defeitos/Falhas e Procedimentos já aprovada no sistema (nunca inventa solução fora dela) e, se
+não resolver, abre um chamado técnico de verdade — ver `whatsapp.js`. Fica desligado por padrão;
+só liga quando todas as variáveis de ambiente abaixo estiverem definidas:
+
+```
+WHATSAPP_TOKEN=token_de_acesso_do_numero_do_whatsapp_business
+WHATSAPP_PHONE_ID=phone_number_id_do_meta_for_developers
+WHATSAPP_VERIFY_TOKEN=uma_frase_secreta_qualquer_que_voce_inventa
+ANTHROPIC_API_KEY=sua_chave_da_api_da_anthropic
+node server.js
+```
+
+- `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID`: vêm do painel do app em
+  [developers.facebook.com](https://developers.facebook.com), produto WhatsApp → Configuração da
+  API → aba de teste (token temporário) ou, em produção, um token de **System User** permanente.
+- `WHATSAPP_VERIFY_TOKEN`: você inventa qualquer texto — só precisa ser o mesmo valor colocado
+  aqui e no campo "Verify token" quando configurar a URL do webhook no painel da Meta (a URL é
+  `https://seu-dominio/api/whatsapp/webhook`).
+- `ANTHROPIC_API_KEY`: crie em [console.anthropic.com](https://console.anthropic.com).
+- `ANTHROPIC_MODEL` (opcional): sobrescreve o modelo padrão usado.
+
+Sem essas variáveis, o webhook não faz nada — o resto do sistema funciona normalmente.
+
 ## Referências do projeto
 
 A pasta `docs/` (na raiz do repositório) guarda o briefing original do
