@@ -1786,6 +1786,9 @@ const server = http.createServer(async (req, res) => {
   const rotaEncontrada = rotas.find((r) => r.metodo === req.method && r.regex.test(pathname));
   if (rotaEncontrada) {
     try {
+      // espera o banco (Postgres) terminar de conectar antes de tocar em qualquer
+      // rota da API, pra nenhuma requisição cair no fallback de arquivo local por engano
+      await db.pronto;
       const m = pathname.match(rotaEncontrada.regex);
       await rotaEncontrada.handler(req, res, m);
     } catch (e) {
@@ -1797,15 +1800,20 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/')) {
     return enviarJSON(res, 404, { erro: 'Rota não encontrada.' });
   }
+  // arquivos estáticos (login, html, css, js) não dependem do banco: servidos imediatamente
   servirEstatico(req, res, pathname);
 });
 
+// o servidor começa a aceitar conexões imediatamente, sem esperar o Postgres conectar,
+// pra evitar 502 no Render enquanto a conexão com o banco ainda está sendo estabelecida.
+// as rotas da API individualmente esperam `db.pronto` (acima) antes de processar qualquer coisa.
+server.listen(PORT, () => {
+  console.log(`Pro Conecta rodando em http://localhost:${PORT}`);
+  if (process.env.ADMIN_EMAIL) console.log(`Conta de administrador: ${process.env.ADMIN_EMAIL}`);
+});
+
 db.pronto.then(() => {
-  server.listen(PORT, () => {
-    console.log(`Pro Conecta rodando em http://localhost:${PORT}`);
-    console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
-    if (process.env.ADMIN_EMAIL) console.log(`Conta de administrador: ${process.env.ADMIN_EMAIL}`);
-  });
+  console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
   verificarLembretesDeslocamento();
   setInterval(verificarLembretesDeslocamento, 15 * 60 * 1000);
 });
