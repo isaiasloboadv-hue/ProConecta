@@ -48,8 +48,17 @@ async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
   const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.erro || 'Erro na requisição');
+  let corpoInvalido = false;
+  const data = await res.json().catch(() => { corpoInvalido = true; return {}; });
+  if (!res.ok) {
+    const erro = new Error(data.erro || 'Erro na requisição');
+    erro.status = res.status;
+    // resposta sem JSON válido (ou sem campo erro) não veio do nosso backend — é sintoma de
+    // instabilidade da hospedagem (ex: "acordando" após período inativo no plano gratuito),
+    // não um erro de validação de verdade
+    erro.falhaTransitoria = corpoInvalido || !data.erro || [502, 503, 504].includes(res.status);
+    throw erro;
+  }
   return data;
 }
 
@@ -138,10 +147,19 @@ function ehErroDeConexao(e) { return e instanceof TypeError; }
 
 // tenta enviar o relatório; se falhar por falta de conexão, guarda na fila em vez de propagar
 // o erro. `extra` carrega o que for preciso pra terminar o pós-processamento (PDF/e-mail) do
-// termo de aceite quando esse item sincronizar mais tarde.
+// termo de aceite quando esse item sincronizar mais tarde. Numa falha transitória do servidor
+// (ex: hospedagem "acordando" depois de um tempo sem uso), tenta mais uma vez sozinho antes de
+// desistir — evita que o técnico perca o relatório preenchido por causa de uma instabilidade.
 async function enviarVisitaOuEnfileirar(body, extra) {
   try {
-    const resp = await api('/api/visitas', { method: 'POST', body });
+    let resp;
+    try {
+      resp = await api('/api/visitas', { method: 'POST', body });
+    } catch (e) {
+      if (!e.falhaTransitoria) throw e;
+      await new Promise((r) => setTimeout(r, 2500));
+      resp = await api('/api/visitas', { method: 'POST', body });
+    }
     return { enviado: true, visita: resp.visita };
   } catch (e) {
     if (!ehErroDeConexao(e)) throw e;
