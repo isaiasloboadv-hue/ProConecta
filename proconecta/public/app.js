@@ -2086,7 +2086,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   linhaCampos([{ label: 'Empresa', valor: d.empresa || item.cliente_nome, frac: 1 }]);
   linhaCampos([{ label: 'Contato', valor: d.contato || item.contato || item.cliente_contato, frac: 1 }]);
   linhaCampos([{ label: 'Telefone', valor: d.telefone || item.telefone || item.cliente_telefone, frac: 1 }]);
-  y += 12;
+  y += 16;
 
   tituloCentro('Tipo de serviço');
   {
@@ -2119,12 +2119,12 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   }
   linhaCampos([{ label: 'Acessórios', valor: d.acessorios, frac: 1 }]);
   linhaCampos([{ label: 'Defeito informado', valor: d.defeito_informado, frac: 1 }]);
-  y += 12;
+  y += 16;
 
   tituloCentro('Técnico responsável');
   linhaCampos([{ label: 'Nome', valor: d.tecnico_nome || item.tecnico_nome || USER.nome, frac: 0.5 }, { label: 'E-mail', valor: d.tecnico_email || USER.email, frac: 0.5 }]);
   linhaCampos([{ label: 'Entrada', valor: fmtData(d.data_entrada), frac: 0.33 }, { label: 'Conclusão', valor: fmtData(d.data_conclusao), frac: 0.33 }, { label: 'Período', valor: periodoReparo(d), frac: 0.34 }]);
-  y += 12;
+  y += 16;
 
   tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
   {
@@ -2135,7 +2135,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     const altura = Math.max(24, linhas.length * 12 + 12);
     doc.rect(margem, y, largura, altura, 'S');
     doc.text(linhas, margem + 8, y + 14);
-    y += altura + 12;
+    y += altura + 16;
   }
 
   tituloCentro('Serviço realizado', null, true);
@@ -4247,7 +4247,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]);
   linhaCampos([{ label: 'Contato', valor: r.contato, frac: 1 }]);
   linhaCampos([{ label: 'Telefone', valor: r.telefone, frac: 1 }]);
-  y += 12;
+  y += 16;
 
   tituloCentro('Tipo de serviço');
   {
@@ -4282,12 +4282,12 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   }
   linhaCampos([{ label: 'Acessórios', valor: r.acessorios, frac: 1 }]);
   linhaCampos([{ label: 'Defeito informado', valor: r.defeito_informado, frac: 1 }]);
-  y += 12;
+  y += 16;
 
   tituloCentro('Técnico responsável');
   linhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.5 }, { label: 'E-mail', valor: r.tecnico_email, frac: 0.5 }]);
   linhaCampos([{ label: 'Entrada', valor: r.data_entrada, frac: 0.26 }, { label: 'Conclusão', valor: r.data_conclusao, frac: 0.26 }, { label: 'Período', valor: periodoManut(r.data_entrada, r.data_conclusao), frac: 0.48 }]);
-  y += 12;
+  y += 16;
 
   tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
   {
@@ -4298,7 +4298,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     const altura = Math.max(24, linhas.length * 12 + 12);
     doc.rect(margem, y, largura, altura, 'S');
     doc.text(linhas, margem + 8, y + 14);
-    y += altura + 12;
+    y += altura + 16;
   }
 
   tituloCentro('Serviços realizados', 'Manutenção realizada / Resultados de amostra');
