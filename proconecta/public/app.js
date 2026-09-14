@@ -10,7 +10,7 @@ let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
-const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente' };
+const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
@@ -262,9 +262,9 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
-  if (USER.papel === 'tecnico' || USER.papel === 'administrador') ativarNotificacoesPush();
+  if (USER.papel === 'tecnico' || USER.papel === 'administrador' || USER.papel === 'producao') ativarNotificacoesPush();
   if (USER.papel === 'administrador') atualizarStatusBanco();
-  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
+  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
 
@@ -384,6 +384,25 @@ const NAV = {
     { key: 'equipamentos', label: 'Meus equipamentos', page: 'equipamentos' },
     { key: 'chamados', label: 'Abertura de chamado', page: 'chamados' },
   ],
+  producao: [
+    { key: 'biblioteca', label: 'Biblioteca', children: [
+      { key: 'acessar', label: 'Acessar biblioteca', children: [
+        { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
+        { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
+      ]},
+      { key: 'adicionar', label: 'Adicionar', children: [
+        { key: 'adicionar-defeito', label: 'Defeitos/Falhas', page: 'add-defeito' },
+        { key: 'adicionar-procedimento', label: 'Manual de Procedimentos', page: 'add-procedimento' },
+      ]},
+      { key: 'meus-registros', label: 'Meus registros', page: 'meus-registros' },
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
+    ]},
+    { key: 'clientes', label: 'Clientes', page: 'clientes' },
+    { key: 'equipamentos', label: 'Equipamentos', children: [
+      { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
+      { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+    ]},
+  ],
 };
 
 function buscarCaminho(nodes, pagina, caminho) {
@@ -415,7 +434,7 @@ function renderNavNodes(nodes, nivel) {
 }
 
 function montarSidebar() {
-  const label = USER.papel === 'tecnico' ? 'Acesso técnico' : USER.papel === 'administrador' ? 'Acesso administrador' : 'Acesso cliente';
+  const label = USER.papel === 'tecnico' ? 'Acesso técnico' : USER.papel === 'administrador' ? 'Acesso administrador' : USER.papel === 'producao' ? 'Acesso produção' : 'Acesso cliente';
   const nav = NAV[USER.papel] || [];
   document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
   renderHeaderRight();
@@ -4868,8 +4887,10 @@ async function renderClientes() {
           <td data-label="E-mail">${esc(c.email || '—')}</td>
           <td data-label="Cidade/UF">${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
           <td style="white-space:nowrap;">
-            <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
-            <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            ${USER.papel === 'administrador' ? `
+              <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
+              <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            ` : ''}
           </td>
         </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum cliente cadastrado ainda.</td></tr>`}
     </table></div>`;
@@ -4995,8 +5016,10 @@ async function renderEquipamentosCadastrar() {
       <tr><th>Tipo</th><th>Modelo</th><th></th></tr>
       ${catalogo.length ? catalogo.map((e) => `<tr><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td>
         <td style="white-space:nowrap;">
-          <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
-          <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ${USER.papel === 'administrador' ? `
+            <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ` : ''}
         </td></tr>`).join('') : `<tr><td colspan="3" class="empty">Nenhum equipamento no catálogo ainda.</td></tr>`}
     </table></div>`;
 }
@@ -5084,8 +5107,10 @@ async function renderEquipamentosAtrelar() {
         return `<tr><td data-label="Cliente">${esc(cliente ? cliente.nome_empresa : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº de série">${esc(e.numero_serie)}</td><td data-label="Fabricação">${esc(e.data_fabricacao || '—')}</td>
         <td style="white-space:nowrap;">
           <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
-          <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
-          <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ${USER.papel === 'administrador' ? `
+            <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ` : ''}
         </td></tr>`;
       }).join('') : `<tr><td colspan="6" class="empty">Nenhum equipamento atrelado a um cliente ainda.</td></tr>`}
     </table></div>
@@ -5187,6 +5212,7 @@ function mostrarFormUsuario(usuario) {
         <div><label>Setor</label><input id="nu-setor" value="${usuario ? esc(usuario.setor || '') : ''}"></div>
         <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()">
           <option value="tecnico" ${usuario && usuario.papel === 'tecnico' ? 'selected' : ''}>Técnico</option>
+          <option value="producao" ${usuario && usuario.papel === 'producao' ? 'selected' : ''}>Produção</option>
           <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
           <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
         </select></div>

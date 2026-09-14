@@ -1133,7 +1133,7 @@ rota('GET', /^\/api\/registros\/fila$/, async (req, res) => {
 // POST /api/registros — técnico ou administrador envia um novo registro
 rota('POST', /^\/api\/registros$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador podem enviar registros.' });
+  if (!exigirPapel(user, ['tecnico', 'administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só técnico, produção ou administrador podem enviar registros.' });
   const body = await lerCorpo(req);
   const erro = validarRegistro(body);
   if (erro) return enviarJSON(res, 400, { erro });
@@ -1326,7 +1326,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
   let notificacoes = [];
-  if (user.papel === 'tecnico') {
+  if (user.papel === 'tecnico' || user.papel === 'producao') {
     notificacoes = data.registros
       .filter((r) => r.autor_id === user.id && r.status === 'alteracao_sugerida' && !r.lida)
       .map((r) => ({ id: r.id, tipo: 'alteracao_sugerida', texto: `Alteração sugerida em "${r.titulo}"`, registro_id: r.id }));
@@ -1485,7 +1485,7 @@ rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // GET /api/clientes — administrador: lista de empresas-cliente (para vincular usuário/chamado)
 rota('GET', /^\/api\/clientes$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê clientes.' });
+  if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção veem clientes.' });
   const data = db.load();
   enviarJSON(res, 200, { clientes: data.clientes });
 });
@@ -1493,7 +1493,7 @@ rota('GET', /^\/api\/clientes$/, async (req, res) => {
 // POST /api/clientes — administrador cadastra uma nova empresa-cliente
 rota('POST', /^\/api\/clientes$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra clientes.' });
+  if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção cadastram clientes.' });
   const body = await lerCorpo(req);
   if (!body.nome_empresa || !String(body.nome_empresa).trim()) {
     return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
@@ -1569,7 +1569,7 @@ rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
 // POST /api/equipamentos — cadastra um tipo/modelo no catálogo (ainda sem cliente nem nº de série)
 rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra equipamentos.' });
+  if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção cadastram equipamentos.' });
   const body = await lerCorpo(req);
   if (!body.tipo || !String(body.tipo).trim() || !body.modelo || !String(body.modelo).trim()) {
     return enviarJSON(res, 400, { erro: 'Tipo e modelo são obrigatórios.' });
@@ -1630,7 +1630,7 @@ rota('DELETE', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
 // criando a unidade física de fato (com nº de série próprio)
 rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador atrela equipamentos.' });
+  if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção atrelam equipamentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
   const catalogo = data.equipamentos.find((e) => e.id === Number(m[1]) && e.cliente_id === null);
