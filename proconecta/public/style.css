@@ -418,3 +418,36 @@ tr:last-child td{border-bottom:none;}
 @media(max-width:520px){
   .brand .wordmark.inline{display:none;}
 }
+
+/* ---------- atendimento por chat (IA -> fila -> técnico) ---------- */
+.chat-panel{display:flex;flex-direction:column;padding:14px;}
+.chat-mensagens{display:flex;flex-direction:column;gap:10px;max-height:56vh;min-height:180px;overflow-y:auto;padding:4px 2px;}
+.chat-msg{max-width:78%;padding:9px 12px;border-radius:12px;background:var(--blue-pale-2);border:1px solid var(--line);}
+.chat-msg-outro{align-self:flex-start;}
+.chat-msg-proprio{align-self:flex-end;background:var(--blue);border-color:var(--blue);}
+.chat-msg-proprio .chat-msg-texto,.chat-msg-proprio .chat-msg-hora{color:#fff;}
+.chat-msg-proprio .chat-msg-rotulo{color:rgba(255,255,255,.85);}
+.chat-msg-ia{background:var(--green-bg);border-color:var(--green-bg);}
+.chat-msg-rotulo{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:var(--ink-soft);margin-bottom:3px;}
+.chat-msg-texto{font-size:13.5px;line-height:1.5;white-space:pre-wrap;color:var(--ink);}
+.chat-msg-hora{font-size:10px;color:var(--ink-soft);margin-top:4px;text-align:right;}
+.chat-sistema{align-self:center;font-size:11.5px;color:var(--ink-soft);background:var(--line);padding:5px 12px;border-radius:20px;}
+.chat-compositor{display:flex;gap:8px;margin-top:12px;align-items:flex-end;}
+.chat-compositor textarea{flex:1;resize:none;min-height:42px;}
+@media(max-width:600px){ .chat-msg{max-width:90%;} }
+
+.atendimento-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px;}
+.atendimento-card{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:.15s;background:#fff;}
+.atendimento-card:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}
+.atendimento-card.atendimento-urgente{border-color:var(--red);}
+.atendimento-card-topo{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.atendimento-numero{font-size:10.5px;font-weight:800;letter-spacing:.4px;color:var(--ink-soft);text-transform:uppercase;}
+.atendimento-cliente{font-weight:700;font-size:14.5px;color:var(--navy);margin-bottom:2px;}
+.atendimento-equip{font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;}
+.atendimento-resumo{font-size:12.5px;color:var(--ink);line-height:1.4;margin-bottom:10px;}
+.atendimento-status{margin-top:auto;}
+
+.atendimento-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:14px;}
+.stat-tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 14px;text-align:center;}
+.stat-valor{font-size:26px;font-weight:800;color:var(--navy);font-variant-numeric:tabular-nums;}
+.stat-label{font-size:11.5px;color:var(--ink-soft);margin-top:4px;text-transform:uppercase;letter-spacing:.3px;}

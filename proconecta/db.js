@@ -38,7 +38,6 @@ function seed() {
     registros: [],
     chamados: [],
     relatorios_manutencao: [],
-    conversas_whatsapp: [],
     push_subscriptions: [],
     vapid: null,
     _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1 },
@@ -91,7 +90,24 @@ function migrar(data) {
   }
   if (!data.chamados) data.chamados = [];
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
-  if (!data.conversas_whatsapp) data.conversas_whatsapp = [];
+  // "chamados" virou o atendimento por chat (IA -> técnico), unificando o que antes era
+  // conversas_whatsapp (histórico solto por telefone) com o antigo chamado (só criado quando a
+  // IA escalava). Bancos antigos que ainda tenham chamados no formato de antes do chat ganham os
+  // campos novos com valor neutro, pra não quebrar a leitura.
+  for (const c of data.chamados) {
+    if (!Array.isArray(c.mensagens)) c.mensagens = [];
+    if (c.status === undefined) c.status = 'aguardando_tecnico';
+    if (c.telefone_whatsapp === undefined) c.telefone_whatsapp = null;
+    if (c.origem === undefined) c.origem = 'app';
+    if (c.tecnico_id === undefined) c.tecnico_id = null;
+    if (c.os_id === undefined) c.os_id = null;
+    if (c.prioridade === undefined) c.prioridade = 'normal';
+    if (c.resolvido_por === undefined) c.resolvido_por = null;
+    if (c.resolvido_em === undefined) c.resolvido_em = null;
+    if (c.assumido_em === undefined) c.assumido_em = null;
+    if (c.lida_tecnico === undefined) c.lida_tecnico = true;
+    if (c.lida_cliente === undefined) c.lida_cliente = true;
+  }
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
   if (!data._seq.relatorios_manutencao) data._seq.relatorios_manutencao = 1;

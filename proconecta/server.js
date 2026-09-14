@@ -8,6 +8,8 @@ const path = require('path');
 const url = require('url');
 const db = require('./db');
 const email = require('./email');
+const ia = require('./ia');
+const whatsapp = require('./whatsapp');
 const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
@@ -1342,6 +1344,28 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
           return { id: a.id, tipo: 'os_atribuida', texto: `Nova Ordem de Serviço atribuída a você${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: a.id };
         })
     );
+    if (user.papel === 'tecnico') {
+      notificacoes = notificacoes.concat(
+        data.chamados
+          .filter((c) => c.status === 'aguardando_tecnico')
+          .map((c) => {
+            const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
+            return { id: c.id, tipo: 'chamado_fila', texto: `Atendimento aguardando técnico${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: c.id };
+          })
+      );
+      notificacoes = notificacoes.concat(
+        data.chamados
+          .filter((c) => c.tecnico_id === user.id && !c.lida_tecnico)
+          .map((c) => {
+            const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
+            return { id: c.id, tipo: 'chamado_mensagem', texto: `Nova mensagem no atendimento${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: c.id };
+          })
+      );
+    }
+  } else if (user.papel === 'cliente') {
+    notificacoes = data.chamados
+      .filter((c) => c.cliente_id === user.cliente_id && !c.lida_cliente)
+      .map((c) => ({ id: c.id, tipo: 'chamado_mensagem_cliente', texto: 'Nova mensagem no seu atendimento', registro_id: c.id }));
   } else if (user.papel === 'administrador') {
     notificacoes = data.registros
       .filter((r) => r.status === 'em_analise')
@@ -1361,46 +1385,6 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
     );
   }
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });
-});
-
-// ---------- chamados de serviço (cliente) ----------
-
-// GET /api/chamados
-rota('GET', /^\/api\/chamados$/, async (req, res) => {
-  const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['cliente', 'administrador'])) return enviarJSON(res, 403, { erro: 'Acesso não permitido.' });
-  const data = db.load();
-  let lista = data.chamados;
-  if (user.papel === 'cliente') lista = lista.filter((c) => c.cliente_id === user.cliente_id);
-  lista = lista.map((c) => {
-    const eq = data.equipamentos.find((e) => e.id === c.equipamento_id);
-    const cli = data.clientes.find((cl) => cl.id === c.cliente_id);
-    return { ...c, equipamento_tipo: eq ? eq.tipo : null, cliente_nome: cli ? cli.nome_empresa : null };
-  }).sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
-  enviarJSON(res, 200, { chamados: lista });
-});
-
-// POST /api/chamados — só cliente
-rota('POST', /^\/api\/chamados$/, async (req, res) => {
-  const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só um cliente pode abrir um chamado.' });
-  const body = await lerCorpo(req);
-  if (!body.tipo_servico || !body.equipamento_id || !body.descricao) {
-    return enviarJSON(res, 400, { erro: 'Tipo de serviço, equipamento e descrição são obrigatórios.' });
-  }
-  const data = db.load();
-  const item = {
-    id: nextId(data, 'chamados'),
-    cliente_id: user.cliente_id,
-    equipamento_id: Number(body.equipamento_id),
-    tipo_servico: body.tipo_servico, // preventiva | corretiva | treinamento
-    descricao: body.descricao,
-    status: 'aberto',
-    criado_em: new Date().toISOString(),
-  };
-  data.chamados.push(item);
-  db.save(data);
-  enviarJSON(res, 201, { chamado: item });
 });
 
 // ---------- relatórios de manutenção interna (avulsos, sem vínculo com O.S./agenda) ----------
@@ -1782,10 +1766,293 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- atendimento por chat (chamados: IA de 1º nível -> fila -> técnico) ----------
+// o mesmo "chamado" é o fio da conversa tanto quando o cliente entra pelo chat dentro do
+// ProConecta quanto quando manda mensagem pelo WhatsApp (ver whatsapp.js) — o técnico responde
+// num lugar só, e se a conversa veio do WhatsApp a resposta dele volta pro WhatsApp do cliente.
+
+function chamadoComDetalhes(data, c) {
+  const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
+  const tecnico = data.usuarios.find((u) => u.id === c.tecnico_id);
+  const equipamento = data.equipamentos.find((e) => e.id === c.equipamento_id);
+  return {
+    ...c,
+    cliente_nome: cliente ? cliente.nome_empresa : null,
+    tecnico_nome: tecnico ? tecnico.nome : null,
+    equipamento_tipo: equipamento ? equipamento.tipo : null,
+    equipamento_modelo: equipamento ? equipamento.modelo : null,
+    numero_os: c.os_id ? (() => { const os = data.agenda.find((a) => a.id === c.os_id); return os ? (os.numero_os || `OS-${String(os.id).padStart(6, '0')}`) : null; })() : null,
+  };
+}
+
+async function enviarPushTecnicos(data, payload) {
+  const tecnicos = data.usuarios.filter((u) => u.papel === 'tecnico');
+  await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, payload).catch(() => {})));
+}
+
+// POST /api/chamados — o cliente (logado no ProConecta) inicia um atendimento com a primeira
+// mensagem. Se a IA estiver configurada ela já responde; senão cai direto pra fila do técnico
+// (a funcionalidade continua utilizável mesmo sem a IA ligada).
+rota('POST', /^\/api\/chamados$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só clientes iniciam atendimento por aqui.' });
+  if (!user.cliente_id) return enviarJSON(res, 400, { erro: 'Sua conta não está vinculada a uma empresa cliente — fale com o administrador.' });
+  const body = await lerCorpo(req);
+  if (!body.mensagem || !String(body.mensagem).trim()) return enviarJSON(res, 400, { erro: 'Descreva o problema pra começar o atendimento.' });
+  const data = db.load();
+
+  const agora = new Date().toISOString();
+  const chamado = {
+    id: nextId(data, 'chamados'),
+    cliente_id: user.cliente_id,
+    telefone_whatsapp: null,
+    origem: 'app',
+    equipamento_id: body.equipamento_id ? Number(body.equipamento_id) : null,
+    status: 'ia',
+    prioridade: 'normal',
+    tecnico_id: null,
+    os_id: null,
+    resumo_ia: '',
+    resolvido_por: null,
+    mensagens: [{ autor: 'cliente', texto: String(body.mensagem).trim(), criado_em: agora }],
+    lida_tecnico: true,
+    lida_cliente: true,
+    criado_em: agora,
+    atualizado_em: agora,
+    assumido_em: null,
+    resolvido_em: null,
+  };
+  data.chamados.push(chamado);
+
+  if (ia.ativa()) {
+    await ia.processarTurno(data, chamado);
+  } else {
+    chamado.status = 'aguardando_tecnico';
+    chamado.mensagens.push({ autor: 'sistema', texto: 'Assistente automático indisponível no momento — um técnico vai te atender em breve.', criado_em: new Date().toISOString() });
+  }
+  if (chamado.status === 'aguardando_tecnico') {
+    const cliente = data.clientes.find((c) => c.id === user.cliente_id);
+    enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+  }
+  db.save(data);
+  enviarJSON(res, 201, { chamado: chamadoComDetalhes(data, chamado) });
+});
+
+// GET /api/chamados/meu-ativo — o cliente pede o atendimento em andamento dele (se tiver), pra
+// abrir o chat direto sem precisar saber o id.
+rota('GET', /^\/api\/chamados\/meu-ativo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só clientes usam este atendimento.' });
+  const data = db.load();
+  const chamado = data.chamados
+    .filter((c) => c.cliente_id === user.cliente_id && c.status !== 'encerrado')
+    .sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || ''))[0];
+  if (chamado && !chamado.lida_cliente) { chamado.lida_cliente = true; db.save(data); }
+  enviarJSON(res, 200, { chamado: chamado ? chamadoComDetalhes(data, chamado) : null });
+});
+
+// GET /api/chamados/meus-encerrados — histórico do cliente
+rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só clientes usam este atendimento.' });
+  const data = db.load();
+  const lista = data.chamados
+    .filter((c) => c.cliente_id === user.cliente_id && c.status === 'encerrado')
+    .sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || ''))
+    .map((c) => chamadoComDetalhes(data, c));
+  enviarJSON(res, 200, { chamados: lista });
+});
+
+// GET /api/chamados — fila (técnico/administrador). ?fila=1 lista quem tá esperando um técnico
+// (qualquer técnico pode assumir); sem isso, lista os que o próprio técnico já assumiu
+// (administrador sempre vê tudo).
+rota('GET', /^\/api\/chamados$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista;
+  if (user.papel === 'administrador') {
+    lista = query.status ? data.chamados.filter((c) => c.status === query.status) : data.chamados.filter((c) => c.status !== 'encerrado');
+  } else if (query.fila === '1') {
+    lista = data.chamados.filter((c) => c.status === 'aguardando_tecnico');
+  } else {
+    lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status !== 'encerrado');
+  }
+  lista = lista.sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || '')).map((c) => chamadoComDetalhes(data, c));
+  enviarJSON(res, 200, { chamados: lista });
+});
+
+// GET /api/chamados/:id — detalhe + mensagens
+rota('GET', /^\/api\/chamados\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const chamado = data.chamados.find((c) => c.id === Number(m[1]));
+  if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
+  if (user.papel === 'cliente' && chamado.cliente_id !== user.cliente_id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
+  if (user.papel === 'tecnico' && chamado.tecnico_id !== user.id && chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
+  if (user.papel === 'cliente') { chamado.lida_cliente = true; db.save(data); }
+  else if (user.papel === 'tecnico' && chamado.tecnico_id === user.id) { chamado.lida_tecnico = true; db.save(data); }
+  enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado) });
+});
+
+// POST /api/chamados/:id/mensagens — cliente ou técnico manda mensagem no atendimento
+rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const body = await lerCorpo(req);
+  if (!body.texto || !String(body.texto).trim()) return enviarJSON(res, 400, { erro: 'Mensagem vazia.' });
+  const texto = String(body.texto).trim();
+  const data = db.load();
+  const chamado = data.chamados.find((c) => c.id === Number(m[1]));
+  if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
+  if (chamado.status === 'encerrado') return enviarJSON(res, 400, { erro: 'Este atendimento já foi encerrado.' });
+
+  let autor;
+  if (user.papel === 'cliente') {
+    if (chamado.cliente_id !== user.cliente_id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
+    autor = 'cliente';
+  } else if (user.papel === 'tecnico') {
+    if (chamado.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
+    autor = 'tecnico';
+  } else if (user.papel === 'administrador') {
+    autor = 'tecnico';
+  } else {
+    return enviarJSON(res, 403, { erro: 'Sem acesso a este atendimento.' });
+  }
+
+  const agora = new Date().toISOString();
+  chamado.mensagens.push({ autor, texto, criado_em: agora });
+  chamado.atualizado_em = agora;
+
+  if (autor === 'cliente' && chamado.status === 'ia') {
+    if (ia.ativa()) {
+      await ia.processarTurno(data, chamado);
+    } else {
+      chamado.status = 'aguardando_tecnico';
+      chamado.mensagens.push({ autor: 'sistema', texto: 'Assistente automático indisponível no momento — um técnico vai te atender em breve.', criado_em: new Date().toISOString() });
+    }
+    if (chamado.status === 'aguardando_tecnico') {
+      const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
+      enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+    }
+  } else if (autor === 'cliente') {
+    chamado.lida_tecnico = false;
+    if (chamado.tecnico_id) enviarPush(data, chamado.tecnico_id, { titulo: 'Nova mensagem no atendimento', corpo: texto.slice(0, 120), url: '/' }).catch(() => {});
+  } else if (autor === 'tecnico') {
+    chamado.lida_cliente = false;
+    if (chamado.origem === 'whatsapp' && chamado.telefone_whatsapp) {
+      whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, texto).catch((e) => console.error('Erro ao enviar mensagem pro WhatsApp:', e.message));
+    } else if (chamado.cliente_id) {
+      const usuarioCliente = data.usuarios.find((u) => u.cliente_id === chamado.cliente_id && u.papel === 'cliente');
+      if (usuarioCliente) enviarPush(data, usuarioCliente.id, { titulo: 'Nova mensagem do técnico', corpo: texto.slice(0, 120), url: '/' }).catch(() => {});
+    }
+  }
+
+  db.save(data);
+  enviarJSON(res, 201, { chamado: chamadoComDetalhes(data, chamado) });
+});
+
+// POST /api/chamados/:id/assumir — técnico assume o atendimento; vira Ordem de Serviço na hora
+// (pré-preenchida com os dados do cliente já cadastrados), pra admin/técnico completarem o
+// agendamento depois se precisar de visita.
+rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador assumem atendimentos.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const chamado = data.chamados.find((c) => c.id === Number(m[1]));
+  if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
+  if (chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando um técnico.' });
+  if (!chamado.cliente_id) return enviarJSON(res, 400, { erro: 'Este atendimento não tem um cliente identificado no cadastro — não é possível abrir uma O.S. a partir dele.' });
+
+  const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
+  const equipamentoDoChamado = chamado.equipamento_id ? data.equipamentos.find((e) => e.id === chamado.equipamento_id && e.cliente_id === chamado.cliente_id) : null;
+  const tipo = ['corretiva', 'preventiva', 'treinamento'].includes(body.tipo) ? body.tipo : 'corretiva';
+  const primeiraMensagemCliente = chamado.mensagens.find((msg) => msg.autor === 'cliente');
+
+  const agora = new Date();
+  const inicioISO = agora.toISOString().slice(0, 16);
+  const fimISO = new Date(agora.getTime() + 60 * 60000).toISOString().slice(0, 16);
+  const novoId = nextId(data, 'agenda');
+  const osItem = {
+    id: novoId,
+    numero_os: `OS-${String(novoId).padStart(6, '0')}`,
+    tecnico_id: user.id,
+    cliente_id: chamado.cliente_id,
+    equipamento_id: equipamentoDoChamado ? equipamentoDoChamado.id : null,
+    data_hora_inicio: inicioISO,
+    data_hora_fim: fimISO,
+    tipo,
+    categoria: 'online',
+    problema: chamado.resumo_ia || (primeiraMensagemCliente ? primeiraMensagemCliente.texto : ''),
+    contato: (cliente && cliente.nome_empresa) || '', telefone: (cliente && cliente.telefone) || '', email: (cliente && cliente.email) || '', setor_cliente: (cliente && cliente.setor) || '',
+    endereco: (cliente && cliente.endereco) || '', numero: (cliente && cliente.numero) || '', bairro: (cliente && cliente.bairro) || '',
+    cep: (cliente && cliente.cep) || '', cidade: (cliente && cliente.cidade) || '', estado: (cliente && cliente.estado) || '',
+    garantia: '', garantia_obs: '',
+    status: 'pendente',
+    valor_servico: null,
+    retrabalho: false,
+    criado_em: agora.toISOString(),
+    lida_tecnico: true,
+    deslocamento_iniciado_em: null,
+    lembrete_deslocamento_enviado: false,
+    // o cliente já pediu o atendimento pelo chat — não faz sentido pedir confirmação de novo
+    confirmado_cliente_em: agora.toISOString(),
+    feedback_cliente_em: null,
+    orcamento_aprovado_em: null,
+    retorno_pendente_tecnico: false,
+    retorno_deslocamento_iniciado_em: null,
+    origem_chamado_id: chamado.id,
+  };
+  data.agenda.push(osItem);
+
+  chamado.status = 'convertido_os';
+  chamado.tecnico_id = user.id;
+  chamado.os_id = osItem.id;
+  chamado.assumido_em = agora.toISOString();
+  chamado.lida_cliente = false;
+  chamado.mensagens.push({ autor: 'sistema', texto: `${user.nome} assumiu o atendimento — O.S. ${osItem.numero_os} aberta.`, criado_em: agora.toISOString() });
+  db.save(data);
+
+  if (chamado.origem === 'whatsapp' && chamado.telefone_whatsapp) {
+    whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, `${user.nome}, da PRO Marking, assumiu seu atendimento e vai continuar por aqui.`).catch(() => {});
+  }
+  enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado), agenda: agendaComDetalhes(data, osItem) });
+});
+
+// GET /api/chamados/stats — administrador: números de hoje pro painel de atendimentos
+rota('GET', /^\/api\/chamados\/stats$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê as estatísticas de atendimento.' });
+  const data = db.load();
+  const hojeISO = new Date().toISOString().slice(0, 10);
+  const deHoje = data.chamados.filter((c) => (c.criado_em || '').slice(0, 10) === hojeISO);
+  const resolvidosIa = deHoje.filter((c) => c.status === 'encerrado' && c.resolvido_por === 'ia');
+  const paraTecnico = deHoje.filter((c) => c.status === 'convertido_os' || (c.status !== 'ia' && c.tecnico_id));
+  const aguardando = data.chamados.filter((c) => c.status === 'aguardando_tecnico').length; // fila atual, não só de hoje
+  const mediaMinutos = (lista, campoFim, campoInicio) => {
+    const validos = lista.filter((c) => c[campoFim] && c[campoInicio]);
+    if (!validos.length) return null;
+    const total = validos.reduce((soma, c) => soma + (new Date(c[campoFim]) - new Date(c[campoInicio])), 0);
+    return Math.round(total / validos.length / 60000);
+  };
+  const fmtMin = (min) => min === null ? null : `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+  enviarJSON(res, 200, {
+    total: deHoje.length,
+    resolvidos_ia: resolvidosIa.length,
+    tecnico: paraTecnico.length,
+    aguardando,
+    tempo_medio_ia: fmtMin(mediaMinutos(resolvidosIa, 'resolvido_em', 'criado_em')),
+    tempo_medio_tecnico: fmtMin(mediaMinutos(paraTecnico, 'assumido_em', 'criado_em')),
+  });
+});
+
 // ---------- assistente de suporte via WhatsApp (opcional) ----------
 // só funciona se as variáveis de ambiente estiverem configuradas (WHATSAPP_TOKEN,
 // WHATSAPP_PHONE_ID, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY) — ver whatsapp.js
-require('./whatsapp').registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db });
+whatsapp.registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db });
 
 // ---------- arquivos estáticos (frontend) ----------
 

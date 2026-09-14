@@ -262,7 +262,7 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
-  if (USER.papel === 'tecnico' || USER.papel === 'administrador' || USER.papel === 'producao') ativarNotificacoesPush();
+  if (USER.papel === 'tecnico' || USER.papel === 'administrador' || USER.papel === 'producao' || USER.papel === 'cliente') ativarNotificacoesPush();
   const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
@@ -309,6 +309,7 @@ function sincronizarApp() {
 const NAV = {
   tecnico: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
+    { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
     { key: 'relatorio-manutencao', label: 'Criar Relatório', page: 'relatorio-manutencao' },
     { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
@@ -326,6 +327,7 @@ const NAV = {
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
+    { key: 'painel-atendimentos', label: 'Atendimentos', page: 'painel-atendimentos' },
     { key: 'aprovacoes-visitas', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -356,7 +358,7 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'equipamentos', label: 'Meus equipamentos', page: 'equipamentos' },
-    { key: 'chamados', label: 'Abertura de chamado', page: 'chamados' },
+    { key: 'chamados', label: 'Atendimento', page: 'chamados' },
   ],
   producao: [
     { key: 'biblioteca', label: 'Biblioteca', children: [
@@ -464,6 +466,8 @@ async function ir(pagina) {
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
+    if (pagina === 'fila-atendimento') return renderFilaAtendimento();
+    if (pagina === 'painel-atendimentos') return renderPainelAtendimentos();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -602,6 +606,14 @@ async function clicarNotificacao(registroId, tipo) {
     ir('aprovacoes-visitas');
   } else if (tipo === 'edicao_solicitada_biblioteca') {
     ir('solicitacoes-edicao-biblioteca');
+  } else if (tipo === 'chamado_fila') {
+    ir('fila-atendimento');
+  } else if (tipo === 'chamado_mensagem') {
+    paginaAtual = 'fila-atendimento';
+    montarSidebar();
+    abrirChatAtendimentoTecnico(registroId);
+  } else if (tipo === 'chamado_mensagem_cliente') {
+    ir('chamados');
   } else {
     ir('aprovacoes-biblioteca');
   }
@@ -5385,41 +5397,219 @@ function mostrarLinkConvite(convite) {
 }
 
 // ---------- ABERTURA DE CHAMADO (cliente) ----------
+// ---------- atendimento por chat: tela do cliente ----------
+// o cliente conversa com a IA (se estiver configurada); se ela não resolver, o atendimento cai
+// na fila do técnico e a conversa continua no mesmo chat, só que respondida por uma pessoa.
+
+let _atClienteChamado = null;
+let _atClientePoll = null;
+
 async function renderChamados() {
-  const [{ chamados }, { equipamentos }] = await Promise.all([api('/api/chamados'), api('/api/equipamentos')]);
+  clearInterval(_atClientePoll);
+  const { chamado } = await api('/api/chamados/meu-ativo');
+  _atClienteChamado = chamado;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Abertura de chamado</h1><p>Solicite manutenção preventiva, corretiva ou treinamento</p></div>
-    <div class="panel">
-      <div class="form-grid">
-        <div><label>Tipo de serviço</label>
-          <select id="ch-tipo"><option value="preventiva">Manutenção preventiva</option><option value="corretiva">Manutenção corretiva</option><option value="treinamento">Treinamento</option></select>
-        </div>
-        <div><label>Equipamento</label>
-          <select id="ch-equip">${equipamentos.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')}</select>
-        </div>
-        <div class="full"><label>Descreva o problema/necessidade</label><textarea id="ch-descricao"></textarea></div>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="abrirChamado()">Abrir chamado</button>
+    <div class="page-head"><h1>Atendimento</h1><p>Converse com o assistente — se não resolver, um técnico assume a conversa.</p></div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      ${!chamado || chamado.status !== 'encerrado' ? `
+        <div class="chat-compositor">
+          <textarea id="at-texto" placeholder="${chamado ? 'Digite sua mensagem...' : 'Descreva o problema pra começar o atendimento...'}" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoCliente();}"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoCliente()">Enviar</button>
+        </div>` : '<p class="empty" style="margin-top:10px;">Atendimento encerrado. Mande uma nova mensagem abaixo pra abrir outro.</p>'}
     </div>
-    <div class="page-head"><h1 style="font-size:16px;">Meus chamados</h1></div>
+    <div id="at-historico"></div>`;
+  renderMensagensChat('at-mensagens', chamado ? chamado.mensagens : [], 'cliente');
+  if (chamado && chamado.status !== 'encerrado') {
+    _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
+  }
+  carregarHistoricoAtendimentoCliente();
+}
+
+async function atualizarAtendimentoCliente() {
+  if (!_atClienteChamado) return;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atClienteChamado.id}`);
+    _atClienteChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'cliente');
+    if (chamado.status === 'encerrado') { clearInterval(_atClientePoll); renderChamados(); }
+  } catch (e) { /* silencioso — tenta de novo no próximo ciclo */ }
+}
+
+async function enviarMensagemAtendimentoCliente() {
+  const campo = document.getElementById('at-texto');
+  const texto = campo.value.trim();
+  if (!texto) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    if (!_atClienteChamado || _atClienteChamado.status === 'encerrado') {
+      const { chamado } = await api('/api/chamados', { method: 'POST', body: { mensagem: texto } });
+      _atClienteChamado = chamado;
+      renderChamados();
+      return;
+    }
+    const { chamado } = await api(`/api/chamados/${_atClienteChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _atClienteChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'cliente');
+    if (!_atClientePoll) _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+async function carregarHistoricoAtendimentoCliente() {
+  const { chamados } = await api('/api/chamados/meus-encerrados');
+  const alvo = document.getElementById('at-historico');
+  if (!alvo || !chamados.length) return;
+  alvo.innerHTML = `
+    <div class="page-head"><h1 style="font-size:16px;">Atendimentos anteriores</h1></div>
     <div class="panel"><table>
-      <tr><th>Data</th><th>Tipo</th><th>Equipamento</th><th>Status</th></tr>
-      ${chamados.length ? chamados.map((c) => `
-        <tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Tipo">${esc(c.tipo_servico)}</td><td data-label="Equipamento">${esc(c.equipamento_tipo || '—')}</td><td data-label="Status">${tag(c.status === 'aberto' ? 'Aberto' : c.status, c.status === 'aberto' ? 'amber' : 'green')}</td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum chamado aberto ainda.</td></tr>`}
+      <tr><th>Data</th><th>Resolvido por</th></tr>
+      ${chamados.map((c) => `<tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Resolvido por">${c.resolvido_por === 'ia' ? 'Assistente' : c.numero_os ? 'Técnico — ' + esc(c.numero_os) : 'Técnico'}</td></tr>`).join('')}
     </table></div>`;
 }
-async function abrirChamado() {
-  const body = {
-    tipo_servico: document.getElementById('ch-tipo').value,
-    equipamento_id: document.getElementById('ch-equip').value,
-    descricao: document.getElementById('ch-descricao').value,
-  };
+
+// mensagens do chat — reaproveitado tanto na tela do cliente quanto na do técnico; "visao"
+// decide de que lado do chat cada bolha aparece (a mensagem de quem tá olhando vai pra direita)
+function renderMensagensChat(containerId, mensagens, visao) {
+  const alvo = document.getElementById(containerId);
+  if (!alvo) return;
+  const proprioAutor = visao === 'cliente' ? 'cliente' : 'tecnico';
+  alvo.innerHTML = (mensagens || []).length ? (mensagens || []).map((m) => {
+    if (m.autor === 'sistema') return `<div class="chat-sistema">${esc(m.texto)}</div>`;
+    const proprio = m.autor === proprioAutor;
+    const rotulo = m.autor === 'ia' ? 'Assistente' : proprio ? 'Você' : (m.autor === 'tecnico' ? 'Técnico' : 'Cliente');
+    return `<div class="chat-msg ${proprio ? 'chat-msg-proprio' : 'chat-msg-outro'} chat-msg-${m.autor}">
+      <div class="chat-msg-rotulo">${rotulo}</div>
+      <div class="chat-msg-texto">${esc(m.texto)}</div>
+      <div class="chat-msg-hora">${fmtData(m.criado_em)}</div>
+    </div>`;
+  }).join('') : '<p class="empty">Nenhuma mensagem ainda.</p>';
+  alvo.scrollTop = alvo.scrollHeight;
+}
+
+// ---------- atendimento por chat: fila e chat do técnico ----------
+
+async function renderFilaAtendimento() {
+  const [{ chamados: fila }, { chamados: meus }] = await Promise.all([
+    api('/api/chamados?fila=1'),
+    api('/api/chamados'),
+  ]);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Fila de Atendimento</h1><p>Atendimentos que a IA não conseguiu resolver sozinha — qualquer técnico pode assumir.</p></div>
+    <div class="panel">
+      <h2>Aguardando técnico (${fila.length})</h2>
+      <div class="atendimento-grid">
+        ${fila.length ? fila.map((c) => cardAtendimentoFila(c)).join('') : '<p class="empty">Nenhum atendimento na fila agora.</p>'}
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Meus atendimentos</h2>
+      <div class="atendimento-grid">
+        ${meus.length ? meus.map((c) => cardAtendimentoFila(c)).join('') : '<p class="empty">Você ainda não assumiu nenhum atendimento.</p>'}
+      </div>
+    </div>`;
+}
+
+function legendaStatusChamado(status) {
+  if (status === 'aguardando_tecnico') return tag('Aguardando técnico', 'amber');
+  if (status === 'convertido_os') return tag('Em atendimento', 'green');
+  return tag(status, 'blue');
+}
+
+function cardAtendimentoFila(c) {
+  const naoLido = c.tecnico_id && !c.lida_tecnico;
+  const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
+  const resumo = c.resumo_ia || (primeiraDoCliente ? primeiraDoCliente.texto : '');
+  return `
+    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">ATENDIMENTO #${c.id}</span>
+        ${c.prioridade === 'alta' ? '<span class="tag tag-falha">ALTA</span>' : ''}
+        ${naoLido ? '<span class="tag tag-blue">Nova mensagem</span>' : ''}
+      </div>
+      <div class="atendimento-cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</div>
+      ${c.equipamento_tipo ? `<div class="atendimento-equip">${esc(c.equipamento_tipo)}${c.equipamento_modelo ? ' — ' + esc(c.equipamento_modelo) : ''}</div>` : ''}
+      ${resumo ? `<div class="atendimento-resumo">${esc(resumo.slice(0, 140))}</div>` : ''}
+      <div class="atendimento-status">${legendaStatusChamado(c.status)}</div>
+    </div>`;
+}
+
+let _atTecChamado = null;
+let _atTecPoll = null;
+
+async function abrirChatAtendimentoTecnico(id) {
+  clearInterval(_atTecPoll);
+  const { chamado } = await api(`/api/chamados/${id}`);
+  _atTecChamado = chamado;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atendimento #${chamado.id}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${chamado.status === 'aguardando_tecnico' ? `<button class="btn btn-primary btn-sm" onclick="assumirAtendimento(${chamado.id})">Assumir atendimento</button>` : ''}
+        ${chamado.os_id ? `<button class="btn-outline-sm" onclick="ir('agenda')">Ver O.S. ${esc(chamado.numero_os || '')}</button>` : ''}
+        <button class="btn-outline-sm" onclick="ir('fila-atendimento')">‹ Voltar</button>
+      </div>
+    </div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      ${chamado.tecnico_id ? `
+        <div class="chat-compositor">
+          <textarea id="at-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoTecnico();}"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoTecnico()">Enviar</button>
+        </div>` : '<p class="empty" style="margin-top:10px;">Assuma o atendimento pra poder responder ao cliente.</p>'}
+    </div>`;
+  renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
+  if (chamado.status !== 'encerrado') _atTecPoll = setInterval(atualizarAtendimentoTecnico, 4000);
+}
+
+async function atualizarAtendimentoTecnico() {
+  if (!_atTecChamado) return;
   try {
-    await api('/api/chamados', { method: 'POST', body });
-    mostrarToast('Chamado aberto com sucesso.');
-    renderChamados();
+    const { chamado } = await api(`/api/chamados/${_atTecChamado.id}`);
+    _atTecChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
+  } catch (e) { /* silencioso */ }
+}
+
+async function enviarMensagemAtendimentoTecnico() {
+  const campo = document.getElementById('at-texto');
+  const texto = campo.value.trim();
+  if (!texto || !_atTecChamado) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atTecChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _atTecChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
   } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+async function assumirAtendimento(id) {
+  try {
+    await api(`/api/chamados/${id}/assumir`, { method: 'POST', body: {} });
+    mostrarToast('Atendimento assumido — uma Ordem de Serviço foi aberta.');
+    abrirChatAtendimentoTecnico(id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- atendimento por chat: painel do administrador ----------
+
+async function renderPainelAtendimentos() {
+  const stats = await api('/api/chamados/stats');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Atendimentos</h1><p>Atendimento por chat de hoje — IA de 1º nível e fila de técnicos.</p></div>
+    <div class="atendimento-stats-grid">
+      <div class="stat-tile"><div class="stat-valor">${stats.total}</div><div class="stat-label">Total hoje</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.resolvidos_ia}</div><div class="stat-label">Resolvidos pela IA</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.tecnico}</div><div class="stat-label">Técnico</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_ia || '—'}</div><div class="stat-label">Tempo médio IA</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_tecnico || '—'}</div><div class="stat-label">Tempo médio técnico</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.aguardando}</div><div class="stat-label">Aguardando</div></div>
+    </div>`;
 }
 
 // ---------- toast ----------

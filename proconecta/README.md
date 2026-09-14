@@ -183,19 +183,39 @@ node server.js
 
 Nenhuma outra mudança é necessária — veja `email.js`.
 
-## Assistente de suporte técnico pelo WhatsApp (opcional)
+## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
-Um assistente de IA que conversa com o cliente pelo WhatsApp, consulta a Biblioteca de
-Defeitos/Falhas e Procedimentos já aprovada no sistema (nunca inventa solução fora dela) e, se
-não resolver, abre um chamado técnico de verdade — ver `whatsapp.js`. Fica desligado por padrão;
-só liga quando todas as variáveis de ambiente abaixo estiverem definidas:
+O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
+mandando mensagem no WhatsApp da empresa — os dois caem no mesmo "chamado" e na mesma conversa.
+Um assistente de IA responde primeiro, consultando a Biblioteca de Defeitos/Falhas e
+Procedimentos já aprovada no sistema (nunca inventa solução fora dela — ver `ia.js`); se não
+resolver, o atendimento cai na **Fila de Atendimento** do técnico, que assume a conversa — isso já
+abre uma Ordem de Serviço automaticamente, com os dados do cliente pré-preenchidos. O
+administrador acompanha os números do dia (total, resolvidos pela IA, por técnico, tempo médio)
+no menu **Atendimentos**.
+
+A parte da IA liga sozinha, sem depender do WhatsApp, assim que a variável abaixo existir:
+
+```
+ANTHROPIC_API_KEY=sua_chave_da_api_da_anthropic
+node server.js
+```
+
+- `ANTHROPIC_API_KEY`: crie em [console.anthropic.com](https://console.anthropic.com).
+- `ANTHROPIC_MODEL` (opcional): sobrescreve o modelo padrão usado.
+
+Sem essa variável, o chat dentro do app continua funcionando normalmente — só que sem o primeiro
+atendimento automático: a conversa já cai direto na fila do técnico.
+
+### Canal WhatsApp (opcional, além do chat do app)
+
+Pra também receber mensagens pelo WhatsApp Business e a IA responder por lá (ver `whatsapp.js`),
+defina também:
 
 ```
 WHATSAPP_TOKEN=token_de_acesso_do_numero_do_whatsapp_business
 WHATSAPP_PHONE_ID=phone_number_id_do_meta_for_developers
 WHATSAPP_VERIFY_TOKEN=uma_frase_secreta_qualquer_que_voce_inventa
-ANTHROPIC_API_KEY=sua_chave_da_api_da_anthropic
-node server.js
 ```
 
 - `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID`: vêm do painel do app em
@@ -204,10 +224,9 @@ node server.js
 - `WHATSAPP_VERIFY_TOKEN`: você inventa qualquer texto — só precisa ser o mesmo valor colocado
   aqui e no campo "Verify token" quando configurar a URL do webhook no painel da Meta (a URL é
   `https://seu-dominio/api/whatsapp/webhook`).
-- `ANTHROPIC_API_KEY`: crie em [console.anthropic.com](https://console.anthropic.com).
-- `ANTHROPIC_MODEL` (opcional): sobrescreve o modelo padrão usado.
 
-Sem essas variáveis, o webhook não faz nada — o resto do sistema funciona normalmente.
+Sem essas três variáveis, o webhook do WhatsApp não faz nada — o chat dentro do app funciona
+normalmente do mesmo jeito.
 
 ## Referências do projeto
 
