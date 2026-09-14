@@ -1929,84 +1929,261 @@ async function concluirLaudoTecnico() {
   renderAgenda();
 }
 
-function gerarPdfLaudo(d, item) {
+// PDF do laudo técnico (corretiva/preventiva) — mesmo layout do modelo em papel da PRO Marking
+// usado no relatório de manutenção (gerarPdfRelatorioManutencao): capa navy cheia página, depois
+// páginas de conteúdo com caixas com borda, checkboxes, tabela de peças e fotos 2 por linha, e
+// uma página final de contato. Helpers duplicados de propósito (em vez de compartilhados) pra
+// não arriscar mudar o relatório de manutenção, que já está pronto e aprovado.
+function gerarPdfLaudo(d, item, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const margem = 40; let y = 50;
-  const largura = doc.internal.pageSize.getWidth() - margem * 2;
-  function titulo(t) { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71); doc.text(t, margem, y); y += 18; doc.setDrawColor(20, 103, 214); doc.line(margem, y - 12, margem + largura, y - 12); }
-  function linha(rotulo, valor) {
-    if (y > 760) { doc.addPage(); y = 50; }
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
-    doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(limparPdf(valor) || '—', largura - 130);
-    doc.text(linhas, margem + 130, y);
-    y += Math.max(14, linhas.length * 12);
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function opcaoCheckbox(x, yy, marcado, label) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.9);
+    doc.rect(x, yy - 7, 7, 7, 'S');
+    if (marcado) { doc.setFillColor(...PDF_COR.ink); doc.rect(x + 1.2, yy - 5.8, 4.6, 4.6, 'F'); }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(label, x + 11, yy);
+    return x + 11 + doc.getTextWidth(label);
   }
-  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-  doc.text('Laudo Técnico — Pro Conecta', margem, y); y += 22;
-  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
-  doc.text(`Elaborado: ${new Date().toLocaleDateString('pt-BR')} · Setor: ${USER.setor || 'Suporte Técnico'}`, margem, y); y += 24;
 
-  titulo('Dados do atendimento');
-  linha('Empresa', item.cliente_nome); linha('Contato', item.contato || item.cliente_contato); linha('Telefone', item.telefone || item.cliente_telefone);
-  linha('Endereço', `${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`);
-  linha('Técnico', item.tecnico_nome || USER.nome);
-  linha('Equipamento', `${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''} (${item.equipamento_serie || '—'})`);
-  y += 8;
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
-  titulo('Dados do equipamento');
-  linha('Data de fabricação', d.data_fabricacao);
-  linha('Garantia', d.garantia === 'sim' ? 'Sim' : d.garantia === 'nao' ? 'Não' : `N/A — ${d.garantia_obs}`);
-  linha('Acessórios recebidos', d.acessorios); linha('Defeito informado', d.defeito_informado);
-  y += 8;
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text('PRO Marking', pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Laudo Técnico', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
 
-  titulo('Técnico responsável');
-  linha('Data de início', fmtData(d.data_entrada)); linha('Data de conclusão', fmtData(d.data_conclusao)); linha('Período de reparo', periodoReparo(d));
-  y += 8;
+  function tituloCentro(t, sub) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+    }
+    y += 4;
+  }
 
-  titulo('Laudo técnico');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(limparPdf(d.laudo_tecnico), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+  function tituloEsquerda(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem, y); y += 14;
+  }
 
-  titulo('Serviço realizado');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(limparPdf(d.servico_realizado), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
-
-  if (d.pecas.length) {
-    titulo('Peças fornecidas');
-    d.pecas.forEach((p) => {
-      if (y > 760) { doc.addPage(); y = 50; }
-      doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-      doc.text(limparPdf(`- ${p.descricao || '—'}${p.quantidade ? ' (qtd: ' + p.quantidade + ')' : ''}`), margem, y); y += 13;
+  // linha de campos "LABEL: valor" dentro de caixas com borda, lado a lado
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
     });
-    y += 8;
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(26); doc.setFont(undefined, 'bold');
+  doc.setTextColor(...PDF_COR.blueBright); doc.text('PRO', pageW / 2 - 4, 265, { align: 'right' });
+  doc.setTextColor(...PDF_COR.white); doc.text('Marking', pageW / 2 + 2, 265, { align: 'left' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('LAUDO TÉCNICO', pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(item.cliente_nome).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do cliente');
+  linhaCampos([{ label: 'Empresa', valor: d.empresa || item.cliente_nome, frac: 1 }]);
+  linhaCampos([{ label: 'Contato', valor: d.contato || item.contato || item.cliente_contato, frac: 1 }]);
+  linhaCampos([{ label: 'Telefone', valor: d.telefone || item.telefone || item.cliente_telefone, frac: 1 }]);
+  y += 12;
+
+  tituloCentro('Tipo de serviço');
+  {
+    const opcoes = [['preventiva', 'PREVENTIVA'], ['corretiva', 'CORRETIVA']];
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5);
+    const larguras = opcoes.map(([, l]) => 11 + doc.getTextWidth(l));
+    const gap = 16;
+    const total = larguras.reduce((a, b) => a + b, 0) + gap * (larguras.length - 1);
+    let cx = pageW / 2 - total / 2;
+    opcoes.forEach(([v, l], idx) => { opcaoCheckbox(cx, y, item.tipo === v, l); cx += larguras[idx] + gap; });
+    y += 26;
+  }
+
+  tituloCentro('Dados do equipamento');
+  linhaCampos([{ label: 'Equipamento', valor: d.equipamento_tipo || item.equipamento_tipo, frac: 0.34 }, { label: 'Modelo', valor: d.modelo_maquina || item.equipamento_modelo, frac: 0.4 }, { label: 'Nº Série', valor: d.numero_serie || item.equipamento_serie, frac: 0.26 }]);
+  {
+    const wGarantia = largura * 0.62, wData = largura - wGarantia, altura = 20;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, wGarantia, altura, 'S');
+    doc.rect(margem + wGarantia, y, wData, altura, 'S');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('GARANTIA:', margem + 7, y + 13);
+    let cx = margem + 7 + doc.getTextWidth('GARANTIA: ') + 4;
+    [['sim', 'SIM'], ['nao', 'NÃO'], ['na', 'N/A']].forEach(([v, l]) => { cx = opcaoCheckbox(cx, y + 13, d.garantia === v, l) + 10; });
+    doc.setFont(undefined, 'bold'); doc.text('DATA DE FABRICAÇÃO: ', margem + wGarantia + 7, y + 13);
+    const wLblFab = doc.getTextWidth('DATA DE FABRICAÇÃO: ');
+    doc.setFont(undefined, 'normal'); doc.text(limparPdf(d.data_fabricacao) || '—', margem + wGarantia + 7 + wLblFab, y + 13);
+    y += altura;
+  }
+  linhaCampos([{ label: 'Acessórios', valor: d.acessorios, frac: 1 }]);
+  linhaCampos([{ label: 'Defeito informado', valor: d.defeito_informado, frac: 1 }]);
+  y += 12;
+
+  tituloCentro('Técnico responsável');
+  linhaCampos([{ label: 'Nome', valor: d.tecnico_nome || item.tecnico_nome || USER.nome, frac: 0.5 }, { label: 'E-mail', valor: d.tecnico_email || USER.email, frac: 0.5 }]);
+  linhaCampos([{ label: 'Entrada', valor: fmtData(d.data_entrada), frac: 0.33 }, { label: 'Conclusão', valor: fmtData(d.data_conclusao), frac: 0.33 }, { label: 'Período', valor: periodoReparo(d), frac: 0.34 }]);
+  y += 12;
+
+  tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(d.laudo_tecnico) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 12;
+  }
+
+  tituloCentro('Serviço realizado');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(d.servico_realizado) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 14;
+  }
+
+  tituloEsquerda('Peças Fornecidas');
+  {
+    const cols = [{ t: 'Item', frac: 0.14 }, { t: 'Descrição da peça', frac: 0.66 }, { t: 'Qtd.', frac: 0.2 }];
+    const larguras = cols.map((c) => largura * c.frac);
+    if (y + 20 > pageH - margem) novaPagina();
+    let cx = margem;
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
+    y += 18;
+    const pecas = d.pecas || [];
+    if (!pecas.length) {
+      if (y + 18 > pageH - margem) novaPagina();
+      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem + 6, y + 12);
+      y += 18;
+    } else {
+      pecas.forEach((p, i) => {
+        if (y + 18 > pageH - margem) novaPagina();
+        cx = margem;
+        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', String(p.quantidade || '—')];
+        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
+        y += 18;
+      });
+    }
+    y += 16;
   }
 
   if (d.observacoes) {
-    titulo('Observações');
-    if (y > 740) { doc.addPage(); y = 50; }
-    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8;
+    tituloCentro('Observações');
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 14;
   }
 
-  if (d.fotos.length) {
-    doc.addPage(); y = 50;
-    titulo('Relatório fotográfico');
-    const wImg = 240, hImg = 180;
-    let x = margem;
-    d.fotos.forEach((f, i) => {
-      if (x + wImg > margem + largura) { x = margem; y += hImg + 20; }
-      if (y + hImg > 780) { doc.addPage(); y = 50; x = margem; }
-      const m = /^data:image\/(\w+);/.exec(f);
-      const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
-      try { doc.addImage(f, formato, x, y, wImg, hImg); } catch (e) {}
-      x += wImg + 20;
-    });
+  tituloCentro('Relatório fotográfico');
+  if (d.fotos && d.fotos.length) {
+    const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+    for (let i = 0; i < d.fotos.length; i += 2) {
+      if (y + hImg > pageH - margem) novaPagina();
+      [d.fotos[i], d.fotos[i + 1]].forEach((f, j) => {
+        if (!f) return;
+        const cx = margem + j * (wImg + gap);
+        try {
+          const m = /^data:image\/(\w+);/.exec(f);
+          const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+          doc.setDrawColor(...PDF_COR.line);
+          doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+          doc.addImage(f, formato, cx, y, wImg, hImg);
+        } catch (e) {}
+      });
+      y += hImg + gap;
+    }
+  } else {
+    doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Nenhuma foto anexada.', margem, y); y += 16;
   }
 
-  doc.setFontSize(9); doc.setTextColor(74, 85, 104);
-  doc.text('PRO Marking · WhatsApp 12 99718-7506 · Telefone 12 3902-3453 · suporte@promarking.com.br', margem, doc.internal.pageSize.getHeight() - 24);
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('PRO Marking', pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text('WhatsApp: 12 99718-7506', pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text('Telefone: 12 3902-3453', pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
 
-  return doc.output('datauristring');
+  return doc.output('bloburl');
 }
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
@@ -2332,16 +2509,14 @@ function detalheCompletoOS(a, visita) {
     ${timelineOS(a, visita)}`;
 }
 
-function baixarPdfLaudoAprovado(agendaId) {
+async function baixarPdfLaudoAprovado(agendaId) {
   const a = (window._agendaCache || []).find((x) => x.id === agendaId);
   const v = (window._visitasPorAgenda || {})[agendaId];
   if (!a || !v || !v.laudo) return alert('Não foi possível localizar o laudo aprovado desta O.S.');
   try {
-    const pdfDataUri = gerarPdfLaudo(v.laudo, a);
-    const link = document.createElement('a');
-    link.href = pdfDataUri;
-    link.download = `laudo-tecnico-${v.id}.pdf`;
-    document.body.appendChild(link); link.click(); link.remove();
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfLaudo(v.laudo, a, logo);
+    window.open(url, '_blank');
   } catch (e) {
     alert('Erro ao gerar o PDF: ' + e.message);
   }
