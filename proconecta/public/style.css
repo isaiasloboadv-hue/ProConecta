@@ -18,6 +18,7 @@
   --red:#B3261E;
   --teal:#0E7C86;
   --purple:#6B4FA0;
+  --purple-bg:#EDE7F6;
   --pink:#B23A6B;
 }
 *{box-sizing:border-box;}
@@ -248,6 +249,7 @@ textarea{resize:vertical;min-height:64px;}
 .tag-green{background:var(--green-bg);color:var(--green);}
 .tag-amber{background:var(--amber-bg);color:var(--amber);}
 .tag-orange{background:var(--orange-bg);color:var(--orange);}
+.tag-purple{background:var(--purple-bg);color:var(--purple);}
 .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;}
 .badge-pendente{background:var(--amber-bg);color:var(--amber);}
 .badge-aprovado{background:var(--green-bg);color:var(--green);}

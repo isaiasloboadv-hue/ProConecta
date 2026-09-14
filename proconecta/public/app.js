@@ -14,18 +14,21 @@ const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', clien
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
+  atendimento: 'Atendimento',
 };
 // versão curta pro topo do card de O.S. — cabe ao lado da tag do técnico sem quebrar linha
 const TIPO_OS_LABEL_CURTO = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Trein. online',
   treinamento_presencial: 'Trein. presencial', demonstracao_tecnica: 'Demo. técnica',
+  atendimento: 'Atendimento',
 };
 const TIPO_OS_COR = {
   corretiva: 'falha', preventiva: 'green', treinamento_online: 'blue',
-  treinamento_presencial: 'amber', demonstracao_tecnica: 'orange',
+  treinamento_presencial: 'amber', demonstracao_tecnica: 'orange', atendimento: 'purple',
 };
-// laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura)
-const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva'];
+// laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura) — "atendimento"
+// (O.S. aberta automaticamente quando um técnico assume um chamado do chat) usa o mesmo laudo
+const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva', 'atendimento'];
 // termo de aceite com checklist/assinatura — hoje só treinamento presencial, enquanto
 // o modelo de referência específico dele não chega
 const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];

@@ -180,7 +180,7 @@ const CHECKLIST_CORRETIVA = [
 ];
 
 // tipos de OS que usam o Laudo Técnico (diagnóstico + serviço realizado + peças + fotos, sem assinatura)
-const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva'];
+const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva', 'atendimento'];
 // tipos que usam o termo de aceite com checklist/assinatura — hoje só treinamento presencial,
 // enquanto o modelo de referência específico dele não chega
 const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];
@@ -1969,7 +1969,9 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
 
   const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
   const equipamentoDoChamado = chamado.equipamento_id ? data.equipamentos.find((e) => e.id === chamado.equipamento_id && e.cliente_id === chamado.cliente_id) : null;
-  const tipo = ['corretiva', 'preventiva', 'treinamento'].includes(body.tipo) ? body.tipo : 'corretiva';
+  // toda O.S. aberta a partir de um chamado do chat nasce como "Atendimento" — é o técnico quem,
+  // ao preencher o Laudo Técnico, define se era mesmo uma corretiva/preventiva de verdade
+  const tipo = 'atendimento';
   const primeiraMensagemCliente = chamado.mensagens.find((msg) => msg.autor === 'cliente');
 
   const agora = new Date();
