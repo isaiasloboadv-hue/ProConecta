@@ -64,13 +64,17 @@ function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
   const cliente = data.clientes.find((c) => c.id === item.cliente_id);
   const equipamento = data.equipamentos.find((e) => e.id === item.equipamento_id);
-  const visita = data.visitas.find((v) => v.agenda_id === item.id);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
   return {
     ...item,
     visita_id: visita ? visita.id : null,
     visita_status: visita ? visita.status_aprovacao : null,
     visita_data_aprovacao: visita ? visita.data_aprovacao : null,
     visita_solicitacao_reabertura: visita ? visita.solicitacao_reabertura : null,
+    visita_tem_pecas: !!(visita && visita.laudo && Array.isArray(visita.laudo.pecas) && visita.laudo.pecas.length > 0),
+    visita_necessidade_retorno: !!(visita && visita.laudo && visita.laudo.necessidade_retorno),
+    visita_retorno_id: visitaRetorno ? visitaRetorno.id : null,
     finalizada: item.finalizada || false,
     finalizado_em: item.finalizado_em || null,
     tecnico_nome: tecnico ? tecnico.nome : null,
@@ -406,6 +410,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     lembrete_deslocamento_enviado: false,
     confirmado_cliente_em: null,
     feedback_cliente_em: null,
+    orcamento_aprovado_em: null,
+    retorno_pendente_tecnico: false,
   };
   data.agenda.push(item);
   db.save(data);
@@ -466,9 +472,56 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
-// POST /api/agenda/:id/registrar-feedback — administrador marca que o cliente já deu o
-// retorno/feedback sobre o serviço prestado; é o passo anterior e obrigatório antes de poder
-// finalizar a O.S. (2 ações separadas: primeiro o feedback, depois a finalização em si).
+// checa se a O.S. já pode chegar na etapa de feedback do cliente: o relatório original
+// precisa estar aprovado, o orçamento (se houve peças fornecidas) precisa estar aprovado, e
+// não pode haver um retorno do técnico ainda pendente
+function erroAntesDoFeedback(data, item) {
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  if (!visita || visita.status_aprovacao !== 'aprovado') {
+    return 'Só é possível avançar depois do relatório aprovado.';
+  }
+  if (visita.laudo && Array.isArray(visita.laudo.pecas) && visita.laudo.pecas.length > 0 && !item.orcamento_aprovado_em) {
+    return 'Aprove o orçamento das peças fornecidas antes de avançar.';
+  }
+  if (item.retorno_pendente_tecnico) {
+    return 'Aguarde o técnico enviar o relatório de retorno antes de avançar.';
+  }
+  return null;
+}
+
+// POST /api/agenda/:id/orcamento-aprovado — quando o relatório aprovado tem peças fornecidas,
+// o administrador aprova o orçamento antes de seguir; se o técnico também marcou necessidade
+// de retorno, libera pra ele enviar um segundo relatório (de retorno) antes do feedback.
+rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-aprovado$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador aprova o orçamento.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  if (!visita || visita.status_aprovacao !== 'aprovado') {
+    return enviarJSON(res, 400, { erro: 'Só é possível aprovar o orçamento depois do relatório aprovado.' });
+  }
+  if (!visita.laudo || !Array.isArray(visita.laudo.pecas) || visita.laudo.pecas.length === 0) {
+    return enviarJSON(res, 400, { erro: 'Este relatório não tem peças fornecidas.' });
+  }
+  if (item.orcamento_aprovado_em) return enviarJSON(res, 400, { erro: 'O orçamento já foi aprovado.' });
+  item.orcamento_aprovado_em = new Date().toISOString();
+  if (visita.laudo.necessidade_retorno) item.retorno_pendente_tecnico = true;
+  db.save(data);
+  if (item.retorno_pendente_tecnico) {
+    enviarPush(data, item.tecnico_id, {
+      titulo: 'Orçamento aprovado — retorno necessário',
+      corpo: `O orçamento da O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')} foi aprovado. Envie o relatório de retorno quando concluir.`,
+      url: '/',
+    }).catch(() => {});
+  }
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/registrar-feedback — administrador marca que o cliente aprovou o
+// serviço ("Cliente OK"); é o passo anterior e obrigatório antes de poder finalizar a O.S.
 rota('POST', /^\/api\/agenda\/(\d+)\/registrar-feedback$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra o feedback do cliente.' });
@@ -476,13 +529,38 @@ rota('POST', /^\/api\/agenda\/(\d+)\/registrar-feedback$/, async (req, res, m) =
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
-  const visitaFeedback = data.visitas.find((v) => v.agenda_id === item.id);
-  if (!visitaFeedback || visitaFeedback.status_aprovacao !== 'aprovado') {
-    return enviarJSON(res, 400, { erro: 'Só é possível registrar o feedback depois do relatório aprovado.' });
-  }
+  const erro = erroAntesDoFeedback(data, item);
+  if (erro) return enviarJSON(res, 400, { erro });
   if (item.feedback_cliente_em) return enviarJSON(res, 400, { erro: 'O feedback do cliente já foi registrado.' });
   item.feedback_cliente_em = new Date().toISOString();
   db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/retrabalho — administrador registra que o cliente deu um feedback
+// negativo e precisa de um retorno do técnico (ex.: novo treinamento). Só é permitido uma
+// rodada extra por O.S. — se já existe um relatório de retorno, não libera de novo.
+rota('POST', /^\/api\/agenda\/(\d+)\/retrabalho$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra o retrabalho.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  const erro = erroAntesDoFeedback(data, item);
+  if (erro) return enviarJSON(res, 400, { erro });
+  if (item.feedback_cliente_em) return enviarJSON(res, 400, { erro: 'O feedback do cliente já foi registrado.' });
+  if (item.retrabalho || data.visitas.some((v) => v.agenda_id === item.id && v.rodada === 2)) {
+    return enviarJSON(res, 400, { erro: 'Esta O.S. já passou por uma rodada de retrabalho.' });
+  }
+  item.retrabalho = true;
+  item.retorno_pendente_tecnico = true;
+  db.save(data);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Retorno necessário',
+    corpo: `O cliente pediu um retorno na O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}. Envie um novo relatório quando concluir.`,
+    url: '/',
+  }).catch(() => {});
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
@@ -497,15 +575,17 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já está finalizada.' });
-  const visita = data.visitas.find((v) => v.agenda_id === item.id);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
   if (item.status !== 'concluida' || !visita || visita.status_aprovacao !== 'aprovado') {
     return enviarJSON(res, 400, { erro: 'Só é possível finalizar uma O.S. já concluída e aprovada.' });
   }
   if (!item.feedback_cliente_em) {
     return enviarJSON(res, 400, { erro: 'Registre o feedback do cliente antes de finalizar esta O.S.' });
   }
+  const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
+  const visitaBase = visitaRetorno || visita;
   const umDiaEmMs = 24 * 60 * 60 * 1000;
-  if (!visita.data_aprovacao || (Date.now() - new Date(visita.data_aprovacao).getTime()) < umDiaEmMs) {
+  if (!visitaBase.data_aprovacao || (Date.now() - new Date(visitaBase.data_aprovacao).getTime()) < umDiaEmMs) {
     return enviarJSON(res, 400, { erro: 'Aguarde pelo menos 1 dia após a conclusão para finalizar esta O.S.' });
   }
   item.finalizada = true;
@@ -659,8 +739,30 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     lida_tecnico: false,
   };
 
+  // retorno do técnico (depois de orçamento aprovado com necessidade de retorno, ou de um
+  // retrabalho por feedback negativo do cliente): gera um SEGUNDO relatório, separado do
+  // original, e já entra aprovado — sem passar de novo pela fila do gestor
+  if (agendaItem.retorno_pendente_tecnico) {
+    const visitaRetorno = { id: nextId(data, 'visitas'), agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, rodada: 2, criado_em: new Date().toISOString(), ...camposVisita };
+    visitaRetorno.status_aprovacao = 'aprovado';
+    visitaRetorno.aprovado_por = null;
+    visitaRetorno.data_aprovacao = new Date().toISOString();
+    data.visitas.push(visitaRetorno);
+    agendaItem.retorno_pendente_tecnico = false;
+    db.save(data);
+    const adminsRetorno = data.usuarios.filter((u) => u.papel === 'administrador');
+    adminsRetorno.forEach((admin) => {
+      enviarPush(data, admin.id, {
+        titulo: 'Relatório de retorno enviado',
+        corpo: `${user.nome} enviou o relatório de retorno da O.S. ${agendaItem.numero_os || 'OS-' + String(agendaItem.id).padStart(6, '0')}.`,
+        url: '/',
+      }).catch(() => {});
+    });
+    return enviarJSON(res, 201, { visita: visitaRetorno });
+  }
+
   // se a atividade já tinha uma visita (reaberta pelo administrador), edita a mesma em vez de duplicar
-  let visita = data.visitas.find((v) => v.agenda_id === agendaItem.id);
+  let visita = data.visitas.find((v) => v.agenda_id === agendaItem.id && (v.rodada || 1) === 1);
   if (visita) {
     Object.assign(visita, camposVisita, { atualizado_em: new Date().toISOString() });
   } else {

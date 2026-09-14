@@ -579,7 +579,11 @@ async function carregarAgendaComVisitas() {
   const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
   window._agendaCache = agenda;
   window._visitasPorAgenda = {};
-  visitas.forEach((v) => { window._visitasPorAgenda[v.agenda_id] = v; });
+  window._visitasRetornoPorAgenda = {};
+  visitas.forEach((v) => {
+    if ((v.rodada || 1) === 1) window._visitasPorAgenda[v.agenda_id] = v;
+    else window._visitasRetornoPorAgenda[v.agenda_id] = v;
+  });
 }
 
 async function renderAgenda() {
@@ -600,11 +604,11 @@ async function renderAgenda() {
           <td data-label="Cliente">${a.cliente_nome || '—'}</td>
           <td data-label="Equipamento">${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
           <td data-label="Tipo">${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
-          <td data-label="Status">${a.status === 'concluida'
+          <td data-label="Status">${a.retorno_pendente_tecnico ? tag('Retorno pendente', 'amber') : a.status === 'concluida'
             ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
             : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${botaoDeslocamento(a)}${a.status !== 'concluida' && a.confirmado_cliente_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
-            ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' ? (
+          <td>${botaoDeslocamento(a)}${(a.status !== 'concluida' || a.retorno_pendente_tecnico) && a.confirmado_cliente_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">${a.retorno_pendente_tecnico ? 'Enviar retorno' : 'Executar'}</button>` : ''}
+            ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' && !a.retorno_pendente_tecnico ? (
               a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
                 ? `<span class="tag tag-amber">Reabertura solicitada</span>`
                 : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`
@@ -766,6 +770,8 @@ function diasEntre(isoInicio, isoFim) {
 function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
   if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
+  if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) return { label: 'Orçamento', cor: 'orange' };
+  if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) return { label: 'Aguardando deslocamento', cor: 'amber' };
   if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) return { label: 'Aguardando feedback', cor: 'pink' };
   if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
@@ -787,6 +793,7 @@ function osCardCorpo(a) {
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
+      ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
       <div class="os-fase-banner os-fase-${fase.cor}">${esc(fase.label)}</div>
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
@@ -1618,7 +1625,7 @@ async function concluirRelatorioSimples(exigirSerie) {
 // ---------- LAUDO TÉCNICO (corretiva / preventiva) ----------
 let laudoDraft = null;
 let laudoAgendaAtual = null;
-function chaveRascunhoLaudo(agendaId) { return `pc_rascunho_laudo_${agendaId}`; }
+function chaveRascunhoLaudo(agendaId, retorno) { return `pc_rascunho_laudo_${agendaId}${retorno ? '_retorno' : ''}`; }
 
 function laudoPadrao(item) {
   return {
@@ -1631,6 +1638,7 @@ function laudoPadrao(item) {
     laudo_tecnico: '', servico_realizado: '',
     pecas: [], fotos: [], observacoes: '',
     relevante_biblioteca: false,
+    necessidade_retorno: false,
   };
 }
 
@@ -1661,15 +1669,17 @@ async function renderLaudoTecnico(item) {
   laudoAgendaAtual = item;
   let salvoEm = null;
   try {
-    const bruto = localStorage.getItem(chaveRascunhoLaudo(item.id));
+    const bruto = localStorage.getItem(chaveRascunhoLaudo(item.id, item.retorno_pendente_tecnico));
     if (bruto) {
       const salvo = JSON.parse(bruto);
       laudoDraft = salvo.draft;
       salvoEm = salvo.em;
-    } else if (item.visita_id) {
+    } else if (item.visita_id && !item.retorno_pendente_tecnico) {
       const { visita } = await api(`/api/visitas/${item.visita_id}`);
       laudoDraft = visita.laudo ? { ...laudoPadrao(item), ...visita.laudo } : laudoPadrao(item);
     } else {
+      // relatório de retorno: começa em branco, só com os dados travados da O.S. — não
+      // reaproveita o texto do laudo original, que é um atendimento anterior e distinto
       laudoDraft = laudoPadrao(item);
     }
   } catch (e) { laudoDraft = laudoPadrao(item); }
@@ -1677,7 +1687,7 @@ async function renderLaudoTecnico(item) {
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Laudo Técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>${item.retorno_pendente_tecnico ? 'Relatório de retorno' : 'Laudo Técnico'} — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>${item.retorno_pendente_tecnico ? 'Segundo relatório desta O.S., referente ao retorno.' : 'Preenchimento presencial no cliente.'} Campos com * são obrigatórios.</p></div>
     <div class="panel">
       <h2>Dados do atendimento</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Definidos pelo administrador na abertura desta OS — não podem ser alterados aqui.</p>
@@ -1734,6 +1744,10 @@ async function renderLaudoTecnico(item) {
       <h2>Peças fornecidas</h2>
       <div class="steps-list" id="lt-pecas"></div>
       <button class="btn btn-ghost btn-sm" onclick="adicionarPecaLaudo()">+ Adicionar peça</button>
+      <label style="display:flex; align-items:center; gap:10px; font-weight:600; text-transform:none; font-size:13.5px; margin-top:14px;">
+        <input type="checkbox" id="lt-necessidade-retorno" onchange="atualizarRascunhoLaudo()" style="width:auto; accent-color:var(--blue);">
+        Vai ser necessário um retorno pra concluir o serviço (depois do orçamento das peças aprovado)
+      </label>
     </div>
 
     <div class="panel">
@@ -1769,7 +1783,7 @@ async function renderLaudoTecnico(item) {
     </div>
 
     <div class="panel">
-      <p style="font-size:12.5px; color:var(--ink-soft);">Ao finalizar, o laudo é enviado para aprovação do administrador. O PDF fica disponível para gerar assim que ele for aprovado.</p>
+      <p style="font-size:12.5px; color:var(--ink-soft);">${item.retorno_pendente_tecnico ? 'Ao finalizar, o relatório de retorno é enviado direto — sem passar de novo pela aprovação do gestor.' : 'Ao finalizar, o laudo é enviado para aprovação do administrador. O PDF fica disponível para gerar assim que ele for aprovado.'}</p>
       <p id="lt-rascunho-status" style="font-size:12px; color:var(--green);">${salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="limparLaudo(${item.id})">Limpar formulário</button>
@@ -1791,6 +1805,7 @@ function preencherCamposLaudo() {
   document.getElementById('lt-periodo').value = periodoReparo(d);
   if (d.garantia) { const r = document.querySelector(`input[name="lt-garantia"][value="${d.garantia}"]`); if (r) r.checked = true; }
   document.getElementById('lt-relevante-biblioteca').checked = !!d.relevante_biblioteca;
+  document.getElementById('lt-necessidade-retorno').checked = !!d.necessidade_retorno;
 }
 
 function renderPecasLaudo() {
@@ -1837,10 +1852,11 @@ function atualizarRascunhoLaudo(semLerCampos) {
     const garantia = document.querySelector('input[name="lt-garantia"]:checked');
     d.garantia = garantia ? garantia.value : '';
     d.relevante_biblioteca = document.getElementById('lt-relevante-biblioteca').checked;
+    d.necessidade_retorno = document.getElementById('lt-necessidade-retorno').checked;
   }
   document.getElementById('lt-periodo').value = periodoReparo(laudoDraft);
   try {
-    localStorage.setItem(chaveRascunhoLaudo(laudoDraft.agenda_id), JSON.stringify({ draft: laudoDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
+    localStorage.setItem(chaveRascunhoLaudo(laudoDraft.agenda_id, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico), JSON.stringify({ draft: laudoDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
     const status = document.getElementById('lt-rascunho-status');
     if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
   } catch (e) {}
@@ -1848,7 +1864,7 @@ function atualizarRascunhoLaudo(semLerCampos) {
 
 function limparLaudo(agendaId) {
   if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
-  localStorage.removeItem(chaveRascunhoLaudo(agendaId));
+  localStorage.removeItem(chaveRascunhoLaudo(agendaId, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico));
   renderLaudoTecnico(laudoAgendaAtual);
 }
 
@@ -1861,16 +1877,18 @@ async function concluirLaudoTecnico() {
   if (!String(d.servico_realizado || '').trim()) return alert('Descreva o serviço realizado.');
   if (!d.fotos.length) return alert('Anexe ao menos uma foto no relatório fotográfico.');
 
+  const chaveRascunho = chaveRascunhoLaudo(d.agenda_id, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico);
   const body = { agenda_id: d.agenda_id, laudo: d, relevante_biblioteca: d.relevante_biblioteca };
   let r;
   try {
-    r = await enviarVisitaOuEnfileirar(body, { chaveRascunho: chaveRascunhoLaudo(d.agenda_id) });
+    r = await enviarVisitaOuEnfileirar(body, { chaveRascunho });
   } catch (e) {
     alert('Erro ao concluir: ' + e.message);
     return;
   }
-  if (r.enviado) localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
-  mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
+  if (r.enviado) localStorage.removeItem(chaveRascunho);
+  const eraRetorno = laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico;
+  mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : (eraRetorno ? 'Relatório de retorno enviado — o administrador foi avisado.' : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.'));
   renderAgenda();
 }
 
@@ -2049,11 +2067,19 @@ function acoesOS(a, visita) {
       ${visita.relevante_biblioteca ? `<button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id}, true)">Aprovar e incluir na biblioteca</button>` : ''}
       <button class="btn btn-ghost btn-sm" onclick="sugerirEdicaoVisita(${visita.id})">Sugerir edição</button>
       <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) {
+    acoes = `
+      <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
+      <button class="btn btn-primary btn-sm" onclick="orcamentoAprovadoOS(${a.id})">Orçamento aprovado</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
+    acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico enviar o relatório de retorno.</span>`;
   } else if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) {
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
-      <button class="btn btn-primary btn-sm" onclick="registrarFeedbackOS(${a.id})">Cliente deu feedback</button>`;
+      <button class="btn btn-primary btn-sm" onclick="registrarFeedbackOS(${a.id})">✓ Cliente OK</button>
+      ${!a.visita_retorno_id ? `<button class="btn btn-ghost btn-sm" onclick="retrabalhoOS(${a.id})" style="color:var(--red);">↺ Retorno / retrabalho</button>` : ''}`;
   } else if (visita && visita.status_aprovacao === 'aprovado') {
     const umDiaMs = 24 * 60 * 60 * 1000;
     const podeFinalizar = visita.data_aprovacao && (Date.now() - new Date(visita.data_aprovacao).getTime()) >= umDiaMs;
@@ -2089,11 +2115,28 @@ async function confirmarClienteOS(id) {
 }
 
 // passo entre a aprovação do relatório e a finalização da O.S.: o admin registra que o
-// cliente já deu o retorno sobre o serviço — só depois disso o botão Finalizar O.S. libera
+// cliente aprovou o serviço ("Cliente OK") — só depois disso o botão Finalizar O.S. libera
 async function registrarFeedbackOS(id) {
-  if (!confirm('Confirma que o cliente já deu o retorno sobre o serviço prestado?')) return;
+  if (!confirm('Confirma que o cliente aprovou o serviço prestado?')) return;
   try { await api(`/api/agenda/${id}/registrar-feedback`, { method: 'POST' }); mostrarToast('Feedback do cliente registrado.'); voltarListaOS(); }
   catch (e) { alert('Erro ao registrar feedback: ' + e.message); }
+}
+
+// quando o relatório aprovado tem peças fornecidas, o admin aprova o orçamento antes de
+// seguir — se o técnico também marcou necessidade de retorno, libera pra ele enviar um
+// segundo relatório antes de chegar na etapa de feedback do cliente
+async function orcamentoAprovadoOS(id) {
+  if (!confirm('Confirma que o orçamento das peças fornecidas foi aprovado?')) return;
+  try { await api(`/api/agenda/${id}/orcamento-aprovado`, { method: 'POST' }); mostrarToast('Orçamento aprovado.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao aprovar orçamento: ' + e.message); }
+}
+
+// feedback negativo do cliente: precisa de um retorno do técnico (ex.: novo treinamento) —
+// marca a O.S. como retrabalho e libera pro técnico enviar um segundo relatório
+async function retrabalhoOS(id) {
+  if (!confirm('Confirma que o cliente deu um feedback negativo e precisa de um retorno do técnico? Isso marca a O.S. como retrabalho.')) return;
+  try { await api(`/api/agenda/${id}/retrabalho`, { method: 'POST' }); mostrarToast('Retrabalho registrado — o técnico foi avisado.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao registrar retrabalho: ' + e.message); }
 }
 
 function cardOSAdmin(a) {
@@ -2173,6 +2216,22 @@ function timelineOS(a, visita) {
     ? { label: 'Aprovado pelo gestor', data: visita.data_aprovacao, estado: 'feito' }
     : { label: 'Aguardando aprovação do gestor', data: null, estado: 'pendente' });
 
+  // orçamento: só aparece quando o relatório tem peças fornecidas
+  if (a.visita_tem_pecas) {
+    passos.push(a.orcamento_aprovado_em
+      ? { label: 'Orçamento aprovado', data: a.orcamento_aprovado_em, estado: 'feito' }
+      : { label: 'Aguardando aprovação do orçamento', data: null, estado: 'pendente' });
+  }
+
+  // retorno do técnico: acontece quando o relatório original pediu retorno (depois do
+  // orçamento aprovado) OU quando virou retrabalho por feedback negativo do cliente
+  if (a.retorno_pendente_tecnico || a.visita_retorno_id) {
+    const visitaRetorno = (window._visitasRetornoPorAgenda || {})[a.id];
+    passos.push(a.visita_retorno_id
+      ? { label: 'Técnico enviou o relatório de retorno', data: visitaRetorno ? visitaRetorno.criado_em : null, estado: 'feito' }
+      : { label: a.retrabalho ? 'Aguardando retorno do técnico para retrabalho' : 'Aguardando retorno do técnico', data: null, estado: 'pendente' });
+  }
+
   passos.push(a.feedback_cliente_em
     ? { label: 'Cliente deu o feedback', data: a.feedback_cliente_em, estado: 'feito' }
     : { label: 'Aguardando feedback do cliente', data: null, estado: 'pendente' });
@@ -2210,6 +2269,11 @@ function detalheCompletoOS(a, visita) {
         ${detalheRelatorioVisita(visita)}
         ${visita.laudo && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfLaudoAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
       </div>` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
+    ${a.visita_retorno_id ? `
+      <div class="os-relatorio-box" style="margin-top:14px;">
+        <div class="os-relatorio-box-titulo">Relatório de retorno enviado pelo técnico</div>
+        ${detalheRelatorioVisita((window._visitasRetornoPorAgenda || {})[a.id] || {})}
+      </div>` : ''}
     ${timelineOS(a, visita)}`;
 }
 
@@ -4014,7 +4078,11 @@ async function renderCalendarioTecnico() {
   const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda?todas=1'), api('/api/visitas?todas=1')]);
   window._agendaCache = agenda;
   window._visitasPorAgenda = {};
-  visitas.forEach((v) => { window._visitasPorAgenda[v.agenda_id] = v; });
+  window._visitasRetornoPorAgenda = {};
+  visitas.forEach((v) => {
+    if ((v.rodada || 1) === 1) window._visitasPorAgenda[v.agenda_id] = v;
+    else window._visitasRetornoPorAgenda[v.agenda_id] = v;
+  });
   renderAgendaCalendarioTecnico();
 }
 
@@ -4147,6 +4215,9 @@ function acoesOSCalendarioTecnico(a, visita) {
   }
   if (a.tecnico_id !== USER.id) {
     return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
+  }
+  if (a.retorno_pendente_tecnico) {
+    return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Enviar relatório de retorno</button>`;
   }
   if (a.status !== 'concluida') {
     return `${botaoDeslocamento(a)}${a.confirmado_cliente_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;

@@ -129,6 +129,17 @@ function migrar(data) {
       const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
       a.feedback_cliente_em = jaAprovado ? (a.finalizado_em || (visitaDoItem && visitaDoItem.data_aprovacao) || new Date().toISOString()) : null;
     }
+    if (a.retrabalho === undefined) a.retrabalho = false;
+    if (a.retorno_pendente_tecnico === undefined) a.retorno_pendente_tecnico = false;
+    if (a.orcamento_aprovado_em === undefined) {
+      // se o relatório já aprovado tinha peças fornecidas, mas esse controle de orçamento
+      // ainda não existia, considera que o orçamento já foi tratado por fora do sistema —
+      // não bloqueia O.S. antigas que já passaram desse ponto na prática.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      const temPecas = visitaDoItem && visitaDoItem.laudo && Array.isArray(visitaDoItem.laudo.pecas) && visitaDoItem.laudo.pecas.length > 0;
+      const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
+      a.orcamento_aprovado_em = (temPecas && jaAprovado) ? (a.feedback_cliente_em || a.criado_em || new Date().toISOString()) : null;
+    }
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
@@ -136,6 +147,7 @@ function migrar(data) {
   }
   for (const v of data.visitas) {
     if (v.lida_tecnico === undefined) v.lida_tecnico = false;
+    if (v.rodada === undefined) v.rodada = 1;
   }
   // relatórios de manutenção criados antes do e-mail do técnico ser buscado corretamente
   // ficaram com esse campo em branco — preenche retroativamente a partir do cadastro atual
