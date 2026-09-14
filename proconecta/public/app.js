@@ -1884,13 +1884,39 @@ function renderFotosLaudo() {
       <button class="photo-rm" onclick="removerFotoLaudo(${j})">×</button>
     </div>`).join('');
 }
-function adicionarFotosLaudo(event) {
-  const arquivos = Array.from(event.target.files || []);
-  Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
+// fotos de celular costumam vir com vários MB cada — sem isso, um relatório com só 4-5 fotos
+// já manda um POST de dezenas de MB, que trava ou falha em conexão de campo ("Failed to
+// fetch"). Redimensiona pro máximo de 1600px no lado maior e recomprime como JPEG, o que reduz
+// drasticamente o tamanho sem perda visível no relatório/PDF.
+function comprimirImagemDataUrl(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1600;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        const escala = MAX / Math.max(width, height);
+        width = Math.round(width * escala);
+        height = Math.round(height * escala);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      try { resolve(canvas.toDataURL('image/jpeg', 0.75)); } catch (e) { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+function lerFotosComoDataUrl(arquivos) {
+  return Promise.all(Array.from(arquivos).map((arquivo) => new Promise((resolve) => {
     const leitor = new FileReader();
     leitor.onload = () => resolve(leitor.result);
     leitor.readAsDataURL(arquivo);
-  }))).then((dataUrls) => {
+  }).then(comprimirImagemDataUrl)));
+}
+function adicionarFotosLaudo(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
     laudoDraft.fotos.push(...dataUrls);
     renderFotosLaudo();
     atualizarRascunhoLaudo(true);
@@ -3400,12 +3426,7 @@ function removerBlocoFotoRelatorioManut(i) {
   renderBlocosFotosRelatorioManut();
 }
 function adicionarFotosNoBlocoRelatorioManut(event, i) {
-  const arquivos = Array.from(event.target.files || []);
-  Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
-    const leitor = new FileReader();
-    leitor.onload = () => resolve(leitor.result);
-    leitor.readAsDataURL(arquivo);
-  }))).then((dataUrls) => {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
     relatorioManutDraft.fotos[i].fotos.push(...dataUrls);
     renderBlocosFotosRelatorioManut();
   });
@@ -4672,12 +4693,7 @@ function adicionarPasso() { procDraft.push({ texto: '', fotos: [] }); renderPass
 function removerPasso(i) { procDraft.splice(i, 1); renderPassosDraft(); }
 function removerFoto(i, j) { procDraft[i].fotos.splice(j, 1); renderPassosDraft(); }
 function adicionarFotos(event, i) {
-  const arquivos = Array.from(event.target.files || []);
-  Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
-    const leitor = new FileReader();
-    leitor.onload = () => resolve(leitor.result);
-    leitor.readAsDataURL(arquivo);
-  }))).then((dataUrls) => {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
     procDraft[i].fotos.push(...dataUrls);
     renderPassosDraft();
   });
