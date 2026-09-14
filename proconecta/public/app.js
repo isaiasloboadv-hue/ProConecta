@@ -2071,22 +2071,26 @@ function acoesOS(a, visita) {
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
-      <button class="btn btn-primary btn-sm" onclick="orcamentoAprovadoOS(${a.id})">Orçamento aprovado</button>`;
+      <button class="btn btn-primary btn-sm" onclick="orcamentoAprovadoOS(${a.id})">Orçamento aprovado</button>
+      <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
-    acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico enviar o relatório de retorno.</span>`;
+    acoes = `
+      <span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico enviar o relatório de retorno.</span>
+      <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) {
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
       <button class="btn btn-primary btn-sm" onclick="registrarFeedbackOS(${a.id})">✓ Cliente OK</button>
-      ${!a.visita_retorno_id ? `<button class="btn btn-ghost btn-sm" onclick="retrabalhoOS(${a.id})" style="color:var(--red);">↺ Retorno / retrabalho</button>` : ''}`;
+      ${!a.visita_retorno_id ? `<button class="btn btn-ghost btn-sm" onclick="retrabalhoOS(${a.id})" style="color:var(--red);">↺ Retorno / retrabalho</button>` : ''}
+      <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado') {
     const umDiaMs = 24 * 60 * 60 * 1000;
     const podeFinalizar = visita.data_aprovacao && (Date.now() - new Date(visita.data_aprovacao).getTime()) >= umDiaMs;
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
-      ${podeFinalizar ? `<button class="btn btn-primary btn-sm" onclick="finalizarOS(${a.id})">Finalizar O.S.</button>` : `<span class="tag tag-amber">Aguarde 1 dia após a aprovação pra finalizar</span>`}`;
+      ${podeFinalizar ? `<button class="btn btn-primary btn-sm" onclick="finalizarOS(${a.id})">Finalizar O.S.</button>` : `<span class="tag tag-amber">Aguarde 1 dia após a aprovação pra finalizar</span><button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`}`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
     acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else if (visita && visita.status_aprovacao === 'alteracao_sugerida') {
@@ -2103,6 +2107,14 @@ function acoesOS(a, visita) {
 async function finalizarOS(id) {
   if (!confirm('Confirma que a empresa já deu o retorno concordando com o serviço prestado? Depois de finalizada, esta O.S. não pode mais ser alterada — um novo atendimento vai precisar de uma O.S. nova.')) return;
   try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST' }); mostrarToast('O.S. finalizada.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao finalizar: ' + e.message); }
+}
+
+// escape hatch: o administrador pode finalizar direto quando julgar necessário, pulando
+// orçamento/retorno do técnico/feedback do cliente/prazo de 1 dia — usado com moderação
+async function finalizarForcadoOS(id) {
+  if (!confirm('Isso finaliza a O.S. pulando as etapas pendentes (orçamento, retorno do técnico, feedback do cliente, prazo de 1 dia). Confirma que quer finalizar assim mesmo?')) return;
+  try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST', body: { forcar: true } }); mostrarToast('O.S. finalizada — etapas puladas.'); voltarListaOS(); }
   catch (e) { alert('Erro ao finalizar: ' + e.message); }
 }
 

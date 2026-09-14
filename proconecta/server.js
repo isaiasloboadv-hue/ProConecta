@@ -567,10 +567,13 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retrabalho$/, async (req, res, m) => {
 // POST /api/agenda/:id/finalizar — administrador confirma o fechamento da O.S. depois do
 // feedback do cliente já registrado; a partir daqui a O.S. vira registro histórico, sem mais
 // alterações (um novo atendimento pede uma O.S. nova). Só pode finalizar depois de aprovada,
-// com o feedback já registrado, e com pelo menos 1 dia completo desde a aprovação.
+// com o feedback já registrado, e com pelo menos 1 dia completo desde a aprovação — a menos
+// que o administrador mande pular essas etapas (body.forcar), quando julgar necessário.
 rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador finaliza ordens de serviço.' });
+  const body = await lerCorpo(req);
+  const forcar = !!body.forcar;
   const data = db.load();
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
@@ -579,17 +582,28 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   if (item.status !== 'concluida' || !visita || visita.status_aprovacao !== 'aprovado') {
     return enviarJSON(res, 400, { erro: 'Só é possível finalizar uma O.S. já concluída e aprovada.' });
   }
-  if (!item.feedback_cliente_em) {
-    return enviarJSON(res, 400, { erro: 'Registre o feedback do cliente antes de finalizar esta O.S.' });
-  }
-  const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
-  const visitaBase = visitaRetorno || visita;
-  const umDiaEmMs = 24 * 60 * 60 * 1000;
-  if (!visitaBase.data_aprovacao || (Date.now() - new Date(visitaBase.data_aprovacao).getTime()) < umDiaEmMs) {
-    return enviarJSON(res, 400, { erro: 'Aguarde pelo menos 1 dia após a conclusão para finalizar esta O.S.' });
+  const agora = new Date().toISOString();
+  if (!forcar) {
+    if (!item.feedback_cliente_em) {
+      return enviarJSON(res, 400, { erro: 'Registre o feedback do cliente antes de finalizar esta O.S.' });
+    }
+    const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
+    const visitaBase = visitaRetorno || visita;
+    const umDiaEmMs = 24 * 60 * 60 * 1000;
+    if (!visitaBase.data_aprovacao || (Date.now() - new Date(visitaBase.data_aprovacao).getTime()) < umDiaEmMs) {
+      return enviarJSON(res, 400, { erro: 'Aguarde pelo menos 1 dia após a conclusão para finalizar esta O.S.' });
+    }
+  } else {
+    // pulando etapas: preenche os controles pendentes (orçamento, retorno, feedback) pra
+    // manter a linha do tempo coerente, em vez de deixá-los soltos numa O.S. já finalizada
+    if (!item.orcamento_aprovado_em && visita.laudo && Array.isArray(visita.laudo.pecas) && visita.laudo.pecas.length > 0) {
+      item.orcamento_aprovado_em = agora;
+    }
+    item.retorno_pendente_tecnico = false;
+    if (!item.feedback_cliente_em) item.feedback_cliente_em = agora;
   }
   item.finalizada = true;
-  item.finalizado_em = new Date().toISOString();
+  item.finalizado_em = agora;
   db.save(data);
   const clienteFinal = data.clientes.find((c) => c.id === item.cliente_id);
   enviarPush(data, item.tecnico_id, {
