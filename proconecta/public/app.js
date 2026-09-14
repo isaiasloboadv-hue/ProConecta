@@ -2013,7 +2013,11 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     y += 24;
   }
 
-  function tituloCentro(t, sub) {
+  // apertado=true mantém o título colado no que vem embaixo (texto de laudo/serviço, fotos) —
+  // usado nas seções onde título e conteúdo precisam ficar visualmente juntos. Por padrão (sem
+  // subtítulo e sem apertado) o título ganha mais respiro, pra não ficar colado na primeira
+  // caixa de dados (Dados do cliente, Tipo de serviço, Dados do equipamento, Técnico responsável).
+  function tituloCentro(t, sub, apertado) {
     if (y > pageH - margem - 60) novaPagina();
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
     doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
@@ -2022,10 +2026,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
       doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
       y += 4;
     } else {
-      // títulos sem subtítulo (Dados do cliente, Tipo de serviço, Dados do equipamento,
-      // Técnico responsável) vêm seguidos direto pelas caixas de campos — um respiro maior
-      // aqui evita o título ficar colado na primeira caixa.
-      y += 10;
+      y += apertado ? 4 : 16;
     }
   }
 
@@ -2137,7 +2138,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     y += altura + 12;
   }
 
-  tituloCentro('Serviço realizado');
+  tituloCentro('Serviço realizado', null, true);
   {
     if (y > pageH - margem - 40) novaPagina();
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -2197,7 +2198,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     const gapCheck = 12, wImgCheck = (largura - gapCheck) / 2, hImgCheck = wImgCheck * 0.68;
     if (y + 34 + hImgCheck > pageH - margem) novaPagina();
   }
-  tituloCentro('Relatório fotográfico');
+  tituloCentro('Relatório fotográfico', null, true);
   if (d.fotos && d.fotos.length) {
     const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
     for (let i = 0; i < d.fotos.length; i += 2) {
@@ -4173,7 +4174,11 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     y += 24;
   }
 
-  function tituloCentro(t, sub) {
+  // apertado=true mantém o título colado no que vem embaixo (texto de laudo/serviço, fotos) —
+  // usado nas seções onde título e conteúdo precisam ficar visualmente juntos. Por padrão (sem
+  // subtítulo e sem apertado) o título ganha mais respiro, pra não ficar colado na primeira
+  // caixa de dados (Dados do cliente, Tipo de serviço, Dados do equipamento, Técnico responsável).
+  function tituloCentro(t, sub, apertado) {
     if (y > pageH - margem - 60) novaPagina();
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
     doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
@@ -4182,10 +4187,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
       doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
       y += 4;
     } else {
-      // títulos sem subtítulo (Dados do cliente, Tipo de serviço, Dados do equipamento,
-      // Técnico responsável) vêm seguidos direto pelas caixas de campos — um respiro maior
-      // aqui evita o título ficar colado na primeira caixa.
-      y += 10;
+      y += apertado ? 4 : 16;
     }
   }
 
@@ -4374,7 +4376,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
     if (y + 34 + hImgFoto > pageH - margem) novaPagina();
   }
-  tituloCentro('Relatório fotográfico');
+  tituloCentro('Relatório fotográfico', null, true);
   if (r.fotos && r.fotos.length) {
     r.fotos.forEach((entrada) => {
       // compatibilidade com relatórios salvos antes de existir o comentário por grupo de fotos
