@@ -2160,6 +2160,12 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     y += altura + 14;
   }
 
+  // garante que o título "Relatório fotográfico" nunca fique sozinho no fim de uma página
+  // com as fotos só aparecendo na página seguinte.
+  if (d.fotos && d.fotos.length) {
+    const gapCheck = 12, wImgCheck = (largura - gapCheck) / 2, hImgCheck = wImgCheck * 0.68;
+    if (y + 34 + hImgCheck > pageH - margem) novaPagina();
+  }
   tituloCentro('Relatório fotográfico');
   if (d.fotos && d.fotos.length) {
     const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
@@ -4306,6 +4312,14 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     y += alturaLinha;
   }
 
+  // garante que o título "Relatório fotográfico" nunca fique sozinho no fim de uma página
+  // com as fotos só aparecendo na página seguinte — reserva também a altura da primeira
+  // linha de fotos antes de decidir se precisa pular de página.
+  const temFotos = r.fotos && r.fotos.length && r.fotos.some((entrada) => (typeof entrada === 'string' ? [entrada] : (entrada.fotos || [])).length);
+  if (temFotos) {
+    const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
+    if (y + 34 + hImgFoto > pageH - margem) novaPagina();
+  }
   tituloCentro('Relatório fotográfico');
   if (r.fotos && r.fotos.length) {
     r.fotos.forEach((entrada) => {
