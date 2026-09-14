@@ -596,6 +596,7 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- AGENDA ----------
+let minhaAgendaDetalheId = null;
 async function carregarAgendaComVisitas() {
   const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
   window._agendaCache = agenda;
@@ -612,34 +613,45 @@ async function renderAgenda() {
     await carregarAgendaComVisitas();
     return renderAgendaCalendario();
   }
-  const { agenda } = await api('/api/agenda');
-  window._agendaCache = agenda;
+  minhaAgendaDetalheId = null;
+  await carregarAgendaComVisitas();
+  const agenda = window._agendaCache;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
-    <div class="panel"><table>
-      <tr><th>Data</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Status</th><th></th></tr>
-      ${agenda.length ? agenda.map((a) => `
-        <tr>
-          <td data-label="Data">${fmtData(a.data_hora_inicio)}</td>
-          <td data-label="Cliente">${a.cliente_nome || '—'}</td>
-          <td data-label="Equipamento">${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
-          <td data-label="Tipo">${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
-          <td data-label="Status">${a.retorno_pendente_tecnico ? tag('Retorno pendente', 'amber') : a.status === 'concluida'
-            ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
-            : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${botaoDeslocamento(a)}${a.retorno_pendente_tecnico
-              ? (a.retorno_deslocamento_iniciado_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Enviar retorno</button>` : '')
-              : (a.status !== 'concluida' && a.deslocamento_iniciado_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : '')}
-            ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' && !a.retorno_pendente_tecnico ? (
-              a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
-                ? `<span class="tag tag-amber">Reabertura solicitada</span>`
-                : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`
-            ) : ''}</td>
-        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhuma atividade ainda.</td></tr>`}
-    </table></div>
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a)).join('')}</div>` : `<div class="empty">Nenhuma atividade ainda.</div>`}
     <div id="diario-form"></div>
   `;
+}
+
+// card da própria O.S. do técnico na "Minha agenda" — mesmo layout de card usado em todo o
+// resto do sistema (osCardCorpo), pra ficar igual em qualquer tamanho de tela (PC ou app) e
+// já trazer o selo de retrabalho, a tarja de fase etc.
+function cardOSMinhaAgenda(a) {
+  return `
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSMinhaAgenda(${a.id})" style="cursor:pointer;">
+      ${osCardCorpo(a)}
+      <div class="os-card-actions" onclick="event.stopPropagation()">
+        <button class="os-card-toggle" onclick="abrirDetalheOSMinhaAgenda(${a.id})">Abrir</button>
+      </div>
+    </div>`;
+}
+
+function abrirDetalheOSMinhaAgenda(id) {
+  minhaAgendaDetalheId = id;
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const visita = (window._visitasPorAgenda || {})[id];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="renderAgenda()">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOSCalendarioTecnico(a, visita)}</div>
+      ${detalheCompletoOS(a, visita)}
+    </div>`;
 }
 
 // ---------- AGENDA GERAL (admin): calendário mensal ----------
@@ -2453,6 +2465,7 @@ async function iniciarDeslocamento(id) {
       if (idx !== -1) window._agendaCache[idx] = agenda;
     }
     if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
+    else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
     else renderAgenda();
   } catch (e) { alert('Erro: ' + e.message); }
 }
