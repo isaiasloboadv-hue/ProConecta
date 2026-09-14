@@ -1407,14 +1407,19 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
 // menu "Criar Relatório" do técnico — usado pra registrar um atendimento de manutenção interna
 // (ex.: análise de amostra recebida na oficina) que não passa pelo fluxo normal de O.S./aprovação.
 
-// GET /api/relatorios-manutencao/meus — o técnico só vê os relatórios que ele mesmo criou
+// GET /api/relatorios-manutencao/meus — o técnico só vê os relatórios que ele mesmo criou.
+// Não manda as fotos aqui: essa lista só mostra data/empresa/equipamento, mas cada relatório
+// pode ter várias fotos em base64, e mandar tudo de uma vez deixava essa tela cada vez mais
+// lenta conforme o histórico crescia. As fotos são buscadas sob demanda (rota abaixo) quando
+// o técnico realmente abre o PDF/Word/fotos de um relatório específico.
 rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
   const lista = data.relatorios_manutencao
     .filter((r) => r.autor_id === user.id)
-    .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+    .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
+    .map((r) => { const { fotos, ...resto } = r; return resto; });
   enviarJSON(res, 200, { relatorios: lista });
 });
 

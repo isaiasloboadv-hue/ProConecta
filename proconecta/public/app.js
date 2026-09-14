@@ -3546,8 +3546,20 @@ async function salvarRelatorioManutencao() {
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
-async function abrirPdfRelatorioManutencao(i) {
+// a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
+// completo (com fotos) na hora que alguma ação realmente precisa delas, e guarda de volta
+// no cache pra não buscar de novo se a pessoa clicar noutra ação do mesmo relatório.
+async function relatorioManutCompleto(i) {
   const r = (window._relatoriosManutCache || [])[i];
+  if (!r) return null;
+  if (r.fotos) return r;
+  const { relatorio } = await api(`/api/relatorios-manutencao/${r.id}`);
+  window._relatoriosManutCache[i] = relatorio;
+  return relatorio;
+}
+
+async function abrirPdfRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
@@ -3556,8 +3568,8 @@ async function abrirPdfRelatorioManutencao(i) {
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
-function abrirFotosRelatorioManutencao(i) {
-  const r = (window._relatoriosManutCache || [])[i];
+async function abrirFotosRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
   if (!r) return;
   const blocos = r.fotos || [];
   const temFotos = blocos.length && blocos.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length));
@@ -3583,7 +3595,7 @@ function abrirFotosRelatorioManutencao(i) {
 }
 
 async function baixarTodasFotosRelatorioManutencao(i) {
-  const r = (window._relatoriosManutCache || [])[i];
+  const r = await relatorioManutCompleto(i);
   if (!r) return;
   const fotos = [];
   (r.fotos || []).forEach((entrada) => {
@@ -4047,7 +4059,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
 }
 
 async function baixarWordRelatorioManutencao(i) {
-  const r = (window._relatoriosManutCache || [])[i];
+  const r = await relatorioManutCompleto(i);
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
