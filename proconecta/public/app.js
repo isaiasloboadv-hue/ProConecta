@@ -2963,6 +2963,7 @@ function abrirEditarProcedimento(i, origem) {
   const r = (window._procedimentosCache || [])[i];
   if (!r) return;
   procDraft = r.passos && r.passos.length ? JSON.parse(JSON.stringify(r.passos)) : [{ texto: '', fotos: [] }];
+  fotoDestaqueDraft = r.foto_destaque || null;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Editar procedimento</h1><p>Alteração direta: o procedimento continua publicado imediatamente após salvar.</p></div>
@@ -2976,6 +2977,7 @@ function abrirEditarProcedimento(i, origem) {
             ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${r.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
+        <div><label>Foto de destaque (equipamento/peça)</label><div id="fp-foto-destaque" style="display:flex;"></div></div>
         <div class="full"><label>Precauções/EPIs</label><textarea id="fp-precaucoes">${esc(r.precaucoes || '')}</textarea></div>
         <div class="full"><label>Ferramentas necessárias</label><textarea id="fp-ferramentas">${esc(r.ferramentas || '')}</textarea></div>
       </div>
@@ -2987,6 +2989,7 @@ function abrirEditarProcedimento(i, origem) {
       <button class="btn-outline-sm" onclick="abrirDetalheProcedimento(${i}, '${origem || ''}')">Cancelar</button>
     </div>`;
   renderPassosDraft();
+  renderFotoDestaque();
 }
 async function salvarEdicaoProcedimento(id, i, origem) {
   const body = {
@@ -2996,6 +2999,7 @@ async function salvarEdicaoProcedimento(id, i, origem) {
     periodicidade: document.getElementById('fp-periodicidade').value,
     precaucoes: document.getElementById('fp-precaucoes').value,
     ferramentas: document.getElementById('fp-ferramentas').value,
+    foto_destaque: fotoDestaqueDraft,
     passos: procDraft,
   };
   try {
@@ -3114,7 +3118,11 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   rotuloEsq('EQUIPAMENTO');
   valorEsq(`${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`);
 
-  const primeiraFoto = tipo === 'procedimento' ? ((r.passos || []).find((p) => p.fotos && p.fotos.length) || {}).fotos?.[0] : (r.fotos || [])[0];
+  // procedimentos antigos (criados antes de existir o campo foto_destaque) continuam usando a
+  // 1ª foto do passo 1 como reserva, pra não ficar sem imagem nenhuma na coluna esquerda.
+  const primeiraFoto = tipo === 'procedimento'
+    ? (r.foto_destaque || ((r.passos || []).find((p) => p.fotos && p.fotos.length) || {}).fotos?.[0])
+    : (r.fotos || [])[0];
   if (primeiraFoto) {
     try {
       doc.setDrawColor(...PDF_COR.line);
@@ -4666,6 +4674,7 @@ async function salvarDefeito(idParaReenvio) {
 function renderFormProcedimento(main, prefill) {
   const editando = !!prefill;
   procDraft = prefill && prefill.passos && prefill.passos.length ? JSON.parse(JSON.stringify(prefill.passos)) : [{ texto: '', fotos: [] }];
+  fotoDestaqueDraft = prefill ? (prefill.foto_destaque || null) : null;
   main.innerHTML = `
     <div class="page-head"><h1>${editando ? 'Editar procedimento' : 'Adicionar Manual de Procedimentos'}</h1><p>${editando ? 'Corrija conforme o comentário do administrador e reenvie.' : 'Cada etapa pode ter uma ou mais fotos anexadas.'}</p></div>
     ${editando && prefill.comentario_admin ? `<div class="admin-note"><b>Comentário do administrador</b>${esc(prefill.comentario_admin)}</div>` : ''}
@@ -4679,6 +4688,7 @@ function renderFormProcedimento(main, prefill) {
             ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${prefill && prefill.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
+        <div><label>Foto de destaque (equipamento/peça)</label><div id="fp-foto-destaque" style="display:flex;"></div></div>
         <div class="full"><label>Precauções/EPIs</label><textarea id="fp-precaucoes" placeholder="ex: óculos de proteção, desligar da tomada...">${esc(prefill ? prefill.precaucoes : '')}</textarea></div>
         <div class="full"><label>Ferramentas necessárias</label><textarea id="fp-ferramentas" placeholder="ex: chave de fenda, multímetro...">${esc(prefill ? prefill.ferramentas : '')}</textarea></div>
       </div>
@@ -4689,7 +4699,27 @@ function renderFormProcedimento(main, prefill) {
       <button class="btn btn-primary btn-sm" onclick="salvarProcedimento(${editando ? prefill.id : 'null'})">${editando ? 'Reenviar para aprovação' : 'Enviar para aprovação'}</button>
     </div>`;
   renderPassosDraft();
+  renderFotoDestaque();
 }
+
+// foto única e independente das fotos dos passos — mostrada em destaque na coluna esquerda do
+// PDF do procedimento (antes disso, o PDF usava sempre a 1ª foto do passo 1 como destaque, o
+// que ficava estranho quando a etapa 1 não era a que melhor representa o equipamento/peça).
+let fotoDestaqueDraft = null;
+function renderFotoDestaque() {
+  const alvo = document.getElementById('fp-foto-destaque');
+  if (!alvo) return;
+  alvo.innerHTML = fotoDestaqueDraft
+    ? `<div class="photo-thumb"><img src="${fotoDestaqueDraft}" onclick="abrirLightbox('${fotoDestaqueDraft}')" alt="Foto de destaque">
+         <button class="photo-rm" onclick="removerFotoDestaque()">×</button></div>`
+    : `<label class="photo-add"><span class="plus">+</span>Foto<input type="file" accept="image/*" style="display:none" onchange="adicionarFotoDestaque(event)"></label>`;
+}
+function adicionarFotoDestaque(event) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) return;
+  lerFotosComoDataUrl([arquivo]).then(([dataUrl]) => { fotoDestaqueDraft = dataUrl; renderFotoDestaque(); });
+}
+function removerFotoDestaque() { fotoDestaqueDraft = null; renderFotoDestaque(); }
 
 function renderPassosDraft() {
   document.getElementById('steps-list').innerHTML = procDraft.map((p, i) => `
@@ -4732,6 +4762,7 @@ async function salvarProcedimento(idParaReenvio) {
     precaucoes: document.getElementById('fp-precaucoes').value,
     ferramentas: document.getElementById('fp-ferramentas').value,
     passos: procDraft,
+    foto_destaque: fotoDestaqueDraft,
   };
   try {
     if (idParaReenvio) await api(`/api/registros/${idParaReenvio}/reenviar`, { method: 'POST', body });

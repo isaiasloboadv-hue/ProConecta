@@ -1031,7 +1031,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/recusar-reabertura$/, async (req, res, m) 
 // ---------- biblioteca técnica: Defeitos/Falhas e Manual de Procedimentos ----------
 
 const CAMPOS_DEFEITO = ['titulo', 'equipamento_tipo', 'equipamento_modelo', 'numero_serie', 'sintoma', 'causa', 'solucao'];
-const CAMPOS_PROCEDIMENTO = ['titulo', 'equipamento_tipo', 'equipamento_modelo', 'periodicidade', 'precaucoes', 'ferramentas', 'passos'];
+const CAMPOS_PROCEDIMENTO = ['titulo', 'equipamento_tipo', 'equipamento_modelo', 'periodicidade', 'precaucoes', 'ferramentas', 'passos', 'foto_destaque'];
 
 function validarRegistro(body) {
   if (body.tipo !== 'defeito' && body.tipo !== 'procedimento') return 'Tipo inválido (use "defeito" ou "procedimento").';
