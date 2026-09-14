@@ -47,19 +47,30 @@ const UF_REGIAO = {
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-  const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  let corpoInvalido = false;
-  const data = await res.json().catch(() => { corpoInvalido = true; return {}; });
-  if (!res.ok) {
-    const erro = new Error(data.erro || 'Erro na requisição');
-    erro.status = res.status;
-    // resposta sem JSON válido (ou sem campo erro) não veio do nosso backend — é sintoma de
-    // instabilidade da hospedagem (ex: "acordando" após período inativo no plano gratuito),
-    // não um erro de validação de verdade
-    erro.falhaTransitoria = corpoInvalido || !data.erro || [502, 503, 504].includes(res.status);
-    throw erro;
+  async function tentar() {
+    const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    let corpoInvalido = false;
+    const data = await res.json().catch(() => { corpoInvalido = true; return {}; });
+    if (!res.ok) {
+      const erro = new Error(data.erro || 'Erro na requisição');
+      erro.status = res.status;
+      // resposta sem JSON válido (ou sem campo erro) não veio do nosso backend — é sintoma de
+      // instabilidade da hospedagem (ex: "acordando" após período inativo no plano gratuito),
+      // não um erro de validação de verdade
+      erro.falhaTransitoria = corpoInvalido || !data.erro || [502, 503, 504].includes(res.status);
+      throw erro;
+    }
+    return data;
   }
-  return data;
+  try {
+    return await tentar();
+  } catch (e) {
+    // instabilidade passageira da hospedagem: tenta mais uma vez sozinho antes de mostrar erro
+    // pro usuário — evita ter que clicar de novo em qualquer botão da tela por causa disso
+    if (!e.falhaTransitoria) throw e;
+    await new Promise((r) => setTimeout(r, 2500));
+    return await tentar();
+  }
 }
 
 async function fazerLogin() {
@@ -147,19 +158,11 @@ function ehErroDeConexao(e) { return e instanceof TypeError; }
 
 // tenta enviar o relatório; se falhar por falta de conexão, guarda na fila em vez de propagar
 // o erro. `extra` carrega o que for preciso pra terminar o pós-processamento (PDF/e-mail) do
-// termo de aceite quando esse item sincronizar mais tarde. Numa falha transitória do servidor
-// (ex: hospedagem "acordando" depois de um tempo sem uso), tenta mais uma vez sozinho antes de
-// desistir — evita que o técnico perca o relatório preenchido por causa de uma instabilidade.
+// termo de aceite quando esse item sincronizar mais tarde. Falhas transitórias do servidor já
+// são reprocessadas sozinhas dentro de api().
 async function enviarVisitaOuEnfileirar(body, extra) {
   try {
-    let resp;
-    try {
-      resp = await api('/api/visitas', { method: 'POST', body });
-    } catch (e) {
-      if (!e.falhaTransitoria) throw e;
-      await new Promise((r) => setTimeout(r, 2500));
-      resp = await api('/api/visitas', { method: 'POST', body });
-    }
+    const resp = await api('/api/visitas', { method: 'POST', body });
     return { enviado: true, visita: resp.visita };
   } catch (e) {
     if (!ehErroDeConexao(e)) throw e;
@@ -625,7 +628,9 @@ async function renderAgenda() {
           <td data-label="Status">${a.retorno_pendente_tecnico ? tag('Retorno pendente', 'amber') : a.status === 'concluida'
             ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
             : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${botaoDeslocamento(a)}${(a.status !== 'concluida' || a.retorno_pendente_tecnico) && a.confirmado_cliente_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">${a.retorno_pendente_tecnico ? 'Enviar retorno' : 'Executar'}</button>` : ''}
+          <td>${botaoDeslocamento(a)}${a.retorno_pendente_tecnico
+              ? (a.retorno_deslocamento_iniciado_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Enviar retorno</button>` : '')
+              : (a.status !== 'concluida' && a.deslocamento_iniciado_em ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : '')}
             ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' && !a.retorno_pendente_tecnico ? (
               a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
                 ? `<span class="tag tag-amber">Reabertura solicitada</span>`
@@ -789,7 +794,9 @@ function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
   if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
   if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) return { label: 'Orçamento', cor: 'orange' };
-  if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) return { label: 'Aguardando deslocamento', cor: 'amber' };
+  if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
+    return a.retorno_deslocamento_iniciado_em ? { label: 'Técnico a caminho', cor: 'blue' } : { label: 'Aguardando deslocamento', cor: 'amber' };
+  }
   if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) return { label: 'Aguardando feedback', cor: 'pink' };
   if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
@@ -2254,8 +2261,14 @@ function timelineOS(a, visita) {
   }
 
   // retorno do técnico: acontece quando o relatório original pediu retorno (depois do
-  // orçamento aprovado) OU quando virou retrabalho por feedback negativo do cliente
+  // orçamento aprovado) OU quando virou retrabalho por feedback negativo do cliente. O
+  // deslocamento desse retorno usa o mesmo rótulo do deslocamento original — mesma etapa,
+  // só que numa segunda volta.
   if (a.retorno_pendente_tecnico || a.visita_retorno_id) {
+    passos.push(a.retorno_deslocamento_iniciado_em
+      ? { label: 'Técnico iniciou o deslocamento', data: a.retorno_deslocamento_iniciado_em, estado: 'feito' }
+      : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
+
     const visitaRetorno = (window._visitasRetornoPorAgenda || {})[a.id];
     passos.push(a.visita_retorno_id
       ? { label: 'Técnico enviou o relatório de retorno', data: visitaRetorno ? visitaRetorno.criado_em : null, estado: 'feito' }
@@ -2416,7 +2429,14 @@ async function solicitarReaberturaVisita(id) {
 // (não finalizada), e some depois de marcado — vira uma tag mostrando desde quando ele está
 // a caminho. O administrador recebe uma notificação push quando o técnico toca nele.
 function botaoDeslocamento(a) {
-  if (a.tecnico_id !== USER.id || a.finalizada || a.status === 'concluida') return '';
+  if (a.tecnico_id !== USER.id || a.finalizada) return '';
+  // retorno pendente: o técnico precisa se deslocar de novo antes de enviar o relatório de
+  // retorno — o mesmo botão/rótulo do deslocamento original, só que num segundo momento
+  if (a.retorno_pendente_tecnico) {
+    if (a.retorno_deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.retorno_deslocamento_iniciado_em)}</span>`;
+    return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
+  }
+  if (a.status === 'concluida') return '';
   if (!a.confirmado_cliente_em) return `<span class="tag" style="background:var(--line); color:var(--ink-soft); margin-right:6px;">Aguardando confirmação do cliente</span>`;
   if (a.deslocamento_iniciado_em) return `<span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-right:6px;">🚗 A caminho desde ${fmtData(a.deslocamento_iniciado_em)}</span>`;
   return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
@@ -4247,10 +4267,10 @@ function acoesOSCalendarioTecnico(a, visita) {
     return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
   }
   if (a.retorno_pendente_tecnico) {
-    return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Enviar relatório de retorno</button>`;
+    return `${botaoDeslocamento(a)}${a.retorno_deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Enviar relatório de retorno</button>` : ''}`;
   }
   if (a.status !== 'concluida') {
-    return `${botaoDeslocamento(a)}${a.confirmado_cliente_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;
+    return `${botaoDeslocamento(a)}${a.deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;
   }
   if (a.visita_id && a.visita_status === 'aprovado') {
     return botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'

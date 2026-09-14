@@ -131,6 +131,7 @@ function migrar(data) {
     }
     if (a.retrabalho === undefined) a.retrabalho = false;
     if (a.retorno_pendente_tecnico === undefined) a.retorno_pendente_tecnico = false;
+    if (a.retorno_deslocamento_iniciado_em === undefined) a.retorno_deslocamento_iniciado_em = null;
     if (a.orcamento_aprovado_em === undefined) {
       // se o relatório já aprovado tinha peças fornecidas, mas esse controle de orçamento
       // ainda não existia, considera que o orçamento já foi tratado por fora do sistema —

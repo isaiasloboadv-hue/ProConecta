@@ -412,6 +412,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     feedback_cliente_em: null,
     orcamento_aprovado_em: null,
     retorno_pendente_tecnico: false,
+    retorno_deslocamento_iniciado_em: null,
   };
   data.agenda.push(item);
   db.save(data);
@@ -668,7 +669,9 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-cliente$/, async (req, res, m) =>
 });
 
 // POST /api/agenda/:id/iniciar-deslocamento — o técnico avisa que já está a caminho do cliente;
-// fica marcado na linha do tempo da O.S. e notifica o administrador
+// fica marcado na linha do tempo da O.S. e notifica o administrador. Se a O.S. estiver com um
+// retorno pendente (peças que exigiram um segundo deslocamento, ou retrabalho), marca o
+// deslocamento DO RETORNO em vez de mexer no deslocamento original, já concluído.
 rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado inicia o deslocamento.' });
@@ -678,8 +681,13 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (!item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento.' });
-  if (item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
-  item.deslocamento_iniciado_em = new Date().toISOString();
+  if (item.retorno_pendente_tecnico) {
+    if (item.retorno_deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
+    item.retorno_deslocamento_iniciado_em = new Date().toISOString();
+  } else {
+    if (item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
+    item.deslocamento_iniciado_em = new Date().toISOString();
+  }
   db.save(data);
   const cliente = data.clientes.find((c) => c.id === item.cliente_id);
   const admins = data.usuarios.filter((u) => u.papel === 'administrador');
@@ -703,6 +711,9 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
   if (agendaItem.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta atividade não é sua.' });
   if (!agendaItem.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de executar esta O.S.' });
+  if (agendaItem.retorno_pendente_tecnico && !agendaItem.retorno_deslocamento_iniciado_em) {
+    return enviarJSON(res, 400, { erro: 'Inicie o deslocamento antes de enviar o relatório de retorno.' });
+  }
 
   // dados do atendimento (cliente, contato, endereço, equipamento, datas, técnico) são sempre os que o
   // administrador definiu na agenda — o que vier do técnico para esses campos é ignorado
