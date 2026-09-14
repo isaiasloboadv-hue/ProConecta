@@ -2347,10 +2347,9 @@ function baixarPdfLaudoAprovado(agendaId) {
   }
 }
 
-// mostra o relatório enviado pelo técnico organizado nas mesmas seções do PDF gerado
-// (gerarPdfRelatorio / gerarPdfLaudo) — em vez de uma lista corrida de campos, cada bloco tem
-// seu título, igual ao documento final. Dados do atendimento (empresa/contato/endereço/
-// equipamento) já aparecem acima, no corpo da O.S., então não se repetem aqui.
+// mostra o relatório enviado pelo técnico organizado exatamente nas mesmas seções (mesmos
+// títulos, mesma ordem) do PDF gerado por gerarPdfRelatorio / gerarPdfLaudo — pra não ter
+// divergência entre o que aparece na tela e o que sai no documento baixado.
 function detalheRelatorioVisita(v) {
   if (v.relatorio) {
     const r = v.relatorio;
@@ -2358,8 +2357,11 @@ function detalheRelatorioVisita(v) {
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
       <div class="relatorio-secao">
         <div class="relatorio-secao-titulo">Dados do atendimento</div>
-        <div class="kv"><b>Data:</b> ${esc(r.data_inicial)} a ${esc(r.data_final)} <span class="sep">·</span> <b>Equipamento:</b> ${esc(r.modelo_maquina)} (${esc(r.numero_serie)})</div>
-        <div class="kv"><b>Serviço:</b> ${esc(r.servico)}</div>
+        <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
+        <div class="kv"><b>Endereço:</b> ${esc(r.endereco)}, ${esc(r.numero)} — ${esc(r.bairro)}, ${esc(r.cidade)}/${esc(r.estado)} — CEP ${esc(r.cep)}</div>
+        <div class="kv"><b>Data inicial:</b> ${esc(r.data_inicial)} <span class="sep">·</span> <b>Data final:</b> ${esc(r.data_final)}</div>
+        <div class="kv"><b>Modelo da máquina:</b> ${esc(r.modelo_maquina)} <span class="sep">·</span> <b>Nº de série:</b> ${esc(r.numero_serie)}</div>
+        <div class="kv"><b>Serviço:</b> ${esc(r.servico)} <span class="sep">·</span> <b>Técnico:</b> ${esc(r.tecnico_nome)}</div>
       </div>
       <div class="relatorio-secao">
         <div class="relatorio-secao-titulo">Item / entrega / observação</div>
@@ -2398,14 +2400,19 @@ function detalheRelatorioVisita(v) {
     return `
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
       <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Dados do atendimento</div>
+        <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
+        <div class="kv"><b>Endereço:</b> ${esc(l.endereco || '')}, ${esc(l.numero || '')} — ${esc(l.bairro || '')}, ${esc(l.cidade || '')}/${esc(l.estado || '')}</div>
+        <div class="kv"><b>Técnico:</b> ${esc(l.tecnico_nome || '')} <span class="sep">·</span> <b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
+      </div>
+      <div class="relatorio-secao">
         <div class="relatorio-secao-titulo">Dados do equipamento</div>
-        <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
         <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
         <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
         <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
       </div>
       <div class="relatorio-secao">
-        <div class="relatorio-secao-titulo">Atendimento técnico</div>
+        <div class="relatorio-secao-titulo">Técnico responsável</div>
         <div class="kv"><b>Data de início:</b> ${l.data_entrada ? fmtData(l.data_entrada) : '—'} <span class="sep">·</span> <b>Data de conclusão:</b> ${l.data_conclusao ? fmtData(l.data_conclusao) : '—'} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
       </div>
       <div class="relatorio-secao">
