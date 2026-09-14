@@ -222,6 +222,7 @@ let cache = null;
 async function inicializarPostgres() {
   const p = obterPool();
   await p.query('CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)');
+  await p.query('CREATE TABLE IF NOT EXISTS fotos (id TEXT PRIMARY KEY, dados TEXT NOT NULL, criado_em TIMESTAMPTZ DEFAULT now())');
   const r = await p.query('SELECT data FROM app_state WHERE id = 1');
   if (r.rows.length === 0) {
     const data = seed();
@@ -272,4 +273,32 @@ function estaUsandoPostgres() {
   return usaPostgres && !!cache;
 }
 
-module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres };
+// ---------- fotos (guardadas à parte do bloco principal — antes ficavam dentro do mesmo JSON
+// que fica sempre carregado na memória, e isso foi o que estourou o limite de RAM do plano
+// gratuito do Render conforme foram se acumulando; agora só uma referência pequena fica no bloco
+// principal, e a foto de verdade só é buscada quando alguém realmente precisa dela) ----------
+
+const FOTOS_DIR = path.join(__dirname, 'fotos');
+
+async function salvarFoto(dadosBase64) {
+  const id = crypto.randomBytes(12).toString('hex');
+  if (estaUsandoPostgres()) {
+    await obterPool().query('INSERT INTO fotos (id, dados) VALUES ($1, $2)', [id, dadosBase64]);
+  } else {
+    if (!fs.existsSync(FOTOS_DIR)) fs.mkdirSync(FOTOS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(FOTOS_DIR, id), dadosBase64);
+  }
+  return id;
+}
+
+async function carregarFoto(id) {
+  if (!id) return null;
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query('SELECT dados FROM fotos WHERE id = $1', [id]);
+    return r.rows.length ? r.rows[0].dados : null;
+  }
+  const caminho = path.join(FOTOS_DIR, String(id));
+  return fs.existsSync(caminho) ? fs.readFileSync(caminho, 'utf8') : null;
+}
+
+module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto };

@@ -279,6 +279,41 @@ function registroComAutor(data, r) {
   return { ...r, autor_nome: autor ? autor.nome : null };
 }
 
+// ---------- fotos guardadas à parte (ver db.js) ----------
+// extrairFotosProfundo percorre qualquer objeto/array e troca toda string grande (foto em
+// base64, assinatura em base64 etc.) por uma referência pequena `{__foto_ref}`, guardando a foto
+// de verdade na tabela separada — é isso que impede o bloco principal de crescer sem parar na
+// memória. hidratarFotosProfundo faz o caminho inverso, só quando alguém realmente precisa ver a
+// foto (nunca mexe no objeto original, sempre devolve uma cópia nova).
+// só extrai string que realmente é uma imagem (sempre vem como "data:image/...;base64,..." —
+// é assim que toda captura de foto/assinatura desse sistema gera o valor no navegador) — assim
+// nunca corre o risco de confundir um texto comprido (laudo técnico, causa, solução) com foto.
+async function extrairFotosProfundo(valor) {
+  if (typeof valor === 'string') {
+    if (!valor.startsWith('data:') || valor.length < 100) return valor;
+    const id = await db.salvarFoto(valor);
+    return { __foto_ref: id };
+  }
+  if (Array.isArray(valor)) return Promise.all(valor.map((v) => extrairFotosProfundo(v)));
+  if (valor && typeof valor === 'object') {
+    const entradas = await Promise.all(Object.entries(valor).map(async ([k, v]) => [k, await extrairFotosProfundo(v)]));
+    return Object.fromEntries(entradas);
+  }
+  return valor;
+}
+
+async function hidratarFotosProfundo(valor) {
+  if (valor && typeof valor === 'object' && !Array.isArray(valor) && typeof valor.__foto_ref === 'string' && Object.keys(valor).length === 1) {
+    return (await db.carregarFoto(valor.__foto_ref)) || null;
+  }
+  if (Array.isArray(valor)) return Promise.all(valor.map((v) => hidratarFotosProfundo(v)));
+  if (valor && typeof valor === 'object') {
+    const entradas = await Promise.all(Object.entries(valor).map(async ([k, v]) => [k, await hidratarFotosProfundo(v)]));
+    return Object.fromEntries(entradas);
+  }
+  return valor;
+}
+
 // ---------- rotas da API ----------
 
 const rotas = [];
@@ -708,7 +743,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
 rota('POST', /^\/api\/visitas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const agendaItem = data.agenda.find((a) => a.id === Number(body.agenda_id));
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
@@ -852,7 +887,7 @@ rota('GET', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
   const visita = data.visitas.find((v) => v.id === Number(m[1]));
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (user.papel === 'tecnico' && visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
-  enviarJSON(res, 200, { visita });
+  enviarJSON(res, 200, { visita: await hidratarFotosProfundo(visita) });
 });
 
 // POST /api/visitas/:id/enviar-relatorio  (envia o PDF do relatório corretivo por e-mail)
@@ -1078,7 +1113,7 @@ rota('GET', /^\/api\/registros$/, async (req, res) => {
     lista = lista.filter((r) => [r.titulo, r.sintoma, r.causa, r.solucao].filter(Boolean).join(' ').toLowerCase().includes(q));
   }
   lista = lista.map((r) => registroComAutor(data, r)).sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
-  enviarJSON(res, 200, { registros: lista });
+  enviarJSON(res, 200, { registros: await hidratarFotosProfundo(lista) });
 });
 
 // GET /api/registros/meus — o próprio autor vê todos os status dos registros que enviou
@@ -1089,7 +1124,7 @@ rota('GET', /^\/api\/registros\/meus$/, async (req, res) => {
   const lista = data.registros
     .filter((r) => r.autor_id === user.id)
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
-  enviarJSON(res, 200, { registros: lista });
+  enviarJSON(res, 200, { registros: await hidratarFotosProfundo(lista) });
 });
 
 // GET /api/registros/ranking — ranking de técnicos que mais contribuíram com a biblioteca aprovada
@@ -1121,14 +1156,14 @@ rota('GET', /^\/api\/registros\/fila$/, async (req, res) => {
     .filter((r) => r.status === 'em_analise')
     .map((r) => registroComAutor(data, r))
     .sort((a, b) => (a.criado_em || '').localeCompare(b.criado_em || ''));
-  enviarJSON(res, 200, { registros: lista });
+  enviarJSON(res, 200, { registros: await hidratarFotosProfundo(lista) });
 });
 
 // POST /api/registros — técnico ou administrador envia um novo registro
 rota('POST', /^\/api\/registros$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico', 'administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só técnico, produção ou administrador podem enviar registros.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req));
   const erro = validarRegistro(body);
   if (erro) return enviarJSON(res, 400, { erro });
   const data = db.load();
@@ -1154,7 +1189,7 @@ rota('POST', /^\/api\/registros$/, async (req, res) => {
 rota('POST', /^\/api\/registros\/(\d+)\/reenviar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const registro = data.registros.find((r) => r.id === Number(m[1]));
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
@@ -1180,7 +1215,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/aprovar$/, async (req, res, m) => {
   registro.aprovado_por = user.id;
   registro.data_aprovacao = new Date().toISOString();
   db.save(data);
-  enviarJSON(res, 200, { registro });
+  enviarJSON(res, 200, { registro: await hidratarFotosProfundo(registro) });
 });
 
 // POST /api/registros/:id/sugerir-alteracao — administrador, comentário obrigatório
@@ -1204,7 +1239,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/sugerir-alteracao$/, async (req, res, m)
 rota('PUT', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita diretamente.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const registro = data.registros.find((r) => r.id === Number(m[1]));
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
@@ -1215,7 +1250,7 @@ rota('PUT', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   registro.atualizado_por_nome = user.nome;
   registro.solicitacao_edicao = null;
   db.save(data);
-  enviarJSON(res, 200, { registro: registroComAutor(data, registro) });
+  enviarJSON(res, 200, { registro: await hidratarFotosProfundo(registroComAutor(data, registro)) });
 });
 
 // POST /api/registros/:id/solicitar-edicao — técnico pede ao administrador uma correção num
@@ -1230,7 +1265,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/solicitar-edicao$/, async (req, res, m) 
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   registro.solicitacao_edicao = { comentario: body.comentario, solicitante_id: user.id, solicitante_nome: user.nome, criado_em: new Date().toISOString() };
   db.save(data);
-  enviarJSON(res, 200, { registro: registroComAutor(data, registro) });
+  enviarJSON(res, 200, { registro: await hidratarFotosProfundo(registroComAutor(data, registro)) });
 });
 
 // GET /api/registros/solicitacoes-edicao — administrador: casos publicados com pedido de correção pendente
@@ -1242,7 +1277,7 @@ rota('GET', /^\/api\/registros\/solicitacoes-edicao$/, async (req, res) => {
     .filter((r) => r.solicitacao_edicao)
     .map((r) => registroComAutor(data, r))
     .sort((a, b) => (b.solicitacao_edicao.criado_em || '').localeCompare(a.solicitacao_edicao.criado_em || ''));
-  enviarJSON(res, 200, { registros: lista });
+  enviarJSON(res, 200, { registros: await hidratarFotosProfundo(lista) });
 });
 
 // DELETE /api/registros/:id — administrador exclui um registro de biblioteca (pendente ou já aprovado)
@@ -1415,14 +1450,14 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
-  enviarJSON(res, 200, { relatorio: item });
+  enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
 
 // POST /api/relatorios-manutencao — cria um relatório avulso; salva na hora, sem aprovação do admin
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req));
   if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -1455,7 +1490,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req));
   if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2172,4 +2207,19 @@ db.pronto.then(() => {
   console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
   verificarLembretesDeslocamento();
   setInterval(verificarLembretesDeslocamento, 15 * 60 * 1000);
+  migrarFotosParaTabelaSeparada().catch((e) => console.error('[fotos] erro na migração:', e.message));
 });
+
+// migração única: fotos que já estavam guardadas dentro do bloco principal (de antes de existir a
+// tabela separada) saem de lá na primeira vez que o servidor sobe com este código — depois disso
+// tudo já nasce pequeno (só a referência), então roda só essa vez (guardado em data._fotos_migradas).
+async function migrarFotosParaTabelaSeparada() {
+  const data = db.load();
+  if (data._fotos_migradas) return;
+  data.visitas = await extrairFotosProfundo(data.visitas);
+  data.registros = await extrairFotosProfundo(data.registros);
+  data.relatorios_manutencao = await extrairFotosProfundo(data.relatorios_manutencao);
+  data._fotos_migradas = true;
+  db.save(data);
+  console.log('[fotos] migração de fotos pra tabela separada concluída.');
+}
