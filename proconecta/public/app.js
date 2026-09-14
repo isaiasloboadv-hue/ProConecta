@@ -2347,49 +2347,78 @@ function baixarPdfLaudoAprovado(agendaId) {
   }
 }
 
+// mostra o relatório enviado pelo técnico organizado nas mesmas seções do PDF gerado
+// (gerarPdfRelatorio / gerarPdfLaudo) — em vez de uma lista corrida de campos, cada bloco tem
+// seu título, igual ao documento final. Dados do atendimento (empresa/contato/endereço/
+// equipamento) já aparecem acima, no corpo da O.S., então não se repetem aqui.
 function detalheRelatorioVisita(v) {
   if (v.relatorio) {
     const r = v.relatorio;
     return `
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
-      <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
-      <div class="kv"><b>Endereço:</b> ${esc(r.endereco)}, ${esc(r.numero)} — ${esc(r.bairro)}, ${esc(r.cidade)}/${esc(r.estado)} — CEP ${esc(r.cep)}</div>
-      <div class="kv"><b>Data:</b> ${esc(r.data_inicial)} a ${esc(r.data_final)} <span class="sep">·</span> <b>Equipamento:</b> ${esc(r.modelo_maquina)} (${esc(r.numero_serie)})</div>
-      <div class="kv"><b>Serviço:</b> ${esc(r.servico)}</div>
-      <ol class="item-steps">
-        ${(r.checklist || []).map((c) => `<li>${esc(c.item)} — <b>${c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A'}</b>${c.observacao ? ' — ' + esc(c.observacao) : ''}</li>`).join('')}
-      </ol>
-      <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>
-      <div class="kv"><b>Aceite:</b> ${r.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito'}</div>
-      <div class="kv"><b>Avaliação:</b> ${r.avaliacao ? r.avaliacao.estrelas : '—'}/5 estrelas <span class="sep">·</span> Dúvidas sanadas: ${r.avaliacao && r.avaliacao.duvidas_sanadas === 'sim' ? 'Sim' : 'Não'} <span class="sep">·</span> Apto a operar: ${r.avaliacao && r.avaliacao.apto_operar === 'sim' ? 'Sim' : 'Não'}</div>
-      <div class="kv"><b>Assinaturas</b></div>
-      <div style="display:flex; gap:16px; flex-wrap:wrap;">
-        <div>${esc(r.assinatura_cliente_nome || '—')} (cliente)${r.assinatura_cliente_img ? `<br><img src="${r.assinatura_cliente_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_cliente_img}')">` : ''}</div>
-        <div>${esc(r.assinatura_tecnico_nome || '—')} (técnico)${r.assinatura_tecnico_img ? `<br><img src="${r.assinatura_tecnico_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_tecnico_img}')">` : ''}</div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Dados do atendimento</div>
+        <div class="kv"><b>Data:</b> ${esc(r.data_inicial)} a ${esc(r.data_final)} <span class="sep">·</span> <b>Equipamento:</b> ${esc(r.modelo_maquina)} (${esc(r.numero_serie)})</div>
+        <div class="kv"><b>Serviço:</b> ${esc(r.servico)}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Item / entrega / observação</div>
+        <ol class="item-steps">
+          ${(r.checklist || []).map((c) => `<li>${esc(c.item)} — <b>${c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A'}</b>${c.observacao ? ' — ' + esc(c.observacao) : ''}</li>`).join('')}
+        </ol>
+      </div>
+      ${r.observacoes ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Observações</div><div class="relatorio-secao-texto">${esc(r.observacoes)}</div></div>` : ''}
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Aceite e avaliação</div>
+        <div class="kv"><b>Aceite:</b> ${r.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito'}</div>
+        <div class="kv"><b>Avaliação:</b> ${r.avaliacao ? r.avaliacao.estrelas : '—'}/5 estrelas <span class="sep">·</span> Dúvidas sanadas: ${r.avaliacao && r.avaliacao.duvidas_sanadas === 'sim' ? 'Sim' : 'Não'} <span class="sep">·</span> Apto a operar: ${r.avaliacao && r.avaliacao.apto_operar === 'sim' ? 'Sim' : 'Não'}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Assinaturas</div>
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          <div>${esc(r.assinatura_cliente_nome || '—')} (cliente)${r.assinatura_cliente_img ? `<br><img src="${r.assinatura_cliente_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_cliente_img}')">` : ''}</div>
+          <div>${esc(r.assinatura_tecnico_nome || '—')} (técnico)${r.assinatura_tecnico_img ? `<br><img src="${r.assinatura_tecnico_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_tecnico_img}')">` : ''}</div>
+        </div>
       </div>`;
   }
   if (v.relatorio_simples) {
     const r = v.relatorio_simples;
     return `
-      <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
-      <div class="kv"><b>Equipamento:</b> ${esc(r.equipamento_tipo)} — ${esc(r.equipamento_modelo)} ${r.numero_serie ? `(${esc(r.numero_serie)})` : ''}</div>
-      <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>`;
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Equipamento</div>
+        <div class="kv"><b>Equipamento:</b> ${esc(r.equipamento_tipo)} — ${esc(r.equipamento_modelo)} ${r.numero_serie ? `(${esc(r.numero_serie)})` : ''}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Observações</div>
+        <div class="relatorio-secao-texto">${esc(r.observacoes)}</div>
+      </div>`;
   }
   if (v.laudo) {
     const l = v.laudo;
     return `
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
-      <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
-      <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
-      <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
-      <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
-      <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
-      <div class="kv"><b>Data de início:</b> ${l.data_entrada ? fmtData(l.data_entrada) : '—'} <span class="sep">·</span> <b>Data de conclusão:</b> ${l.data_conclusao ? fmtData(l.data_conclusao) : '—'} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
-      <div class="kv"><b>Laudo técnico:</b> ${esc(l.laudo_tecnico || '')}</div>
-      <div class="kv"><b>Serviço realizado:</b> ${esc(l.servico_realizado || '')}</div>
-      ${(l.pecas || []).length ? `<div class="kv"><b>Peças fornecidas:</b></div><ol class="item-steps">${l.pecas.map((p) => `<li>${esc(p.descricao || '—')}${p.quantidade ? ' (qtd: ' + esc(p.quantidade) + ')' : ''}</li>`).join('')}</ol>` : ''}
-      ${l.observacoes ? `<div class="kv"><b>Observações:</b> ${esc(l.observacoes)}</div>` : ''}
-      ${(l.fotos || []).length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="step-photos">${l.fotos.map((f) => `<div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do laudo"></div>`).join('')}</div>` : ''}`;
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Dados do equipamento</div>
+        <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
+        <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
+        <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
+        <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Atendimento técnico</div>
+        <div class="kv"><b>Data de início:</b> ${l.data_entrada ? fmtData(l.data_entrada) : '—'} <span class="sep">·</span> <b>Data de conclusão:</b> ${l.data_conclusao ? fmtData(l.data_conclusao) : '—'} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Laudo técnico</div>
+        <div class="relatorio-secao-texto">${esc(l.laudo_tecnico || '')}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Serviço realizado</div>
+        <div class="relatorio-secao-texto">${esc(l.servico_realizado || '')}</div>
+      </div>
+      ${(l.pecas || []).length ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Peças fornecidas</div><ol class="item-steps">${l.pecas.map((p) => `<li>${esc(p.descricao || '—')}${p.quantidade ? ' (qtd: ' + esc(p.quantidade) + ')' : ''}</li>`).join('')}</ol></div>` : ''}
+      ${l.observacoes ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Observações</div><div class="relatorio-secao-texto">${esc(l.observacoes)}</div></div>` : ''}
+      ${(l.fotos || []).length ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Relatório fotográfico</div><div class="step-photos">${l.fotos.map((f) => `<div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do laudo"></div>`).join('')}</div></div>` : ''}`;
   }
   return `<div class="kv"><b>Causa:</b> ${esc(v.causa)}</div><div class="kv"><b>Correção:</b> ${esc(v.correcao)}</div><div class="kv"><b>Resultado:</b> ${esc(v.resultado)}</div>`;
 }

@@ -254,6 +254,10 @@ textarea{resize:vertical;min-height:64px;}
 .badge-alteracao{background:var(--orange-bg);color:var(--orange);}
 
 .item-body{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:13.5px;color:var(--ink);line-height:1.55;}
+/* .kv (rótulo: valor) é usado tanto solto (detalhe da O.S.) quanto dentro de .item-body — sem
+   essa regra base, as linhas ficavam todas grudadas, sem respiro nem destaque no rótulo. */
+.kv{margin-bottom:7px;font-size:13px;line-height:1.55;color:var(--ink);}
+.kv b{color:var(--navy);font-weight:700;}
 .item-body .kv{margin-bottom:8px;}
 .item-body .kv b{color:var(--navy);}
 /* em telas bem largas, texto corrido não deveria esticar até a borda do painel — fica difícil de
@@ -350,6 +354,13 @@ textarea{resize:vertical;min-height:64px;}
 .os-timeline-data{font-size:12px;color:var(--ink-soft);margin-top:2px;}
 .os-relatorio-box{margin-top:16px;padding:16px 18px;background:var(--blue-pale-2);border:1px solid var(--line);border-radius:12px;}
 .os-relatorio-box-titulo{font-size:13.5px;font-weight:800;color:var(--navy);margin-bottom:12px;}
+/* agrupa o conteúdo do relatório em seções com título, igual ao PDF gerado (gerarPdfLaudo /
+   gerarPdfRelatorio) — em vez de uma lista corrida de campos, cada bloco (dados do
+   equipamento, laudo técnico, serviço realizado...) fica separado e com destaque próprio. */
+.relatorio-secao{margin-top:16px;}
+.relatorio-secao:first-child{margin-top:0;}
+.relatorio-secao-titulo{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--blue);padding-bottom:6px;margin-bottom:9px;border-bottom:1.5px solid var(--blue-pale);}
+.relatorio-secao-texto{font-size:13px;line-height:1.55;color:var(--ink);white-space:pre-wrap;}
 
 table{width:100%;border-collapse:collapse;}
 th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft);padding:10px 6px;border-bottom:1px solid var(--line);}
