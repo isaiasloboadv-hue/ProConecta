@@ -1466,6 +1466,33 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   enviarJSON(res, 201, { relatorio: item });
 });
 
+// PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou
+rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  const body = await lerCorpo(req);
+  if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
+    return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
+  }
+  const data = db.load();
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
+  Object.assign(item, {
+    empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
+    tipo_servico: body.tipo_servico || '', tipo_servico_outros: body.tipo_servico_outros || '',
+    marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+    garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
+    data_fabricacao: body.data_fabricacao || '',
+    acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
+    data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
+    laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
+    pecas: Array.isArray(body.pecas) ? body.pecas : [],
+    fotos: Array.isArray(body.fotos) ? body.fotos : [],
+  });
+  db.save(data);
+  enviarJSON(res, 200, { relatorio: item });
+});
+
 // DELETE /api/relatorios-manutencao/:id — o próprio autor pode apagar um relatório que criou
 rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);

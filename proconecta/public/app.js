@@ -3257,6 +3257,7 @@ async function renderRelatorioManutencao() {
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
             <button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>
+            <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
         </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`}
@@ -3280,18 +3281,20 @@ function relatorioManutPadrao() {
   };
 }
 
-function mostrarFormRelatorioManutencao() {
-  relatorioManutDraft = relatorioManutPadrao();
+function mostrarFormRelatorioManutencao(existente) {
+  relatorioManutDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioManutPadrao();
+  const d = relatorioManutDraft;
+  const editando = !!d.id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Novo relatório — Manutenção interna</h1><p>Preencha os dados abaixo. Ao gerar, o PDF fica disponível e o relatório é salvo no seu histórico. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>${editando ? 'Editar relatório' : 'Novo relatório'} — Manutenção interna</h1><p>Preencha os dados abaixo. Ao gerar, o PDF fica disponível e o relatório é salvo no seu histórico. Campos com * são obrigatórios.</p></div>
 
     <div class="panel">
       <h2>Dados do cliente</h2>
       <div class="form-grid">
-        <div class="full"><label>Empresa*</label><input id="rm-empresa"></div>
-        <div><label>Contato</label><input id="rm-contato"></div>
-        <div><label>Telefone</label><input id="rm-telefone"></div>
+        <div class="full"><label>Empresa*</label><input id="rm-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Contato</label><input id="rm-contato" value="${esc(d.contato)}"></div>
+        <div><label>Telefone</label><input id="rm-telefone" value="${esc(d.telefone)}"></div>
       </div>
     </div>
 
@@ -3299,28 +3302,28 @@ function mostrarFormRelatorioManutencao() {
       <h2>Tipo de serviço</h2>
       <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
         ${[['amostra', 'Amostra'], ['analise', 'Análise'], ['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['outros', 'Outros']].map(([v, l]) => `
-          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-tipo-servico" value="${v}" style="width:auto;" onchange="document.getElementById('rm-tipo-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-tipo-servico" value="${v}" style="width:auto;" ${d.tipo_servico === v ? 'checked' : ''} onchange="document.getElementById('rm-tipo-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
       </div>
-      <div id="rm-tipo-outros-wrap" style="display:none;"><label>Especifique</label><input id="rm-tipo-servico-outros"></div>
+      <div id="rm-tipo-outros-wrap" style="display:${d.tipo_servico === 'outros' ? 'block' : 'none'};"><label>Especifique</label><input id="rm-tipo-servico-outros" value="${esc(d.tipo_servico_outros)}"></div>
     </div>
 
     <div class="panel">
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
-        <div><label>Marca</label><input id="rm-marca"></div>
-        <div><label>Equipamento*</label><input id="rm-equipamento"></div>
-        <div><label>Nº de série</label><input id="rm-numero_serie"></div>
-        <div><label>Data de fabricação (MM/AAAA)</label><input id="rm-data_fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
+        <div><label>Marca</label><input id="rm-marca" value="${esc(d.marca)}"></div>
+        <div><label>Equipamento*</label><input id="rm-equipamento" value="${esc(d.equipamento)}"></div>
+        <div><label>Nº de série</label><input id="rm-numero_serie" value="${esc(d.numero_serie)}"></div>
+        <div><label>Data de fabricação (MM/AAAA)</label><input id="rm-data_fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(d.data_fabricacao)}"></div>
       </div>
       <label>Garantia</label>
       <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
         ${[['sim', 'Sim'], ['nao', 'Não'], ['outros', 'Outros']].map(([v, l]) => `
-          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-garantia" value="${v}" style="width:auto;" onchange="document.getElementById('rm-garantia-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-garantia" value="${v}" style="width:auto;" ${d.garantia === v ? 'checked' : ''} onchange="document.getElementById('rm-garantia-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
       </div>
-      <div id="rm-garantia-outros-wrap" style="display:none;"><label>Especifique</label><input id="rm-garantia_obs"></div>
+      <div id="rm-garantia-outros-wrap" style="display:${d.garantia === 'outros' ? 'block' : 'none'};"><label>Especifique</label><input id="rm-garantia_obs" value="${esc(d.garantia_obs)}"></div>
       <div class="form-grid">
-        <div class="full"><label>Acessórios recebidos</label><input id="rm-acessorios" placeholder="ex: cabo de força, fonte..."></div>
-        <div class="full"><label>Defeito informado</label><input id="rm-defeito_informado"></div>
+        <div class="full"><label>Acessórios recebidos</label><input id="rm-acessorios" placeholder="ex: cabo de força, fonte..." value="${esc(d.acessorios)}"></div>
+        <div class="full"><label>Defeito informado</label><input id="rm-defeito_informado" value="${esc(d.defeito_informado)}"></div>
       </div>
     </div>
 
@@ -3329,21 +3332,21 @@ function mostrarFormRelatorioManutencao() {
       <div class="form-grid">
         <div><label>Nome</label><input value="${esc(USER.nome)}" disabled></div>
         <div><label>E-mail</label><input value="${esc(USER.email || '')}" disabled></div>
-        <div><label>Data de entrada</label><input id="rm-data_entrada" type="date"></div>
-        <div><label>Data de conclusão</label><input id="rm-data_conclusao" type="date"></div>
+        <div><label>Data de entrada</label><input id="rm-data_entrada" type="date" value="${esc(d.data_entrada)}"></div>
+        <div><label>Data de conclusão</label><input id="rm-data_conclusao" type="date" value="${esc(d.data_conclusao)}"></div>
       </div>
     </div>
 
     <div class="panel">
       <h2>Laudo técnico</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Defeito encontrado e análise do estado do equipamento</p>
-      <textarea id="rm-laudo_tecnico" placeholder="Descreva o diagnóstico..."></textarea>
+      <textarea id="rm-laudo_tecnico" placeholder="Descreva o diagnóstico...">${esc(d.laudo_tecnico)}</textarea>
     </div>
 
     <div class="panel">
       <h2>Serviços realizados</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Manutenção realizada / resultados de amostra</p>
-      <textarea id="rm-servico_realizado" placeholder="Descreva o que foi feito..."></textarea>
+      <textarea id="rm-servico_realizado" placeholder="Descreva o que foi feito...">${esc(d.servico_realizado)}</textarea>
     </div>
 
     <div class="panel">
@@ -3558,13 +3561,21 @@ async function salvarRelatorioManutencao() {
   if (!d.empresa.trim() || !d.equipamento.trim()) { alert('Preencha ao menos Empresa e Equipamento.'); return; }
 
   try {
-    const { relatorio } = await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioManutencao(relatorio, logo);
     window.open(url, '_blank');
-    mostrarToast('Relatório salvo e PDF gerado.');
+    mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado.');
     renderRelatorioManutencao();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function editarRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  mostrarFormRelatorioManutencao(r);
 }
 
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
