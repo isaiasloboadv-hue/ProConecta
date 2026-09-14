@@ -302,6 +302,15 @@ rota('GET', /^\/api\/me$/, async (req, res) => {
   enviarJSON(res, 200, { usuario: user });
 });
 
+// GET /api/status — só pro administrador: mostra se o banco é o Postgres (persistente) ou o
+// arquivo local (some a cada reinício do Render sem "disco persistente"), pra nunca ficar na
+// dúvida se os dados de teste estão realmente seguros.
+rota('GET', /^\/api\/status$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê o status do banco.' });
+  enviarJSON(res, 200, { banco: db.estaUsandoPostgres() ? 'postgres' : 'arquivo' });
+});
+
 // ---------- convite de primeiro acesso ----------
 
 // GET /api/convite/:token — pública: a tela de ativação usa isso para mostrar nome/e-mail
