@@ -10,7 +10,7 @@ let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
-const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', reparo: 'Setor Reparo' };
+const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', reparo: 'Setor Reparo', estoque: 'Estoque' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
@@ -265,8 +265,8 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
-  if (['tecnico', 'administrador', 'producao', 'cliente', 'pos_venda', 'reparo'].includes(USER.papel)) ativarNotificacoesPush();
-  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', reparo: 'fila-reparo' }[USER.papel] || 'agenda';
+  if (['tecnico', 'administrador', 'producao', 'cliente', 'pos_venda', 'reparo', 'estoque'].includes(USER.papel)) ativarNotificacoesPush();
+  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', reparo: 'fila-reparo', estoque: 'fila-estoque' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
 
@@ -349,6 +349,7 @@ const NAV = {
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
     { key: 'painel-atendimentos', label: 'Atendimentos', page: 'painel-atendimentos' },
+    { key: 'solicitacao-atendimento', label: 'Solicitação de Atendimento', page: 'fila-solicitacao-atendimento' },
     { key: 'aprovacoes-visitas', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -405,6 +406,9 @@ const NAV = {
   ],
   reparo: [
     { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
+  ],
+  estoque: [
+    { key: 'fila-estoque', label: 'Estoque', page: 'fila-estoque' },
   ],
 };
 
@@ -497,6 +501,8 @@ async function ir(pagina) {
     if (pagina === 'painel-atendimentos') return renderPainelAtendimentos();
     if (pagina === 'fila-pos-venda') return renderFilaPosVenda();
     if (pagina === 'fila-reparo') return renderFilaReparo();
+    if (pagina === 'fila-estoque') return renderFilaEstoque();
+    if (pagina === 'fila-solicitacao-atendimento') return renderFilaSolicitacaoAtendimento();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -869,6 +875,8 @@ const FASE_ATENDIMENTO_TARJA = {
   em_diagnostico_reparo: { label: 'Em diagnóstico (reparo)', cor: 'orange' },
   orcamento_enviado: { label: 'Orçamento enviado', cor: 'pink' },
   executando_reparo: { label: 'Executando reparo', cor: 'teal' },
+  aguardando_saida_estoque: { label: 'Aguardando saída (estoque)', cor: 'navy' },
+  aguardando_criacao_os: { label: 'Aguardando criação da O.S.', cor: 'red' },
 };
 
 function faseAtualOS(a) {
@@ -933,8 +941,9 @@ function cardOS(a) {
 }
 
 let agendaEmEdicaoId = null;
-async function mostrarFormNovaAtividade(agendaItem) {
+async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
   agendaEmEdicaoId = agendaItem ? agendaItem.id : null;
+  window._origemSolicitacaoId = origemSolicitacao ? origemSolicitacao.id : null;
   const [{ usuarios }, { equipamentos }, { clientes }, sugestaoNumero] = await Promise.all([
     api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes'),
     agendaItem ? Promise.resolve(null) : api('/api/agenda/proximo-numero'),
@@ -943,7 +952,7 @@ async function mostrarFormNovaAtividade(agendaItem) {
   window._clientesCache = clientes;
   window._equipamentosCache = equipamentos;
   document.getElementById('form-nova-atividade').innerHTML = `
-    <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço'}</div>
+    <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : origemSolicitacao ? 'Nova O.S. — a partir da Solicitação de Atendimento' : 'Nova Ordem de Serviço'}</div>
       <h2 style="margin-top:0;">Tipo de serviço</h2>
       <div class="form-grid">
         <div><label>Nº da O.S.</label><input id="na-numero-os" value="${esc(agendaItem ? numeroOS(agendaItem) : sugestaoNumero.numero)}"></div>
@@ -1019,6 +1028,30 @@ async function mostrarFormNovaAtividade(agendaItem) {
     preencherClienteNovaAtividade(false);
     document.getElementById('na-equip').value = agendaItem.equipamento_id;
     preencherNumeroSerieNovaAtividade();
+  } else if (origemSolicitacao) {
+    // puxa empresa/contato/equipamento/problema do atendimento original — o admin ajusta
+    // apenas data/horário e confirma o técnico antes de salvar
+    const clienteAtual = clientes.find((c) => c.id === origemSolicitacao.cliente_id);
+    if (clienteAtual) {
+      document.getElementById('na-cliente-nome').value = clienteAtual.nome_empresa;
+      document.getElementById('na-cliente').value = clienteAtual.id;
+    }
+    preencherClienteNovaAtividade(false);
+    document.getElementById('na-contato').value = origemSolicitacao.contato || '';
+    document.getElementById('na-telefone').value = origemSolicitacao.telefone || '';
+    document.getElementById('na-email').value = origemSolicitacao.email || '';
+    document.getElementById('na-setor-cliente').value = origemSolicitacao.setor_cliente || '';
+    document.getElementById('na-endereco').value = origemSolicitacao.endereco || '';
+    document.getElementById('na-numero').value = origemSolicitacao.numero || '';
+    document.getElementById('na-bairro').value = origemSolicitacao.bairro || '';
+    document.getElementById('na-cep').value = origemSolicitacao.cep || '';
+    document.getElementById('na-cidade').value = origemSolicitacao.cidade || '';
+    document.getElementById('na-estado').value = origemSolicitacao.estado || '';
+    document.getElementById('na-problema').value = origemSolicitacao.problema || '';
+    if (origemSolicitacao.equipamento_id) {
+      document.getElementById('na-equip').value = origemSolicitacao.equipamento_id;
+      preencherNumeroSerieNovaAtividade();
+    }
   } else {
     preencherClienteNovaAtividade();
   }
@@ -1146,7 +1179,14 @@ async function salvarNovaAtividade() {
       agendaEmEdicaoId = null;
       mostrarToast('Ordem de serviço atualizada.');
     } else {
-      await api('/api/agenda', { method: 'POST', body });
+      const { agenda: novaOS } = await api('/api/agenda', { method: 'POST', body });
+      if (window._origemSolicitacaoId) {
+        const origemId = window._origemSolicitacaoId;
+        window._origemSolicitacaoId = null;
+        await api(`/api/agenda/${origemId}/finalizar-solicitacao`, { method: 'POST', body: { nova_os_id: novaOS.id } });
+        mostrarToast('O.S. criada — atendimento original encerrado.');
+        return ir('fila-solicitacao-atendimento');
+      }
     }
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
     else renderAgenda();
@@ -2397,7 +2437,10 @@ function acoesOSAtendimento(a) {
       ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
       <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>`;
   }
-  if (fase === 'aguardando_equipamento') return `<button class="btn btn-primary btn-sm" onclick="reparoIniciarAtendimento(${a.id})">Iniciar atendimento (reparo)</button>`;
+  if (fase === 'aguardando_equipamento') {
+    if (!a.estoque_recebido_em) return `<button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada (estoque)</button>`;
+    return `<button class="btn btn-primary btn-sm" onclick="reparoIniciarAtendimento(${a.id})">Iniciar atendimento (reparo)</button>`;
+  }
   if (fase === 'em_diagnostico_reparo') return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de diagnóstico</button>`;
   if (fase === 'orcamento_enviado') {
     return `
@@ -2405,6 +2448,11 @@ function acoesOSAtendimento(a) {
       <button class="btn btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>`;
   }
   if (fase === 'executando_reparo') return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de liberação</button>`;
+  if (fase === 'aguardando_saida_estoque') {
+    const label = a.motivo_pos_venda === 'peca_enviada' ? 'Confirmar envio da peça (estoque)' : 'Confirmar saída do equipamento (estoque)';
+    return `<button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button>`;
+  }
+  if (fase === 'aguardando_criacao_os') return `<button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button>`;
   return '';
 }
 
@@ -2584,9 +2632,14 @@ function timelineOSAtendimento(a) {
   passos.push({ label: `Encaminhado pro pós-venda${a.motivo_pos_venda ? ' — ' + esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '') : ''}`, data: a.encaminhado_pos_venda_em, estado: 'feito' });
 
   if (a.motivo_pos_venda === 'cliente_envia_equipamento') {
+    passos.push(a.estoque_recebido_em
+      ? { label: 'Equipamento chegou e foi conferido pelo estoque', data: a.estoque_recebido_em, estado: 'feito' }
+      : { label: 'Aguardando o equipamento chegar no estoque', data: null, estado: 'pendente' });
+    if (!a.estoque_recebido_em) return renderizarTimelineOS(passos);
+
     passos.push(a.equipamento_recebido_em
-      ? { label: 'Equipamento recebido e diagnosticado pelo setor de reparo', data: a.equipamento_recebido_em, estado: 'feito' }
-      : { label: 'Aguardando equipamento chegar no setor de reparo', data: null, estado: 'pendente' });
+      ? { label: 'Setor de reparo iniciou o diagnóstico', data: a.equipamento_recebido_em, estado: 'feito' }
+      : { label: 'Aguardando o setor de reparo iniciar o diagnóstico', data: null, estado: 'pendente' });
     if (!a.equipamento_recebido_em || a.fase_atendimento === 'em_diagnostico_reparo') return renderizarTimelineOS(passos);
   }
 
@@ -2604,9 +2657,26 @@ function timelineOSAtendimento(a) {
     : { label: 'Aguardando decisão do cliente sobre o orçamento', data: null, estado: 'pendente' });
   if (a.pos_venda_decisao !== 'aprovado') return renderizarTimelineOS(passos);
 
-  passos.push(a.finalizada
-    ? { label: 'Equipamento liberado pelo setor de reparo', data: a.finalizado_em, estado: 'feito' }
-    : { label: 'Aguardando o setor de reparo executar e liberar o equipamento', data: null, estado: 'pendente' });
+  if (a.motivo_pos_venda === 'tecnico_visita') {
+    passos.push(a.os_criada_id
+      ? { label: `Nova O.S. de visita técnica criada — ${esc(a.os_criada_numero || ('#' + a.os_criada_id))}`, data: a.finalizado_em, estado: 'feito' }
+      : { label: 'Aguardando o administrador criar a O.S. de visita técnica', data: null, estado: 'pendente' });
+    passos.push(a.finalizada
+      ? { label: 'Atendimento original encerrado — acompanhamento segue na nova O.S.', data: a.finalizado_em, estado: 'feito' }
+      : { label: 'Aguardando finalização deste atendimento', data: null, estado: 'pendente' });
+    return renderizarTimelineOS(passos);
+  }
+
+  if (a.motivo_pos_venda === 'cliente_envia_equipamento') {
+    passos.push(a.equipamento_liberado_reparo_em
+      ? { label: 'Equipamento reparado e liberado pelo setor de reparo', data: a.equipamento_liberado_reparo_em, estado: 'feito' }
+      : { label: 'Aguardando o setor de reparo executar e liberar o equipamento', data: null, estado: 'pendente' });
+    if (!a.equipamento_liberado_reparo_em) return renderizarTimelineOS(passos);
+  }
+
+  passos.push(a.estoque_saida_em
+    ? { label: a.motivo_pos_venda === 'peca_enviada' ? 'Estoque confirmou o envio da peça' : 'Estoque confirmou a saída do equipamento', data: a.estoque_saida_em, estado: 'feito' }
+    : { label: a.motivo_pos_venda === 'peca_enviada' ? 'Aguardando o estoque enviar a peça' : 'Aguardando o estoque confirmar a saída do equipamento', data: null, estado: 'pendente' });
   passos.push(a.finalizada
     ? { label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' }
     : { label: 'Aguardando finalização da O.S.', data: null, estado: 'pendente' });
@@ -4730,6 +4800,12 @@ function acoesOSCalendarioTecnico(a, visita) {
   if (a.finalizada) {
     return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço.</span>`;
   }
+  // O.S. de atendimento (chat) segue o fluxo de pós-venda/reparo/estoque, sem deslocamento — as
+  // ações ficam nas telas dedicadas (Fila de Atendimento, Pós-venda, Setor Reparo, Estoque)
+  if (a.tipo === 'atendimento' && a.fase_atendimento) {
+    const faseLabel = (FASE_ATENDIMENTO_TARJA[a.fase_atendimento] || {}).label || a.fase_atendimento;
+    return `<span style="font-size:11.5px; color:var(--ink-soft);">Fase atual: ${esc(faseLabel)} — acompanhe e aja pela Fila de Atendimento ou pela tela do setor responsável.</span>`;
+  }
   if (a.tecnico_id !== USER.id) {
     return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
   }
@@ -5437,6 +5513,7 @@ function mostrarFormUsuario(usuario) {
           <option value="producao" ${usuario && usuario.papel === 'producao' ? 'selected' : ''}>Produção</option>
           <option value="pos_venda" ${usuario && usuario.papel === 'pos_venda' ? 'selected' : ''}>Pós-venda</option>
           <option value="reparo" ${usuario && usuario.papel === 'reparo' ? 'selected' : ''}>Setor Reparo</option>
+          <option value="estoque" ${usuario && usuario.papel === 'estoque' ? 'selected' : ''}>Estoque</option>
           <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
           <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
         </select></div>
@@ -5922,6 +5999,103 @@ function cardReparo(a) {
 async function reparoIniciarAtendimento(id) {
   try { await api(`/api/agenda/${id}/reparo/iniciar-atendimento`, { method: 'POST' }); mostrarToast('Atendimento iniciado — preencha o relatório quando concluir o diagnóstico.'); renderFilaReparo(); }
   catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- estoque: confirma chegada (equipamento enviado pelo cliente) e saída (equipamento
+// reparado ou peça enviada) ----------
+
+async function renderFilaEstoque() {
+  const { agenda } = await api('/api/agenda/fila-estoque');
+  window._agendaCache = agenda;
+  const chegada = agenda.filter((a) => a.fase_atendimento === 'aguardando_equipamento');
+  const saida = agenda.filter((a) => a.fase_atendimento === 'aguardando_saida_estoque');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Estoque</h1><p>Confirme a chegada de equipamentos enviados pelo cliente e a saída de equipamentos reparados ou peças.</p></div>
+    <div class="panel">
+      <h2>Aguardando chegada (${chegada.length})</h2>
+      <div class="atendimento-grid">
+        ${chegada.length ? chegada.map((a) => cardEstoqueChegada(a)).join('') : '<p class="empty">Nenhum equipamento aguardando chegada agora.</p>'}
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Aguardando saída (${saida.length})</h2>
+      <div class="atendimento-grid">
+        ${saida.length ? saida.map((a) => cardEstoqueSaida(a)).join('') : '<p class="empty">Nenhuma saída pendente agora.</p>'}
+      </div>
+    </div>`;
+}
+
+function cardEstoqueChegada(a) {
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-status">${tag('Aguardando chegada do cliente', 'amber')}</div>
+      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada</button></div>
+    </div>`;
+}
+
+function cardEstoqueSaida(a) {
+  const label = a.motivo_pos_venda === 'peca_enviada' ? 'Confirmar envio da peça' : 'Confirmar saída do equipamento';
+  const resumo = a.motivo_pos_venda === 'peca_enviada' ? 'Orçamento aprovado — peça pronta pra envio' : 'Equipamento reparado pelo setor de reparo';
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-resumo">${esc(resumo)}</div>
+      <div class="atendimento-status">${tag('Pronto pra saída', 'purple')}</div>
+      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button></div>
+    </div>`;
+}
+
+async function estoqueConfirmarChegada(id) {
+  try { await api(`/api/agenda/${id}/estoque/confirmar-chegada`, { method: 'POST' }); mostrarToast('Chegada confirmada — o setor de reparo foi avisado.'); renderFilaEstoque(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function estoqueConfirmarSaida(id) {
+  if (!confirm('Confirma que saiu rumo ao cliente? A O.S. será finalizada.')) return;
+  try { await api(`/api/agenda/${id}/estoque/confirmar-saida`, { method: 'POST' }); mostrarToast('Saída confirmada — O.S. finalizada.'); renderFilaEstoque(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- administrador: Solicitação de Atendimento (motivo "técnico vai até o cliente") ----------
+// depois que o pós-venda aprova o orçamento nesse caminho, o admin precisa criar uma O.S. de
+// verdade (visita técnica) pra agendar o técnico — essa tela reúne os pedidos e pré-preenche o
+// formulário padrão de Nova Ordem de Serviço com os dados do atendimento original.
+
+async function renderFilaSolicitacaoAtendimento() {
+  const { agenda } = await api('/api/agenda/fila-solicitacao-atendimento');
+  window._agendaCache = agenda;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Solicitação de Atendimento</h1><p>Orçamentos aprovados pra visita técnica — crie a O.S. de verdade pra agendar o técnico.</p></div>
+    <div class="atendimento-grid">
+      ${agenda.length ? agenda.map((a) => cardSolicitacaoAtendimento(a)).join('') : '<p class="empty">Nenhuma solicitação de atendimento pendente agora.</p>'}
+    </div>
+    <div id="form-nova-atividade"></div>`;
+}
+
+function cardSolicitacaoAtendimento(a) {
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      ${a.problema ? `<div class="atendimento-resumo">${esc(a.problema.slice(0, 140))}</div>` : ''}
+      <div class="atendimento-status">${tag('Orçamento aprovado — aguardando O.S.', 'orange')}</div>
+      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button></div>
+    </div>`;
+}
+
+function abrirCriarOSDeSolicitacao(id) {
+  const item = (window._agendaCache || []).find((a) => a.id === id);
+  if (!item) return;
+  mostrarFormNovaAtividade(null, item);
+  document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth' });
 }
 
 // ---------- toast ----------
