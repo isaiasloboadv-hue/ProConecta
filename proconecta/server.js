@@ -1163,6 +1163,18 @@ function montarCamposRegistro(body) {
   return out;
 }
 
+// a lista de busca da biblioteca só mostra título/equipamento/nº de série numa tabela — as fotos
+// nunca aparecem ali, só quando o caso é aberto (rota /api/registros/:id abaixo). Por isso a
+// lista nem carrega as fotos: economiza banda (que no Render é limitada) a cada busca, já que
+// cada resultado pode ter vários MB de fotos em base64.
+function semFotosRegistro(r) {
+  const { fotos, foto_destaque, ...resto } = r;
+  if (Array.isArray(resto.passos)) {
+    resto.passos = resto.passos.map((p) => { const { fotos: _fotosPasso, ...restoPasso } = p; return restoPasso; });
+  }
+  return resto;
+}
+
 // GET /api/registros?tipo=defeito|procedimento&q=&equipamento=&serie=  — biblioteca aprovada (qualquer usuário logado)
 rota('GET', /^\/api\/registros$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -1183,8 +1195,19 @@ rota('GET', /^\/api\/registros$/, async (req, res) => {
     const q = query.q.toLowerCase();
     lista = lista.filter((r) => [r.titulo, r.sintoma, r.causa, r.solucao].filter(Boolean).join(' ').toLowerCase().includes(q));
   }
-  lista = lista.map((r) => registroComAutor(data, r)).sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
-  enviarJSON(res, 200, { registros: await hidratarFotosProfundo(lista) });
+  lista = lista.map((r) => semFotosRegistro(registroComAutor(data, r))).sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  enviarJSON(res, 200, { registros: lista });
+});
+
+// GET /api/registros/:id — registro completo, COM fotos — usado só quando o caso é realmente
+// aberto (a lista acima nunca traz fotos, por economia de banda)
+rota('GET', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  enviarJSON(res, 200, { registro: await hidratarFotosProfundo(registroComAutor(data, registro)) });
 });
 
 // GET /api/registros/meus — o próprio autor vê todos os status dos registros que enviou

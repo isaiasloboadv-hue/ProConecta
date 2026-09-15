@@ -2988,9 +2988,11 @@ function filtrarDefeitos() {
   };
   renderBibliotecaDefeitos(filtros, true);
 }
-function abrirDetalheDefeito(i, origem) {
+async function abrirDetalheDefeito(i, origem) {
   const r = (window._defeitosCache || [])[i];
   if (!r) return;
+  // a lista de busca não traz fotos (economia de banda) — busca o registro completo só agora
+  if (!r._completo) { Object.assign(r, (await api(`/api/registros/${r.id}`)).registro); r._completo = true; }
   carregarLogoDataUri();
   const main = document.getElementById('main');
   const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)';
@@ -3049,6 +3051,7 @@ async function salvarEdicaoDefeito(id, i, origem) {
     const { registro } = await api(`/api/registros/${id}`, { method: 'PUT', body });
     mostrarToast('Alterações salvas.');
     if (origem === 'solicitacoes') { renderSolicitacoesEdicao(); return; }
+    registro._completo = true; // já veio com fotos — evita refazer a busca à toa
     window._defeitosCache[i] = registro;
     abrirDetalheDefeito(i, origem);
   } catch (e) { alert('Erro: ' + e.message); }
@@ -3093,6 +3096,7 @@ async function renderSolicitacoesEdicao() {
 function abrirDeSolicitacao(i) {
   const r = (window._solicitacoesCache || [])[i];
   if (!r) return;
+  r._completo = true; // essa lista já vem com fotos — evita refazer a busca à toa
   if (r.tipo === 'defeito') { window._defeitosCache = [r]; window._defeitosFiltros = {}; abrirDetalheDefeito(0, 'solicitacoes'); }
   else { window._procedimentosCache = [r]; window._procedimentosFiltros = {}; abrirDetalheProcedimento(0, 'solicitacoes'); }
 }
@@ -3135,9 +3139,11 @@ function filtrarProcedimentos() {
   };
   renderBibliotecaProcedimentos(filtros, true);
 }
-function abrirDetalheProcedimento(i, origem) {
+async function abrirDetalheProcedimento(i, origem) {
   const r = (window._procedimentosCache || [])[i];
   if (!r) return;
+  // a lista de busca não traz fotos (economia de banda) — busca o registro completo só agora
+  if (!r._completo) { Object.assign(r, (await api(`/api/registros/${r.id}`)).registro); r._completo = true; }
   carregarLogoDataUri();
   const main = document.getElementById('main');
   const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)';
@@ -3215,6 +3221,7 @@ async function salvarEdicaoProcedimento(id, i, origem) {
     const { registro } = await api(`/api/registros/${id}`, { method: 'PUT', body });
     mostrarToast('Alterações salvas.');
     if (origem === 'solicitacoes') { renderSolicitacoesEdicao(); return; }
+    registro._completo = true; // já veio com fotos — evita refazer a busca à toa
     window._procedimentosCache[i] = registro;
     abrirDetalheProcedimento(i, origem);
   } catch (e) { alert('Erro: ' + e.message); }
