@@ -7,6 +7,9 @@
 // Para enviar e-mail de verdade, defina as variáveis de ambiente:
 //   RESEND_API_KEY   (crie uma conta grátis em resend.com)
 //   EMAIL_REMETENTE  (ex: "Pro Conecta <onboarding@seudominio.com.br>")
+//   APP_URL          (ex: "https://proconecta.onrender.com" — sem isso o link do
+//                      convite/ativação aponta pro endereço interno do servidor,
+//                      que ninguém de fora consegue abrir)
 // Nenhuma outra mudança é necessária — enviarConvite() passa a usar a API do Resend.
 
 const REMETENTE = process.env.EMAIL_REMETENTE || 'Pro Conecta <onboarding@proconecta.com.br>';

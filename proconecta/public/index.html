@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pro Conecta</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0A2647">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pro Conecta">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@800;900&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
@@ -23,30 +30,30 @@
       <div class="field"><label>E-mail</label><input id="login-email" placeholder="seu@email.com.br"></div>
       <div class="field"><label>Senha</label><input id="login-senha" type="password"></div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="fazerLogin()">Entrar</button>
-      <div class="demo-box">
-        <div class="dtitle">Contas de demonstração</div>
-        <div class="demo-row"><span><b>Técnico</b> — isaias@proconecta.com.br</span><button class="demo-use" onclick="preencherDemo('isaias@proconecta.com.br')">Usar</button></div>
-        <div class="demo-row"><span><b>Administrador</b> — admin@proconecta.com.br</span><button class="demo-use" onclick="preencherDemo('admin@proconecta.com.br')">Usar</button></div>
-        <div class="demo-row"><span><b>Cliente</b> — cliente@abc.com.br</span><button class="demo-use" onclick="preencherDemo('cliente@abc.com.br')">Usar</button></div>
-      </div>
     </div>
     <div class="auth-strip">
-      <img src="https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=300&h=120&fit=crop" alt="">
-      <img src="https://images.unsplash.com/photo-1565043666747-69f6646db940?w=300&h=120&fit=crop" alt="">
-      <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?w=300&h=120&fit=crop" alt="">
+      <img src="https://cdn.prod.website-files.com/64a86f9032795ab0798d3f06/685ab32423bc994dd27144a4_Rob%C3%B4%20Colaborativo.jpg" alt="">
+      <img src="https://cdn.prod.website-files.com/64a86f9032795ab0798d3f06/69f88f5b06c9e53ef6add0ef_6859ab5e61226ca88dc0fbd2__LIV3882-2-2.webp" alt="">
+      <img src="https://cdn.prod.website-files.com/64a86f9032795ab0798d3f06/69f8907126254ddae3d4eb58_661e92f0dd08c23d939a7a92_m%C3%A1quina-de-grava%C3%A7%C3%A3o-a-laser-smartbox-portatil-10.webp" alt="">
     </div>
   </div>
 </div>
 
 <div id="appView" style="display:none">
   <header>
-    <div class="brand">
-      <div class="brand-mark chip"><img src="/logo.png" alt="Pro Conecta" style="height:28px;width:auto;display:block;"></div>
-      <div class="wordmark inline"><span class="pro">Pro</span><span class="conecta">Conecta</span></div>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <button class="hamburger-btn" id="btn-hamburger" onclick="alternarMenuMobile()" aria-label="Abrir menu">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <div class="brand">
+        <div class="brand-mark chip"><img src="/logo.png" alt="Pro Conecta" style="height:28px;width:auto;display:block;"></div>
+        <div class="wordmark inline"><span class="pro">Pro</span><span class="conecta">Conecta</span></div>
+      </div>
     </div>
     <div class="header-right" id="headerRight"></div>
   </header>
 
+  <div class="nav-backdrop" id="navBackdrop" onclick="fecharMenuMobile()"></div>
   <div class="shell">
     <nav class="side" id="sideNav"></nav>
     <main id="main"></main>
@@ -61,6 +68,13 @@
 <div class="modal-overlay" id="inviteModal"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.iife.js"></script>
 <script src="/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
+</script>
 </body>
 </html>

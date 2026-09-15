@@ -10,22 +10,25 @@ let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
-const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente' };
+const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', reparo: 'Setor Reparo', estoque: 'Estoque' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
+  atendimento: 'Atendimento',
 };
 // versão curta pro topo do card de O.S. — cabe ao lado da tag do técnico sem quebrar linha
 const TIPO_OS_LABEL_CURTO = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Trein. online',
   treinamento_presencial: 'Trein. presencial', demonstracao_tecnica: 'Demo. técnica',
+  atendimento: 'Atendimento',
 };
 const TIPO_OS_COR = {
   corretiva: 'falha', preventiva: 'green', treinamento_online: 'blue',
-  treinamento_presencial: 'amber', demonstracao_tecnica: 'orange',
+  treinamento_presencial: 'amber', demonstracao_tecnica: 'orange', atendimento: 'purple',
 };
-// laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura)
-const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva'];
+// laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura) — "atendimento"
+// (O.S. aberta automaticamente quando um técnico assume um chamado do chat) usa o mesmo laudo
+const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva', 'atendimento'];
 // termo de aceite com checklist/assinatura — hoje só treinamento presencial, enquanto
 // o modelo de referência específico dele não chega
 const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];
@@ -47,16 +50,30 @@ const UF_REGIAO = {
 async function api(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-  const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.erro || 'Erro na requisição');
-  return data;
-}
-
-function preencherDemo(email) {
-  document.getElementById('login-email').value = email;
-  document.getElementById('login-senha').value = '123456';
-  fazerLogin();
+  async function tentar() {
+    const res = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    let corpoInvalido = false;
+    const data = await res.json().catch(() => { corpoInvalido = true; return {}; });
+    if (!res.ok) {
+      const erro = new Error(data.erro || 'Erro na requisição');
+      erro.status = res.status;
+      // resposta sem JSON válido (ou sem campo erro) não veio do nosso backend — é sintoma de
+      // instabilidade da hospedagem (ex: "acordando" após período inativo no plano gratuito),
+      // não um erro de validação de verdade
+      erro.falhaTransitoria = corpoInvalido || !data.erro || [502, 503, 504].includes(res.status);
+      throw erro;
+    }
+    return data;
+  }
+  try {
+    return await tentar();
+  } catch (e) {
+    // instabilidade passageira da hospedagem: tenta mais uma vez sozinho antes de mostrar erro
+    // pro usuário — evita ter que clicar de novo em qualquer botão da tela por causa disso
+    if (!e.falhaTransitoria) throw e;
+    await new Promise((r) => setTimeout(r, 2500));
+    return await tentar();
+  }
 }
 
 async function fazerLogin() {
@@ -95,13 +112,161 @@ async function tentarSessaoExistente() {
   }
 }
 
+// ---------- fila de envio offline (relatórios do técnico) ----------
+// quando o técnico conclui um relatório sem internet, o envio é guardado no aparelho (com
+// fotos e tudo — por isso IndexedDB, não localStorage, que tem pouco espaço) em vez de dar
+// erro. Assim que a conexão voltar (evento 'online', abrir o app de novo, ou tocar em
+// Sincronizar) a fila é reenviada sozinha, na ordem em que foi criada.
+const IDB_NOME = 'proconecta_offline';
+const IDB_STORE = 'fila_visitas';
+const MSG_ENFILEIRADO = 'Sem conexão no momento — o relatório foi guardado neste aparelho e será enviado automaticamente assim que a internet voltar (ou toque em Sincronizar).';
+
+function abrirFilaOfflineDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NOME, 1);
+    req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(IDB_STORE)) req.result.createObjectStore(IDB_STORE, { keyPath: 'id' }); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function filaOfflineAdicionar(item) {
+  const db = await abrirFilaOfflineDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(item);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+async function filaOfflineListar() {
+  const db = await abrirFilaOfflineDB();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []).sort((a, b) => a.criado_em.localeCompare(b.criado_em)));
+    req.onerror = () => reject(req.error);
+  });
+}
+async function filaOfflineRemover(id) {
+  const db = await abrirFilaOfflineDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(id);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+
+// fetch() lança TypeError quando não há rede (sem chegar a ter resposta do servidor); erros
+// vindos do backend (validação, 403...) chegam como Error normal com mensagem própria — só o
+// primeiro caso deve cair na fila offline, o segundo é um erro de verdade pra tela tratar.
+function ehErroDeConexao(e) { return e instanceof TypeError; }
+
+// tenta enviar o relatório; se falhar por falta de conexão, guarda na fila em vez de propagar
+// o erro. `extra` carrega o que for preciso pra terminar o pós-processamento (PDF/e-mail) do
+// termo de aceite quando esse item sincronizar mais tarde. Falhas transitórias do servidor já
+// são reprocessadas sozinhas dentro de api().
+async function enviarVisitaOuEnfileirar(body, extra) {
+  try {
+    const resp = await api('/api/visitas', { method: 'POST', body });
+    return { enviado: true, visita: resp.visita };
+  } catch (e) {
+    if (!ehErroDeConexao(e)) throw e;
+    await filaOfflineAdicionar({ id: 'off-' + Date.now() + '-' + Math.random().toString(36).slice(2), body, criado_em: new Date().toISOString(), ...(extra || {}) });
+    await atualizarBadgeSincronizar();
+    return { enviado: false, enfileirado: true };
+  }
+}
+
+let sincronizandoFilaOffline = false;
+async function sincronizarFilaOffline() {
+  if (sincronizandoFilaOffline || !TOKEN) return;
+  if (!('indexedDB' in window)) return;
+  let fila;
+  try { fila = await filaOfflineListar(); } catch (e) { return; }
+  if (!fila.length) return;
+  sincronizandoFilaOffline = true;
+  let enviados = 0;
+  for (const item of fila) {
+    try {
+      const resp = await api('/api/visitas', { method: 'POST', body: item.body });
+      await filaOfflineRemover(item.id);
+      if (item.chaveRascunho) localStorage.removeItem(item.chaveRascunho);
+      if (item.pdfTermoAceite && resp.visita) {
+        try {
+          const pdfDataUri = gerarPdfRelatorio(item.pdfTermoAceite.dados, item.pdfTermoAceite.agendaItem);
+          const pdfBase64 = pdfDataUri.split(',')[1];
+          await api(`/api/visitas/${resp.visita.id}/enviar-relatorio`, { method: 'POST', body: { pdf_base64: pdfBase64, emails: item.pdfTermoAceite.emails } });
+        } catch (e2) { console.error('PDF/e-mail do relatório sincronizado depois falhou:', e2.message); }
+      }
+      enviados++;
+    } catch (e) {
+      if (ehErroDeConexao(e)) break; // sem rede de novo — tenta o resto na próxima
+      console.error('Descartando item pendente que o servidor rejeitou:', e.message);
+      await filaOfflineRemover(item.id);
+    }
+  }
+  sincronizandoFilaOffline = false;
+  await atualizarBadgeSincronizar();
+  if (enviados > 0) {
+    mostrarToast(`${enviados} relatório${enviados === 1 ? '' : 's'} pendente${enviados === 1 ? '' : 's'} sincronizado${enviados === 1 ? '' : 's'} com sucesso.`);
+    if (paginaAtual === 'agenda') renderAgenda();
+  }
+}
+
+async function atualizarBadgeSincronizar() {
+  const badge = document.getElementById('sync-badge');
+  if (!badge) return;
+  if (!('indexedDB' in window)) { badge.classList.add('hidden'); return; }
+  let fila = [];
+  try { fila = await filaOfflineListar(); } catch (e) {}
+  badge.textContent = fila.length;
+  badge.classList.toggle('hidden', fila.length === 0);
+}
+
+window.addEventListener('online', sincronizarFilaOffline);
+
+// ---------- notificação push (barra de notificação do celular) ----------
+// pede permissão ao navegador e inscreve este aparelho pra receber notificação de verdade
+// (O.S. atribuída, cliente confirmou, técnico a caminho) mesmo com o app fechado. Silencioso:
+// se o navegador não suportar, ou a pessoa negar a permissão, o app continua funcionando
+// normalmente — só sem a notificação na barra (o sino dentro do app continua funcionando).
+function urlBase64ParaUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const bruto = atob(base64);
+  const saida = new Uint8Array(bruto.length);
+  for (let i = 0; i < bruto.length; i++) saida[i] = bruto.charCodeAt(i);
+  return saida;
+}
+
+async function ativarNotificacoesPush() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
+    const registration = await navigator.serviceWorker.ready;
+    let inscricao = await registration.pushManager.getSubscription();
+    if (!inscricao) {
+      const permissao = await Notification.requestPermission();
+      if (permissao !== 'granted') return;
+      const { chave } = await api('/api/push/chave-publica');
+      inscricao = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ParaUint8Array(chave),
+      });
+    }
+    const json = inscricao.toJSON();
+    await api('/api/push/inscrever', { method: 'POST', body: { endpoint: json.endpoint, keys: json.keys } });
+  } catch (e) { /* notificação push é um extra — nunca deve travar o login */ }
+}
+
 function entrarNoApp() {
   document.getElementById('authView').style.display = 'none';
   document.getElementById('appView').style.display = 'block';
   montarSidebar();
   atualizarSino();
   sinoTimer = setInterval(atualizarSino, 15000);
-  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
+  atualizarBadgeSincronizar();
+  sincronizarFilaOffline();
+  if (['tecnico', 'administrador', 'producao', 'cliente', 'pos_venda', 'reparo', 'estoque'].includes(USER.papel)) ativarNotificacoesPush();
+  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', reparo: 'fila-reparo', estoque: 'fila-estoque' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
 
@@ -112,6 +277,10 @@ function initials(nome) {
 function renderHeaderRight() {
   const el = document.getElementById('headerRight');
   el.innerHTML = `
+    ${USER.papel === 'tecnico' ? `
+    <button class="btn-presenca ${USER.online ? 'online' : 'offline'}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
+      <span class="presenca-bolinha"></span><span class="presenca-label">${USER.online ? 'Online' : 'Offline'}</span>
+    </button>` : ''}
     <div class="user-chip">
       <div class="user-avatar">${initials(USER.nome)}</div>
       <div class="user-meta">
@@ -119,6 +288,10 @@ function renderHeaderRight() {
         <span class="u-role">${PAPEL_LABEL[USER.papel] || USER.papel}</span>
       </div>
     </div>
+    <button class="btn-bell" id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="bell-badge hidden" id="sync-badge">0</span>
+    </button>
     <div class="bell-wrap">
       <button class="btn-bell" id="btn-bell" onclick="alternarSino()">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3a6 6 0 0 0-6 6v3.3c0 .6-.2 1.2-.6 1.7L4 16h16l-1.4-2a2.6 2.6 0 0 1-.6-1.7V9a6 6 0 0 0-6-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -130,11 +303,36 @@ function renderHeaderRight() {
   `;
 }
 
+// liga/desliga a presença do técnico na fila de atendimento — só quem está online entra
+// no rodízio (round-robin) que distribui os atendimentos novos.
+async function alternarPresenca() {
+  const btn = document.getElementById('btn-presenca');
+  if (btn) btn.disabled = true;
+  try {
+    const { usuario } = await api('/api/tecnico/online', { method: 'POST', body: { online: !USER.online } });
+    USER.online = usuario.online;
+    USER.online_desde = usuario.online_desde;
+    renderHeaderRight();
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+// força buscar a versão mais nova do sistema e dos dados — útil no app instalado (PWA),
+// que pode ficar aberto em segundo plano por dias sem recarregar sozinho.
+function sincronizarApp() {
+  const btn = document.getElementById('btn-sync');
+  if (btn) btn.classList.add('girando');
+  location.reload();
+}
+
 // ---------- menu em cascata ----------
 
 const NAV = {
   tecnico: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
+    { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
+    { key: 'relatorio-manutencao', label: 'Criar Relatório', page: 'relatorio-manutencao' },
+    { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -150,6 +348,8 @@ const NAV = {
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
+    { key: 'painel-atendimentos', label: 'Atendimentos', page: 'painel-atendimentos' },
+    { key: 'solicitacao-atendimento', label: 'Solicitação de Atendimento', page: 'fila-solicitacao-atendimento' },
     { key: 'aprovacoes-visitas', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -180,7 +380,35 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'equipamentos', label: 'Meus equipamentos', page: 'equipamentos' },
-    { key: 'chamados', label: 'Abertura de chamado', page: 'chamados' },
+    { key: 'chamados', label: 'Atendimento', page: 'chamados' },
+  ],
+  producao: [
+    { key: 'biblioteca', label: 'Biblioteca', children: [
+      { key: 'acessar', label: 'Acessar biblioteca', children: [
+        { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
+        { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
+      ]},
+      { key: 'adicionar', label: 'Adicionar', children: [
+        { key: 'adicionar-defeito', label: 'Defeitos/Falhas', page: 'add-defeito' },
+        { key: 'adicionar-procedimento', label: 'Manual de Procedimentos', page: 'add-procedimento' },
+      ]},
+      { key: 'meus-registros', label: 'Meus registros', page: 'meus-registros' },
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
+    ]},
+    { key: 'clientes', label: 'Clientes', page: 'clientes' },
+    { key: 'equipamentos', label: 'Equipamentos', children: [
+      { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
+      { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+    ]},
+  ],
+  pos_venda: [
+    { key: 'fila-pos-venda', label: 'Pós-venda', page: 'fila-pos-venda' },
+  ],
+  reparo: [
+    { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
+  ],
+  estoque: [
+    { key: 'fila-estoque', label: 'Estoque', page: 'fila-estoque' },
   ],
 };
 
@@ -213,10 +441,11 @@ function renderNavNodes(nodes, nivel) {
 }
 
 function montarSidebar() {
-  const label = USER.papel === 'tecnico' ? 'Acesso técnico' : USER.papel === 'administrador' ? 'Acesso administrador' : 'Acesso cliente';
+  const label = 'Acesso ' + (PAPEL_LABEL[USER.papel] || 'cliente').toLowerCase();
   const nav = NAV[USER.papel] || [];
   document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
   renderHeaderRight();
+  aplicarEstadoMenuMobile();
 }
 
 function alternarGrupo(key) {
@@ -224,15 +453,35 @@ function alternarGrupo(key) {
   montarSidebar();
 }
 
+// menu lateral vira uma gaveta deslizante no celular (aberta pelo botão hamburger no cabeçalho)
+let menuMobileAberto = false;
+function aplicarEstadoMenuMobile() {
+  const nav = document.getElementById('sideNav');
+  const backdrop = document.getElementById('navBackdrop');
+  if (nav) nav.classList.toggle('open', menuMobileAberto);
+  if (backdrop) backdrop.classList.toggle('show', menuMobileAberto);
+}
+function alternarMenuMobile() {
+  menuMobileAberto = !menuMobileAberto;
+  aplicarEstadoMenuMobile();
+}
+function fecharMenuMobile() {
+  menuMobileAberto = false;
+  aplicarEstadoMenuMobile();
+}
+
 async function ir(pagina) {
   paginaAtual = pagina;
   const caminho = buscarCaminho(NAV[USER.papel] || [], pagina, []);
   if (caminho) caminho.forEach((k) => navAbertos.add(k));
+  fecharMenuMobile();
   montarSidebar();
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">Carregando...</div>';
   try {
     if (pagina === 'agenda') return renderAgenda();
+    if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
+    if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
     if (pagina === 'biblioteca-procedimentos') return renderBibliotecaProcedimentos();
@@ -248,6 +497,12 @@ async function ir(pagina) {
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
+    if (pagina === 'fila-atendimento') return renderFilaAtendimento();
+    if (pagina === 'painel-atendimentos') return renderPainelAtendimentos();
+    if (pagina === 'fila-pos-venda') return renderFilaPosVenda();
+    if (pagina === 'fila-reparo') return renderFilaReparo();
+    if (pagina === 'fila-estoque') return renderFilaEstoque();
+    if (pagina === 'fila-solicitacao-atendimento') return renderFilaSolicitacaoAtendimento();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -261,6 +516,17 @@ function badgeStatus(status) {
   return `<span class="badge badge-pendente">Em análise</span>`;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// as fontes padrão do jsPDF (Helvetica) só sabem desenhar o intervalo Latin-1 — emoji e outros
+// símbolos fora dele (digitados por autocorreção do teclado do celular, por ex.) viram
+// caracteres corrompidos no PDF em vez de sumirem, então tiram esses símbolos antes de imprimir.
+function limparPdf(s) {
+  return String(s == null ? '' : s)
+    .replace(/[✅✓•]/g, '-')
+    .replace(/[^\x00-\xFF]/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
+function numeroOS(a) { return a.numero_os || `OS-${String(a.id).padStart(6, '0')}`; }
 
 // campo de empresa/cliente com dropdown pesquisável (combobox) — em vez de um <select> puro.
 // idPrefix vira "<idPrefix>-nome" (o que o usuário digita/vê) + "<idPrefix>" (hidden com o id resolvido)
@@ -271,7 +537,8 @@ function campoClienteHTML(idPrefix, clientes, placeholder, onResolved) {
     <div class="combo-cliente" id="${idPrefix}-wrap">
       <input id="${idPrefix}-nome" autocomplete="off" placeholder="${esc(placeholder || 'Clique para escolher a empresa...')}"
         oninput="filtrarComboCliente('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})"
-        onfocus="this.select(); abrirComboCliente('${idPrefix}')">
+        onfocus="this.select(); abrirComboCliente('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''})"
+        onblur="setTimeout(() => resolverClienteDigitado('${idPrefix}'${onResolved ? `, '${onResolved}'` : ''}), 250)">
       <div class="combo-lista" id="${idPrefix}-lista"></div>
       <input type="hidden" id="${idPrefix}">
     </div>`;
@@ -292,8 +559,8 @@ function renderComboClienteLista(idPrefix, itens, onResolved) {
 
 // abre o menu mostrando SEMPRE a lista completa (ignora o texto atual do campo, que pode ser
 // o nome já selecionado) — clicar na caixa é sempre um convite a navegar/pesquisar do zero.
-function abrirComboCliente(idPrefix) {
-  renderComboClienteLista(idPrefix, todosClientesOrdenados());
+function abrirComboCliente(idPrefix, onResolved) {
+  renderComboClienteLista(idPrefix, todosClientesOrdenados(), onResolved);
 }
 
 function filtrarComboCliente(idPrefix, onResolved) {
@@ -312,18 +579,31 @@ function selecionarClienteCombo(idPrefix, clienteId, onResolved) {
   if (onResolved && typeof window[onResolved] === 'function') window[onResolved]();
 }
 
+// se o admin digitou/colou o nome da empresa (ou o navegador autopreencheu o campo) sem
+// clicar numa sugestão da lista, o id oculto fica vazio mesmo com o texto certo na tela —
+// ao sair do campo, tenta casar o texto com uma empresa cadastrada e resolve sozinho.
+function resolverClienteDigitado(idPrefix, onResolved) {
+  // o formulário pode já ter sido salvo/fechado antes do atraso de 250ms acabar — se os
+  // campos não existem mais no DOM, não há nada a resolver.
+  const campoOculto = document.getElementById(idPrefix);
+  const campoNome = document.getElementById(idPrefix + '-nome');
+  if (!campoOculto || !campoNome) return;
+  if (campoOculto.value) return;
+  const texto = campoNome.value.trim().toLowerCase();
+  if (!texto) return;
+  const cliente = (window._clientesCache || []).find((c) => c.nome_empresa.trim().toLowerCase() === texto);
+  if (cliente) {
+    selecionarClienteCombo(idPrefix, cliente.id, onResolved);
+  } else {
+    campoNome.value = '';
+  }
+}
+
 document.addEventListener('click', (e) => {
   document.querySelectorAll('.combo-cliente .combo-lista.show').forEach((lista) => {
     if (!lista.parentElement.contains(e.target)) lista.classList.remove('show');
   });
 });
-
-function selecionarClienteInicial(idPrefix, clientes) {
-  if (!clientes.length) return;
-  const ordenados = clientes.slice().sort((a, b) => a.nome_empresa.localeCompare(b.nome_empresa, 'pt-BR'));
-  document.getElementById(idPrefix + '-nome').value = ordenados[0].nome_empresa;
-  document.getElementById(idPrefix).value = ordenados[0].id;
-}
 
 // ---------- sino de notificações ----------
 
@@ -361,6 +641,14 @@ async function clicarNotificacao(registroId, tipo) {
     ir('aprovacoes-visitas');
   } else if (tipo === 'edicao_solicitada_biblioteca') {
     ir('solicitacoes-edicao-biblioteca');
+  } else if (tipo === 'chamado_fila') {
+    ir('fila-atendimento');
+  } else if (tipo === 'chamado_mensagem') {
+    paginaAtual = 'fila-atendimento';
+    montarSidebar();
+    abrirChatAtendimentoTecnico(registroId);
+  } else if (tipo === 'chamado_mensagem_cliente') {
+    ir('chamados');
   } else {
     ir('aprovacoes-biblioteca');
   }
@@ -374,11 +662,16 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- AGENDA ----------
+let minhaAgendaDetalheId = null;
 async function carregarAgendaComVisitas() {
   const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
   window._agendaCache = agenda;
   window._visitasPorAgenda = {};
-  visitas.forEach((v) => { window._visitasPorAgenda[v.agenda_id] = v; });
+  window._visitasRetornoPorAgenda = {};
+  visitas.forEach((v) => {
+    if ((v.rodada || 1) === 1) window._visitasPorAgenda[v.agenda_id] = v;
+    else window._visitasRetornoPorAgenda[v.agenda_id] = v;
+  });
 }
 
 async function renderAgenda() {
@@ -386,32 +679,45 @@ async function renderAgenda() {
     await carregarAgendaComVisitas();
     return renderAgendaCalendario();
   }
-  const { agenda } = await api('/api/agenda');
-  window._agendaCache = agenda;
+  minhaAgendaDetalheId = null;
+  await carregarAgendaComVisitas();
+  const agenda = window._agendaCache;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
-    <div class="panel"><table>
-      <tr><th>Data</th><th>Cliente</th><th>Equipamento</th><th>Tipo</th><th>Status</th><th></th></tr>
-      ${agenda.length ? agenda.map((a) => `
-        <tr>
-          <td>${fmtData(a.data_hora_inicio)}</td>
-          <td>${a.cliente_nome || '—'}</td>
-          <td>${a.equipamento_tipo || '—'} ${a.equipamento_modelo ? '(' + a.equipamento_modelo + ')' : ''}</td>
-          <td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td>
-          <td>${a.status === 'concluida'
-            ? (a.visita_status === 'aprovado' ? tag('Concluída', 'green') : a.visita_status === 'reprovado' ? tag('Reprovado', 'falha') : tag('Em análise', 'amber'))
-            : a.status === 'em_andamento' ? tag('Em andamento', 'blue') : tag('Pendente', 'amber')}</td>
-          <td>${a.status !== 'concluida' ? `<button class="btn btn-ghost btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}
-            ${a.status === 'concluida' && a.visita_id && a.visita_status === 'aprovado' ? (
-              a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
-                ? `<span class="tag tag-amber">Reabertura solicitada</span>`
-                : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`
-            ) : ''}</td>
-        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhuma atividade ainda.</td></tr>`}
-    </table></div>
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a)).join('')}</div>` : `<div class="empty">Nenhuma atividade ainda.</div>`}
     <div id="diario-form"></div>
   `;
+}
+
+// card da própria O.S. do técnico na "Minha agenda" — mesmo layout de card usado em todo o
+// resto do sistema (osCardCorpo), pra ficar igual em qualquer tamanho de tela (PC ou app) e
+// já trazer o selo de retrabalho, a tarja de fase etc.
+function cardOSMinhaAgenda(a) {
+  return `
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSMinhaAgenda(${a.id})" style="cursor:pointer;">
+      ${osCardCorpo(a)}
+      <div class="os-card-actions" onclick="event.stopPropagation()">
+        <button class="os-card-toggle" onclick="abrirDetalheOSMinhaAgenda(${a.id})">Abrir</button>
+      </div>
+    </div>`;
+}
+
+function abrirDetalheOSMinhaAgenda(id) {
+  minhaAgendaDetalheId = id;
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const visita = (window._visitasPorAgenda || {})[id];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="renderAgenda()">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOSCalendarioTecnico(a, visita)}</div>
+      ${detalheCompletoOS(a, visita)}
+    </div>`;
 }
 
 // ---------- AGENDA GERAL (admin): calendário mensal ----------
@@ -531,7 +837,7 @@ function abrirDetalheOSCalendario(id) {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="renderDiaCalendario('${calDiaSelecionado}')">‹ Voltar para o dia</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -542,9 +848,10 @@ function abrirDetalheOSCalendario(id) {
   `;
 }
 
-const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído' };
+const STATUS_OS_LABEL = { agendado: 'Agendado', pendente: 'Pendente', concluido: 'Concluído', finalizada: 'Finalizada' };
 
 function statusOS(a) {
+  if (a.finalizada) return 'finalizada';
   if (a.status === 'concluida') return a.visita_status === 'aprovado' ? 'concluido' : 'pendente';
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
@@ -557,16 +864,54 @@ function diasEntre(isoInicio, isoFim) {
   return Math.round((b - a) / 86400000);
 }
 
+// diz em que ponto da linha do tempo a O.S. está agora — vira a tarja horizontal
+// no topo do card, pra dar pra ver o andamento de todos os cards sem abrir um por um
+// cada tarja corresponde exatamente a uma etapa em aberto da linha do tempo (timelineOS) —
+// mostra sempre a etapa mais adiantada que ainda está pendente.
+const FASE_ATENDIMENTO_TARJA = {
+  em_atendimento: { label: 'Em atendimento', cor: 'blue' },
+  aguardando_pos_venda: { label: 'Aguardando pós-venda', cor: 'purple' },
+  aguardando_equipamento: { label: 'Aguardando equipamento', cor: 'amber' },
+  em_diagnostico_reparo: { label: 'Em diagnóstico (reparo)', cor: 'orange' },
+  orcamento_enviado: { label: 'Orçamento enviado', cor: 'pink' },
+  executando_reparo: { label: 'Executando reparo', cor: 'teal' },
+  aguardando_saida_estoque: { label: 'Aguardando saída (estoque)', cor: 'navy' },
+  aguardando_criacao_os: { label: 'Aguardando criação da O.S.', cor: 'red' },
+};
+
+function faseAtualOS(a) {
+  const visita = (window._visitasPorAgenda || {})[a.id];
+  if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
+  // O.S. de atendimento (nascida do chat) segue o fluxo de pós-venda/reparo, não o fluxo normal
+  // de deslocamento/orçamento/feedback do cliente
+  if (a.tipo === 'atendimento' && a.fase_atendimento) return FASE_ATENDIMENTO_TARJA[a.fase_atendimento] || FASE_ATENDIMENTO_TARJA.em_atendimento;
+  if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) return { label: 'Orçamento', cor: 'orange' };
+  if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
+    return a.retorno_deslocamento_iniciado_em ? { label: 'Técnico a caminho', cor: 'blue' } : { label: 'Aguardando deslocamento', cor: 'amber' };
+  }
+  if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) return { label: 'Aguardando feedback', cor: 'pink' };
+  if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
+  if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
+  if (visita) return { label: 'Relatório em análise', cor: 'orange' };
+  if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
+  if (!a.confirmado_cliente_em) return { label: 'Confirmação cliente', cor: 'purple' };
+  return { label: 'Aguardando deslocamento', cor: 'amber' };
+}
+
 function osCardCorpo(a) {
   const status = statusOS(a);
+  const fase = faseAtualOS(a);
   const hojeISO = dataISOLocal(new Date());
   const diaAtendimento = (a.data_hora_inicio || '').slice(0, 10);
   const diaAbertura = (a.criado_em || a.data_hora_inicio || '').slice(0, 10);
   const diffVenc = diasEntre(hojeISO, diaAtendimento);
   const vencRelativo = diffVenc === 0 ? 'hoje' : diffVenc > 0 ? `em ${diffVenc} dia${diffVenc === 1 ? '' : 's'}` : `há ${-diffVenc} dia${diffVenc === -1 ? '' : 's'}`;
+  const vencClasse = diffVenc < 0 ? 'os-venc-vencido' : diffVenc === 0 ? 'os-venc-hoje' : 'os-venc-futuro';
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
+      ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
+      <div class="os-fase-banner os-fase-${fase.cor}">${esc(fase.label)}</div>
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
         <span class="tag tag-${TIPO_OS_COR[a.tipo] || 'blue'} os-tag-tipo" title="${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}">${esc(TIPO_OS_LABEL_CURTO[a.tipo] || TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
@@ -574,20 +919,20 @@ function osCardCorpo(a) {
       </div>
       <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
       <div class="os-card-fields">
-        <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">OS-${String(a.id).padStart(6, '0')}</span></div>
+        <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">${esc(numeroOS(a))}</span></div>
         <div class="os-field"><span class="os-field-label">Contato</span><span class="os-field-value">${esc(a.contato || a.cliente_contato || '—')}</span></div>
         <div class="os-field"><span class="os-field-label">E-mail</span><span class="os-field-value">${esc(a.email || a.cliente_email || '—')}</span></div>
         <div class="os-field"><span class="os-field-label">Telefone</span><span class="os-field-value">${esc(a.telefone || a.cliente_telefone || '—')}</span></div>
       </div>
       <div class="os-card-footer">
-        <span class="os-venc">Venc ${vd}/${vm} · ${vencRelativo}</span>
+        <span class="os-venc ${vencClasse}">Venc ${vd}/${vm} · ${vencRelativo}</span>
         <span class="os-dias-abertura">${diasAbertura} dia${diasAbertura === 1 ? '' : 's'} desde a abertura</span>
       </div>`;
 }
 
 function cardOS(a) {
   return `
-    <div class="os-card" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOSCalendario(${a.id})">Abrir</button>
@@ -596,17 +941,22 @@ function cardOS(a) {
 }
 
 let agendaEmEdicaoId = null;
-async function mostrarFormNovaAtividade(agendaItem) {
+async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
   agendaEmEdicaoId = agendaItem ? agendaItem.id : null;
-  const [{ usuarios }, { equipamentos }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes')]);
+  window._origemSolicitacaoId = origemSolicitacao ? origemSolicitacao.id : null;
+  const [{ usuarios }, { equipamentos }, { clientes }, sugestaoNumero] = await Promise.all([
+    api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes'),
+    agendaItem ? Promise.resolve(null) : api('/api/agenda/proximo-numero'),
+  ]);
   const tecnicos = usuarios.filter((u) => u.papel === 'tecnico');
   window._clientesCache = clientes;
   window._equipamentosCache = equipamentos;
   document.getElementById('form-nova-atividade').innerHTML = `
-    <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : 'Nova Ordem de Serviço'}</div>
+    <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : origemSolicitacao ? 'Nova O.S. — a partir da Solicitação de Atendimento' : 'Nova Ordem de Serviço'}</div>
       <h2 style="margin-top:0;">Tipo de serviço</h2>
       <div class="form-grid">
-        <div class="full"><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
+        <div><label>Nº da O.S.</label><input id="na-numero-os" value="${esc(agendaItem ? numeroOS(agendaItem) : sugestaoNumero.numero)}"></div>
+        <div><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
           <option value="corretiva" ${agendaItem && agendaItem.tipo === 'corretiva' ? 'selected' : ''}>Corretiva</option>
           <option value="preventiva" ${agendaItem && agendaItem.tipo === 'preventiva' ? 'selected' : ''}>Preventiva</option>
           <option value="treinamento_online" ${agendaItem && agendaItem.tipo === 'treinamento_online' ? 'selected' : ''}>Treinamento online</option>
@@ -648,6 +998,7 @@ async function mostrarFormNovaAtividade(agendaItem) {
             <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="nao" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'nao' ? 'checked' : ''} style="width:auto;"> Não</label>
             <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="na-garantia" value="na" onchange="atualizarGarantiaNovaAtividade()" ${agendaItem && agendaItem.garantia === 'na' ? 'checked' : ''} style="width:auto;"> N/A</label>
           </div>
+          <div id="na-garantia-hint" style="color:var(--ink-soft); font-size:13px; margin-top:-8px; margin-bottom:10px;"></div>
         </div>
         <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
       </div>
@@ -677,8 +1028,31 @@ async function mostrarFormNovaAtividade(agendaItem) {
     preencherClienteNovaAtividade(false);
     document.getElementById('na-equip').value = agendaItem.equipamento_id;
     preencherNumeroSerieNovaAtividade();
+  } else if (origemSolicitacao) {
+    // puxa empresa/contato/equipamento/problema do atendimento original — o admin ajusta
+    // apenas data/horário e confirma o técnico antes de salvar
+    const clienteAtual = clientes.find((c) => c.id === origemSolicitacao.cliente_id);
+    if (clienteAtual) {
+      document.getElementById('na-cliente-nome').value = clienteAtual.nome_empresa;
+      document.getElementById('na-cliente').value = clienteAtual.id;
+    }
+    preencherClienteNovaAtividade(false);
+    document.getElementById('na-contato').value = origemSolicitacao.contato || '';
+    document.getElementById('na-telefone').value = origemSolicitacao.telefone || '';
+    document.getElementById('na-email').value = origemSolicitacao.email || '';
+    document.getElementById('na-setor-cliente').value = origemSolicitacao.setor_cliente || '';
+    document.getElementById('na-endereco').value = origemSolicitacao.endereco || '';
+    document.getElementById('na-numero').value = origemSolicitacao.numero || '';
+    document.getElementById('na-bairro').value = origemSolicitacao.bairro || '';
+    document.getElementById('na-cep').value = origemSolicitacao.cep || '';
+    document.getElementById('na-cidade').value = origemSolicitacao.cidade || '';
+    document.getElementById('na-estado').value = origemSolicitacao.estado || '';
+    document.getElementById('na-problema').value = origemSolicitacao.problema || '';
+    if (origemSolicitacao.equipamento_id) {
+      document.getElementById('na-equip').value = origemSolicitacao.equipamento_id;
+      preencherNumeroSerieNovaAtividade();
+    }
   } else {
-    selecionarClienteInicial('na-cliente', clientes);
     preencherClienteNovaAtividade();
   }
   atualizarTipoNovaAtividade();
@@ -706,6 +1080,40 @@ function preencherNumeroSerieNovaAtividade() {
   const equip = (window._equipamentosCache || []).find((e) => e.id === equipId);
   document.getElementById('na-numero-serie').value = equip ? equip.numero_serie : '';
   document.getElementById('na-data-fabricacao').value = equip ? (equip.data_fabricacao || '—') : '';
+  atualizarGarantiaAutomatica(equip ? equip.data_fabricacao : '');
+}
+
+// garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA). Dentro desse prazo,
+// a garantia é automática — trava em "Sim" pra evitar erro de preenchimento. Passado o prazo,
+// libera pro admin escolher (pode ter sido feita uma corretiva com um novo prazo de garantia).
+function dentroDaGarantiaDeFabrica(dataFabricacao) {
+  const m = /^(\d{2})\/(\d{4})$/.exec((dataFabricacao || '').trim());
+  if (!m) return null;
+  const limite = new Date(Number(m[2]), Number(m[1]) - 1, 1);
+  limite.setFullYear(limite.getFullYear() + 1);
+  return new Date() <= limite;
+}
+
+function atualizarGarantiaAutomatica(dataFabricacao) {
+  const radios = document.querySelectorAll('input[name="na-garantia"]');
+  if (!radios.length) return;
+  const dentroDoAno = dentroDaGarantiaDeFabrica(dataFabricacao);
+  const radioSim = document.querySelector('input[name="na-garantia"][value="sim"]');
+  if (dentroDoAno) {
+    radios.forEach((r) => { r.disabled = true; });
+    if (radioSim) { radioSim.checked = true; radioSim.dataset.auto = '1'; }
+  } else {
+    radios.forEach((r) => { r.disabled = false; });
+    // só limpa o "Sim" se ele veio do preenchimento automático (equipamento anterior) —
+    // se já era uma escolha manual salva (ex: editando uma O.S. existente), preserva.
+    if (radioSim && radioSim.dataset.auto === '1') {
+      radioSim.checked = false;
+      delete radioSim.dataset.auto;
+    }
+  }
+  const hint = document.getElementById('na-garantia-hint');
+  if (hint) hint.textContent = dentroDoAno ? 'Preenchido automaticamente: equipamento ainda dentro de 1 ano de fabricação.' : '';
+  atualizarGarantiaNovaAtividade();
 }
 
 function preencherClienteNovaAtividade(sobrescreverContato) {
@@ -725,10 +1133,12 @@ function preencherClienteNovaAtividade(sobrescreverContato) {
     document.getElementById('na-estado').value = cliente.estado || '';
   }
 
-  const equipDoCliente = (window._equipamentosCache || []).filter((e) => e.cliente_id === clienteId);
-  document.getElementById('na-equip').innerHTML = equipDoCliente.length
-    ? equipDoCliente.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')
-    : `<option value="">Nenhum equipamento cadastrado para este cliente</option>`;
+  const equipDoCliente = clienteId ? (window._equipamentosCache || []).filter((e) => e.cliente_id === clienteId) : [];
+  document.getElementById('na-equip').innerHTML = !clienteId
+    ? `<option value="">Escolha uma empresa primeiro</option>`
+    : equipDoCliente.length
+      ? equipDoCliente.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')
+      : `<option value="">Nenhum equipamento cadastrado para este cliente</option>`;
   preencherNumeroSerieNovaAtividade();
 }
 
@@ -742,6 +1152,7 @@ async function salvarNovaAtividade() {
     if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
   }
   const body = {
+    numero_os: document.getElementById('na-numero-os').value,
     tecnico_id: document.getElementById('na-tecnico').value,
     equipamento_id: document.getElementById('na-equip').value,
     cliente_id: document.getElementById('na-cliente').value,
@@ -768,7 +1179,14 @@ async function salvarNovaAtividade() {
       agendaEmEdicaoId = null;
       mostrarToast('Ordem de serviço atualizada.');
     } else {
-      await api('/api/agenda', { method: 'POST', body });
+      const { agenda: novaOS } = await api('/api/agenda', { method: 'POST', body });
+      if (window._origemSolicitacaoId) {
+        const origemId = window._origemSolicitacaoId;
+        window._origemSolicitacaoId = null;
+        await api(`/api/agenda/${origemId}/finalizar-solicitacao`, { method: 'POST', body: { nova_os_id: novaOS.id } });
+        mostrarToast('O.S. criada — atendimento original encerrado.');
+        return ir('fila-solicitacao-atendimento');
+      }
     }
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
     else renderAgenda();
@@ -812,8 +1230,8 @@ async function finalizarDiario(agendaId) {
     relevante_biblioteca: document.getElementById('dt-relevante').value === 'true',
   };
   try {
-    await api('/api/visitas', { method: 'POST', body });
-    mostrarModalSucesso('Atividade finalizada e enviada para aprovação do administrador.');
+    const r = await enviarVisitaOuEnfileirar(body);
+    mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : 'Atividade finalizada e enviada para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro: ' + e.message); }
 }
@@ -1205,11 +1623,17 @@ async function concluirRelatorio() {
   if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
 
   const body = { agenda_id: d.agenda_id, relatorio: { ...d, emails_copia: emails }, relevante_biblioteca: d.relevante_biblioteca };
-  let visita;
+  let visita, r;
   try {
-    ({ visita } = await api('/api/visitas', { method: 'POST', body }));
+    r = await enviarVisitaOuEnfileirar(body, { chaveRascunho: chaveRascunho(d.agenda_id), pdfTermoAceite: { dados: d, agendaItem: relatorioAgendaAtual, emails } });
+    visita = r.visita;
   } catch (e) {
     alert('Erro ao concluir: ' + e.message);
+    return;
+  }
+  if (r.enfileirado) {
+    mostrarModalSucesso(MSG_ENFILEIRADO);
+    renderAgenda();
     return;
   }
   // A partir daqui a visita já foi salva e enviada para aprovação — isso não pode mais falhar
@@ -1243,7 +1667,7 @@ function gerarPdfRelatorio(d, item) {
     if (y > 760) { doc.addPage(); y = 50; }
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
     doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(String(valor || '—'), largura - 130);
+    const linhas = doc.splitTextToSize(limparPdf(valor) || '—', largura - 130);
     doc.text(linhas, margem + 130, y);
     y += Math.max(14, linhas.length * 12);
   }
@@ -1265,13 +1689,13 @@ function gerarPdfRelatorio(d, item) {
     if (y > 760) { doc.addPage(); y = 50; }
     const r = c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A';
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(16, 24, 38);
-    doc.text(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${r}`, margem, y); y += 13;
-    if (c.observacao) { doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104); const linhas = doc.splitTextToSize('Obs: ' + c.observacao, largura - 10); doc.text(linhas, margem + 12, y); y += linhas.length * 12; }
+    doc.text(limparPdf(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${r}`), margem, y); y += 13;
+    if (c.observacao) { doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104); const linhas = doc.splitTextToSize(limparPdf('Obs: ' + c.observacao), largura - 10); doc.text(linhas, margem + 12, y); y += linhas.length * 12; }
   });
   y += 8;
 
   titulo('Observações');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.observacoes, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
 
   titulo('Aceite e avaliação');
   linha('Aceite', d.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito');
@@ -1284,8 +1708,8 @@ function gerarPdfRelatorio(d, item) {
   titulo('Assinaturas');
   const wImg = 220, hImg = 90;
   doc.setFontSize(10); doc.setTextColor(16, 24, 38);
-  doc.text(`Cliente: ${d.assinatura_cliente_nome}`, margem, y);
-  doc.text(`Técnico: ${d.assinatura_tecnico_nome}`, margem + largura / 2, y);
+  doc.text(limparPdf(`Cliente: ${d.assinatura_cliente_nome}`), margem, y);
+  doc.text(limparPdf(`Técnico: ${d.assinatura_tecnico_nome}`), margem + largura / 2, y);
   y += 8;
   try { doc.addImage(d.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
   try { doc.addImage(d.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
@@ -1341,8 +1765,8 @@ async function concluirRelatorioSimples(exigirSerie) {
     if (!String(relatorio_simples[c] || '').trim()) return alert('Preencha todos os campos obrigatórios.');
   }
   try {
-    await api('/api/visitas', { method: 'POST', body: { agenda_id: relatorioAgendaAtual.id, relatorio_simples } });
-    mostrarModalSucesso('Atendimento concluído e enviado para aprovação do administrador.');
+    const r = await enviarVisitaOuEnfileirar({ agenda_id: relatorioAgendaAtual.id, relatorio_simples });
+    mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : 'Atendimento concluído e enviado para aprovação do administrador.');
     renderAgenda();
   } catch (e) { alert('Erro ao concluir: ' + e.message); }
 }
@@ -1350,7 +1774,7 @@ async function concluirRelatorioSimples(exigirSerie) {
 // ---------- LAUDO TÉCNICO (corretiva / preventiva) ----------
 let laudoDraft = null;
 let laudoAgendaAtual = null;
-function chaveRascunhoLaudo(agendaId) { return `pc_rascunho_laudo_${agendaId}`; }
+function chaveRascunhoLaudo(agendaId, retorno) { return `pc_rascunho_laudo_${agendaId}${retorno ? '_retorno' : ''}`; }
 
 function laudoPadrao(item) {
   return {
@@ -1363,6 +1787,7 @@ function laudoPadrao(item) {
     laudo_tecnico: '', servico_realizado: '',
     pecas: [], fotos: [], observacoes: '',
     relevante_biblioteca: false,
+    necessidade_retorno: false,
   };
 }
 
@@ -1393,15 +1818,17 @@ async function renderLaudoTecnico(item) {
   laudoAgendaAtual = item;
   let salvoEm = null;
   try {
-    const bruto = localStorage.getItem(chaveRascunhoLaudo(item.id));
+    const bruto = localStorage.getItem(chaveRascunhoLaudo(item.id, item.retorno_pendente_tecnico));
     if (bruto) {
       const salvo = JSON.parse(bruto);
       laudoDraft = salvo.draft;
       salvoEm = salvo.em;
-    } else if (item.visita_id) {
+    } else if (item.visita_id && !item.retorno_pendente_tecnico) {
       const { visita } = await api(`/api/visitas/${item.visita_id}`);
       laudoDraft = visita.laudo ? { ...laudoPadrao(item), ...visita.laudo } : laudoPadrao(item);
     } else {
+      // relatório de retorno: começa em branco, só com os dados travados da O.S. — não
+      // reaproveita o texto do laudo original, que é um atendimento anterior e distinto
       laudoDraft = laudoPadrao(item);
     }
   } catch (e) { laudoDraft = laudoPadrao(item); }
@@ -1409,7 +1836,7 @@ async function renderLaudoTecnico(item) {
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Laudo Técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>${item.retorno_pendente_tecnico ? 'Relatório de retorno' : 'Laudo Técnico'} — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>${item.retorno_pendente_tecnico ? 'Segundo relatório desta O.S., referente ao retorno.' : 'Preenchimento presencial no cliente.'} Campos com * são obrigatórios.</p></div>
     <div class="panel">
       <h2>Dados do atendimento</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Definidos pelo administrador na abertura desta OS — não podem ser alterados aqui.</p>
@@ -1466,16 +1893,26 @@ async function renderLaudoTecnico(item) {
       <h2>Peças fornecidas</h2>
       <div class="steps-list" id="lt-pecas"></div>
       <button class="btn btn-ghost btn-sm" onclick="adicionarPecaLaudo()">+ Adicionar peça</button>
+      <label style="display:flex; align-items:center; gap:10px; font-weight:600; text-transform:none; font-size:13.5px; margin-top:14px;">
+        <input type="checkbox" id="lt-necessidade-retorno" onchange="atualizarRascunhoLaudo()" style="width:auto; accent-color:var(--blue);">
+        Vai ser necessário um retorno pra concluir o serviço (depois do orçamento das peças aprovado)
+      </label>
     </div>
 
     <div class="panel">
       <h2>Relatório fotográfico*</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Anexe ao menos uma foto do equipamento/serviço realizado.</p>
       <div class="step-photos" id="lt-fotos"></div>
-      <label class="photo-add" style="margin-top:10px;">
-        <span class="plus">+</span>Foto
-        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosLaudo(event)">
-      </label>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotosLaudo(event)">
+        </label>
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">+</span>Galeria
+          <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosLaudo(event)">
+        </label>
+      </div>
     </div>
 
     <div class="panel">
@@ -1501,7 +1938,7 @@ async function renderLaudoTecnico(item) {
     </div>
 
     <div class="panel">
-      <p style="font-size:12.5px; color:var(--ink-soft);">Ao finalizar, o laudo é enviado para aprovação do administrador. O PDF fica disponível para gerar assim que ele for aprovado.</p>
+      <p style="font-size:12.5px; color:var(--ink-soft);">${item.retorno_pendente_tecnico ? 'Ao finalizar, o relatório de retorno é enviado direto — sem passar de novo pela aprovação do gestor.' : 'Ao finalizar, o laudo é enviado para aprovação do administrador. O PDF fica disponível para gerar assim que ele for aprovado.'}</p>
       <p id="lt-rascunho-status" style="font-size:12px; color:var(--green);">${salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="limparLaudo(${item.id})">Limpar formulário</button>
@@ -1523,6 +1960,7 @@ function preencherCamposLaudo() {
   document.getElementById('lt-periodo').value = periodoReparo(d);
   if (d.garantia) { const r = document.querySelector(`input[name="lt-garantia"][value="${d.garantia}"]`); if (r) r.checked = true; }
   document.getElementById('lt-relevante-biblioteca').checked = !!d.relevante_biblioteca;
+  document.getElementById('lt-necessidade-retorno').checked = !!d.necessidade_retorno;
 }
 
 function renderPecasLaudo() {
@@ -1545,13 +1983,39 @@ function renderFotosLaudo() {
       <button class="photo-rm" onclick="removerFotoLaudo(${j})">×</button>
     </div>`).join('');
 }
-function adicionarFotosLaudo(event) {
-  const arquivos = Array.from(event.target.files || []);
-  Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
+// fotos de celular costumam vir com vários MB cada — sem isso, um relatório com só 4-5 fotos
+// já manda um POST de dezenas de MB, que trava ou falha em conexão de campo ("Failed to
+// fetch"). Redimensiona pro máximo de 1600px no lado maior e recomprime como JPEG, o que reduz
+// drasticamente o tamanho sem perda visível no relatório/PDF.
+function comprimirImagemDataUrl(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 1600;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        const escala = MAX / Math.max(width, height);
+        width = Math.round(width * escala);
+        height = Math.round(height * escala);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      try { resolve(canvas.toDataURL('image/jpeg', 0.75)); } catch (e) { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+function lerFotosComoDataUrl(arquivos) {
+  return Promise.all(Array.from(arquivos).map((arquivo) => new Promise((resolve) => {
     const leitor = new FileReader();
     leitor.onload = () => resolve(leitor.result);
     leitor.readAsDataURL(arquivo);
-  }))).then((dataUrls) => {
+  }).then(comprimirImagemDataUrl)));
+}
+function adicionarFotosLaudo(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
     laudoDraft.fotos.push(...dataUrls);
     renderFotosLaudo();
     atualizarRascunhoLaudo(true);
@@ -1569,10 +2033,11 @@ function atualizarRascunhoLaudo(semLerCampos) {
     const garantia = document.querySelector('input[name="lt-garantia"]:checked');
     d.garantia = garantia ? garantia.value : '';
     d.relevante_biblioteca = document.getElementById('lt-relevante-biblioteca').checked;
+    d.necessidade_retorno = document.getElementById('lt-necessidade-retorno').checked;
   }
   document.getElementById('lt-periodo').value = periodoReparo(laudoDraft);
   try {
-    localStorage.setItem(chaveRascunhoLaudo(laudoDraft.agenda_id), JSON.stringify({ draft: laudoDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
+    localStorage.setItem(chaveRascunhoLaudo(laudoDraft.agenda_id, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico), JSON.stringify({ draft: laudoDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
     const status = document.getElementById('lt-rascunho-status');
     if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
   } catch (e) {}
@@ -1580,7 +2045,7 @@ function atualizarRascunhoLaudo(semLerCampos) {
 
 function limparLaudo(agendaId) {
   if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
-  localStorage.removeItem(chaveRascunhoLaudo(agendaId));
+  localStorage.removeItem(chaveRascunhoLaudo(agendaId, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico));
   renderLaudoTecnico(laudoAgendaAtual);
 }
 
@@ -1593,101 +2058,296 @@ async function concluirLaudoTecnico() {
   if (!String(d.servico_realizado || '').trim()) return alert('Descreva o serviço realizado.');
   if (!d.fotos.length) return alert('Anexe ao menos uma foto no relatório fotográfico.');
 
+  const chaveRascunho = chaveRascunhoLaudo(d.agenda_id, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico);
   const body = { agenda_id: d.agenda_id, laudo: d, relevante_biblioteca: d.relevante_biblioteca };
+  let r;
   try {
-    await api('/api/visitas', { method: 'POST', body });
+    r = await enviarVisitaOuEnfileirar(body, { chaveRascunho });
   } catch (e) {
     alert('Erro ao concluir: ' + e.message);
     return;
   }
-  localStorage.removeItem(chaveRascunhoLaudo(d.agenda_id));
-  mostrarModalSucesso('Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.');
-  renderAgenda();
+  if (r.enviado) localStorage.removeItem(chaveRascunho);
+  const eraRetorno = laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico;
+  const eraReparo = laudoAgendaAtual && laudoAgendaAtual.tipo === 'atendimento' && USER.papel === 'reparo';
+  mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : eraReparo ? 'Relatório enviado.' : (eraRetorno ? 'Relatório de retorno enviado — o administrador foi avisado.' : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.'));
+  if (eraReparo) renderFilaReparo();
+  else renderAgenda();
 }
 
-function gerarPdfLaudo(d, item) {
+// PDF do laudo técnico (corretiva/preventiva) — mesmo layout do modelo em papel da PRO Marking
+// usado no relatório de manutenção (gerarPdfRelatorioManutencao): capa navy cheia página, depois
+// páginas de conteúdo com caixas com borda, checkboxes, tabela de peças e fotos 2 por linha, e
+// uma página final de contato. Helpers duplicados de propósito (em vez de compartilhados) pra
+// não arriscar mudar o relatório de manutenção, que já está pronto e aprovado.
+function gerarPdfLaudo(d, item, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const margem = 40; let y = 50;
-  const largura = doc.internal.pageSize.getWidth() - margem * 2;
-  function titulo(t) { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71); doc.text(t, margem, y); y += 18; doc.setDrawColor(20, 103, 214); doc.line(margem, y - 12, margem + largura, y - 12); }
-  function linha(rotulo, valor) {
-    if (y > 760) { doc.addPage(); y = 50; }
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
-    doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(String(valor || '—'), largura - 130);
-    doc.text(linhas, margem + 130, y);
-    y += Math.max(14, linhas.length * 12);
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function opcaoCheckbox(x, yy, marcado, label) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.9);
+    doc.rect(x, yy - 7, 7, 7, 'S');
+    if (marcado) { doc.setFillColor(...PDF_COR.ink); doc.rect(x + 1.2, yy - 5.8, 4.6, 4.6, 'F'); }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(label, x + 11, yy);
+    return x + 11 + doc.getTextWidth(label);
   }
-  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-  doc.text('Laudo Técnico — Pro Conecta', margem, y); y += 22;
-  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
-  doc.text(`Elaborado: ${new Date().toLocaleDateString('pt-BR')} · Setor: ${USER.setor || 'Suporte Técnico'}`, margem, y); y += 24;
 
-  titulo('Dados do atendimento');
-  linha('Empresa', item.cliente_nome); linha('Contato', item.contato || item.cliente_contato); linha('Telefone', item.telefone || item.cliente_telefone);
-  linha('Endereço', `${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`);
-  linha('Técnico', item.tecnico_nome || USER.nome);
-  linha('Equipamento', `${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''} (${item.equipamento_serie || '—'})`);
-  y += 8;
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
-  titulo('Dados do equipamento');
-  linha('Data de fabricação', d.data_fabricacao);
-  linha('Garantia', d.garantia === 'sim' ? 'Sim' : d.garantia === 'nao' ? 'Não' : `N/A — ${d.garantia_obs}`);
-  linha('Acessórios recebidos', d.acessorios); linha('Defeito informado', d.defeito_informado);
-  y += 8;
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text('PRO Marking', pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Laudo Técnico', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
 
-  titulo('Técnico responsável');
-  linha('Data de início', fmtData(d.data_entrada)); linha('Data de conclusão', fmtData(d.data_conclusao)); linha('Período de reparo', periodoReparo(d));
-  y += 8;
+  // apertado=true mantém o título colado no que vem embaixo (texto de laudo/serviço, fotos) —
+  // usado nas seções onde título e conteúdo precisam ficar visualmente juntos. Por padrão (sem
+  // subtítulo e sem apertado) o título ganha mais respiro, pra não ficar colado na primeira
+  // caixa de dados (Dados do cliente, Tipo de serviço, Dados do equipamento, Técnico responsável).
+  function tituloCentro(t, sub, apertado) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      y += apertado ? 4 : 16;
+    }
+  }
 
-  titulo('Laudo técnico');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.laudo_tecnico, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
+  function tituloEsquerda(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem, y); y += 14;
+  }
 
-  titulo('Serviço realizado');
-  { if (y > 740) { doc.addPage(); y = 50; } doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38); const linhas = doc.splitTextToSize(d.servico_realizado, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8; }
-
-  if (d.pecas.length) {
-    titulo('Peças fornecidas');
-    d.pecas.forEach((p) => {
-      if (y > 760) { doc.addPage(); y = 50; }
-      doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-      doc.text(`• ${p.descricao || '—'}${p.quantidade ? ' (qtd: ' + p.quantidade + ')' : ''}`, margem, y); y += 13;
+  // linha de campos "LABEL: valor" dentro de caixas com borda, lado a lado
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
     });
-    y += 8;
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(26); doc.setFont(undefined, 'bold');
+  doc.setTextColor(...PDF_COR.blueBright); doc.text('PRO', pageW / 2 - 4, 265, { align: 'right' });
+  doc.setTextColor(...PDF_COR.white); doc.text('Marking', pageW / 2 + 2, 265, { align: 'left' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('LAUDO TÉCNICO', pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(item.cliente_nome).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do cliente');
+  linhaCampos([{ label: 'Empresa', valor: d.empresa || item.cliente_nome, frac: 1 }]);
+  linhaCampos([{ label: 'Contato', valor: d.contato || item.contato || item.cliente_contato, frac: 1 }]);
+  linhaCampos([{ label: 'Telefone', valor: d.telefone || item.telefone || item.cliente_telefone, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Tipo de serviço');
+  {
+    const opcoes = [['preventiva', 'PREVENTIVA'], ['corretiva', 'CORRETIVA']];
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5);
+    const larguras = opcoes.map(([, l]) => 11 + doc.getTextWidth(l));
+    const gap = 16;
+    const total = larguras.reduce((a, b) => a + b, 0) + gap * (larguras.length - 1);
+    let cx = pageW / 2 - total / 2;
+    opcoes.forEach(([v, l], idx) => { opcaoCheckbox(cx, y, item.tipo === v, l); cx += larguras[idx] + gap; });
+    y += 26;
+  }
+
+  tituloCentro('Dados do equipamento');
+  linhaCampos([{ label: 'Equipamento', valor: d.equipamento_tipo || item.equipamento_tipo, frac: 0.34 }, { label: 'Modelo', valor: d.modelo_maquina || item.equipamento_modelo, frac: 0.4 }, { label: 'Nº Série', valor: d.numero_serie || item.equipamento_serie, frac: 0.26 }]);
+  {
+    const wGarantia = largura * 0.62, wData = largura - wGarantia, altura = 20;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, wGarantia, altura, 'S');
+    doc.rect(margem + wGarantia, y, wData, altura, 'S');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('GARANTIA:', margem + 7, y + 13);
+    let cx = margem + 7 + doc.getTextWidth('GARANTIA: ') + 4;
+    [['sim', 'SIM'], ['nao', 'NÃO'], ['na', 'N/A']].forEach(([v, l]) => { cx = opcaoCheckbox(cx, y + 13, d.garantia === v, l) + 10; });
+    doc.setFont(undefined, 'bold'); doc.text('DATA DE FABRICAÇÃO: ', margem + wGarantia + 7, y + 13);
+    const wLblFab = doc.getTextWidth('DATA DE FABRICAÇÃO: ');
+    doc.setFont(undefined, 'normal'); doc.text(limparPdf(d.data_fabricacao) || '—', margem + wGarantia + 7 + wLblFab, y + 13);
+    y += altura;
+  }
+  linhaCampos([{ label: 'Acessórios', valor: d.acessorios, frac: 1 }]);
+  linhaCampos([{ label: 'Defeito informado', valor: d.defeito_informado, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Técnico responsável');
+  linhaCampos([{ label: 'Nome', valor: d.tecnico_nome || item.tecnico_nome || USER.nome, frac: 0.5 }, { label: 'E-mail', valor: d.tecnico_email || USER.email, frac: 0.5 }]);
+  linhaCampos([{ label: 'Entrada', valor: fmtData(d.data_entrada), frac: 0.33 }, { label: 'Conclusão', valor: fmtData(d.data_conclusao), frac: 0.33 }, { label: 'Período', valor: periodoReparo(d), frac: 0.34 }]);
+  y += 16;
+
+  tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(d.laudo_tecnico) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  tituloCentro('Serviço realizado', null, true);
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(d.servico_realizado) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 14;
+  }
+
+  tituloEsquerda('Peças Fornecidas');
+  {
+    const cols = [{ t: 'Item', frac: 0.14 }, { t: 'Descrição da peça', frac: 0.66 }, { t: 'Qtd.', frac: 0.2 }];
+    const larguras = cols.map((c) => largura * c.frac);
+    if (y + 20 > pageH - margem) novaPagina();
+    let cx = margem;
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
+    y += 18;
+    const pecas = d.pecas || [];
+    if (!pecas.length) {
+      if (y + 18 > pageH - margem) novaPagina();
+      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem + 6, y + 12);
+      y += 18;
+    } else {
+      pecas.forEach((p, i) => {
+        if (y + 18 > pageH - margem) novaPagina();
+        cx = margem;
+        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', String(p.quantidade || '—')];
+        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
+        y += 18;
+      });
+    }
+    y += 16;
   }
 
   if (d.observacoes) {
-    titulo('Observações');
-    if (y > 740) { doc.addPage(); y = 50; }
-    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(16, 24, 38);
-    const linhas = doc.splitTextToSize(d.observacoes, largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 8;
+    tituloCentro('Observações');
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 14;
   }
 
-  if (d.fotos.length) {
-    doc.addPage(); y = 50;
-    titulo('Relatório fotográfico');
-    const wImg = 240, hImg = 180;
-    let x = margem;
-    d.fotos.forEach((f, i) => {
-      if (x + wImg > margem + largura) { x = margem; y += hImg + 20; }
-      if (y + hImg > 780) { doc.addPage(); y = 50; x = margem; }
-      const m = /^data:image\/(\w+);/.exec(f);
-      const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
-      try { doc.addImage(f, formato, x, y, wImg, hImg); } catch (e) {}
-      x += wImg + 20;
-    });
+  // garante que o título "Relatório fotográfico" nunca fique sozinho no fim de uma página
+  // com as fotos só aparecendo na página seguinte.
+  if (d.fotos && d.fotos.length) {
+    const gapCheck = 12, wImgCheck = (largura - gapCheck) / 2, hImgCheck = wImgCheck * 0.68;
+    if (y + 34 + hImgCheck > pageH - margem) novaPagina();
+  }
+  tituloCentro('Relatório fotográfico', null, true);
+  if (d.fotos && d.fotos.length) {
+    const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+    for (let i = 0; i < d.fotos.length; i += 2) {
+      if (y + hImg > pageH - margem) novaPagina();
+      [d.fotos[i], d.fotos[i + 1]].forEach((f, j) => {
+        if (!f) return;
+        const cx = margem + j * (wImg + gap);
+        try {
+          const m = /^data:image\/(\w+);/.exec(f);
+          const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+          doc.setDrawColor(...PDF_COR.line);
+          doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+          doc.addImage(f, formato, cx, y, wImg, hImg);
+        } catch (e) {}
+      });
+      y += hImg + gap;
+    }
+  } else {
+    doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Nenhuma foto anexada.', margem, y); y += 16;
   }
 
-  doc.setFontSize(9); doc.setTextColor(74, 85, 104);
-  doc.text('PRO Marking · WhatsApp 12 99718-7506 · Telefone 12 3902-3453 · suporte@promarking.com.br', margem, doc.internal.pageSize.getHeight() - 24);
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('PRO Marking', pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text('WhatsApp: 12 99718-7506', pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text('Telefone: 12 3902-3453', pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
 
-  return doc.output('datauristring');
+  return doc.output('bloburl');
 }
 
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
 let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
+let osSomenteHoje = false;
 
 async function renderAprovacoesVisitas() {
   await carregarAgendaComVisitas();
@@ -1695,6 +2355,7 @@ async function renderAprovacoesVisitas() {
 }
 
 function mudarMesOS(delta) {
+  osSomenteHoje = false;
   osMes += delta;
   if (osMes < 0) { osMes = 11; osAno--; }
   if (osMes > 11) { osMes = 0; osAno++; }
@@ -1705,24 +2366,27 @@ function irParaHojeOS() {
   const hoje = new Date();
   osAno = hoje.getFullYear();
   osMes = hoje.getMonth();
+  osSomenteHoje = !osSomenteHoje;
   desenharOrdemServico();
 }
 
 function desenharOrdemServico() {
   const agenda = window._agendaCache || [];
   const visitasPorAgenda = window._visitasPorAgenda || {};
-  const doMes = agenda
+  const hojeISO = dataISOLocal(new Date());
+  let doMes = agenda
     .filter((a) => {
       const d = new Date(a.data_hora_inicio);
       return d.getFullYear() === osAno && d.getMonth() === osMes;
     })
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  if (osSomenteHoje) doMes = doMes.filter((a) => (a.data_hora_inicio || '').slice(0, 10) === hojeISO);
   const reaberturas = Object.values(visitasPorAgenda).filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
 
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Ordem de Serviço</h1><p>${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}</p></div>
+      <div><h1>Ordem de Serviço</h1><p>${osSomenteHoje ? `${doMes.length} O.S. hoje` : `${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}`}</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -1733,7 +2397,7 @@ function desenharOrdemServico() {
           <div class="cal-mes-label">${MES_LABEL[osMes]} de ${osAno}</div>
           <button onclick="mudarMesOS(1)">›</button>
         </div>
-        <button class="btn-outline-sm" onclick="irParaHojeOS()">Hoje</button>
+        <button class="btn-outline-sm ${osSomenteHoje ? 'active' : ''}" style="${osSomenteHoje ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="irParaHojeOS()">${osSomenteHoje ? '✓ Só hoje' : 'Hoje'}</button>
       </div>
     </div>
 
@@ -1743,9 +2407,9 @@ function desenharOrdemServico() {
       <tr><th>Equipamento</th><th>Técnico</th><th>Motivo</th><th></th></tr>
       ${reaberturas.map((v) => `
         <tr>
-          <td>${v.equipamento_tipo || '—'}</td>
-          <td>${v.tecnico_nome || '—'}</td>
-          <td>${esc(v.solicitacao_reabertura.motivo || '—')}</td>
+          <td data-label="Equipamento">${v.equipamento_tipo || '—'}</td>
+          <td data-label="Técnico">${v.tecnico_nome || '—'}</td>
+          <td data-label="Motivo">${esc(v.solicitacao_reabertura.motivo || '—')}</td>
           <td>
             <button class="btn btn-primary btn-sm" onclick="reabrirVisita(${v.id})">Aprovar e reabrir</button>
             <button class="btn btn-ghost btn-sm" onclick="recusarReabertura(${v.id})">Recusar</button>
@@ -1758,7 +2422,53 @@ function desenharOrdemServico() {
 
 // ações disponíveis pra uma O.S. (aprovar/reprovar/reabrir/excluir relatório + editar/excluir a própria O.S.)
 // — usadas tanto no card quanto na tela de detalhe.
+// ações de uma O.S. de atendimento (fluxo pós-venda/reparo) — o administrador vê e usa os
+// mesmos botões das telas dedicadas de pós-venda/reparo, como reforço se ninguém dos setores
+// estiver disponível
+function acoesOSAtendimento(a) {
+  const fase = a.fase_atendimento;
+  if (fase === 'em_atendimento') {
+    return `
+      <button class="btn-outline-sm" onclick="encerrarAtendimento(${a.id})">✓ Encerrar atendimento</button>
+      <button class="btn btn-primary btn-sm" onclick="encaminharPosVenda(${a.id})">Encaminhar pro pós-venda</button>`;
+  }
+  if (fase === 'aguardando_pos_venda') {
+    return `
+      ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
+      <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>`;
+  }
+  if (fase === 'aguardando_equipamento') {
+    if (!a.estoque_recebido_em) return `<button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada (estoque)</button>`;
+    return `<button class="btn btn-primary btn-sm" onclick="reparoIniciarAtendimento(${a.id})">Iniciar atendimento (reparo)</button>`;
+  }
+  if (fase === 'em_diagnostico_reparo') return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de diagnóstico</button>`;
+  if (fase === 'orcamento_enviado') {
+    return `
+      <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
+      <button class="btn btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>`;
+  }
+  if (fase === 'executando_reparo') return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de liberação</button>`;
+  if (fase === 'aguardando_saida_estoque') {
+    const label = a.motivo_pos_venda === 'peca_enviada' ? 'Confirmar envio da peça (estoque)' : 'Confirmar saída do equipamento (estoque)';
+    return `<button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button>`;
+  }
+  if (fase === 'aguardando_criacao_os') return `<button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button>`;
+  return '';
+}
+
 function acoesOS(a, visita) {
+  if (a.finalizada) {
+    return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço. Abra uma nova O.S. se precisar de um novo atendimento.</span>`;
+  }
+  // O.S. de atendimento (chat): o administrador pode agir como backup do pós-venda/reparo se
+  // precisar, além das telas dedicadas de cada setor
+  if (a.tipo === 'atendimento' && a.fase_atendimento) return acoesOSAtendimento(a);
+  if (!a.confirmado_cliente_em) {
+    return `
+      <button class="btn btn-primary btn-sm" onclick="confirmarClienteOS(${a.id})">✓ Confirmar cliente</button>
+      <button class="btn-outline-sm" onclick="editarOS(${a.id})">Editar</button>
+      <button class="btn-outline-sm" onclick="excluirOS(${a.id})" style="color:var(--red); border-color:var(--red);">Excluir O.S.</button>`;
+  }
   let acoes;
   if (visita && visita.status_aprovacao === 'pendente') {
     acoes = `
@@ -1766,10 +2476,30 @@ function acoesOS(a, visita) {
       ${visita.relevante_biblioteca ? `<button class="btn btn-primary btn-sm" onclick="aprovarVisita(${visita.id}, true)">Aprovar e incluir na biblioteca</button>` : ''}
       <button class="btn btn-ghost btn-sm" onclick="sugerirEdicaoVisita(${visita.id})">Sugerir edição</button>
       <button class="btn btn-ghost btn-sm" onclick="reprovarVisita(${visita.id})">Reprovar</button>`;
-  } else if (visita && visita.status_aprovacao === 'aprovado') {
+  } else if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) {
     acoes = `
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
-      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>`;
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
+      <button class="btn btn-primary btn-sm" onclick="orcamentoAprovadoOS(${a.id})">Orçamento aprovado</button>
+      <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
+    acoes = `
+      <span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico enviar o relatório de retorno.</span>
+      <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) {
+    acoes = `
+      <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
+      <button class="btn btn-primary btn-sm" onclick="registrarFeedbackOS(${a.id})">✓ Cliente OK</button>
+      ${!a.visita_retorno_id ? `<button class="btn btn-ghost btn-sm" onclick="retrabalhoOS(${a.id})" style="color:var(--red);">↺ Retorno / retrabalho</button>` : ''}
+      <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
+  } else if (visita && visita.status_aprovacao === 'aprovado') {
+    const umDiaMs = 24 * 60 * 60 * 1000;
+    const podeFinalizar = visita.data_aprovacao && (Date.now() - new Date(visita.data_aprovacao).getTime()) >= umDiaMs;
+    acoes = `
+      <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
+      <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
+      ${podeFinalizar ? `<button class="btn btn-primary btn-sm" onclick="finalizarOS(${a.id})">Finalizar O.S.</button>` : `<span class="tag tag-amber">Aguarde 1 dia após a aprovação pra finalizar</span><button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`}`;
   } else if (visita && visita.status_aprovacao === 'reprovado') {
     acoes = `<span class="tag tag-falha">Reprovado${visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''}</span>`;
   } else if (visita && visita.status_aprovacao === 'alteracao_sugerida') {
@@ -1783,9 +2513,56 @@ function acoesOS(a, visita) {
   return acoes;
 }
 
+async function finalizarOS(id) {
+  if (!confirm('Confirma que a empresa já deu o retorno concordando com o serviço prestado? Depois de finalizada, esta O.S. não pode mais ser alterada — um novo atendimento vai precisar de uma O.S. nova.')) return;
+  try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST' }); mostrarToast('O.S. finalizada.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao finalizar: ' + e.message); }
+}
+
+// escape hatch: o administrador pode finalizar direto quando julgar necessário, pulando
+// orçamento/retorno do técnico/feedback do cliente/prazo de 1 dia — usado com moderação
+async function finalizarForcadoOS(id) {
+  if (!confirm('Isso finaliza a O.S. pulando as etapas pendentes (orçamento, retorno do técnico, feedback do cliente, prazo de 1 dia). Confirma que quer finalizar assim mesmo?')) return;
+  try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST', body: { forcar: true } }); mostrarToast('O.S. finalizada — etapas puladas.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao finalizar: ' + e.message); }
+}
+
+// 2ª etapa da linha do tempo: o admin confirma que o cliente já aceitou o agendamento —
+// libera o técnico pra iniciar o deslocamento e executar a O.S. (ficam bloqueados até aqui)
+async function confirmarClienteOS(id) {
+  if (!confirm('Confirma que o cliente já aceitou este agendamento? Isso libera o técnico para iniciar o deslocamento e executar a O.S.')) return;
+  try { await api(`/api/agenda/${id}/confirmar-cliente`, { method: 'POST' }); mostrarToast('Cliente confirmado — o técnico já pode prosseguir.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao confirmar: ' + e.message); }
+}
+
+// passo entre a aprovação do relatório e a finalização da O.S.: o admin registra que o
+// cliente aprovou o serviço ("Cliente OK") — só depois disso o botão Finalizar O.S. libera
+async function registrarFeedbackOS(id) {
+  if (!confirm('Confirma que o cliente aprovou o serviço prestado?')) return;
+  try { await api(`/api/agenda/${id}/registrar-feedback`, { method: 'POST' }); mostrarToast('Feedback do cliente registrado.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao registrar feedback: ' + e.message); }
+}
+
+// quando o relatório aprovado tem peças fornecidas, o admin aprova o orçamento antes de
+// seguir — se o técnico também marcou necessidade de retorno, libera pra ele enviar um
+// segundo relatório antes de chegar na etapa de feedback do cliente
+async function orcamentoAprovadoOS(id) {
+  if (!confirm('Confirma que o orçamento das peças fornecidas foi aprovado?')) return;
+  try { await api(`/api/agenda/${id}/orcamento-aprovado`, { method: 'POST' }); mostrarToast('Orçamento aprovado.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao aprovar orçamento: ' + e.message); }
+}
+
+// feedback negativo do cliente: precisa de um retorno do técnico (ex.: novo treinamento) —
+// marca a O.S. como retrabalho e libera pro técnico enviar um segundo relatório
+async function retrabalhoOS(id) {
+  if (!confirm('Confirma que o cliente deu um feedback negativo e precisa de um retorno do técnico? Isso marca a O.S. como retrabalho.')) return;
+  try { await api(`/api/agenda/${id}/retrabalho`, { method: 'POST' }); mostrarToast('Retrabalho registrado — o técnico foi avisado.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao registrar retrabalho: ' + e.message); }
+}
+
 function cardOSAdmin(a) {
   return `
-    <div class="os-card" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
       ${osCardCorpo(a)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOS(${a.id})">Abrir</button>
@@ -1801,7 +2578,7 @@ function abrirDetalheOS(id) {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>OS-${String(a.id).padStart(6, '0')}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="desenharOrdemServico()">‹ Voltar</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -1833,21 +2610,138 @@ function fmtDataHora(iso) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// linha do tempo: abertura da O.S. -> relatório enviado -> aprovação/reprovação
-function timelineOS(a, visita) {
-  const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
-  if (visita) {
-    passos.push({ label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' });
-    if (visita.status_aprovacao === 'aprovado') {
-      passos.push({ label: 'Aprovado pelo administrador', data: visita.data_aprovacao, estado: 'feito' });
-    } else if (visita.status_aprovacao === 'reprovado') {
-      passos.push({ label: 'Reprovado pelo administrador' + (visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''), data: visita.data_aprovacao, estado: 'reprovado' });
+// linha do tempo completa: abertura -> confirmação do cliente -> deslocamento -> relatório ->
+// aprovação do gestor -> feedback do cliente -> finalização da O.S. Cada etapa aparece sempre
+// (feita ou em aberto), na ordem — só a reprovação interrompe a sequência normal.
+// linha do tempo de uma O.S. de atendimento (nascida do chat) — segue o fluxo de pós-venda/setor
+// reparo, bem diferente do fluxo normal (sem confirmação de cliente/deslocamento/feedback)
+function timelineOSAtendimento(a) {
+  const passos = [
+    { label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' },
+    { label: 'Em atendimento (chat)', data: a.criado_em, estado: 'feito' },
+  ];
+  if (!a.encaminhado_pos_venda_em) {
+    if (a.finalizada) {
+      passos.push({ label: 'Resolvido direto no atendimento (chat) — sem precisar do pós-venda', data: a.finalizado_em, estado: 'feito' });
+      passos.push({ label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' });
     } else {
-      passos.push({ label: 'Aguardando aprovação do administrador', data: null, estado: 'pendente' });
+      passos.push({ label: 'Em aberto — o técnico encerra direto ou encaminha pro pós-venda', data: null, estado: 'pendente' });
     }
-  } else {
-    passos.push({ label: 'Aguardando o técnico preencher o relatório', data: null, estado: 'pendente' });
+    return renderizarTimelineOS(passos);
   }
+  passos.push({ label: `Encaminhado pro pós-venda${a.motivo_pos_venda ? ' — ' + esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '') : ''}`, data: a.encaminhado_pos_venda_em, estado: 'feito' });
+
+  if (a.motivo_pos_venda === 'cliente_envia_equipamento') {
+    passos.push(a.estoque_recebido_em
+      ? { label: 'Equipamento chegou e foi conferido pelo estoque', data: a.estoque_recebido_em, estado: 'feito' }
+      : { label: 'Aguardando o equipamento chegar no estoque', data: null, estado: 'pendente' });
+    if (!a.estoque_recebido_em) return renderizarTimelineOS(passos);
+
+    passos.push(a.equipamento_recebido_em
+      ? { label: 'Setor de reparo iniciou o diagnóstico', data: a.equipamento_recebido_em, estado: 'feito' }
+      : { label: 'Aguardando o setor de reparo iniciar o diagnóstico', data: null, estado: 'pendente' });
+    if (!a.equipamento_recebido_em || a.fase_atendimento === 'em_diagnostico_reparo') return renderizarTimelineOS(passos);
+  }
+
+  passos.push(a.pos_venda_orcamento_enviado_em
+    ? { label: 'Orçamento enviado ao cliente', data: a.pos_venda_orcamento_enviado_em, estado: 'feito' }
+    : { label: 'Aguardando pós-venda enviar o orçamento', data: null, estado: 'pendente' });
+  if (!a.pos_venda_orcamento_enviado_em) return renderizarTimelineOS(passos);
+
+  if (a.pos_venda_decisao === 'reprovado') {
+    passos.push({ label: 'Cliente não aprovou o orçamento', data: a.pos_venda_decisao_em, estado: 'reprovado' });
+    return renderizarTimelineOS(passos);
+  }
+  passos.push(a.pos_venda_decisao === 'aprovado'
+    ? { label: 'Cliente aprovou o orçamento', data: a.pos_venda_decisao_em, estado: 'feito' }
+    : { label: 'Aguardando decisão do cliente sobre o orçamento', data: null, estado: 'pendente' });
+  if (a.pos_venda_decisao !== 'aprovado') return renderizarTimelineOS(passos);
+
+  if (a.motivo_pos_venda === 'tecnico_visita') {
+    passos.push(a.os_criada_id
+      ? { label: `Nova O.S. de visita técnica criada — ${esc(a.os_criada_numero || ('#' + a.os_criada_id))}`, data: a.finalizado_em, estado: 'feito' }
+      : { label: 'Aguardando o administrador criar a O.S. de visita técnica', data: null, estado: 'pendente' });
+    passos.push(a.finalizada
+      ? { label: 'Atendimento original encerrado — acompanhamento segue na nova O.S.', data: a.finalizado_em, estado: 'feito' }
+      : { label: 'Aguardando finalização deste atendimento', data: null, estado: 'pendente' });
+    return renderizarTimelineOS(passos);
+  }
+
+  if (a.motivo_pos_venda === 'cliente_envia_equipamento') {
+    passos.push(a.equipamento_liberado_reparo_em
+      ? { label: 'Equipamento reparado e liberado pelo setor de reparo', data: a.equipamento_liberado_reparo_em, estado: 'feito' }
+      : { label: 'Aguardando o setor de reparo executar e liberar o equipamento', data: null, estado: 'pendente' });
+    if (!a.equipamento_liberado_reparo_em) return renderizarTimelineOS(passos);
+  }
+
+  passos.push(a.estoque_saida_em
+    ? { label: a.motivo_pos_venda === 'peca_enviada' ? 'Estoque confirmou o envio da peça' : 'Estoque confirmou a saída do equipamento', data: a.estoque_saida_em, estado: 'feito' }
+    : { label: a.motivo_pos_venda === 'peca_enviada' ? 'Aguardando o estoque enviar a peça' : 'Aguardando o estoque confirmar a saída do equipamento', data: null, estado: 'pendente' });
+  passos.push(a.finalizada
+    ? { label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' }
+    : { label: 'Aguardando finalização da O.S.', data: null, estado: 'pendente' });
+  return renderizarTimelineOS(passos);
+}
+
+function timelineOS(a, visita) {
+  if (a.tipo === 'atendimento' && a.fase_atendimento) return timelineOSAtendimento(a);
+  const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
+
+  passos.push(a.confirmado_cliente_em
+    ? { label: 'Cliente confirmou o agendamento', data: a.confirmado_cliente_em, estado: 'feito' }
+    : { label: 'Aguardando confirmação do cliente', data: null, estado: 'pendente' });
+
+  passos.push(a.deslocamento_iniciado_em
+    ? { label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' }
+    : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
+
+  passos.push(visita
+    ? { label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' }
+    : { label: 'Aguardando o técnico preencher o relatório', data: null, estado: 'pendente' });
+
+  if (visita && visita.status_aprovacao === 'reprovado') {
+    passos.push({ label: 'Reprovado pelo gestor' + (visita.comentario_reprovacao ? ': ' + esc(visita.comentario_reprovacao) : ''), data: visita.data_aprovacao, estado: 'reprovado' });
+    return renderizarTimelineOS(passos);
+  }
+
+  passos.push(visita && visita.status_aprovacao === 'aprovado'
+    ? { label: 'Aprovado pelo gestor', data: visita.data_aprovacao, estado: 'feito' }
+    : { label: 'Aguardando aprovação do gestor', data: null, estado: 'pendente' });
+
+  // orçamento: só aparece quando o relatório tem peças fornecidas
+  if (a.visita_tem_pecas) {
+    passos.push(a.orcamento_aprovado_em
+      ? { label: 'Orçamento aprovado', data: a.orcamento_aprovado_em, estado: 'feito' }
+      : { label: 'Aguardando aprovação do orçamento', data: null, estado: 'pendente' });
+  }
+
+  // retorno do técnico: acontece quando o relatório original pediu retorno (depois do
+  // orçamento aprovado) OU quando virou retrabalho por feedback negativo do cliente. O
+  // deslocamento desse retorno usa o mesmo rótulo do deslocamento original — mesma etapa,
+  // só que numa segunda volta.
+  if (a.retorno_pendente_tecnico || a.visita_retorno_id) {
+    passos.push(a.retorno_deslocamento_iniciado_em
+      ? { label: 'Técnico iniciou o deslocamento', data: a.retorno_deslocamento_iniciado_em, estado: 'feito' }
+      : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
+
+    const visitaRetorno = (window._visitasRetornoPorAgenda || {})[a.id];
+    passos.push(a.visita_retorno_id
+      ? { label: 'Técnico enviou o relatório de retorno', data: visitaRetorno ? visitaRetorno.criado_em : null, estado: 'feito' }
+      : { label: a.retrabalho ? 'Aguardando retorno do técnico para retrabalho' : 'Aguardando retorno do técnico', data: null, estado: 'pendente' });
+  }
+
+  passos.push(a.feedback_cliente_em
+    ? { label: 'Cliente deu o feedback', data: a.feedback_cliente_em, estado: 'feito' }
+    : { label: 'Aguardando feedback do cliente', data: null, estado: 'pendente' });
+
+  passos.push(a.finalizada
+    ? { label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' }
+    : { label: 'Aguardando finalização da O.S.', data: null, estado: 'pendente' });
+
+  return renderizarTimelineOS(passos);
+}
+
+function renderizarTimelineOS(passos) {
   return `
     <div class="os-card-title" style="margin-top:18px;">Linha do tempo</div>
     <ul class="os-timeline">
@@ -1872,68 +2766,107 @@ function detalheCompletoOS(a, visita) {
         <div class="os-relatorio-box-titulo">Relatório enviado pelo técnico</div>
         ${detalheRelatorioVisita(visita)}
         ${visita.laudo && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfLaudoAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
-      </div>` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
+      </div>` : `<div class="admin-note" style="margin-top:14px;">${a.tipo === 'atendimento' ? 'Ainda não há relatório — acompanhe o andamento na linha do tempo abaixo.' : 'O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.'}</div>`}
+    ${a.visita_retorno_id ? `
+      <div class="os-relatorio-box" style="margin-top:14px;">
+        <div class="os-relatorio-box-titulo">Relatório de retorno enviado pelo técnico</div>
+        ${detalheRelatorioVisita((window._visitasRetornoPorAgenda || {})[a.id] || {})}
+      </div>` : ''}
     ${timelineOS(a, visita)}`;
 }
 
-function baixarPdfLaudoAprovado(agendaId) {
+async function baixarPdfLaudoAprovado(agendaId) {
   const a = (window._agendaCache || []).find((x) => x.id === agendaId);
   const v = (window._visitasPorAgenda || {})[agendaId];
   if (!a || !v || !v.laudo) return alert('Não foi possível localizar o laudo aprovado desta O.S.');
   try {
-    const pdfDataUri = gerarPdfLaudo(v.laudo, a);
-    const link = document.createElement('a');
-    link.href = pdfDataUri;
-    link.download = `laudo-tecnico-${v.id}.pdf`;
-    document.body.appendChild(link); link.click(); link.remove();
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfLaudo(v.laudo, a, logo);
+    window.open(url, '_blank');
   } catch (e) {
     alert('Erro ao gerar o PDF: ' + e.message);
   }
 }
 
+// mostra o relatório enviado pelo técnico organizado exatamente nas mesmas seções (mesmos
+// títulos, mesma ordem) do PDF gerado por gerarPdfRelatorio / gerarPdfLaudo — pra não ter
+// divergência entre o que aparece na tela e o que sai no documento baixado.
 function detalheRelatorioVisita(v) {
   if (v.relatorio) {
     const r = v.relatorio;
     return `
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
-      <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
-      <div class="kv"><b>Endereço:</b> ${esc(r.endereco)}, ${esc(r.numero)} — ${esc(r.bairro)}, ${esc(r.cidade)}/${esc(r.estado)} — CEP ${esc(r.cep)}</div>
-      <div class="kv"><b>Data:</b> ${esc(r.data_inicial)} a ${esc(r.data_final)} <span class="sep">·</span> <b>Equipamento:</b> ${esc(r.modelo_maquina)} (${esc(r.numero_serie)})</div>
-      <div class="kv"><b>Serviço:</b> ${esc(r.servico)}</div>
-      <ol class="item-steps">
-        ${(r.checklist || []).map((c) => `<li>${esc(c.item)} — <b>${c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A'}</b>${c.observacao ? ' — ' + esc(c.observacao) : ''}</li>`).join('')}
-      </ol>
-      <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>
-      <div class="kv"><b>Aceite:</b> ${r.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito'}</div>
-      <div class="kv"><b>Avaliação:</b> ${r.avaliacao ? r.avaliacao.estrelas : '—'}/5 estrelas <span class="sep">·</span> Dúvidas sanadas: ${r.avaliacao && r.avaliacao.duvidas_sanadas === 'sim' ? 'Sim' : 'Não'} <span class="sep">·</span> Apto a operar: ${r.avaliacao && r.avaliacao.apto_operar === 'sim' ? 'Sim' : 'Não'}</div>
-      <div class="kv"><b>Assinaturas</b></div>
-      <div style="display:flex; gap:16px; flex-wrap:wrap;">
-        <div>${esc(r.assinatura_cliente_nome || '—')} (cliente)${r.assinatura_cliente_img ? `<br><img src="${r.assinatura_cliente_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_cliente_img}')">` : ''}</div>
-        <div>${esc(r.assinatura_tecnico_nome || '—')} (técnico)${r.assinatura_tecnico_img ? `<br><img src="${r.assinatura_tecnico_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_tecnico_img}')">` : ''}</div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Dados do atendimento</div>
+        <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
+        <div class="kv"><b>Endereço:</b> ${esc(r.endereco)}, ${esc(r.numero)} — ${esc(r.bairro)}, ${esc(r.cidade)}/${esc(r.estado)} — CEP ${esc(r.cep)}</div>
+        <div class="kv"><b>Data inicial:</b> ${esc(r.data_inicial)} <span class="sep">·</span> <b>Data final:</b> ${esc(r.data_final)}</div>
+        <div class="kv"><b>Modelo da máquina:</b> ${esc(r.modelo_maquina)} <span class="sep">·</span> <b>Nº de série:</b> ${esc(r.numero_serie)}</div>
+        <div class="kv"><b>Serviço:</b> ${esc(r.servico)} <span class="sep">·</span> <b>Técnico:</b> ${esc(r.tecnico_nome)}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Item / entrega / observação</div>
+        <ol class="item-steps">
+          ${(r.checklist || []).map((c) => `<li>${esc(c.item)} — <b>${c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A'}</b>${c.observacao ? ' — ' + esc(c.observacao) : ''}</li>`).join('')}
+        </ol>
+      </div>
+      ${r.observacoes ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Observações</div><div class="relatorio-secao-texto">${esc(r.observacoes)}</div></div>` : ''}
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Aceite e avaliação</div>
+        <div class="kv"><b>Aceite:</b> ${r.aceite === 'aceito' ? 'Li e aceito os termos' : 'Não aceito'}</div>
+        <div class="kv"><b>Avaliação:</b> ${r.avaliacao ? r.avaliacao.estrelas : '—'}/5 estrelas <span class="sep">·</span> Dúvidas sanadas: ${r.avaliacao && r.avaliacao.duvidas_sanadas === 'sim' ? 'Sim' : 'Não'} <span class="sep">·</span> Apto a operar: ${r.avaliacao && r.avaliacao.apto_operar === 'sim' ? 'Sim' : 'Não'}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Assinaturas</div>
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          <div>${esc(r.assinatura_cliente_nome || '—')} (cliente)${r.assinatura_cliente_img ? `<br><img src="${r.assinatura_cliente_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_cliente_img}')">` : ''}</div>
+          <div>${esc(r.assinatura_tecnico_nome || '—')} (técnico)${r.assinatura_tecnico_img ? `<br><img src="${r.assinatura_tecnico_img}" style="max-width:200px; border:1px solid var(--line); border-radius:6px; margin-top:4px;" onclick="abrirLightbox('${r.assinatura_tecnico_img}')">` : ''}</div>
+        </div>
       </div>`;
   }
   if (v.relatorio_simples) {
     const r = v.relatorio_simples;
     return `
-      <div class="kv"><b>Empresa:</b> ${esc(r.empresa)} <span class="sep">·</span> <b>Contato:</b> ${esc(r.contato)} <span class="sep">·</span> <b>Telefone:</b> ${esc(r.telefone)}</div>
-      <div class="kv"><b>Equipamento:</b> ${esc(r.equipamento_tipo)} — ${esc(r.equipamento_modelo)} ${r.numero_serie ? `(${esc(r.numero_serie)})` : ''}</div>
-      <div class="kv"><b>Observações:</b> ${esc(r.observacoes)}</div>`;
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Equipamento</div>
+        <div class="kv"><b>Equipamento:</b> ${esc(r.equipamento_tipo)} — ${esc(r.equipamento_modelo)} ${r.numero_serie ? `(${esc(r.numero_serie)})` : ''}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Observações</div>
+        <div class="relatorio-secao-texto">${esc(r.observacoes)}</div>
+      </div>`;
   }
   if (v.laudo) {
     const l = v.laudo;
     return `
       ${v.relevante_biblioteca ? `<div class="admin-note" style="background:var(--green-bg); color:var(--green);"><b>Marcado como relevante</b>Se aprovado, entra na Biblioteca de Defeitos/Falhas com ${esc(v.tecnico_nome || 'o técnico')} como autor.</div>` : ''}
-      <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
-      <div class="kv"><b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
-      <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
-      <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
-      <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
-      <div class="kv"><b>Data de início:</b> ${l.data_entrada ? fmtData(l.data_entrada) : '—'} <span class="sep">·</span> <b>Data de conclusão:</b> ${l.data_conclusao ? fmtData(l.data_conclusao) : '—'} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
-      <div class="kv"><b>Laudo técnico:</b> ${esc(l.laudo_tecnico || '')}</div>
-      <div class="kv"><b>Serviço realizado:</b> ${esc(l.servico_realizado || '')}</div>
-      ${(l.pecas || []).length ? `<div class="kv"><b>Peças fornecidas:</b></div><ol class="item-steps">${l.pecas.map((p) => `<li>${esc(p.descricao || '—')}${p.quantidade ? ' (qtd: ' + esc(p.quantidade) + ')' : ''}</li>`).join('')}</ol>` : ''}
-      ${l.observacoes ? `<div class="kv"><b>Observações:</b> ${esc(l.observacoes)}</div>` : ''}
-      ${(l.fotos || []).length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="step-photos">${l.fotos.map((f) => `<div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do laudo"></div>`).join('')}</div>` : ''}`;
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Dados do atendimento</div>
+        <div class="kv"><b>Empresa:</b> ${esc(l.empresa || '')} <span class="sep">·</span> <b>Contato:</b> ${esc(l.contato || '')} <span class="sep">·</span> <b>Telefone:</b> ${esc(l.telefone || '')}</div>
+        <div class="kv"><b>Endereço:</b> ${esc(l.endereco || '')}, ${esc(l.numero || '')} — ${esc(l.bairro || '')}, ${esc(l.cidade || '')}/${esc(l.estado || '')}</div>
+        <div class="kv"><b>Técnico:</b> ${esc(l.tecnico_nome || '')} <span class="sep">·</span> <b>Equipamento:</b> ${esc(l.equipamento_tipo || '')} — ${esc(l.modelo_maquina || '')} (${esc(l.numero_serie || '—')})</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Dados do equipamento</div>
+        <div class="kv"><b>Data de fabricação:</b> ${esc(l.data_fabricacao || '—')} <span class="sep">·</span> <b>Garantia:</b> ${l.garantia === 'sim' ? 'Sim' : l.garantia === 'nao' ? 'Não' : `N/A — ${esc(l.garantia_obs || '')}`}</div>
+        <div class="kv"><b>Acessórios recebidos:</b> ${esc(l.acessorios || '—')}</div>
+        <div class="kv"><b>Defeito informado:</b> ${esc(l.defeito_informado || '—')}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Técnico responsável</div>
+        <div class="kv"><b>Data de início:</b> ${l.data_entrada ? fmtData(l.data_entrada) : '—'} <span class="sep">·</span> <b>Data de conclusão:</b> ${l.data_conclusao ? fmtData(l.data_conclusao) : '—'} <span class="sep">·</span> <b>Período de reparo:</b> ${periodoReparo(l)}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Laudo técnico</div>
+        <div class="relatorio-secao-texto">${esc(l.laudo_tecnico || '')}</div>
+      </div>
+      <div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Serviço realizado</div>
+        <div class="relatorio-secao-texto">${esc(l.servico_realizado || '')}</div>
+      </div>
+      ${(l.pecas || []).length ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Peças fornecidas</div><ol class="item-steps">${l.pecas.map((p) => `<li>${esc(p.descricao || '—')}${p.quantidade ? ' (qtd: ' + esc(p.quantidade) + ')' : ''}</li>`).join('')}</ol></div>` : ''}
+      ${l.observacoes ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Observações</div><div class="relatorio-secao-texto">${esc(l.observacoes)}</div></div>` : ''}
+      ${(l.fotos || []).length ? `<div class="relatorio-secao"><div class="relatorio-secao-titulo">Relatório fotográfico</div><div class="step-photos">${l.fotos.map((f) => `<div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do laudo"></div>`).join('')}</div></div>` : ''}`;
   }
   return `<div class="kv"><b>Causa:</b> ${esc(v.causa)}</div><div class="kv"><b>Correção:</b> ${esc(v.correcao)}</div><div class="kv"><b>Resultado:</b> ${esc(v.resultado)}</div>`;
 }
@@ -1981,6 +2914,39 @@ async function solicitarReaberturaVisita(id) {
   catch (e) { alert('Erro: ' + e.message); }
 }
 
+// botão "Iniciar deslocamento": só aparece pro técnico designado, numa O.S. ainda em aberto
+// (não finalizada). Assim que ele toca no botão, o botão Executar (ou Enviar retorno) já
+// aparece no lugar dele — não fica os dois juntos ocupando espaço. O administrador recebe uma
+// notificação push quando o técnico toca nele.
+function botaoDeslocamento(a) {
+  if (a.tecnico_id !== USER.id || a.finalizada) return '';
+  // retorno pendente: o técnico precisa se deslocar de novo antes de enviar o relatório de
+  // retorno — o mesmo botão/rótulo do deslocamento original, só que num segundo momento
+  if (a.retorno_pendente_tecnico) {
+    if (a.retorno_deslocamento_iniciado_em) return '';
+    return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
+  }
+  if (a.status === 'concluida') return '';
+  if (!a.confirmado_cliente_em) return `<span class="tag" style="background:var(--line); color:var(--ink-soft); margin-right:6px;">Aguardando confirmação do cliente</span>`;
+  if (a.deslocamento_iniciado_em) return '';
+  return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
+}
+
+async function iniciarDeslocamento(id) {
+  if (!confirm('Confirma que você está saindo agora para este atendimento? O administrador vai ser avisado.')) return;
+  try {
+    const { agenda } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
+    mostrarToast('Deslocamento iniciado — o administrador foi avisado.');
+    if (Array.isArray(window._agendaCache)) {
+      const idx = window._agendaCache.findIndex((a) => a.id === id);
+      if (idx !== -1) window._agendaCache[idx] = agenda;
+    }
+    if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
+    else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
+    else renderAgenda();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
 // ---------- BIBLIOTECA: ACESSAR ----------
 async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
   let registros = [];
@@ -2004,10 +2970,10 @@ async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
       <tr><th>Título</th><th>Equipamento</th><th>Nº de série</th><th></th></tr>
       ${registros.map((r, i) => `
         <tr style="cursor:pointer;" onclick="abrirDetalheDefeito(${i})">
-          <td>${esc(r.titulo)}</td>
-          <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
-          <td>${esc(r.numero_serie || '—')}</td>
-          <td style="white-space:nowrap;">
+          <td data-label="Título">${esc(r.titulo)}</td>
+          <td data-label="Equipamento">${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
+          <td data-label="Nº de série">${esc(r.numero_serie || '—')}</td>
+          <td class="td-acoes">
             <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheDefeito(${i})">Abrir</button>
             ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('defeito', ${i})">Excluir</button>` : ''}
           </td>
@@ -2022,9 +2988,11 @@ function filtrarDefeitos() {
   };
   renderBibliotecaDefeitos(filtros, true);
 }
-function abrirDetalheDefeito(i, origem) {
+async function abrirDetalheDefeito(i, origem) {
   const r = (window._defeitosCache || [])[i];
   if (!r) return;
+  // a lista de busca não traz fotos (economia de banda) — busca o registro completo só agora
+  if (!r._completo) { Object.assign(r, (await api(`/api/registros/${r.id}`)).registro); r._completo = true; }
   carregarLogoDataUri();
   const main = document.getElementById('main');
   const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)';
@@ -2083,6 +3051,7 @@ async function salvarEdicaoDefeito(id, i, origem) {
     const { registro } = await api(`/api/registros/${id}`, { method: 'PUT', body });
     mostrarToast('Alterações salvas.');
     if (origem === 'solicitacoes') { renderSolicitacoesEdicao(); return; }
+    registro._completo = true; // já veio com fotos — evita refazer a busca à toa
     window._defeitosCache[i] = registro;
     abrirDetalheDefeito(i, origem);
   } catch (e) { alert('Erro: ' + e.message); }
@@ -2127,6 +3096,7 @@ async function renderSolicitacoesEdicao() {
 function abrirDeSolicitacao(i) {
   const r = (window._solicitacoesCache || [])[i];
   if (!r) return;
+  r._completo = true; // essa lista já vem com fotos — evita refazer a busca à toa
   if (r.tipo === 'defeito') { window._defeitosCache = [r]; window._defeitosFiltros = {}; abrirDetalheDefeito(0, 'solicitacoes'); }
   else { window._procedimentosCache = [r]; window._procedimentosFiltros = {}; abrirDetalheProcedimento(0, 'solicitacoes'); }
 }
@@ -2152,10 +3122,10 @@ async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
       <tr><th>Título</th><th>Equipamento</th><th>Periodicidade</th><th></th></tr>
       ${registros.map((r, i) => `
         <tr style="cursor:pointer;" onclick="abrirDetalheProcedimento(${i})">
-          <td>${esc(r.titulo)}</td>
-          <td>${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
-          <td>${esc(r.periodicidade || '—')}</td>
-          <td style="white-space:nowrap;">
+          <td data-label="Título">${esc(r.titulo)}</td>
+          <td data-label="Equipamento">${esc(r.equipamento_tipo)}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</td>
+          <td data-label="Periodicidade">${esc(r.periodicidade || '—')}</td>
+          <td class="td-acoes">
             <button class="btn-outline-sm" onclick="event.stopPropagation(); abrirDetalheProcedimento(${i})">Abrir</button>
             ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); excluirRegistroBiblioteca('procedimento', ${i})">Excluir</button>` : ''}
           </td>
@@ -2169,9 +3139,11 @@ function filtrarProcedimentos() {
   };
   renderBibliotecaProcedimentos(filtros, true);
 }
-function abrirDetalheProcedimento(i, origem) {
+async function abrirDetalheProcedimento(i, origem) {
   const r = (window._procedimentosCache || [])[i];
   if (!r) return;
+  // a lista de busca não traz fotos (economia de banda) — busca o registro completo só agora
+  if (!r._completo) { Object.assign(r, (await api(`/api/registros/${r.id}`)).registro); r._completo = true; }
   carregarLogoDataUri();
   const main = document.getElementById('main');
   const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)';
@@ -2206,6 +3178,7 @@ function abrirEditarProcedimento(i, origem) {
   const r = (window._procedimentosCache || [])[i];
   if (!r) return;
   procDraft = r.passos && r.passos.length ? JSON.parse(JSON.stringify(r.passos)) : [{ texto: '', fotos: [] }];
+  fotoDestaqueDraft = r.foto_destaque || null;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Editar procedimento</h1><p>Alteração direta: o procedimento continua publicado imediatamente após salvar.</p></div>
@@ -2219,6 +3192,7 @@ function abrirEditarProcedimento(i, origem) {
             ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${r.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
+        <div><label>Foto de destaque (equipamento/peça)</label><div id="fp-foto-destaque" style="display:flex;"></div></div>
         <div class="full"><label>Precauções/EPIs</label><textarea id="fp-precaucoes">${esc(r.precaucoes || '')}</textarea></div>
         <div class="full"><label>Ferramentas necessárias</label><textarea id="fp-ferramentas">${esc(r.ferramentas || '')}</textarea></div>
       </div>
@@ -2230,6 +3204,7 @@ function abrirEditarProcedimento(i, origem) {
       <button class="btn-outline-sm" onclick="abrirDetalheProcedimento(${i}, '${origem || ''}')">Cancelar</button>
     </div>`;
   renderPassosDraft();
+  renderFotoDestaque();
 }
 async function salvarEdicaoProcedimento(id, i, origem) {
   const body = {
@@ -2239,12 +3214,14 @@ async function salvarEdicaoProcedimento(id, i, origem) {
     periodicidade: document.getElementById('fp-periodicidade').value,
     precaucoes: document.getElementById('fp-precaucoes').value,
     ferramentas: document.getElementById('fp-ferramentas').value,
+    foto_destaque: fotoDestaqueDraft,
     passos: procDraft,
   };
   try {
     const { registro } = await api(`/api/registros/${id}`, { method: 'PUT', body });
     mostrarToast('Alterações salvas.');
     if (origem === 'solicitacoes') { renderSolicitacoesEdicao(); return; }
+    registro._completo = true; // já veio com fotos — evita refazer a busca à toa
     window._procedimentosCache[i] = registro;
     abrirDetalheProcedimento(i, origem);
   } catch (e) { alert('Erro: ' + e.message); }
@@ -2255,6 +3232,7 @@ const PDF_COR = {
   navy: [10, 38, 71], navyDeep: [7, 26, 51], blue: [20, 103, 214], blueBright: [46, 134, 255],
   bluePale: [234, 242, 252], ink: [16, 24, 38], inkSoft: [74, 85, 104], line: [220, 228, 239],
   green: [23, 114, 69], greenBg: [225, 243, 233], red: [179, 38, 30], redBg: [250, 227, 225], white: [255, 255, 255],
+  bege: [242, 233, 216],
 };
 
 let _logoDataUriPromise = null;
@@ -2349,14 +3327,18 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   }
   function valorEsq(t) {
     doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-    const linhas = doc.splitTextToSize(String(t || '—'), colEsqLargura - 26);
+    const linhas = doc.splitTextToSize(limparPdf(t) || '—', colEsqLargura - 26);
     doc.text(linhas, margem + 14, ye); ye += linhas.length * 11 + 12;
   }
 
   rotuloEsq('EQUIPAMENTO');
   valorEsq(`${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`);
 
-  const primeiraFoto = tipo === 'procedimento' ? ((r.passos || []).find((p) => p.fotos && p.fotos.length) || {}).fotos?.[0] : (r.fotos || [])[0];
+  // procedimentos antigos (criados antes de existir o campo foto_destaque) continuam usando a
+  // 1ª foto do passo 1 como reserva, pra não ficar sem imagem nenhuma na coluna esquerda.
+  const primeiraFoto = tipo === 'procedimento'
+    ? (r.foto_destaque || ((r.passos || []).find((p) => p.fotos && p.fotos.length) || {}).fotos?.[0])
+    : (r.fotos || [])[0];
   if (primeiraFoto) {
     try {
       doc.setDrawColor(...PDF_COR.line);
@@ -2373,7 +3355,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
       rotuloEsq('FERRAMENTAS');
       doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       r.ferramentas.split(/[\n,]/).map((s) => s.trim()).filter(Boolean).forEach((fnome) => {
-        const linhas = doc.splitTextToSize('✓ ' + fnome, colEsqLargura - 26);
+        const linhas = doc.splitTextToSize(limparPdf('✓ ' + fnome), colEsqLargura - 26);
         doc.text(linhas, margem + 14, ye); ye += linhas.length * 11;
       });
       ye += 10;
@@ -2392,7 +3374,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
   const dataAtt = fmtData(r.atualizado_em || r.criado_em);
   const quemAtt = r.atualizado_por_nome || r.autor_nome || '—';
-  const linhasAtt = doc.splitTextToSize(`${dataAtt} · ${quemAtt}`, colEsqLargura - 26);
+  const linhasAtt = doc.splitTextToSize(limparPdf(`${dataAtt} · ${quemAtt}`), colEsqLargura - 26);
   doc.text(linhasAtt, margem + 14, yUpdate + 12);
 
   doc.setFontSize(7); doc.setTextColor(...PDF_COR.inkSoft);
@@ -2402,11 +3384,11 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   // ----- coluna direita -----
   let y2 = topoConteudo + 8;
   doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  const tituloLinhas = doc.splitTextToSize(r.titulo || '—', colDirLargura);
+  const tituloLinhas = doc.splitTextToSize(limparPdf(r.titulo) || '—', colDirLargura);
   doc.text(tituloLinhas, colDirX, y2); y2 += tituloLinhas.length * 19 + 4;
 
   doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`, colDirX, y2); y2 += 14;
+  doc.text(limparPdf(`Equipamento: ${r.equipamento_tipo || ''}${r.equipamento_modelo ? ' — ' + r.equipamento_modelo : ''}`), colDirX, y2); y2 += 14;
   doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.4); doc.line(colDirX, y2, colDirX + colDirLargura, y2); y2 += 18;
 
   function tituloSecao(t) {
@@ -2417,6 +3399,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
     doc.text(t, colDirX + 10, y2); y2 += 15;
   }
   function paragrafo(texto) {
+    texto = limparPdf(texto);
     if (!texto) return;
     if (y2 > pageH - margem - 40) { doc.addPage(); pintarFundoPagina(); y2 = margem + 30; }
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -2438,7 +3421,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
       doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
       doc.text(String(i + 1), colDirX + 6, y2, { align: 'center' });
       doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-      const linhas = doc.splitTextToSize(p.texto || '', colDirLargura - 20);
+      const linhas = doc.splitTextToSize(limparPdf(p.texto), colDirLargura - 20);
       doc.text(linhas, colDirX + 18, y2); y2 += linhas.length * 12 + 4;
       if (p.fotos && p.fotos.length) {
         const wImg = 90, hImg = 68; let x = colDirX + 18;
@@ -2477,9 +3460,1374 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   }
 
   doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`, colDirX, pageH - margem - 10);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), colDirX, pageH - margem - 10);
 
   return doc.output('bloburl');
+}
+
+// ---------- CRIAR RELATÓRIO (manutenção interna, avulso — sem vínculo com O.S./agenda) ----------
+
+async function renderRelatorioManutencao() {
+  const { relatorios } = await api('/api/relatorios-manutencao/meus');
+  window._relatoriosManutCache = relatorios;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Criar Relatório</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S., fica salvo só aqui no seu histórico</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManutencao()">+ Novo relatório</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Data</th><th>Empresa</th><th>Equipamento</th><th></th></tr>
+      ${relatorios.length ? relatorios.map((r, i) => `
+        <tr>
+          <td data-label="Data">${fmtData(r.criado_em)}</td>
+          <td data-label="Empresa">${esc(r.empresa)}</td>
+          <td data-label="Equipamento">${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''}</td>
+          <td class="td-acoes">
+            <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
+            <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
+            <button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>
+            <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          </td>
+        </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`}
+    </table></div>`;
+}
+
+let relatorioManutDraft = null;
+function relatorioManutPadrao() {
+  return {
+    empresa: '', contato: '', telefone: '',
+    tipo_servico: '', tipo_servico_outros: '',
+    marca: '', equipamento: '', numero_serie: '',
+    garantia: '', garantia_obs: '',
+    data_fabricacao: '',
+    acessorios: '', defeito_informado: '',
+    data_entrada: '', data_conclusao: '',
+    laudo_tecnico: '', servico_realizado: '',
+    pecas: [],
+    // cada bloco é um grupo de fotos + um comentário (com negrito/itálico/cor/fonte) sobre elas
+    fotos: [],
+  };
+}
+
+function mostrarFormRelatorioManutencao(existente) {
+  relatorioManutDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioManutPadrao();
+  const d = relatorioManutDraft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar relatório' : 'Novo relatório'} — Manutenção interna</h1><p>Preencha os dados abaixo. Ao gerar, o PDF fica disponível e o relatório é salvo no seu histórico. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Dados do cliente</h2>
+      <div class="form-grid">
+        <div class="full"><label>Empresa*</label><input id="rm-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Contato</label><input id="rm-contato" value="${esc(d.contato)}"></div>
+        <div><label>Telefone</label><input id="rm-telefone" value="${esc(d.telefone)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Tipo de serviço</h2>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        ${[['amostra', 'Amostra'], ['analise', 'Análise'], ['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['outros', 'Outros']].map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-tipo-servico" value="${v}" style="width:auto;" ${d.tipo_servico === v ? 'checked' : ''} onchange="document.getElementById('rm-tipo-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
+      </div>
+      <div id="rm-tipo-outros-wrap" style="display:${d.tipo_servico === 'outros' ? 'block' : 'none'};"><label>Especifique</label><input id="rm-tipo-servico-outros" value="${esc(d.tipo_servico_outros)}"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados do equipamento</h2>
+      <div class="form-grid">
+        <div><label>Marca</label><input id="rm-marca" value="${esc(d.marca)}"></div>
+        <div><label>Equipamento*</label><input id="rm-equipamento" value="${esc(d.equipamento)}"></div>
+        <div><label>Nº de série</label><input id="rm-numero_serie" value="${esc(d.numero_serie)}"></div>
+        <div><label>Data de fabricação (MM/AAAA)</label><input id="rm-data_fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(d.data_fabricacao)}"></div>
+      </div>
+      <label>Garantia</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        ${[['sim', 'Sim'], ['nao', 'Não'], ['outros', 'Outros']].map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-garantia" value="${v}" style="width:auto;" ${d.garantia === v ? 'checked' : ''} onchange="document.getElementById('rm-garantia-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
+      </div>
+      <div id="rm-garantia-outros-wrap" style="display:${d.garantia === 'outros' ? 'block' : 'none'};"><label>Especifique</label><input id="rm-garantia_obs" value="${esc(d.garantia_obs)}"></div>
+      <div class="form-grid">
+        <div class="full"><label>Acessórios recebidos</label><input id="rm-acessorios" placeholder="ex: cabo de força, fonte..." value="${esc(d.acessorios)}"></div>
+        <div class="full"><label>Defeito informado</label><input id="rm-defeito_informado" value="${esc(d.defeito_informado)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Técnico responsável</h2>
+      <div class="form-grid">
+        <div><label>Nome</label><input value="${esc(USER.nome)}" disabled></div>
+        <div><label>E-mail</label><input value="${esc(USER.email || '')}" disabled></div>
+        <div><label>Data de entrada</label><input id="rm-data_entrada" type="date" value="${esc(d.data_entrada)}"></div>
+        <div><label>Data de conclusão</label><input id="rm-data_conclusao" type="date" value="${esc(d.data_conclusao)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Laudo técnico</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Defeito encontrado e análise do estado do equipamento</p>
+      <textarea id="rm-laudo_tecnico" placeholder="Descreva o diagnóstico...">${esc(d.laudo_tecnico)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Serviços realizados</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Manutenção realizada / resultados de amostra</p>
+      <textarea id="rm-servico_realizado" placeholder="Descreva o que foi feito...">${esc(d.servico_realizado)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Peças fornecidas</h2>
+      <div class="steps-list" id="rm-pecas"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarPecaRelatorioManut()">+ Adicionar peça</button>
+    </div>
+
+    <div class="panel">
+      <h2>Relatório fotográfico</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Anexe uma ou mais fotos e escreva um comentário sobre elas — o comentário aparece embaixo das fotos no PDF. Clique em "+ Adicionar" pra criar outro grupo de fotos com outro comentário.</p>
+      <div id="rm-blocos-fotos"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarBlocoFotoRelatorioManut()">+ Adicionar fotos e comentário</button>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarRelatorioManutencao()">Gerar PDF e salvar</button>
+      </div>
+    </div>`;
+  renderPecasRelatorioManut();
+  renderBlocosFotosRelatorioManut();
+}
+
+function renderPecasRelatorioManut() {
+  document.getElementById('rm-pecas').innerHTML = relatorioManutDraft.pecas.map((p, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioManutDraft.pecas[${i}].descricao=this.value;">
+        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioManutDraft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="Qtd" value="${esc(p.quantidade || '')}" style="flex:0 0 60px;" oninput="relatorioManutDraft.pecas[${i}].quantidade=this.value;">
+        <button class="step-rm" onclick="removerPecaRelatorioManut(${i})">×</button>
+      </div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
+}
+function adicionarPecaRelatorioManut() { relatorioManutDraft.pecas.push({ descricao: '', codigo_pmk: '', quantidade: '' }); renderPecasRelatorioManut(); }
+function removerPecaRelatorioManut(i) { relatorioManutDraft.pecas.splice(i, 1); renderPecasRelatorioManut(); }
+
+// "Relatório fotográfico" em blocos: cada bloco tem suas fotos + um comentário de texto rico
+// (negrito/itálico/sublinhado/cor/fonte) que aparece embaixo delas no PDF — igual pedido pelo
+// usuário, no molde do que já existe nos passos do Manual de Procedimentos da biblioteca.
+function renderBlocosFotosRelatorioManut() {
+  const alvo = document.getElementById('rm-blocos-fotos');
+  if (!alvo) return;
+  alvo.innerHTML = relatorioManutDraft.fotos.map((bloco, i) => `
+    <div class="rm-bloco-foto">
+      <div class="step-photos">
+        ${(bloco.fotos || []).map((f, j) => `
+          <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do relatório">
+            <button class="photo-rm" onclick="removerFotoDoBlocoRelatorioManut(${i}, ${j})">×</button>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotosNoBlocoRelatorioManut(event, ${i})">
+        </label>
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">+</span>Galeria
+          <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosNoBlocoRelatorioManut(event, ${i})">
+        </label>
+      </div>
+      <div class="rt-toolbar">
+        <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'bold')" title="Negrito"><b>B</b></button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'italic')" title="Itálico"><i>I</i></button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="rtExecRelatorioManut(${i}, 'underline')" title="Sublinhado"><u>S</u></button>
+        <input type="color" title="Cor da fonte" onchange="rtCorRelatorioManut(${i}, this.value)">
+        <select title="Fonte" onchange="rtFonteRelatorioManut(${i}, this.value)">
+          <option value="helvetica">Fonte padrão</option>
+          <option value="times">Fonte serifada</option>
+          <option value="courier">Fonte monoespaçada</option>
+        </select>
+        <button type="button" class="rt-rm" onclick="removerBlocoFotoRelatorioManut(${i})" title="Remover este grupo de fotos">Remover grupo</button>
+      </div>
+      <div class="rt-editor" id="rm-comentario-${i}" contenteditable="true" data-placeholder="Comente essa(s) foto(s)..." oninput="relatorioManutDraft.fotos[${i}].comentario = this.innerHTML;">${bloco.comentario || ''}</div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma foto adicionada ainda.</p>';
+}
+function adicionarBlocoFotoRelatorioManut() {
+  relatorioManutDraft.fotos.push({ comentario: '', fotos: [] });
+  renderBlocosFotosRelatorioManut();
+}
+function removerBlocoFotoRelatorioManut(i) {
+  relatorioManutDraft.fotos.splice(i, 1);
+  renderBlocosFotosRelatorioManut();
+}
+function adicionarFotosNoBlocoRelatorioManut(event, i) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    relatorioManutDraft.fotos[i].fotos.push(...dataUrls);
+    renderBlocosFotosRelatorioManut();
+  });
+}
+function removerFotoDoBlocoRelatorioManut(i, j) {
+  relatorioManutDraft.fotos[i].fotos.splice(j, 1);
+  renderBlocosFotosRelatorioManut();
+}
+// comandos de formatação do comentário — usa o próprio editor contenteditable do navegador
+// (mesma técnica usada em qualquer editor de texto simples embutido numa página).
+// como o seletor de cor nativo (<input type=color>) rouba o foco do editor ao abrir, guarda-se
+// continuamente a última seleção de texto feita dentro de cada editor pra poder restaurá-la
+// antes de aplicar a cor/fonte — senão o texto selecionado "some" e o comando não pega em nada.
+window._rtUltimaSelecao = window._rtUltimaSelecao || {};
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const no = range.commonAncestorContainer;
+  const el = no.nodeType === 1 ? no : no.parentElement;
+  const editor = el && el.closest && el.closest('.rt-editor');
+  if (editor && editor.id.startsWith('rm-comentario-')) {
+    window._rtUltimaSelecao[editor.id] = range.cloneRange();
+  }
+});
+function rtRestaurarSelecao(idEditor) {
+  const range = window._rtUltimaSelecao[idEditor];
+  if (!range) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+function rtExecRelatorioManut(i, comando) {
+  document.getElementById(`rm-comentario-${i}`).focus();
+  document.execCommand(comando, false, null);
+  relatorioManutDraft.fotos[i].comentario = document.getElementById(`rm-comentario-${i}`).innerHTML;
+}
+function rtCorRelatorioManut(i, cor) {
+  const editor = document.getElementById(`rm-comentario-${i}`);
+  editor.focus();
+  rtRestaurarSelecao(editor.id);
+  document.execCommand('foreColor', false, cor);
+  relatorioManutDraft.fotos[i].comentario = editor.innerHTML;
+}
+function rtFonteRelatorioManut(i, fonte) {
+  const editor = document.getElementById(`rm-comentario-${i}`);
+  editor.focus();
+  rtRestaurarSelecao(editor.id);
+  document.execCommand('fontName', false, fonte);
+  relatorioManutDraft.fotos[i].comentario = editor.innerHTML;
+}
+
+// interpreta o HTML simples do comentário (negrito/itálico/sublinhado/cor/fonte) em uma lista de
+// palavras com seu estilo — usada tanto pra desenhar no PDF quanto reaproveitável no futuro.
+function extrairPalavrasComEstilo(html) {
+  const raiz = document.createElement('div');
+  raiz.innerHTML = html || '';
+  const palavras = [];
+  function estiloEfetivo(no, herdado) {
+    const estilo = { ...herdado };
+    if (no.nodeType !== 1) return estilo;
+    const tag = no.tagName.toLowerCase();
+    if (tag === 'b' || tag === 'strong') estilo.negrito = true;
+    if (tag === 'i' || tag === 'em') estilo.italico = true;
+    if (tag === 'u') estilo.sublinhado = true;
+    if (tag === 'font') {
+      if (no.getAttribute('color')) estilo.cor = no.getAttribute('color');
+      if (no.getAttribute('face')) estilo.fonte = no.getAttribute('face');
+    }
+    if (no.style) {
+      if (no.style.color) estilo.cor = no.style.color;
+      if (no.style.fontFamily) estilo.fonte = no.style.fontFamily.split(',')[0].replace(/["']/g, '').trim();
+      const peso = no.style.fontWeight;
+      if (peso === 'bold' || (peso && Number(peso) >= 700)) estilo.negrito = true;
+      if (no.style.fontStyle === 'italic') estilo.italico = true;
+      if (no.style.textDecorationLine === 'underline' || no.style.textDecoration.includes('underline')) estilo.sublinhado = true;
+    }
+    return estilo;
+  }
+  function caminhar(no, estilo) {
+    if (no.nodeType === 3) {
+      no.textContent.split(/(\s+)/).forEach((parte) => { if (parte.trim()) palavras.push({ texto: parte, ...estilo }); });
+      return;
+    }
+    if (no.nodeType !== 1) return;
+    if (no.tagName === 'BR') { palavras.push({ quebra: true }); return; }
+    const novoEstilo = estiloEfetivo(no, estilo);
+    Array.from(no.childNodes).forEach((filho) => caminhar(filho, novoEstilo));
+    if (no.tagName === 'DIV' || no.tagName === 'P') palavras.push({ quebra: true });
+  }
+  Array.from(raiz.childNodes).forEach((no) => caminhar(no, { negrito: false, italico: false, sublinhado: false, cor: null, fonte: null }));
+  while (palavras.length && palavras[palavras.length - 1].quebra) palavras.pop();
+  return palavras;
+}
+// normaliza qualquer cor CSS (nome, hex, rgb(...)) pra um trio [r,g,b] usável no jsPDF
+function corCssParaRgb(cor) {
+  if (!cor) return null;
+  const provisorio = document.createElement('div');
+  provisorio.style.color = cor;
+  document.body.appendChild(provisorio);
+  const computada = getComputedStyle(provisorio).color;
+  document.body.removeChild(provisorio);
+  const m = /rgb\((\d+),\s*(\d+),\s*(\d+)/.exec(computada);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+async function salvarRelatorioManutencao() {
+  const d = relatorioManutDraft;
+  d.empresa = document.getElementById('rm-empresa').value;
+  d.contato = document.getElementById('rm-contato').value;
+  d.telefone = document.getElementById('rm-telefone').value;
+  const tipoServico = document.querySelector('input[name="rm-tipo-servico"]:checked');
+  d.tipo_servico = tipoServico ? tipoServico.value : '';
+  d.tipo_servico_outros = document.getElementById('rm-tipo-servico-outros').value;
+  d.marca = document.getElementById('rm-marca').value;
+  d.equipamento = document.getElementById('rm-equipamento').value;
+  d.numero_serie = document.getElementById('rm-numero_serie').value;
+  d.data_fabricacao = document.getElementById('rm-data_fabricacao').value;
+  const garantia = document.querySelector('input[name="rm-garantia"]:checked');
+  d.garantia = garantia ? garantia.value : '';
+  d.garantia_obs = document.getElementById('rm-garantia_obs').value;
+  d.acessorios = document.getElementById('rm-acessorios').value;
+  d.defeito_informado = document.getElementById('rm-defeito_informado').value;
+  d.data_entrada = document.getElementById('rm-data_entrada').value;
+  d.data_conclusao = document.getElementById('rm-data_conclusao').value;
+  d.laudo_tecnico = document.getElementById('rm-laudo_tecnico').value;
+  d.servico_realizado = document.getElementById('rm-servico_realizado').value;
+
+  if (!d.empresa.trim() || !d.equipamento.trim()) { alert('Preencha ao menos Empresa e Equipamento.'); return; }
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioManutencao(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function editarRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  mostrarFormRelatorioManutencao(r);
+}
+
+// a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
+// completo (com fotos) na hora que alguma ação realmente precisa delas, e guarda de volta
+// no cache pra não buscar de novo se a pessoa clicar noutra ação do mesmo relatório.
+async function relatorioManutCompleto(i) {
+  const r = (window._relatoriosManutCache || [])[i];
+  if (!r) return null;
+  if (r.fotos) return r;
+  const { relatorio } = await api(`/api/relatorios-manutencao/${r.id}`);
+  window._relatoriosManutCache[i] = relatorio;
+  return relatorio;
+}
+
+async function abrirPdfRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  try {
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioManutencao(r, logo);
+    window.open(url, '_blank');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+}
+
+async function abrirFotosRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  const blocos = r.fotos || [];
+  const temFotos = blocos.length && blocos.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length));
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Fotos — ${esc(r.empresa)}</h1><p>${esc(r.equipamento)}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${temFotos ? `<button class="btn btn-primary btn-sm" onclick="baixarTodasFotosRelatorioManutencao(${i})">⬇ Baixar todas as fotos</button>` : ''}
+        <button class="btn-outline-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
+      </div>
+    </div>
+    <div class="panel">
+      ${temFotos ? blocos.map((entrada) => {
+        const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+        return (bloco.fotos || []).length ? `
+          <div style="margin-bottom:18px;">
+            <div class="item-step-photos">${bloco.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do relatório">`).join('')}</div>
+            ${bloco.comentario ? `<div style="margin-top:8px; font-size:13px; color:var(--ink-soft);">${bloco.comentario}</div>` : ''}
+          </div>` : '';
+      }).join('') : `<div class="empty">Nenhuma foto anexada neste relatório.</div>`}
+    </div>`;
+}
+
+async function baixarTodasFotosRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  const fotos = [];
+  (r.fotos || []).forEach((entrada) => {
+    const bloco = typeof entrada === 'string' ? { fotos: [entrada] } : entrada;
+    (bloco.fotos || []).forEach((f) => fotos.push(f));
+  });
+  if (!fotos.length) return;
+  try {
+    const zip = new JSZip();
+    fotos.forEach((f, idx) => {
+      const m = /^data:image\/(\w+);base64,(.*)$/.exec(f);
+      if (!m) return;
+      const ext = m[1].toLowerCase().replace('jpeg', 'jpg');
+      zip.file(`foto-${String(idx + 1).padStart(2, '0')}.${ext}`, m[2], { base64: true });
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `fotos-relatorio-${r.id}.zip`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { alert('Erro ao baixar as fotos: ' + e.message); }
+}
+
+const WORD_COR = { navy: '0A2647', blue: '1467D6', ink: '101826', inkSoft: '4A5568', line: 'DCE4EF' };
+
+function corCssParaHexWord(cor) {
+  const rgb = corCssParaRgb(cor);
+  if (!rgb) return null;
+  return rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+function dataUriParaUint8Array(dataUri) {
+  const base64 = (String(dataUri).split(',')[1] || '').replace(/\s/g, '');
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function wTitulo(texto, opcoes) {
+  opcoes = opcoes || {};
+  return new docx.Paragraph({
+    alignment: opcoes.centralizado ? docx.AlignmentType.CENTER : undefined,
+    keepNext: opcoes.manterProximo,
+    spacing: { before: 260, after: opcoes.after != null ? opcoes.after : 140 },
+    border: { bottom: { color: WORD_COR.blue, space: 4, style: docx.BorderStyle.SINGLE, size: 6 } },
+    children: [new docx.TextRun({ text: String(texto).toUpperCase(), bold: true, color: WORD_COR.blue, size: 22 })],
+  });
+}
+
+function wBordaFinaTabela() {
+  const linha = { style: docx.BorderStyle.SINGLE, size: 4, color: WORD_COR.line };
+  return { top: linha, bottom: linha, left: linha, right: linha, insideHorizontal: linha, insideVertical: linha };
+}
+
+// largura útil da página (A4 menos as margens de 300+300 twips) — usada pra fixar
+// a largura das colunas em twips (DXA) em vez de porcentagem, senão o Word recalcula
+// a largura de cada coluna pelo tamanho do texto e desproporciona as caixas
+function wLarguraConteudo() {
+  return docx.convertMillimetersToTwip(210) - 600;
+}
+
+// caixas lado a lado dentro de uma linha de tabela, igual ao layout do PDF (linhaCampos)
+function wLinhaCampos(campos) {
+  const margins = { top: 70, bottom: 70, left: 100, right: 100 };
+  const larguraTotal = wLarguraConteudo();
+  const larguras = campos.map((c) => Math.round(larguraTotal * c.frac));
+  const cells = campos.map((c, i) => new docx.TableCell({
+    width: { size: larguras[i], type: docx.WidthType.DXA },
+    margins,
+    children: [new docx.Paragraph({
+      children: [
+        new docx.TextRun({ text: c.label.toUpperCase() + ': ', bold: true, color: WORD_COR.ink, size: 18 }),
+        new docx.TextRun({ text: c.valor ? String(c.valor) : '—', color: WORD_COR.ink, size: 18 }),
+      ],
+    })],
+  }));
+  return new docx.Table({
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: larguras,
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
+    rows: [new docx.TableRow({ children: cells })],
+  });
+}
+
+// caixa "GARANTIA" (com as opções sim/não/outros) ao lado da caixa "DATA DE FABRICAÇÃO", igual ao PDF
+// checkbox de verdade (Structured Document Tag do Word), clicável/editável direto no
+// Word — em vez de só desenhar ☑/☐ como texto fixo, que ninguém consegue alterar depois
+function wCheckboxOpcao(marcado, label, size) {
+  return [
+    new docx.CheckBox({ checked: !!marcado }),
+    new docx.TextRun({ text: ' ' + label, bold: true, color: WORD_COR.ink, size: size || 18 }),
+  ];
+}
+
+function wLinhaGarantiaData(garantia, dataFabricacao) {
+  const margins = { top: 70, bottom: 70, left: 100, right: 100 };
+  const larguraTotal = wLarguraConteudo();
+  const larguraGarantia = Math.round(larguraTotal * 0.62);
+  const larguraData = larguraTotal - larguraGarantia;
+  const runsGarantia = [new docx.TextRun({ text: 'GARANTIA: ', bold: true, color: WORD_COR.ink, size: 18 })];
+  [['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']].forEach(([v, l], idx) => {
+    if (idx > 0) runsGarantia.push(new docx.TextRun({ text: '   ', size: 18 }));
+    runsGarantia.push(...wCheckboxOpcao(v === garantia, l));
+  });
+  return new docx.Table({
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: [larguraGarantia, larguraData],
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
+    rows: [new docx.TableRow({ children: [
+      new docx.TableCell({ width: { size: larguraGarantia, type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: runsGarantia })] }),
+      new docx.TableCell({ width: { size: larguraData, type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: [
+        new docx.TextRun({ text: 'DATA DE FABRICAÇÃO: ', bold: true, color: WORD_COR.ink, size: 18 }),
+        new docx.TextRun({ text: dataFabricacao ? String(dataFabricacao) : '—', color: WORD_COR.ink, size: 18 }),
+      ] })] }),
+    ] })],
+  });
+}
+
+function wLinhaOpcoes(opcoes, selecionado) {
+  const runs = [];
+  opcoes.forEach(([v, l], idx) => {
+    if (idx > 0) runs.push(new docx.TextRun({ text: '     ', size: 20 }));
+    runs.push(...wCheckboxOpcao(v === selecionado, l));
+  });
+  return new docx.Paragraph({ spacing: { after: 100 }, children: runs });
+}
+
+function wBlocoTexto(texto) {
+  const larguraTotal = wLarguraConteudo();
+  return new docx.Table({
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: [larguraTotal],
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
+    rows: [new docx.TableRow({ children: [new docx.TableCell({
+      margins: { top: 120, bottom: 120, left: 140, right: 140 },
+      children: [new docx.Paragraph({ children: [new docx.TextRun({ text: texto ? String(texto) : '—', size: 20, color: WORD_COR.ink })] })],
+    })] })],
+  });
+}
+
+function wTabelaPecas(pecas) {
+  const margins = { top: 80, bottom: 80, left: 100, right: 100 };
+  const larguraTotal = wLarguraConteudo();
+  const fracs = [0.12, 0.48, 0.22, 0.18];
+  const larguras = fracs.map((f) => Math.round(larguraTotal * f));
+  const headerCell = (t, i) => new docx.TableCell({
+    width: { size: larguras[i], type: docx.WidthType.DXA },
+    shading: { fill: WORD_COR.navy, type: docx.ShadingType.CLEAR, color: 'auto' },
+    margins,
+    children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, bold: true, color: 'FFFFFF', size: 18 })] })],
+  });
+  const cell = (t, i) => new docx.TableCell({ width: { size: larguras[i], type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, size: 18, color: WORD_COR.ink })] })] });
+  const linhas = [new docx.TableRow({ children: [headerCell('Item', 0), headerCell('Descrição da peça', 1), headerCell('Código PMK', 2), headerCell('Qtd.', 3)] })];
+  if (!pecas.length) {
+    linhas.push(new docx.TableRow({ children: [new docx.TableCell({ columnSpan: 4, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma peça informada', italics: true, color: WORD_COR.inkSoft, size: 18 })] })] })] }));
+  } else {
+    pecas.forEach((p, i) => {
+      linhas.push(new docx.TableRow({ children: [cell(String(i + 1), 0), cell(p.descricao || '—', 1), cell(p.codigo_pmk || '—', 2), cell(String(p.quantidade || '—'), 3)] }));
+    });
+  }
+  return new docx.Table({
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: larguras,
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
+    rows: linhas,
+  });
+}
+
+function wRunsComentario(html) {
+  const palavras = extrairPalavrasComEstilo(html);
+  const runs = [];
+  palavras.forEach((p) => {
+    if (p.quebra) { runs.push(new docx.TextRun({ text: '', break: 1 })); return; }
+    if (!p.texto) return;
+    runs.push(new docx.TextRun({
+      text: p.texto + ' ',
+      bold: !!p.negrito,
+      italics: !!p.italico,
+      underline: p.sublinhado ? {} : undefined,
+      color: corCssParaHexWord(p.cor) || WORD_COR.ink,
+      size: 20,
+      font: p.fonte === 'times' ? 'Times New Roman' : p.fonte === 'courier' ? 'Courier New' : 'Calibri',
+    }));
+  });
+  return runs.length ? runs : [new docx.TextRun({ text: '—', size: 20, italics: true, color: WORD_COR.inkSoft })];
+}
+
+function wTabelaFotosBloco(fotos) {
+  const linhas = [];
+  for (let i = 0; i < fotos.length; i += 2) {
+    const par = [fotos[i], fotos[i + 1]];
+    linhas.push(new docx.TableRow({ children: par.map((f) => {
+      if (!f) return new docx.TableCell({ children: [new docx.Paragraph('')] });
+      try {
+        return new docx.TableCell({
+          margins: { top: 60, bottom: 60, left: 60, right: 60 },
+          children: [new docx.Paragraph({ children: [new docx.ImageRun({ data: dataUriParaUint8Array(f), transformation: { width: 235, height: 160 } })] })],
+        });
+      } catch (e) { return new docx.TableCell({ children: [new docx.Paragraph('')] }); }
+    }) }));
+  }
+  return new docx.Table({ width: { size: 100, type: docx.WidthType.PERCENTAGE }, borders: docx.TableBorders.NONE, rows: linhas });
+}
+
+// parágrafo praticamente invisível (linha de ~1pt), usado como fechamento explícito
+// depois das tabelas de capa/contato pra não depender do parágrafo automático do Word.
+// Pinta com a mesma cor de fundo da página, senão sobra uma tira branca descoberta
+// entre o fim da tabela colorida e a borda da folha.
+function wEspacoInvisivel(fillHex) {
+  return new docx.Paragraph({
+    shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
+    spacing: { before: 0, after: 0, line: 20, lineRule: docx.LineRuleType.EXACT },
+    // um parágrafo sem nenhum "run" às vezes não pinta o sombreado no Word — um
+    // texto vazio garante que a cor realmente seja desenhada
+    children: [new docx.TextRun({ text: '' })],
+  });
+}
+
+// o Word sempre insere um parágrafo "de fechamento" (sem formatação nenhuma) entre a
+// primeira seção (capa) e a seção seguinte, pra guardar a quebra de seção — e não tem
+// como colorir esse parágrafo específico pela API do docx.js. Depois de gerar o .docx,
+// abre o arquivo (é um .zip) e pinta esse parágrafo direto no XML, senão sobra uma tira
+// branca entre a capa e a borda da folha.
+async function pintarFechoSecaoCapaWord(blob, fillHex) {
+  const zip = await JSZip.loadAsync(blob);
+  const caminho = 'word/document.xml';
+  let xml = await zip.file(caminho).async('string');
+  xml = xml.replace('<w:p><w:pPr><w:sectPr', `<w:p><w:pPr><w:shd w:val="clear" w:color="auto" w:fill="${fillHex}"/><w:sectPr`);
+  zip.file(caminho, xml);
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', compression: 'DEFLATE' });
+}
+
+// uma linha de tabela colorida (usada em várias, formando uma página cheia dividida em
+// blocos topo/meio/base) — dividir em blocos pequenos em vez de uma única linha gigante
+// evita um bug do Word que às vezes não pinta o sombreamento de uma célula muito alta
+function wLinhaBlocoPagina(fillHex, conteudo, altura, alinhamento) {
+  return new docx.TableRow({
+    height: { value: altura, rule: docx.HeightRule.EXACT },
+    children: [new docx.TableCell({
+      shading: { fill: fillHex, type: docx.ShadingType.CLEAR, color: 'auto' },
+      verticalAlign: alinhamento,
+      children: conteudo,
+    })],
+  });
+}
+
+function wCapa(r, logoDataUri) {
+  const DESLOC_TOPO = 3969; // ~7cm — empurra logo/"PRO Marking" pra baixo, mais perto do centro
+  const DESLOC_BASE = 567; // ~1cm — sobe o slogan, tirando ele da borda inferior
+
+  const topo = [];
+  if (logoDataUri) {
+    try {
+      topo.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { before: DESLOC_TOPO, after: 160 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 70, height: 81 } })],
+      }));
+    } catch (e) {}
+  }
+  topo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: logoDataUri ? undefined : { before: DESLOC_TOPO },
+    children: [
+      new docx.TextRun({ text: 'PRO', bold: true, color: '2E86FF', size: 40 }),
+      new docx.TextRun({ text: 'Marking', bold: true, color: 'FFFFFF', size: 40 }),
+    ],
+  }));
+
+  const meio = [
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { after: 160 },
+      children: [new docx.TextRun({ text: 'RELATÓRIO TÉCNICO', bold: true, color: 'FFFFFF', size: 36 })],
+    }),
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      children: [new docx.TextRun({ text: (r.empresa ? String(r.empresa) : '—').toUpperCase(), color: 'C8D8EC', size: 24 })],
+    }),
+  ];
+
+  const base = [
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { after: DESLOC_BASE },
+      children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
+    }),
+  ];
+
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: docx.TableBorders.NONE,
+    rows: [
+      wLinhaBlocoPagina(WORD_COR.navy, topo, 7375, docx.VerticalAlign.TOP),
+      wLinhaBlocoPagina(WORD_COR.navy, meio, 6431, docx.VerticalAlign.CENTER),
+      wLinhaBlocoPagina(WORD_COR.navy, base, 2731, docx.VerticalAlign.BOTTOM),
+    ],
+  });
+}
+
+function wPaginaContato(logoDataUri) {
+  const conteudo = [];
+  if (logoDataUri) {
+    try {
+      conteudo.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 220 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 40, height: 46 } })],
+      }));
+    } catch (e) {}
+  }
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 260 },
+    children: [new docx.TextRun({ text: 'PRO Marking', bold: true, color: WORD_COR.navy, size: 26 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 180 },
+    children: [new docx.TextRun({ text: 'Entre em contato conosco através:', bold: true, color: WORD_COR.ink, size: 20 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 60 },
+    children: [new docx.TextRun({ text: 'WhatsApp: 12 99718-7506', color: WORD_COR.ink, size: 18 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 220 },
+    children: [new docx.TextRun({ text: 'Telefone: 12 3902-3453', color: WORD_COR.ink, size: 18 })],
+  }));
+  conteudo.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 100 },
+    children: [new docx.TextRun({ text: 'E-mail:', bold: true, color: WORD_COR.ink, size: 18 })],
+  }));
+  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email) => {
+    conteudo.push(new docx.Paragraph({
+      alignment: docx.AlignmentType.CENTER,
+      spacing: { after: 40 },
+      children: [new docx.TextRun({ text: email, color: WORD_COR.blue, size: 18 })],
+    }));
+  });
+  // divide em 3 blocos (espaçador vazio / conteúdo / espaçador vazio) em vez de uma
+  // única célula gigante — igual a capa, que já comprovadamente pinta certo no Word
+  const BEGE = 'F2E9D8';
+  const vazio = [new docx.Paragraph({ children: [new docx.TextRun({ text: '' })] })];
+  return new docx.Table({
+    width: { size: 100, type: docx.WidthType.PERCENTAGE },
+    borders: docx.TableBorders.NONE,
+    rows: [
+      wLinhaBlocoPagina(BEGE, vazio, 2000, docx.VerticalAlign.CENTER),
+      wLinhaBlocoPagina(BEGE, conteudo, 12537, docx.VerticalAlign.CENTER),
+      wLinhaBlocoPagina(BEGE, vazio, 2000, docx.VerticalAlign.CENTER),
+    ],
+  });
+}
+
+async function gerarWordRelatorioManutencao(r, logoDataUri) {
+  const children = [];
+
+  if (logoDataUri) {
+    try {
+      children.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 60 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 46, height: 53 } })],
+      }));
+    } catch (e) {}
+  }
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 20 },
+    children: [new docx.TextRun({ text: 'PRO Marking', bold: true, color: WORD_COR.navy, size: 24 })],
+  }));
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 220 },
+    border: { bottom: { color: WORD_COR.blue, space: 6, style: docx.BorderStyle.SINGLE, size: 8 } },
+    children: [new docx.TextRun({ text: 'Relatório Técnico', bold: true, color: WORD_COR.ink, size: 30 })],
+  }));
+
+  children.push(wTitulo('Dados do cliente'));
+  children.push(wLinhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]));
+  children.push(wLinhaCampos([{ label: 'Contato', valor: r.contato, frac: 1 }]));
+  children.push(wLinhaCampos([{ label: 'Telefone', valor: r.telefone, frac: 1 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
+
+  children.push(wTitulo('Tipo de serviço'));
+  children.push(wLinhaOpcoes([
+    ['amostra', 'AMOSTRA'], ['analise', 'ANÁLISE'], ['preventiva', 'PREVENTIVA'], ['corretiva', 'CORRETIVA'],
+    ['outros', 'OUTROS' + (r.tipo_servico === 'outros' && r.tipo_servico_outros ? ': ' + r.tipo_servico_outros : '')],
+  ], r.tipo_servico));
+
+  children.push(wTitulo('Dados do equipamento'));
+  children.push(wLinhaCampos([{ label: 'Marca', valor: r.marca, frac: 0.34 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.4 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.26 }]));
+  children.push(wLinhaGarantiaData(r.garantia, r.data_fabricacao));
+  children.push(wLinhaCampos([{ label: 'Acessórios', valor: r.acessorios, frac: 1 }]));
+  children.push(wLinhaCampos([{ label: 'Defeito informado', valor: r.defeito_informado, frac: 1 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
+
+  children.push(wTitulo('Técnico responsável'));
+  children.push(wLinhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.5 }, { label: 'E-mail', valor: r.tecnico_email, frac: 0.5 }]));
+  children.push(wLinhaCampos([{ label: 'Entrada', valor: r.data_entrada, frac: 0.26 }, { label: 'Conclusão', valor: r.data_conclusao, frac: 0.26 }, { label: 'Período', valor: periodoManut(r.data_entrada, r.data_conclusao), frac: 0.48 }]));
+
+  children.push(wTitulo('Laudo técnico'));
+  children.push(wBlocoTexto(r.laudo_tecnico));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Serviços realizados'));
+  children.push(wBlocoTexto(r.servico_realizado));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Peças fornecidas'));
+  children.push(wTabelaPecas(r.pecas || []));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Relatório fotográfico', { centralizado: true, manterProximo: true, after: 260 }));
+  const blocosFoto = r.fotos || [];
+  const temFotos = blocosFoto.length && blocosFoto.some((b) => (typeof b === 'string' ? true : (b.fotos || []).length));
+  if (temFotos) {
+    blocosFoto.forEach((entrada) => {
+      const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+      if ((bloco.fotos || []).length) children.push(wTabelaFotosBloco(bloco.fotos));
+      children.push(new docx.Paragraph({ spacing: { before: 60, after: 160 }, children: wRunsComentario(bloco.comentario) }));
+    });
+  } else {
+    children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma foto anexada.', italics: true, color: WORD_COR.inkSoft, size: 20 })] }));
+  }
+
+  const tamanhoPagina = { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) };
+  const semMargem = { top: 0, bottom: 0, left: 0, right: 0, header: 0, footer: 0 };
+
+  // capa e página de contato ficam em seções próprias, com margem zero, pra cor
+  // preencher a folha inteira; o conteúdo fica numa seção separada, com margem normal
+  const doc = new docx.Document({
+    sections: [
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wCapa(r, logoDataUri), wEspacoInvisivel(WORD_COR.navy)],
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
+        children,
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wPaginaContato(logoDataUri), wEspacoInvisivel('F2E9D8')],
+      },
+    ],
+  });
+  const blob = await docx.Packer.toBlob(doc);
+  return pintarFechoSecaoCapaWord(blob, WORD_COR.navy);
+}
+
+async function baixarWordRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  try {
+    const logo = await carregarLogoDataUri();
+    const blob = await gerarWordRelatorioManutencao(r, logo);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${nomeArquivoRelatorioManutencao(r)}.docx`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) { alert('Erro ao gerar o Word: ' + e.message); }
+}
+
+async function excluirRelatorioManutencao(id) {
+  if (!confirm('Excluir este relatório do seu histórico? Essa ação não pode ser desfeita.')) return;
+  try {
+    await api(`/api/relatorios-manutencao/${id}`, { method: 'DELETE' });
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao excluir: ' + e.message); }
+}
+
+function periodoManut(dIni, dFim) {
+  if (!dIni || !dFim) return '—';
+  const d1 = new Date(dIni + 'T00:00:00');
+  const d2 = new Date(dFim + 'T00:00:00');
+  const dias = Math.max(0, Math.round((d2 - d1) / 86400000));
+  return `${dias} DIA${dias === 1 ? '' : 'S'}${dias === 0 ? ' (MESMO DIA)' : ''}`;
+}
+
+// nome de arquivo "empresa - número de série" pro PDF/Word do relatório de manutenção,
+// ex.: relatório da Montreal com nº série 12345678 vira "Montreal - 12345678"
+function nomeArquivoRelatorioManutencao(r) {
+  function limpar(v) { return String(v || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim(); }
+  const empresa = limpar(r.empresa) || 'relatorio';
+  const serie = limpar(r.numero_serie);
+  return serie ? `${empresa} - ${serie}` : empresa;
+}
+
+// PDF em duas partes: capa (navy, cheia página) + páginas de conteúdo com o mesmo layout do
+// modelo em papel da PRO Marking (caixas com borda, checkboxes, tabela de peças, fotos 2 por
+// linha) + página final de contato — pro relatório de manutenção interna gerado pelo técnico.
+function gerarPdfRelatorioManutencao(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function opcaoCheckbox(x, yy, marcado, label) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.9);
+    doc.rect(x, yy - 7, 7, 7, 'S');
+    if (marcado) { doc.setFillColor(...PDF_COR.ink); doc.rect(x + 1.2, yy - 5.8, 4.6, 4.6, 'F'); }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(label, x + 11, yy);
+    return x + 11 + doc.getTextWidth(label);
+  }
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text('PRO Marking', pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  // apertado=true mantém o título colado no que vem embaixo (texto de laudo/serviço, fotos) —
+  // usado nas seções onde título e conteúdo precisam ficar visualmente juntos. Por padrão (sem
+  // subtítulo e sem apertado) o título ganha mais respiro, pra não ficar colado na primeira
+  // caixa de dados (Dados do cliente, Tipo de serviço, Dados do equipamento, Técnico responsável).
+  function tituloCentro(t, sub, apertado) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      y += apertado ? 4 : 16;
+    }
+  }
+
+  function tituloEsquerda(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem, y); y += 14;
+  }
+
+  // linha de campos "LABEL: valor" dentro de caixas com borda, lado a lado
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(26); doc.setFont(undefined, 'bold');
+  doc.setTextColor(...PDF_COR.blueBright); doc.text('PRO', pageW / 2 - 4, 265, { align: 'right' });
+  doc.setTextColor(...PDF_COR.white); doc.text('Marking', pageW / 2 + 2, 265, { align: 'left' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('RELATÓRIO TÉCNICO', pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do cliente');
+  linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Contato', valor: r.contato, frac: 1 }]);
+  linhaCampos([{ label: 'Telefone', valor: r.telefone, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Tipo de serviço');
+  {
+    const opcoes = [['amostra', 'AMOSTRA'], ['analise', 'ANÁLISE'], ['preventiva', 'PREVENTIVA'], ['corretiva', 'CORRETIVA']];
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5);
+    const outrosLabel = 'OUTROS:' + (r.tipo_servico === 'outros' && r.tipo_servico_outros ? ' ' + limparPdf(r.tipo_servico_outros) : ' ____________');
+    const larguras = [...opcoes.map(([, l]) => 11 + doc.getTextWidth(l)), 11 + doc.getTextWidth(outrosLabel)];
+    const gap = 16;
+    const total = larguras.reduce((a, b) => a + b, 0) + gap * (larguras.length - 1);
+    let cx = pageW / 2 - total / 2;
+    opcoes.forEach(([v, l], idx) => { opcaoCheckbox(cx, y, r.tipo_servico === v, l); cx += larguras[idx] + gap; });
+    opcaoCheckbox(cx, y, r.tipo_servico === 'outros', outrosLabel);
+    y += 26;
+  }
+
+  tituloCentro('Dados do equipamento');
+  linhaCampos([{ label: 'Marca', valor: r.marca, frac: 0.34 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.4 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.26 }]);
+  {
+    const wGarantia = largura * 0.62, wData = largura - wGarantia, altura = 20;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, wGarantia, altura, 'S');
+    doc.rect(margem + wGarantia, y, wData, altura, 'S');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('GARANTIA:', margem + 7, y + 13);
+    let cx = margem + 7 + doc.getTextWidth('GARANTIA: ') + 4;
+    [['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']].forEach(([v, l]) => { cx = opcaoCheckbox(cx, y + 13, r.garantia === v, l) + 10; });
+    doc.setFont(undefined, 'bold'); doc.text('DATA DE FABRICAÇÃO: ', margem + wGarantia + 7, y + 13);
+    const wLblFab = doc.getTextWidth('DATA DE FABRICAÇÃO: ');
+    doc.setFont(undefined, 'normal'); doc.text(limparPdf(r.data_fabricacao) || '—', margem + wGarantia + 7 + wLblFab, y + 13);
+    y += altura;
+  }
+  linhaCampos([{ label: 'Acessórios', valor: r.acessorios, frac: 1 }]);
+  linhaCampos([{ label: 'Defeito informado', valor: r.defeito_informado, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Técnico responsável');
+  linhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.5 }, { label: 'E-mail', valor: r.tecnico_email, frac: 0.5 }]);
+  linhaCampos([{ label: 'Entrada', valor: r.data_entrada, frac: 0.26 }, { label: 'Conclusão', valor: r.data_conclusao, frac: 0.26 }, { label: 'Período', valor: periodoManut(r.data_entrada, r.data_conclusao), frac: 0.48 }]);
+  y += 16;
+
+  tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.laudo_tecnico) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  tituloCentro('Serviços realizados', 'Manutenção realizada / Resultados de amostra');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.servico_realizado) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 14;
+  }
+
+  tituloEsquerda('Peças Fornecidas');
+  {
+    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.48 }, { t: 'Código PMK', frac: 0.22 }, { t: 'Qtd.', frac: 0.18 }];
+    const larguras = cols.map((c) => largura * c.frac);
+    if (y + 20 > pageH - margem) novaPagina();
+    let cx = margem;
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
+    y += 18;
+    const pecas = r.pecas || [];
+    if (!pecas.length) {
+      if (y + 18 > pageH - margem) novaPagina();
+      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem + 6, y + 12);
+      y += 18;
+    } else {
+      pecas.forEach((p, i) => {
+        if (y + 18 > pageH - margem) novaPagina();
+        cx = margem;
+        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—', String(p.quantidade || '—')];
+        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
+        y += 18;
+      });
+    }
+    y += 16;
+  }
+
+  // desenha uma lista de palavras com estilo (do editor de comentário) respeitando a largura
+  // da página, com negrito/itálico/sublinhado/cor/fonte por palavra.
+  function desenharTextoRico(palavras) {
+    const alturaLinha = 12.5;
+    let x = margem;
+    if (y > pageH - margem - alturaLinha) novaPagina();
+    palavras.forEach((p) => {
+      if (p.quebra) { x = margem; y += alturaLinha; if (y > pageH - margem - alturaLinha) novaPagina(); return; }
+      const fonte = ['helvetica', 'times', 'courier'].includes(p.fonte) ? p.fonte : 'helvetica';
+      const estiloFonte = p.negrito && p.italico ? 'bolditalic' : p.negrito ? 'bold' : p.italico ? 'italic' : 'normal';
+      doc.setFont(fonte, estiloFonte); doc.setFontSize(9.5);
+      const cor = corCssParaRgb(p.cor) || PDF_COR.ink;
+      doc.setTextColor(...cor);
+      const texto = limparPdf(p.texto);
+      if (!texto) return;
+      const wPalavra = doc.getTextWidth(texto + ' ');
+      if (x + wPalavra > margem + largura) { x = margem; y += alturaLinha; if (y > pageH - margem - alturaLinha) novaPagina(); }
+      doc.text(texto, x, y);
+      if (p.sublinhado) { doc.setDrawColor(...cor); doc.setLineWidth(0.5); doc.line(x, y + 1.5, x + doc.getTextWidth(texto), y + 1.5); }
+      x += wPalavra;
+    });
+    y += alturaLinha;
+  }
+
+  // garante que o título "Relatório fotográfico" nunca fique sozinho no fim de uma página
+  // com as fotos só aparecendo na página seguinte — reserva também a altura da primeira
+  // linha de fotos antes de decidir se precisa pular de página.
+  const temFotos = r.fotos && r.fotos.length && r.fotos.some((entrada) => (typeof entrada === 'string' ? [entrada] : (entrada.fotos || [])).length);
+  if (temFotos) {
+    const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
+    if (y + 34 + hImgFoto > pageH - margem) novaPagina();
+  }
+  tituloCentro('Relatório fotográfico', null, true);
+  if (r.fotos && r.fotos.length) {
+    r.fotos.forEach((entrada) => {
+      // compatibilidade com relatórios salvos antes de existir o comentário por grupo de fotos
+      const bloco = typeof entrada === 'string' ? { comentario: '', fotos: [entrada] } : entrada;
+      const fotosDoBloco = bloco.fotos || [];
+      if (fotosDoBloco.length) {
+        const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+        for (let i = 0; i < fotosDoBloco.length; i += 2) {
+          if (y + hImg > pageH - margem) novaPagina();
+          [fotosDoBloco[i], fotosDoBloco[i + 1]].forEach((f, j) => {
+            if (!f) return;
+            const cx = margem + j * (wImg + gap);
+            try {
+              const m = /^data:image\/(\w+);/.exec(f);
+              const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+              doc.setDrawColor(...PDF_COR.line);
+              doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+              doc.addImage(f, formato, cx, y, wImg, hImg);
+            } catch (e) {}
+          });
+          y += hImg + gap;
+        }
+      }
+      const palavras = extrairPalavrasComEstilo(bloco.comentario);
+      if (palavras.length) { desenharTextoRico(palavras); y += 10; }
+      else y += 4;
+    });
+  } else {
+    doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Nenhuma foto anexada.', margem, y); y += 16;
+  }
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('PRO Marking', pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text('WhatsApp: 12 99718-7506', pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text('Telefone: 12 3902-3453', pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+
+  return doc.output('bloburl');
+}
+
+// ---------- CALENDÁRIO (técnico): vê todas as O.S. de todos os técnicos, igual o administrador
+// vê na Agenda geral — pode abrir e visualizar qualquer uma, mas só consegue executar (preencher
+// relatório) as que estiverem designadas a ele mesmo. Reaproveita as funções de visualização já
+// existentes (osCardCorpo, detalheCompletoOS, o estado do calendário) sem alterar nada do que já
+// existe pro administrador — as ações de administrador (aprovar/reprovar/editar/excluir O.S.)
+// não aparecem aqui.
+
+async function renderCalendarioTecnico() {
+  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda?todas=1'), api('/api/visitas?todas=1')]);
+  window._agendaCache = agenda;
+  window._visitasPorAgenda = {};
+  window._visitasRetornoPorAgenda = {};
+  visitas.forEach((v) => {
+    if ((v.rodada || 1) === 1) window._visitasPorAgenda[v.agenda_id] = v;
+    else window._visitasRetornoPorAgenda[v.agenda_id] = v;
+  });
+  renderAgendaCalendarioTecnico();
+}
+
+function renderAgendaCalendarioTecnico() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Calendário</h1><p>${(window._agendaCache || []).length} O.S. de todos os técnicos — você pode abrir e visualizar qualquer uma, mas só executa as que estiverem designadas a você</p></div>
+    <div class="panel">
+      <div class="cal-head">
+        <div class="cal-nav">
+          <button onclick="mudarMesCalendarioTecnico(-1)">‹</button>
+          <div class="cal-mes-label" id="cal-mes-label"></div>
+          <button onclick="mudarMesCalendarioTecnico(1)">›</button>
+        </div>
+        <button class="btn-outline-sm" onclick="irParaHojeCalendarioTecnico()">Hoje</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+  `;
+  desenharGradeCalendarioTecnico();
+}
+
+function mudarMesCalendarioTecnico(delta) {
+  calMes += delta;
+  if (calMes < 0) { calMes = 11; calAno--; }
+  if (calMes > 11) { calMes = 0; calAno++; }
+  desenharGradeCalendarioTecnico();
+}
+
+function irParaHojeCalendarioTecnico() {
+  const hoje = new Date();
+  calAno = hoje.getFullYear();
+  calMes = hoje.getMonth();
+  calDiaSelecionado = dataISOLocal(hoje);
+  desenharGradeCalendarioTecnico();
+}
+
+function desenharGradeCalendarioTecnico() {
+  const label = document.getElementById('cal-mes-label');
+  if (label) label.textContent = `${MES_LABEL[calMes]} de ${calAno}`;
+  const grid = document.getElementById('cal-grid');
+  if (!grid) return;
+  const agenda = window._agendaCache || [];
+  const contagemPorDia = {};
+  agenda.forEach((a) => {
+    const dia = (a.data_hora_inicio || '').slice(0, 10);
+    if (!dia) return;
+    contagemPorDia[dia] = (contagemPorDia[dia] || 0) + 1;
+  });
+
+  const inicioSemana = new Date(calAno, calMes, 1).getDay();
+  const diasNoMes = new Date(calAno, calMes + 1, 0).getDate();
+  const hojeISO = dataISOLocal(new Date());
+
+  const celulas = [];
+  for (let i = 0; i < inicioSemana; i++) celulas.push(new Date(calAno, calMes, 1 - (inicioSemana - i)));
+  for (let dia = 1; dia <= diasNoMes; dia++) celulas.push(new Date(calAno, calMes, dia));
+  while (celulas.length % 7 !== 0) {
+    const ultima = celulas[celulas.length - 1];
+    celulas.push(new Date(ultima.getFullYear(), ultima.getMonth(), ultima.getDate() + 1));
+  }
+
+  grid.innerHTML = DOW_LABEL.map((d) => `<div class="cal-dow">${d}</div>`).join('') +
+    celulas.map((data) => {
+      const iso = dataISOLocal(data);
+      const qtd = contagemPorDia[iso] || 0;
+      const classes = ['cal-day'];
+      if (data.getMonth() !== calMes) classes.push('fora-mes');
+      if (iso === hojeISO) classes.push('hoje');
+      if (iso === calDiaSelecionado) classes.push('selecionado');
+      return `<div class="${classes.join(' ')}" onclick="selecionarDiaCalendarioTecnico('${iso}')">
+        <div class="cal-day-num">${data.getDate()}</div>
+        ${qtd ? `<div class="cal-day-badge">${qtd}</div>` : ''}
+      </div>`;
+    }).join('');
+}
+
+function selecionarDiaCalendarioTecnico(iso) {
+  calDiaSelecionado = iso;
+  renderDiaCalendarioTecnico(iso);
+}
+
+function renderDiaCalendarioTecnico(iso) {
+  const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
+    .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  const [y, m, d] = iso.split('-');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
+      <button class="btn-outline-sm" onclick="renderAgendaCalendarioTecnico()">‹ Voltar ao calendário</button>
+    </div>
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSCalendarioTecnico(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+  `;
+}
+
+function cardOSCalendarioTecnico(a) {
+  return `
+    <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSCalendarioTecnico(${a.id})" style="cursor:pointer;">
+      ${osCardCorpo(a)}
+      <div class="os-card-actions" onclick="event.stopPropagation()">
+        <button class="os-card-toggle" onclick="abrirDetalheOSCalendarioTecnico(${a.id})">Abrir</button>
+      </div>
+    </div>`;
+}
+
+// tela separada com o detalhe completo de uma O.S. — mesma visualização do administrador
+// (detalheCompletoOS), mas com as ações limitadas ao que o técnico logado pode de fato fazer.
+function abrirDetalheOSCalendarioTecnico(id) {
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const visita = (window._visitasPorAgenda || {})[id];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="renderDiaCalendarioTecnico('${calDiaSelecionado}')">‹ Voltar para o dia</button>
+    </div>
+    <div class="panel">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOSCalendarioTecnico(a, visita)}</div>
+      ${detalheCompletoOS(a, visita)}
+    </div>`;
+}
+
+// só a O.S. designada ao técnico logado ganha um botão de ação (executar / solicitar
+// reabertura) — as demais ficam só pra consulta, sem nenhuma ação de administrador.
+function acoesOSCalendarioTecnico(a, visita) {
+  if (a.finalizada) {
+    return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço.</span>`;
+  }
+  // O.S. de atendimento (chat) segue o fluxo de pós-venda/reparo/estoque, sem deslocamento — as
+  // ações ficam nas telas dedicadas (Fila de Atendimento, Pós-venda, Setor Reparo, Estoque)
+  if (a.tipo === 'atendimento' && a.fase_atendimento) {
+    const faseLabel = (FASE_ATENDIMENTO_TARJA[a.fase_atendimento] || {}).label || a.fase_atendimento;
+    return `<span style="font-size:11.5px; color:var(--ink-soft);">Fase atual: ${esc(faseLabel)} — acompanhe e aja pela Fila de Atendimento ou pela tela do setor responsável.</span>`;
+  }
+  if (a.tecnico_id !== USER.id) {
+    return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
+  }
+  if (a.retorno_pendente_tecnico) {
+    return `${botaoDeslocamento(a)}${a.retorno_deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Enviar relatório de retorno</button>` : ''}`;
+  }
+  if (a.status !== 'concluida') {
+    return `${botaoDeslocamento(a)}${a.deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;
+  }
+  if (a.visita_id && a.visita_status === 'aprovado') {
+    return botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
+      ? `<span class="tag tag-amber">Reabertura solicitada</span>`
+      : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`);
+  }
+  return `<span style="font-size:11.5px; color:var(--ink-soft);">Em análise — aguardando aprovação do administrador.</span>`;
 }
 
 // ---------- RANKING DE TÉCNICOS ----------
@@ -2554,6 +4902,7 @@ async function salvarDefeito(idParaReenvio) {
 function renderFormProcedimento(main, prefill) {
   const editando = !!prefill;
   procDraft = prefill && prefill.passos && prefill.passos.length ? JSON.parse(JSON.stringify(prefill.passos)) : [{ texto: '', fotos: [] }];
+  fotoDestaqueDraft = prefill ? (prefill.foto_destaque || null) : null;
   main.innerHTML = `
     <div class="page-head"><h1>${editando ? 'Editar procedimento' : 'Adicionar Manual de Procedimentos'}</h1><p>${editando ? 'Corrija conforme o comentário do administrador e reenvie.' : 'Cada etapa pode ter uma ou mais fotos anexadas.'}</p></div>
     ${editando && prefill.comentario_admin ? `<div class="admin-note"><b>Comentário do administrador</b>${esc(prefill.comentario_admin)}</div>` : ''}
@@ -2567,6 +4916,7 @@ function renderFormProcedimento(main, prefill) {
             ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${prefill && prefill.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
+        <div><label>Foto de destaque (equipamento/peça)</label><div id="fp-foto-destaque" style="display:flex;"></div></div>
         <div class="full"><label>Precauções/EPIs</label><textarea id="fp-precaucoes" placeholder="ex: óculos de proteção, desligar da tomada...">${esc(prefill ? prefill.precaucoes : '')}</textarea></div>
         <div class="full"><label>Ferramentas necessárias</label><textarea id="fp-ferramentas" placeholder="ex: chave de fenda, multímetro...">${esc(prefill ? prefill.ferramentas : '')}</textarea></div>
       </div>
@@ -2577,7 +4927,30 @@ function renderFormProcedimento(main, prefill) {
       <button class="btn btn-primary btn-sm" onclick="salvarProcedimento(${editando ? prefill.id : 'null'})">${editando ? 'Reenviar para aprovação' : 'Enviar para aprovação'}</button>
     </div>`;
   renderPassosDraft();
+  renderFotoDestaque();
 }
+
+// foto única e independente das fotos dos passos — mostrada em destaque na coluna esquerda do
+// PDF do procedimento (antes disso, o PDF usava sempre a 1ª foto do passo 1 como destaque, o
+// que ficava estranho quando a etapa 1 não era a que melhor representa o equipamento/peça).
+let fotoDestaqueDraft = null;
+function renderFotoDestaque() {
+  const alvo = document.getElementById('fp-foto-destaque');
+  if (!alvo) return;
+  alvo.innerHTML = fotoDestaqueDraft
+    ? `<div class="photo-thumb"><img src="${fotoDestaqueDraft}" onclick="abrirLightbox('${fotoDestaqueDraft}')" alt="Foto de destaque">
+         <button class="photo-rm" onclick="removerFotoDestaque()">×</button></div>`
+    : `<div style="display:flex; gap:8px;">
+         <label class="photo-add"><span class="plus">📷</span>Câmera<input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotoDestaque(event)"></label>
+         <label class="photo-add"><span class="plus">+</span>Galeria<input type="file" accept="image/*" style="display:none" onchange="adicionarFotoDestaque(event)"></label>
+       </div>`;
+}
+function adicionarFotoDestaque(event) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) return;
+  lerFotosComoDataUrl([arquivo]).then(([dataUrl]) => { fotoDestaqueDraft = dataUrl; renderFotoDestaque(); });
+}
+function removerFotoDestaque() { fotoDestaqueDraft = null; renderFotoDestaque(); }
 
 function renderPassosDraft() {
   document.getElementById('steps-list').innerHTML = procDraft.map((p, i) => `
@@ -2593,7 +4966,11 @@ function renderPassosDraft() {
             <button class="photo-rm" onclick="removerFoto(${i}, ${j})">×</button>
           </div>`).join('')}
         <label class="photo-add">
-          <span class="plus">+</span>Foto
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotos(event, ${i})">
+        </label>
+        <label class="photo-add">
+          <span class="plus">+</span>Galeria
           <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotos(event, ${i})">
         </label>
       </div>
@@ -2604,12 +4981,7 @@ function adicionarPasso() { procDraft.push({ texto: '', fotos: [] }); renderPass
 function removerPasso(i) { procDraft.splice(i, 1); renderPassosDraft(); }
 function removerFoto(i, j) { procDraft[i].fotos.splice(j, 1); renderPassosDraft(); }
 function adicionarFotos(event, i) {
-  const arquivos = Array.from(event.target.files || []);
-  Promise.all(arquivos.map((arquivo) => new Promise((resolve) => {
-    const leitor = new FileReader();
-    leitor.onload = () => resolve(leitor.result);
-    leitor.readAsDataURL(arquivo);
-  }))).then((dataUrls) => {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
     procDraft[i].fotos.push(...dataUrls);
     renderPassosDraft();
   });
@@ -2625,6 +4997,7 @@ async function salvarProcedimento(idParaReenvio) {
     precaucoes: document.getElementById('fp-precaucoes').value,
     ferramentas: document.getElementById('fp-ferramentas').value,
     passos: procDraft,
+    foto_destaque: fotoDestaqueDraft,
   };
   try {
     if (idParaReenvio) await api(`/api/registros/${idParaReenvio}/reenviar`, { method: 'POST', body });
@@ -2637,10 +5010,11 @@ async function salvarProcedimento(idParaReenvio) {
 // ---------- MEUS REGISTROS ----------
 async function renderMeusRegistros() {
   const { registros } = await api('/api/registros/meus');
+  window._meusRegistrosCache = registros;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Meus registros</h1><p>${registros.length} enviado(s) — acompanhe o status de aprovação</p></div>
-    ${registros.length ? registros.map((r) => `
+    ${registros.length ? registros.map((r, i) => `
       <div class="item-card">
         <div class="item-top">
           <div><div class="item-title">${esc(r.titulo)}</div>
@@ -2651,8 +5025,56 @@ async function renderMeusRegistros() {
         ${r.status === 'alteracao_sugerida' ? `
           <div class="admin-note"><b>Comentário do administrador</b>${esc(r.comentario_admin)}</div>
           <button class="btn btn-orange btn-outline-sm" style="margin-top:8px;" onclick="editarRegistro(${r.id})">Corrigir e reenviar</button>
-        ` : ''}
+        ` : `<button class="btn-outline-sm" style="margin-top:8px;" onclick="abrirDetalheMeuRegistro(${i})">Abrir</button>`}
       </div>`).join('') : `<div class="empty">Você ainda não enviou nenhum registro.</div>`}`;
+}
+
+function abrirDetalheMeuRegistro(i) {
+  const r = (window._meusRegistrosCache || [])[i];
+  if (!r) return;
+  carregarLogoDataUri();
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(r.titulo)}</h1><p>${esc(r.equipamento_tipo || '')}${r.equipamento_modelo ? ' — ' + esc(r.equipamento_modelo) : ''}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${r.status === 'aprovado' ? `<button class="btn btn-primary btn-sm" onclick="abrirPdfMeuRegistro(${i})">Abrir PDF</button>` : ''}
+        <button class="btn-outline-sm" onclick="renderMeusRegistros()">‹ Voltar</button>
+      </div>
+    </div>
+    ${r.status === 'alteracao_sugerida' ? `<div class="admin-note"><b>Comentário do administrador</b>${esc(r.comentario_admin)}</div>` : ''}
+    <div class="panel">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">${r.tipo === 'defeito' ? tag('Defeito/Falha', 'falha') : tag('Procedimento', 'preventiva')}${badgeStatus(r.status)}</div>
+      ${r.tipo === 'defeito' ? `
+        <div class="kv" style="margin-top:12px;"><b>Sintoma:</b> ${esc(r.sintoma)}</div>
+        <div class="kv"><b>Causa:</b> ${esc(r.causa)}</div>
+        <div class="kv"><b>Solução:</b> ${esc(r.solucao)}</div>
+        ${r.numero_serie ? `<div class="kv"><b>Nº de série:</b> ${esc(r.numero_serie)}</div>` : ''}
+        ${r.fotos && r.fotos.length ? `<div class="kv"><b>Relatório fotográfico:</b></div><div class="item-step-photos">${r.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do defeito">`).join('')}</div>` : ''}
+      ` : `
+        <div style="margin-top:12px;">
+          ${r.periodicidade ? `<div class="kv"><b>Periodicidade:</b> ${esc(r.periodicidade)}</div>` : ''}
+          ${r.precaucoes ? `<div class="kv"><b>Precauções/EPIs:</b> ${esc(r.precaucoes)}</div>` : ''}
+          ${r.ferramentas ? `<div class="kv"><b>Ferramentas:</b> ${esc(r.ferramentas)}</div>` : ''}
+          <ol class="item-steps">
+            ${(r.passos || []).map((p) => `
+              <li>${esc(p.texto)}
+                ${p.fotos && p.fotos.length ? `<div class="item-step-photos">${p.fotos.map((f) => `<img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da etapa">`).join('')}</div>` : ''}
+              </li>`).join('')}
+          </ol>
+        </div>`}
+      <div class="item-autor" style="margin-top:14px;">Enviado em ${fmtData(r.criado_em)}</div>
+    </div>`;
+}
+
+async function abrirPdfMeuRegistro(i) {
+  const r = (window._meusRegistrosCache || [])[i];
+  if (!r) return;
+  try {
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfBiblioteca(r, r.tipo, logo);
+    window.open(url, '_blank');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
 async function editarRegistro(id) {
@@ -2764,14 +5186,16 @@ async function renderClientes() {
       <tr><th>Empresa</th><th>Contato</th><th>Telefone</th><th>E-mail</th><th>Cidade/UF</th><th></th></tr>
       ${clientes.length ? clientes.map((c) => `
         <tr>
-          <td>${esc(c.nome_empresa)}</td>
-          <td>${esc(c.contato || '—')}</td>
-          <td>${esc(c.telefone || '—')}</td>
-          <td>${esc(c.email || '—')}</td>
-          <td>${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
-          <td style="white-space:nowrap;">
-            <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
-            <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          <td data-label="Empresa">${esc(c.nome_empresa)}</td>
+          <td data-label="Contato">${esc(c.contato || '—')}</td>
+          <td data-label="Telefone">${esc(c.telefone || '—')}</td>
+          <td data-label="E-mail">${esc(c.email || '—')}</td>
+          <td data-label="Cidade/UF">${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
+          <td class="td-acoes">
+            ${USER.papel === 'administrador' ? `
+              <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
+              <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            ` : ''}
           </td>
         </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum cliente cadastrado ainda.</td></tr>`}
     </table></div>`;
@@ -2864,7 +5288,7 @@ async function renderMeusEquipamentos() {
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Localização</th><th></th></tr>
       ${equipamentos.length ? equipamentos.map((e) => `
-        <tr><td>${e.tipo}</td><td>${e.modelo}</td><td>${e.numero_serie}</td><td>${e.localizacao || '—'}</td>
+        <tr><td data-label="Tipo">${e.tipo}</td><td data-label="Modelo">${e.modelo}</td><td data-label="Nº de série">${e.numero_serie}</td><td data-label="Localização">${e.localizacao || '—'}</td>
         <td><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button></td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhum equipamento ainda.</td></tr>`}
     </table></div>
     <div id="historico-eq"></div>`;
@@ -2876,7 +5300,7 @@ async function verHistorico(id) {
     <div class="panel"><div class="panel-head">Histórico do equipamento</div>
     <table>
       <tr><th>Data</th><th>Tipo</th><th>Status</th></tr>
-      ${agenda.length ? agenda.map((a) => `<tr><td>${fmtData(a.data_hora_inicio)}</td><td>${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td>${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
+      ${agenda.length ? agenda.map((a) => `<tr><td data-label="Data">${fmtData(a.data_hora_inicio)}</td><td data-label="Tipo">${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td data-label="Status">${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
     </table></div>`;
 }
 
@@ -2895,10 +5319,12 @@ async function renderEquipamentosCadastrar() {
     <div id="form-equipamento-catalogo"></div>
     <div class="panel"><table>
       <tr><th>Tipo</th><th>Modelo</th><th></th></tr>
-      ${catalogo.length ? catalogo.map((e) => `<tr><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td>
-        <td style="white-space:nowrap;">
-          <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
-          <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+      ${catalogo.length ? catalogo.map((e) => `<tr><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td>
+        <td class="td-acoes">
+          ${USER.papel === 'administrador' ? `
+            <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ` : ''}
         </td></tr>`).join('') : `<tr><td colspan="3" class="empty">Nenhum equipamento no catálogo ainda.</td></tr>`}
     </table></div>`;
 }
@@ -2983,11 +5409,13 @@ async function renderEquipamentosAtrelar() {
       <tr><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Fabricação</th><th></th></tr>
       ${atrelados.length ? atrelados.map((e) => {
         const cliente = clientes.find((c) => c.id === e.cliente_id);
-        return `<tr><td>${esc(cliente ? cliente.nome_empresa : '—')}</td><td>${esc(e.tipo)}</td><td>${esc(e.modelo)}</td><td>${esc(e.numero_serie)}</td><td>${esc(e.data_fabricacao || '—')}</td>
-        <td style="white-space:nowrap;">
+        return `<tr><td data-label="Cliente">${esc(cliente ? cliente.nome_empresa : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº de série">${esc(e.numero_serie)}</td><td data-label="Fabricação">${esc(e.data_fabricacao || '—')}</td>
+        <td class="td-acoes">
           <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
-          <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
-          <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ${USER.papel === 'administrador' ? `
+            <button class="btn-outline-sm" onclick="editarAtrelado(${e.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ` : ''}
         </td></tr>`;
       }).join('') : `<tr><td colspan="6" class="empty">Nenhum equipamento atrelado a um cliente ainda.</td></tr>`}
     </table></div>
@@ -3067,13 +5495,13 @@ async function renderUsuarios() {
       <div class="user-row">
         <div class="u-avatar-lg">${initials(u.nome)}</div>
         <div class="u-info">
-          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(u.papel)}</span></div>
+          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(u.papel)}</span>${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
           <div class="u-line2">${esc(u.email)} ${u.cargo ? '· ' + esc(u.cargo) : ''} ${u.setor ? '· ' + esc(u.setor) : ''}</div>
         </div>
         <span class="badge ${u.status === 'ativo' ? 'badge-ativo' : 'badge-convite'}">${u.status === 'ativo' ? 'Ativo' : 'Convite enviado'}</span>
         ${u.status !== 'ativo' ? `<button class="btn-outline-sm" onclick="reenviarConvite(${u.id})">Reenviar convite</button>` : ''}
-        <button class="btn-outline-sm" onclick="editarUsuario(${u.id})">Editar</button>
-        <button class="btn-outline-sm" onclick="excluirUsuario(${u.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        ${!u.protegido || u.id === USER.id ? `<button class="btn-outline-sm" onclick="editarUsuario(${u.id})">Editar</button>` : ''}
+        ${!u.protegido ? `<button class="btn-outline-sm" onclick="excluirUsuario(${u.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>` : ''}
       </div>`).join('')}`;
 }
 let usuarioEmEdicaoId = null;
@@ -3089,6 +5517,10 @@ function mostrarFormUsuario(usuario) {
         <div><label>Setor</label><input id="nu-setor" value="${usuario ? esc(usuario.setor || '') : ''}"></div>
         <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()">
           <option value="tecnico" ${usuario && usuario.papel === 'tecnico' ? 'selected' : ''}>Técnico</option>
+          <option value="producao" ${usuario && usuario.papel === 'producao' ? 'selected' : ''}>Produção</option>
+          <option value="pos_venda" ${usuario && usuario.papel === 'pos_venda' ? 'selected' : ''}>Pós-venda</option>
+          <option value="reparo" ${usuario && usuario.papel === 'reparo' ? 'selected' : ''}>Setor Reparo</option>
+          <option value="estoque" ${usuario && usuario.papel === 'estoque' ? 'selected' : ''}>Estoque</option>
           <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
           <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
         </select></div>
@@ -3172,41 +5604,505 @@ function mostrarLinkConvite(convite) {
 }
 
 // ---------- ABERTURA DE CHAMADO (cliente) ----------
+// ---------- atendimento por chat: tela do cliente ----------
+// o cliente conversa com a IA (se estiver configurada); se ela não resolver, o atendimento cai
+// na fila do técnico e a conversa continua no mesmo chat, só que respondida por uma pessoa.
+
+let _atClienteChamado = null;
+let _atClientePoll = null;
+
 async function renderChamados() {
-  const [{ chamados }, { equipamentos }] = await Promise.all([api('/api/chamados'), api('/api/equipamentos')]);
+  clearInterval(_atClientePoll);
+  const { chamado } = await api('/api/chamados/meu-ativo');
+  _atClienteChamado = chamado;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Abertura de chamado</h1><p>Solicite manutenção preventiva, corretiva ou treinamento</p></div>
-    <div class="panel">
-      <div class="form-grid">
-        <div><label>Tipo de serviço</label>
-          <select id="ch-tipo"><option value="preventiva">Manutenção preventiva</option><option value="corretiva">Manutenção corretiva</option><option value="treinamento">Treinamento</option></select>
-        </div>
-        <div><label>Equipamento</label>
-          <select id="ch-equip">${equipamentos.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('')}</select>
-        </div>
-        <div class="full"><label>Descreva o problema/necessidade</label><textarea id="ch-descricao"></textarea></div>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="abrirChamado()">Abrir chamado</button>
+    <div class="page-head"><h1>Atendimento</h1><p>Converse com o assistente — se não resolver, um técnico assume a conversa.</p></div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      ${!chamado || chamado.status !== 'encerrado' ? `
+        <div class="chat-compositor">
+          <textarea id="at-texto" placeholder="${chamado ? 'Digite sua mensagem...' : 'Descreva o problema pra começar o atendimento...'}" rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoCliente();}"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoCliente()">Enviar</button>
+        </div>` : '<p class="empty" style="margin-top:10px;">Atendimento encerrado. Mande uma nova mensagem abaixo pra abrir outro.</p>'}
     </div>
-    <div class="page-head"><h1 style="font-size:16px;">Meus chamados</h1></div>
+    <div id="at-historico"></div>`;
+  renderMensagensChat('at-mensagens', chamado ? chamado.mensagens : [], 'cliente');
+  if (chamado && chamado.status !== 'encerrado') {
+    _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
+  }
+  carregarHistoricoAtendimentoCliente();
+}
+
+async function atualizarAtendimentoCliente() {
+  if (!_atClienteChamado) return;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atClienteChamado.id}`);
+    _atClienteChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'cliente');
+    if (chamado.status === 'encerrado') { clearInterval(_atClientePoll); renderChamados(); }
+  } catch (e) { /* silencioso — tenta de novo no próximo ciclo */ }
+}
+
+async function enviarMensagemAtendimentoCliente() {
+  const campo = document.getElementById('at-texto');
+  const texto = campo.value.trim();
+  if (!texto) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    if (!_atClienteChamado || _atClienteChamado.status === 'encerrado') {
+      const { chamado } = await api('/api/chamados', { method: 'POST', body: { mensagem: texto } });
+      _atClienteChamado = chamado;
+      renderChamados();
+      return;
+    }
+    const { chamado } = await api(`/api/chamados/${_atClienteChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _atClienteChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'cliente');
+    if (!_atClientePoll) _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+async function carregarHistoricoAtendimentoCliente() {
+  const { chamados } = await api('/api/chamados/meus-encerrados');
+  const alvo = document.getElementById('at-historico');
+  if (!alvo || !chamados.length) return;
+  alvo.innerHTML = `
+    <div class="page-head"><h1 style="font-size:16px;">Atendimentos anteriores</h1></div>
     <div class="panel"><table>
-      <tr><th>Data</th><th>Tipo</th><th>Equipamento</th><th>Status</th></tr>
-      ${chamados.length ? chamados.map((c) => `
-        <tr><td>${fmtData(c.criado_em)}</td><td>${esc(c.tipo_servico)}</td><td>${esc(c.equipamento_tipo || '—')}</td><td>${tag(c.status === 'aberto' ? 'Aberto' : c.status, c.status === 'aberto' ? 'amber' : 'green')}</td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum chamado aberto ainda.</td></tr>`}
+      <tr><th>Data</th><th>Resolvido por</th></tr>
+      ${chamados.map((c) => `<tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Resolvido por">${c.resolvido_por === 'ia' ? 'Assistente' : c.numero_os ? 'Técnico — ' + esc(c.numero_os) : 'Técnico'}</td></tr>`).join('')}
     </table></div>`;
 }
-async function abrirChamado() {
-  const body = {
-    tipo_servico: document.getElementById('ch-tipo').value,
-    equipamento_id: document.getElementById('ch-equip').value,
-    descricao: document.getElementById('ch-descricao').value,
-  };
+
+// mensagens do chat — reaproveitado tanto na tela do cliente quanto na do técnico; "visao"
+// decide de que lado do chat cada bolha aparece (a mensagem de quem tá olhando vai pra direita)
+function renderMensagensChat(containerId, mensagens, visao) {
+  const alvo = document.getElementById(containerId);
+  if (!alvo) return;
+  const proprioAutor = visao === 'cliente' ? 'cliente' : visao === 'pos_venda' ? 'pos_venda' : 'tecnico';
+  alvo.innerHTML = (mensagens || []).length ? (mensagens || []).map((m) => {
+    if (m.autor === 'sistema') return `<div class="chat-sistema">${esc(m.texto)}</div>`;
+    const proprio = m.autor === proprioAutor;
+    const rotulo = m.autor === 'ia' ? 'Assistente' : proprio ? 'Você' : (m.autor === 'tecnico' ? 'Técnico' : m.autor === 'pos_venda' ? 'Pós-venda' : 'Cliente');
+    return `<div class="chat-msg ${proprio ? 'chat-msg-proprio' : 'chat-msg-outro'} chat-msg-${m.autor}">
+      <div class="chat-msg-rotulo">${rotulo}</div>
+      <div class="chat-msg-texto">${esc(m.texto)}</div>
+      <div class="chat-msg-hora">${fmtData(m.criado_em)}</div>
+    </div>`;
+  }).join('') : '<p class="empty">Nenhuma mensagem ainda.</p>';
+  alvo.scrollTop = alvo.scrollHeight;
+}
+
+// ---------- atendimento por chat: fila e chat do técnico ----------
+
+async function renderFilaAtendimento() {
+  const [{ chamados: fila }, { chamados: meus }] = await Promise.all([
+    api('/api/chamados?fila=1'),
+    api('/api/chamados'),
+  ]);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Fila de Atendimento</h1><p>Atendimentos que a IA não conseguiu resolver sozinha — qualquer técnico pode assumir.</p></div>
+    <div class="panel">
+      <h2>Aguardando técnico (${fila.length})</h2>
+      <div class="atendimento-grid">
+        ${fila.length ? fila.map((c) => cardAtendimentoFila(c)).join('') : '<p class="empty">Nenhum atendimento na fila agora.</p>'}
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Meus atendimentos</h2>
+      <div class="atendimento-grid">
+        ${meus.length ? meus.map((c) => cardAtendimentoFila(c)).join('') : '<p class="empty">Você ainda não assumiu nenhum atendimento.</p>'}
+      </div>
+    </div>`;
+}
+
+function legendaStatusChamado(c) {
+  if (c.os_finalizada) return tag('Finalizado', 'green');
+  if (c.os_fase_atendimento && c.os_fase_atendimento !== 'em_atendimento') return tag('Pós-venda', 'purple');
+  if (c.status === 'aguardando_tecnico') return tag('Aguardando técnico', 'amber');
+  if (c.status === 'convertido_os') return tag('Em atendimento', 'green');
+  return tag(c.status, 'blue');
+}
+
+function cardAtendimentoFila(c) {
+  const naoLido = c.tecnico_id && !c.lida_tecnico;
+  const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
+  const resumo = c.resumo_ia || (primeiraDoCliente ? primeiraDoCliente.texto : '');
+  const encerradoOuEncaminhado = c.os_finalizada || (c.os_fase_atendimento && c.os_fase_atendimento !== 'em_atendimento');
+  return `
+    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''} ${encerradoOuEncaminhado ? 'atendimento-card-finalizado' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">ATENDIMENTO #${c.id}</span>
+        ${c.prioridade === 'alta' ? '<span class="tag tag-falha">ALTA</span>' : ''}
+        ${naoLido ? '<span class="tag tag-blue">Nova mensagem</span>' : ''}
+      </div>
+      <div class="atendimento-cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</div>
+      ${c.equipamento_tipo ? `<div class="atendimento-equip">${esc(c.equipamento_tipo)}${c.equipamento_modelo ? ' — ' + esc(c.equipamento_modelo) : ''}</div>` : ''}
+      ${resumo ? `<div class="atendimento-resumo">${esc(resumo.slice(0, 140))}</div>` : ''}
+      <div class="atendimento-status">${legendaStatusChamado(c)}</div>
+    </div>`;
+}
+
+let _atTecChamado = null;
+let _atTecPoll = null;
+
+async function abrirChatAtendimentoTecnico(id) {
+  clearInterval(_atTecPoll);
+  const { chamado } = await api(`/api/chamados/${id}`);
+  _atTecChamado = chamado;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atendimento #${chamado.id}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${chamado.status === 'aguardando_tecnico' ? `<button class="btn btn-primary btn-sm" onclick="assumirAtendimento(${chamado.id})">Assumir atendimento</button>` : ''}
+        ${chamado.os_id ? `<button class="btn-outline-sm" onclick="ir('agenda')">Ver O.S. ${esc(chamado.numero_os || '')}</button>` : ''}
+        ${chamado.os_id && chamado.os_fase_atendimento === 'em_atendimento' ? `<button class="btn-outline-sm" onclick="encerrarAtendimento(${chamado.os_id})">✓ Encerrar atendimento</button>` : ''}
+        ${chamado.os_id && chamado.os_fase_atendimento === 'em_atendimento' ? `<button class="btn btn-primary btn-sm" onclick="encaminharPosVenda(${chamado.os_id})">Encaminhar pro pós-venda</button>` : ''}
+        <button class="btn-outline-sm" onclick="ir('fila-atendimento')">‹ Voltar</button>
+      </div>
+    </div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      ${chamado.tecnico_id ? `
+        <div class="chat-compositor">
+          <textarea id="at-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoTecnico();}"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoTecnico()">Enviar</button>
+        </div>` : '<p class="empty" style="margin-top:10px;">Assuma o atendimento pra poder responder ao cliente.</p>'}
+    </div>`;
+  renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
+  if (chamado.status !== 'encerrado') _atTecPoll = setInterval(atualizarAtendimentoTecnico, 4000);
+}
+
+async function atualizarAtendimentoTecnico() {
+  if (!_atTecChamado) return;
   try {
-    await api('/api/chamados', { method: 'POST', body });
-    mostrarToast('Chamado aberto com sucesso.');
-    renderChamados();
+    const { chamado } = await api(`/api/chamados/${_atTecChamado.id}`);
+    _atTecChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
+  } catch (e) { /* silencioso */ }
+}
+
+async function enviarMensagemAtendimentoTecnico() {
+  const campo = document.getElementById('at-texto');
+  const texto = campo.value.trim();
+  if (!texto || !_atTecChamado) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atTecChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _atTecChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
   } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+async function encerrarAtendimento(agendaId) {
+  if (!confirm('Confirma que o problema foi resolvido direto pelo chat? A O.S. será finalizada, sem passar pelo pós-venda.')) return;
+  try {
+    await api(`/api/agenda/${agendaId}/encerrar-atendimento`, { method: 'POST' });
+    mostrarToast('Atendimento encerrado.');
+    ir('fila-atendimento');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// motivo digitado por número, no mesmo estilo simples usado no resto do sistema (ex: reprovarVisita)
+async function encaminharPosVenda(agendaId) {
+  const escolha = prompt('Motivo do encaminhamento pro pós-venda:\n1 - Cliente vai enviar o equipamento\n2 - Técnico vai até o cliente\n3 - Vamos enviar uma peça pro cliente\n\nDigite 1, 2 ou 3:');
+  const motivos = { '1': 'cliente_envia_equipamento', '2': 'tecnico_visita', '3': 'peca_enviada' };
+  const motivo = motivos[(escolha || '').trim()];
+  if (!motivo) return;
+  try {
+    await api(`/api/agenda/${agendaId}/encaminhar-pos-venda`, { method: 'POST', body: { motivo } });
+    mostrarToast('Encaminhado pro pós-venda.');
+    ir('fila-atendimento');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function assumirAtendimento(id) {
+  try {
+    await api(`/api/chamados/${id}/assumir`, { method: 'POST', body: {} });
+    mostrarToast('Atendimento assumido — uma Ordem de Serviço foi aberta.');
+    abrirChatAtendimentoTecnico(id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- atendimento por chat: painel do administrador ----------
+
+async function renderPainelAtendimentos() {
+  const stats = await api('/api/chamados/stats');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Atendimentos</h1><p>Atendimento por chat de hoje — IA de 1º nível e fila de técnicos.</p></div>
+    <div class="atendimento-stats-grid">
+      <div class="stat-tile"><div class="stat-valor">${stats.total}</div><div class="stat-label">Total hoje</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.resolvidos_ia}</div><div class="stat-label">Resolvidos pela IA</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.tecnico}</div><div class="stat-label">Técnico</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_ia || '—'}</div><div class="stat-label">Tempo médio IA</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_tecnico || '—'}</div><div class="stat-label">Tempo médio técnico</div></div>
+      <div class="stat-tile"><div class="stat-valor">${stats.aguardando}</div><div class="stat-label">Aguardando</div></div>
+    </div>`;
+}
+
+// ---------- pós-venda / setor reparo ----------
+
+const MOTIVO_POS_VENDA_LABEL = {
+  cliente_envia_equipamento: 'Cliente vai enviar o equipamento',
+  tecnico_visita: 'Técnico vai até o cliente',
+  peca_enviada: 'Envio de peça pro cliente',
+};
+
+async function renderFilaPosVenda() {
+  const { agenda } = await api('/api/agenda/fila-pos-venda');
+  window._agendaCache = agenda;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Pós-venda</h1><p>Atendimentos que não resolveram no chat e precisam de orçamento.</p></div>
+    <div class="atendimento-grid">
+      ${agenda.length ? agenda.map((a) => cardPosVenda(a)).join('') : '<p class="empty">Nenhum atendimento aguardando o pós-venda agora.</p>'}
+    </div>`;
+}
+
+function cardPosVenda(a) {
+  const aguardandoDecisao = a.fase_atendimento === 'orcamento_enviado';
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">${esc(numeroOS(a))}</span>
+      </div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-resumo">${esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '—')}</div>
+      <div class="atendimento-status">${aguardandoDecisao ? tag('Orçamento enviado — aguardando cliente', 'amber') : tag('Aguardando pós-venda', 'blue')}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        ${a.origem_chamado_id ? `<button class="btn-outline-sm" onclick="abrirChatAtendimentoPosVenda(${a.origem_chamado_id})">💬 Iniciar atendimento</button>` : ''}
+        ${aguardandoDecisao ? `
+          <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
+          <button class="btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>
+        ` : `
+          ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>
+        `}
+      </div>
+    </div>`;
+}
+
+async function posVendaAguardandoEquipamento(id) {
+  try { await api(`/api/agenda/${id}/pos-venda/aguardando-equipamento`, { method: 'POST' }); mostrarToast('Encaminhado pro setor de reparo.'); renderFilaPosVenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function posVendaOrcamentoEnviado(id) {
+  try { await api(`/api/agenda/${id}/pos-venda/orcamento-enviado`, { method: 'POST' }); mostrarToast('Orçamento marcado como enviado.'); renderFilaPosVenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function posVendaDecisao(id, aprovado) {
+  if (!confirm(aprovado ? 'Confirma que o cliente aprovou o orçamento? A O.S. vai pro setor de reparo executar o serviço.' : 'Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada.')) return;
+  try { await api(`/api/agenda/${id}/pos-venda/decisao`, { method: 'POST', body: { aprovado } }); mostrarToast(aprovado ? 'Aprovado — encaminhado pro reparo.' : 'O.S. finalizada.'); renderFilaPosVenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- pós-venda: chat com o cliente (mesma conversa iniciada pelo técnico) ----------
+// pós-venda usa o chat pra combinar o envio do orçamento por fora do sistema (e-mail, etc.) —
+// os botões de aguardando equipamento / orçamento enviado / decisão do cliente ficam disponíveis
+// aqui também, além do card na fila.
+
+let _atPvChamado = null;
+let _atPvPoll = null;
+
+async function abrirChatAtendimentoPosVenda(chamadoId) {
+  clearInterval(_atPvPoll);
+  const { chamado } = await api(`/api/chamados/${chamadoId}`);
+  _atPvChamado = chamado;
+  const a = (window._agendaCache || []).find((x) => x.id === chamado.os_id) || {};
+  const aguardandoDecisao = a.fase_atendimento === 'orcamento_enviado';
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atendimento #${chamado.id}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${aguardandoDecisao ? `
+          <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
+          <button class="btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>
+        ` : a.fase_atendimento === 'aguardando_pos_venda' ? `
+          ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>
+        ` : ''}
+        <button class="btn-outline-sm" onclick="ir('fila-pos-venda')">‹ Voltar</button>
+      </div>
+    </div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      ${chamado.status !== 'encerrado' ? `
+        <div class="chat-compositor">
+          <textarea id="at-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoPosVenda();}"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoPosVenda()">Enviar</button>
+        </div>` : '<p class="empty" style="margin-top:10px;">Atendimento encerrado.</p>'}
+    </div>`;
+  renderMensagensChat('at-mensagens', chamado.mensagens, 'pos_venda');
+  if (chamado.status !== 'encerrado') _atPvPoll = setInterval(atualizarAtendimentoPosVenda, 4000);
+}
+
+async function atualizarAtendimentoPosVenda() {
+  if (!_atPvChamado) return;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atPvChamado.id}`);
+    _atPvChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'pos_venda');
+  } catch (e) { /* silencioso */ }
+}
+
+async function enviarMensagemAtendimentoPosVenda() {
+  const campo = document.getElementById('at-texto');
+  const texto = campo.value.trim();
+  if (!texto || !_atPvChamado) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atPvChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _atPvChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'pos_venda');
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+async function renderFilaReparo() {
+  const { agenda } = await api('/api/agenda/fila-reparo');
+  window._agendaCache = agenda;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Setor Reparo</h1><p>Equipamentos aguardando chegada, diagnóstico ou execução do reparo.</p></div>
+    <div class="atendimento-grid">
+      ${agenda.length ? agenda.map((a) => cardReparo(a)).join('') : '<p class="empty">Nenhum atendimento no setor de reparo agora.</p>'}
+    </div>`;
+}
+
+function cardReparo(a) {
+  let statusTag, acao;
+  if (a.fase_atendimento === 'aguardando_equipamento') {
+    statusTag = tag('Aguardando equipamento', 'amber');
+    acao = `<button class="btn btn-primary btn-sm" onclick="reparoIniciarAtendimento(${a.id})">Iniciar atendimento</button>`;
+  } else if (a.fase_atendimento === 'em_diagnostico_reparo') {
+    statusTag = tag('Em diagnóstico', 'blue');
+    acao = a.tecnico_id === USER.id ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de diagnóstico</button>` : `<span style="font-size:11.5px; color:var(--ink-soft);">Designado a ${esc(a.tecnico_nome || 'outro técnico')}.</span>`;
+  } else {
+    statusTag = tag('Orçamento aprovado — executar reparo', 'green');
+    acao = `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de liberação</button>`;
+  }
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">${esc(numeroOS(a))}</span>
+      </div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-status">${statusTag}</div>
+      <div style="margin-top:10px;">${acao}</div>
+    </div>`;
+}
+
+async function reparoIniciarAtendimento(id) {
+  try { await api(`/api/agenda/${id}/reparo/iniciar-atendimento`, { method: 'POST' }); mostrarToast('Atendimento iniciado — preencha o relatório quando concluir o diagnóstico.'); renderFilaReparo(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- estoque: confirma chegada (equipamento enviado pelo cliente) e saída (equipamento
+// reparado ou peça enviada) ----------
+
+async function renderFilaEstoque() {
+  const { agenda } = await api('/api/agenda/fila-estoque');
+  window._agendaCache = agenda;
+  const chegada = agenda.filter((a) => a.fase_atendimento === 'aguardando_equipamento');
+  const saida = agenda.filter((a) => a.fase_atendimento === 'aguardando_saida_estoque');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Estoque</h1><p>Confirme a chegada de equipamentos enviados pelo cliente e a saída de equipamentos reparados ou peças.</p></div>
+    <div class="panel">
+      <h2>Aguardando chegada (${chegada.length})</h2>
+      <div class="atendimento-grid">
+        ${chegada.length ? chegada.map((a) => cardEstoqueChegada(a)).join('') : '<p class="empty">Nenhum equipamento aguardando chegada agora.</p>'}
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Aguardando saída (${saida.length})</h2>
+      <div class="atendimento-grid">
+        ${saida.length ? saida.map((a) => cardEstoqueSaida(a)).join('') : '<p class="empty">Nenhuma saída pendente agora.</p>'}
+      </div>
+    </div>`;
+}
+
+function cardEstoqueChegada(a) {
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-status">${tag('Aguardando chegada do cliente', 'amber')}</div>
+      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada</button></div>
+    </div>`;
+}
+
+function cardEstoqueSaida(a) {
+  const label = a.motivo_pos_venda === 'peca_enviada' ? 'Confirmar envio da peça' : 'Confirmar saída do equipamento';
+  const resumo = a.motivo_pos_venda === 'peca_enviada' ? 'Orçamento aprovado — peça pronta pra envio' : 'Equipamento reparado pelo setor de reparo';
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-resumo">${esc(resumo)}</div>
+      <div class="atendimento-status">${tag('Pronto pra saída', 'purple')}</div>
+      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button></div>
+    </div>`;
+}
+
+async function estoqueConfirmarChegada(id) {
+  try { await api(`/api/agenda/${id}/estoque/confirmar-chegada`, { method: 'POST' }); mostrarToast('Chegada confirmada — o setor de reparo foi avisado.'); renderFilaEstoque(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function estoqueConfirmarSaida(id) {
+  if (!confirm('Confirma que saiu rumo ao cliente? A O.S. será finalizada.')) return;
+  try { await api(`/api/agenda/${id}/estoque/confirmar-saida`, { method: 'POST' }); mostrarToast('Saída confirmada — O.S. finalizada.'); renderFilaEstoque(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- administrador: Solicitação de Atendimento (motivo "técnico vai até o cliente") ----------
+// depois que o pós-venda aprova o orçamento nesse caminho, o admin precisa criar uma O.S. de
+// verdade (visita técnica) pra agendar o técnico — essa tela reúne os pedidos e pré-preenche o
+// formulário padrão de Nova Ordem de Serviço com os dados do atendimento original.
+
+async function renderFilaSolicitacaoAtendimento() {
+  const { agenda } = await api('/api/agenda/fila-solicitacao-atendimento');
+  window._agendaCache = agenda;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Solicitação de Atendimento</h1><p>Orçamentos aprovados pra visita técnica — crie a O.S. de verdade pra agendar o técnico.</p></div>
+    <div class="atendimento-grid">
+      ${agenda.length ? agenda.map((a) => cardSolicitacaoAtendimento(a)).join('') : '<p class="empty">Nenhuma solicitação de atendimento pendente agora.</p>'}
+    </div>
+    <div id="form-nova-atividade"></div>`;
+}
+
+function cardSolicitacaoAtendimento(a) {
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      ${a.problema ? `<div class="atendimento-resumo">${esc(a.problema.slice(0, 140))}</div>` : ''}
+      <div class="atendimento-status">${tag('Orçamento aprovado — aguardando O.S.', 'orange')}</div>
+      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button></div>
+    </div>`;
+}
+
+function abrirCriarOSDeSolicitacao(id) {
+  const item = (window._agendaCache || []).find((a) => a.id === id);
+  if (!item) return;
+  mostrarFormNovaAtividade(null, item);
+  document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth' });
 }
 
 // ---------- toast ----------
@@ -3225,7 +6121,7 @@ function mostrarModalSucesso(mensagem) {
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <h3 style="margin-top:16px;">${esc(mensagem)}</h3>
-      <button class="btn btn-primary" style="width:100%; margin-top:18px;" onclick="document.getElementById('modal-sucesso').classList.remove('show')">Ok</button>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:18px;" onclick="document.getElementById('modal-sucesso').classList.remove('show')">Ok</button>
     </div>`;
 }
 
