@@ -175,6 +175,13 @@ function migrar(data) {
     if (a.pos_venda_decisao === undefined) a.pos_venda_decisao = null;
     if (a.pos_venda_decisao_em === undefined) a.pos_venda_decisao_em = null;
     if (a.tecnico_chat_id === undefined) a.tecnico_chat_id = null;
+    // O.S. de atendimento criadas antes desse fluxo existir (fase_atendimento nunca foi
+    // preenchida) entram agora em "em_atendimento" — do jeito que já estavam, só passam a
+    // seguir a linha do tempo nova a partir daqui em vez da antiga (deslocamento/orçamento)
+    if (a.tipo === 'atendimento' && !a.finalizada && !a.fase_atendimento) {
+      a.fase_atendimento = 'em_atendimento';
+      if (!a.tecnico_chat_id) a.tecnico_chat_id = a.tecnico_id;
+    }
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
