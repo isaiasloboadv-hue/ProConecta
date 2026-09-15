@@ -1851,13 +1851,15 @@ function chamadoComDetalhes(data, c) {
   const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
   const tecnico = data.usuarios.find((u) => u.id === c.tecnico_id);
   const equipamento = data.equipamentos.find((e) => e.id === c.equipamento_id);
+  const os = c.os_id ? data.agenda.find((a) => a.id === c.os_id) : null;
   return {
     ...c,
     cliente_nome: cliente ? cliente.nome_empresa : null,
     tecnico_nome: tecnico ? tecnico.nome : null,
     equipamento_tipo: equipamento ? equipamento.tipo : null,
     equipamento_modelo: equipamento ? equipamento.modelo : null,
-    numero_os: c.os_id ? (() => { const os = data.agenda.find((a) => a.id === c.os_id); return os ? (os.numero_os || `OS-${String(os.id).padStart(6, '0')}`) : null; })() : null,
+    numero_os: os ? (os.numero_os || `OS-${String(os.id).padStart(6, '0')}`) : null,
+    os_fase_atendimento: os ? os.fase_atendimento : null,
   };
 }
 
@@ -2137,6 +2139,24 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
 // equipamento — a O.S. finaliza sozinha nesse ponto. Ver fluxo completo no db.js (migrar()).
 
 const MOTIVOS_POS_VENDA = ['cliente_envia_equipamento', 'tecnico_visita', 'peca_enviada'];
+
+// POST /api/agenda/:id/encerrar-atendimento — o técnico resolveu tudo direto no chat, sem
+// precisar do pós-venda/reparo — finaliza a O.S. na hora
+rota('POST', /^\/api\/agenda\/(\d+)\/encerrar-atendimento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encerra o atendimento.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tipo !== 'atendimento') return enviarJSON(res, 400, { erro: 'Só O.S. de atendimento são encerradas por aqui.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.fase_atendimento !== 'em_atendimento') return enviarJSON(res, 400, { erro: 'Este atendimento já foi encaminhado pro pós-venda — não é mais possível encerrar direto.' });
+  const agora = new Date().toISOString();
+  item.finalizada = true;
+  item.finalizado_em = agora;
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
 
 // POST /api/agenda/:id/encaminhar-pos-venda — o técnico do chat encaminha o atendimento que
 // não resolveu remotamente

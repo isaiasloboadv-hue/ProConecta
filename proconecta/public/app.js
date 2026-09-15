@@ -2387,7 +2387,11 @@ function desenharOrdemServico() {
 // estiver disponível
 function acoesOSAtendimento(a) {
   const fase = a.fase_atendimento;
-  if (fase === 'em_atendimento') return `<span style="font-size:11.5px; color:var(--ink-soft);">Em atendimento no chat — o técnico encaminha pro pós-venda se não resolver remotamente.</span>`;
+  if (fase === 'em_atendimento') {
+    return `
+      <button class="btn-outline-sm" onclick="encerrarAtendimento(${a.id})">✓ Encerrar atendimento</button>
+      <button class="btn btn-primary btn-sm" onclick="encaminharPosVenda(${a.id})">Encaminhar pro pós-venda</button>`;
+  }
   if (fase === 'aguardando_pos_venda') {
     return `
       ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
@@ -2569,7 +2573,12 @@ function timelineOSAtendimento(a) {
     { label: 'Em atendimento (chat)', data: a.criado_em, estado: 'feito' },
   ];
   if (!a.encaminhado_pos_venda_em) {
-    passos.push({ label: 'Aguardando encaminhamento pro pós-venda', data: null, estado: 'pendente' });
+    if (a.finalizada) {
+      passos.push({ label: 'Resolvido direto no atendimento (chat) — sem precisar do pós-venda', data: a.finalizado_em, estado: 'feito' });
+      passos.push({ label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' });
+    } else {
+      passos.push({ label: 'Em aberto — o técnico encerra direto ou encaminha pro pós-venda', data: null, estado: 'pendente' });
+    }
     return renderizarTimelineOS(passos);
   }
   passos.push({ label: `Encaminhado pro pós-venda${a.motivo_pos_venda ? ' — ' + esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '') : ''}`, data: a.encaminhado_pos_venda_em, estado: 'feito' });
@@ -5664,7 +5673,8 @@ async function abrirChatAtendimentoTecnico(id) {
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${chamado.status === 'aguardando_tecnico' ? `<button class="btn btn-primary btn-sm" onclick="assumirAtendimento(${chamado.id})">Assumir atendimento</button>` : ''}
         ${chamado.os_id ? `<button class="btn-outline-sm" onclick="ir('agenda')">Ver O.S. ${esc(chamado.numero_os || '')}</button>` : ''}
-        ${chamado.os_id && chamado.status !== 'encerrado' ? `<button class="btn btn-primary btn-sm" onclick="encaminharPosVenda(${chamado.os_id})">Encaminhar pro pós-venda</button>` : ''}
+        ${chamado.os_id && chamado.os_fase_atendimento === 'em_atendimento' ? `<button class="btn-outline-sm" onclick="encerrarAtendimento(${chamado.os_id})">✓ Encerrar atendimento</button>` : ''}
+        ${chamado.os_id && chamado.os_fase_atendimento === 'em_atendimento' ? `<button class="btn btn-primary btn-sm" onclick="encaminharPosVenda(${chamado.os_id})">Encaminhar pro pós-venda</button>` : ''}
         <button class="btn-outline-sm" onclick="ir('fila-atendimento')">‹ Voltar</button>
       </div>
     </div>
@@ -5700,6 +5710,15 @@ async function enviarMensagemAtendimentoTecnico() {
     renderMensagensChat('at-mensagens', chamado.mensagens, 'tecnico');
   } catch (e) { alert('Erro: ' + e.message); }
   finally { campo.disabled = false; campo.focus(); }
+}
+
+async function encerrarAtendimento(agendaId) {
+  if (!confirm('Confirma que o problema foi resolvido direto pelo chat? A O.S. será finalizada, sem passar pelo pós-venda.')) return;
+  try {
+    await api(`/api/agenda/${agendaId}/encerrar-atendimento`, { method: 'POST' });
+    mostrarToast('Atendimento encerrado.');
+    ir('fila-atendimento');
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // motivo digitado por número, no mesmo estilo simples usado no resto do sistema (ex: reprovarVisita)
