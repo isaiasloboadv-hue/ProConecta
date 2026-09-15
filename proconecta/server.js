@@ -742,11 +742,51 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
 // POST /api/visitas  (técnico registra o diário técnico de uma atividade)
 rota('POST', /^\/api\/visitas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
+  if (!exigirPapel(user, ['tecnico', 'reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const agendaItem = data.agenda.find((a) => a.id === Number(body.agenda_id));
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
+
+  // atendimento (chat) virado O.S. de pós-venda/reparo: o setor de reparo preenche o relatório
+  // (diagnóstico antes do orçamento, ou liberação depois do orçamento aprovado pelo cliente) —
+  // mesmo formulário do laudo técnico, mas nasce já aprovado (sem fila do gestor) e não segue o
+  // fluxo normal de deslocamento/orçamento/feedback do cliente — ver "pós-venda / setor reparo"
+  if (agendaItem.tipo === 'atendimento' && ['em_diagnostico_reparo', 'executando_reparo'].includes(agendaItem.fase_atendimento)) {
+    if (!exigirPapel(user, ['reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o setor de reparo preenche este relatório.' });
+    const laudoCompleto = { ...(body.laudo || {}), ...dadosAtendimentoBloqueados(data, agendaItem, user) };
+    const erroLaudo = validarLaudoTecnico(laudoCompleto);
+    if (erroLaudo) return enviarJSON(res, 400, { erro: erroLaudo });
+    const rodada = data.visitas.filter((v) => v.agenda_id === agendaItem.id).length + 1;
+    const agora = new Date().toISOString();
+    const visitaReparo = {
+      id: nextId(data, 'visitas'), agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id,
+      rodada, criado_em: agora,
+      analise: body.analise || '', causa: body.causa || laudoCompleto.laudo_tecnico || '', correcao: body.correcao || laudoCompleto.servico_realizado || '',
+      resultado: body.resultado || 'solucionado', relevante_biblioteca: !!body.relevante_biblioteca,
+      relatorio: null, relatorio_simples: null, laudo: laudoCompleto,
+      status_aprovacao: 'aprovado', aprovado_por: null, data_aprovacao: agora,
+      solicitacao_reabertura: null, lida_tecnico: false,
+    };
+    data.visitas.push(visitaReparo);
+    agendaItem.tecnico_id = user.id;
+    if (agendaItem.fase_atendimento === 'em_diagnostico_reparo') {
+      agendaItem.fase_atendimento = 'aguardando_pos_venda';
+      db.save(data);
+      const posVendas = data.usuarios.filter((u) => u.papel === 'pos_venda');
+      await Promise.all(posVendas.map((pv) => enviarPush(data, pv.id, {
+        titulo: 'Diagnóstico pronto — enviar orçamento',
+        corpo: `${agendaItem.numero_os || 'OS-' + String(agendaItem.id).padStart(6, '0')} está de volta pro pós-venda.`,
+        url: '/',
+      }).catch(() => {})));
+    } else {
+      agendaItem.finalizada = true;
+      agendaItem.finalizado_em = agora;
+      db.save(data);
+    }
+    return enviarJSON(res, 201, { visita: visitaReparo });
+  }
+
   if (agendaItem.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta atividade não é sua.' });
   if (!agendaItem.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de executar esta O.S.' });
   if (agendaItem.retorno_pendente_tecnico && !agendaItem.retorno_deslocamento_iniciado_em) {
@@ -2062,6 +2102,16 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     retorno_pendente_tecnico: false,
     retorno_deslocamento_iniciado_em: null,
     origem_chamado_id: chamado.id,
+    // fluxo de pós-venda/reparo — nasce em "em_atendimento" (ainda no chat com o técnico);
+    // ver seção "pós-venda / setor reparo" mais abaixo
+    fase_atendimento: 'em_atendimento',
+    motivo_pos_venda: null,
+    encaminhado_pos_venda_em: null,
+    equipamento_recebido_em: null,
+    pos_venda_orcamento_enviado_em: null,
+    pos_venda_decisao: null,
+    pos_venda_decisao_em: null,
+    tecnico_chat_id: user.id,
   };
   data.agenda.push(osItem);
 
@@ -2077,6 +2127,161 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, `${user.nome}, da PRO Marking, assumiu seu atendimento e vai continuar por aqui.`).catch(() => {});
   }
   enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado), agenda: agendaComDetalhes(data, osItem) });
+});
+
+// ---------- pós-venda / setor reparo (O.S. tipo "atendimento" que não resolveu no chat) ----------
+// depois que o chat não resolve, o técnico encaminha pro pós-venda escolhendo o motivo; o
+// pós-venda manda o orçamento (direto, ou depois de o setor reparo receber o equipamento e
+// diagnosticar) e registra manualmente se o cliente aprovou; se aprovou, o setor reparo executa
+// o serviço e preenche um segundo relatório (mesmo modelo do laudo técnico) pra liberar o
+// equipamento — a O.S. finaliza sozinha nesse ponto. Ver fluxo completo no db.js (migrar()).
+
+const MOTIVOS_POS_VENDA = ['cliente_envia_equipamento', 'tecnico_visita', 'peca_enviada'];
+
+// POST /api/agenda/:id/encaminhar-pos-venda — o técnico do chat encaminha o atendimento que
+// não resolveu remotamente
+rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encaminha pro pós-venda.' });
+  const body = await lerCorpo(req);
+  if (!MOTIVOS_POS_VENDA.includes(body.motivo)) return enviarJSON(res, 400, { erro: 'Motivo inválido.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tipo !== 'atendimento') return enviarJSON(res, 400, { erro: 'Só O.S. de atendimento passam pelo pós-venda.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.fase_atendimento !== 'em_atendimento') return enviarJSON(res, 400, { erro: 'Este atendimento já foi encaminhado pro pós-venda.' });
+  item.fase_atendimento = 'aguardando_pos_venda';
+  item.motivo_pos_venda = body.motivo;
+  item.encaminhado_pos_venda_em = new Date().toISOString();
+  db.save(data);
+  const posVendas = data.usuarios.filter((u) => u.papel === 'pos_venda');
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+  await Promise.all(posVendas.map((pv) => enviarPush(data, pv.id, {
+    titulo: 'Atendimento aguardando pós-venda',
+    corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
+    url: '/',
+  }).catch(() => {})));
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/pos-venda/aguardando-equipamento — pós-venda manda pro setor reparo
+// esperar o cliente enviar o equipamento
+rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/aguardando-equipamento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda faz isso.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.fase_atendimento !== 'aguardando_pos_venda') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando uma decisão do pós-venda.' });
+  item.fase_atendimento = 'aguardando_equipamento';
+  db.save(data);
+  const reparos = data.usuarios.filter((u) => u.papel === 'reparo');
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+  await Promise.all(reparos.map((r) => enviarPush(data, r.id, {
+    titulo: 'Equipamento a caminho do setor de reparo',
+    corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
+    url: '/',
+  }).catch(() => {})));
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/pos-venda/orcamento-enviado — pós-venda avisa que já mandou o orçamento
+// pro cliente (direto, quando o técnico vai até o cliente ou vai uma peça; ou depois que o
+// setor reparo devolveu com o diagnóstico do equipamento recebido)
+rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/orcamento-enviado$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda faz isso.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.fase_atendimento !== 'aguardando_pos_venda') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando uma decisão do pós-venda.' });
+  item.fase_atendimento = 'orcamento_enviado';
+  item.pos_venda_orcamento_enviado_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/pos-venda/decisao — pós-venda registra manualmente se o cliente
+// aprovou o orçamento (fala com o cliente por fora do sistema)
+rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda faz isso.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.fase_atendimento !== 'orcamento_enviado') return enviarJSON(res, 400, { erro: 'O orçamento ainda não foi enviado pro cliente.' });
+  const agora = new Date().toISOString();
+  if (body.aprovado) {
+    item.pos_venda_decisao = 'aprovado';
+    item.pos_venda_decisao_em = agora;
+    item.fase_atendimento = 'executando_reparo';
+    db.save(data);
+    const reparos = data.usuarios.filter((u) => u.papel === 'reparo');
+    const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+    await Promise.all(reparos.map((r) => enviarPush(data, r.id, {
+      titulo: 'Orçamento aprovado — executar reparo',
+      corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
+      url: '/',
+    }).catch(() => {})));
+  } else {
+    item.pos_venda_decisao = 'reprovado';
+    item.pos_venda_decisao_em = agora;
+    item.finalizada = true;
+    item.finalizado_em = agora;
+    db.save(data);
+  }
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/reparo/iniciar-atendimento — o equipamento chegou no setor de reparo;
+// o técnico do reparo assume a O.S. (fica designado a ele) e libera o relatório
+rota('POST', /^\/api\/agenda\/(\d+)\/reparo\/iniciar-atendimento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o setor de reparo faz isso.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (item.fase_atendimento !== 'aguardando_equipamento') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando o equipamento.' });
+  item.tecnico_id = user.id;
+  item.fase_atendimento = 'em_diagnostico_reparo';
+  item.equipamento_recebido_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// GET /api/agenda/fila-pos-venda — atendimentos aguardando alguma ação do pós-venda
+rota('GET', /^\/api\/agenda\/fila-pos-venda$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda acessa esta fila.' });
+  const data = db.load();
+  const lista = data.agenda
+    .filter((a) => a.tipo === 'atendimento' && !a.finalizada && ['aguardando_pos_venda', 'orcamento_enviado'].includes(a.fase_atendimento))
+    .sort((a, b) => (a.encaminhado_pos_venda_em || '').localeCompare(b.encaminhado_pos_venda_em || ''))
+    .map((a) => agendaComDetalhes(data, a));
+  enviarJSON(res, 200, { agenda: lista });
+});
+
+// GET /api/agenda/fila-reparo — equipamentos aguardando o setor de reparo, mais o que já está
+// designado ao técnico logado (diagnóstico) e o que está liberado pra execução do reparo
+rota('GET', /^\/api\/agenda\/fila-reparo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o setor de reparo acessa esta fila.' });
+  const data = db.load();
+  const lista = data.agenda
+    .filter((a) => a.tipo === 'atendimento' && !a.finalizada && (
+      a.fase_atendimento === 'aguardando_equipamento' ||
+      a.fase_atendimento === 'executando_reparo' ||
+      (a.fase_atendimento === 'em_diagnostico_reparo' && a.tecnico_id === user.id)
+    ))
+    .sort((a, b) => (a.encaminhado_pos_venda_em || '').localeCompare(b.encaminhado_pos_venda_em || ''))
+    .map((a) => agendaComDetalhes(data, a));
+  enviarJSON(res, 200, { agenda: lista });
 });
 
 // GET /api/chamados/stats — administrador: números de hoje pro painel de atendimentos

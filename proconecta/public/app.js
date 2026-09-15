@@ -10,7 +10,7 @@ let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
-const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção' };
+const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', reparo: 'Setor Reparo' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
@@ -265,8 +265,8 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
-  if (USER.papel === 'tecnico' || USER.papel === 'administrador' || USER.papel === 'producao' || USER.papel === 'cliente') ativarNotificacoesPush();
-  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
+  if (['tecnico', 'administrador', 'producao', 'cliente', 'pos_venda', 'reparo'].includes(USER.papel)) ativarNotificacoesPush();
+  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', reparo: 'fila-reparo' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
 
@@ -400,6 +400,12 @@ const NAV = {
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
   ],
+  pos_venda: [
+    { key: 'fila-pos-venda', label: 'Pós-venda', page: 'fila-pos-venda' },
+  ],
+  reparo: [
+    { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
+  ],
 };
 
 function buscarCaminho(nodes, pagina, caminho) {
@@ -431,7 +437,7 @@ function renderNavNodes(nodes, nivel) {
 }
 
 function montarSidebar() {
-  const label = USER.papel === 'tecnico' ? 'Acesso técnico' : USER.papel === 'administrador' ? 'Acesso administrador' : USER.papel === 'producao' ? 'Acesso produção' : 'Acesso cliente';
+  const label = 'Acesso ' + (PAPEL_LABEL[USER.papel] || 'cliente').toLowerCase();
   const nav = NAV[USER.papel] || [];
   document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
   renderHeaderRight();
@@ -489,6 +495,8 @@ async function ir(pagina) {
     if (pagina === 'chamados') return renderChamados();
     if (pagina === 'fila-atendimento') return renderFilaAtendimento();
     if (pagina === 'painel-atendimentos') return renderPainelAtendimentos();
+    if (pagina === 'fila-pos-venda') return renderFilaPosVenda();
+    if (pagina === 'fila-reparo') return renderFilaReparo();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -854,9 +862,21 @@ function diasEntre(isoInicio, isoFim) {
 // no topo do card, pra dar pra ver o andamento de todos os cards sem abrir um por um
 // cada tarja corresponde exatamente a uma etapa em aberto da linha do tempo (timelineOS) —
 // mostra sempre a etapa mais adiantada que ainda está pendente.
+const FASE_ATENDIMENTO_TARJA = {
+  em_atendimento: { label: 'Em atendimento', cor: 'blue' },
+  aguardando_pos_venda: { label: 'Aguardando pós-venda', cor: 'purple' },
+  aguardando_equipamento: { label: 'Aguardando equipamento', cor: 'amber' },
+  em_diagnostico_reparo: { label: 'Em diagnóstico (reparo)', cor: 'orange' },
+  orcamento_enviado: { label: 'Orçamento enviado', cor: 'pink' },
+  executando_reparo: { label: 'Executando reparo', cor: 'teal' },
+};
+
 function faseAtualOS(a) {
   const visita = (window._visitasPorAgenda || {})[a.id];
   if (a.finalizada) return { label: 'Finalizada', cor: 'green' };
+  // O.S. de atendimento (nascida do chat) segue o fluxo de pós-venda/reparo, não o fluxo normal
+  // de deslocamento/orçamento/feedback do cliente
+  if (a.tipo === 'atendimento' && a.fase_atendimento) return FASE_ATENDIMENTO_TARJA[a.fase_atendimento] || FASE_ATENDIMENTO_TARJA.em_atendimento;
   if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) return { label: 'Orçamento', cor: 'orange' };
   if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
     return a.retorno_deslocamento_iniciado_em ? { label: 'Técnico a caminho', cor: 'blue' } : { label: 'Aguardando deslocamento', cor: 'amber' };
@@ -2009,8 +2029,10 @@ async function concluirLaudoTecnico() {
   }
   if (r.enviado) localStorage.removeItem(chaveRascunho);
   const eraRetorno = laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico;
-  mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : (eraRetorno ? 'Relatório de retorno enviado — o administrador foi avisado.' : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.'));
-  renderAgenda();
+  const eraReparo = laudoAgendaAtual && laudoAgendaAtual.tipo === 'atendimento' && USER.papel === 'reparo';
+  mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : eraReparo ? 'Relatório enviado.' : (eraRetorno ? 'Relatório de retorno enviado — o administrador foi avisado.' : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.'));
+  if (eraReparo) renderFilaReparo();
+  else renderAgenda();
 }
 
 // PDF do laudo técnico (corretiva/preventiva) — mesmo layout do modelo em papel da PRO Marking
@@ -2360,10 +2382,35 @@ function desenharOrdemServico() {
 
 // ações disponíveis pra uma O.S. (aprovar/reprovar/reabrir/excluir relatório + editar/excluir a própria O.S.)
 // — usadas tanto no card quanto na tela de detalhe.
+// ações de uma O.S. de atendimento (fluxo pós-venda/reparo) — o administrador vê e usa os
+// mesmos botões das telas dedicadas de pós-venda/reparo, como reforço se ninguém dos setores
+// estiver disponível
+function acoesOSAtendimento(a) {
+  const fase = a.fase_atendimento;
+  if (fase === 'em_atendimento') return `<span style="font-size:11.5px; color:var(--ink-soft);">Em atendimento no chat — o técnico encaminha pro pós-venda se não resolver remotamente.</span>`;
+  if (fase === 'aguardando_pos_venda') {
+    return `
+      ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
+      <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>`;
+  }
+  if (fase === 'aguardando_equipamento') return `<button class="btn btn-primary btn-sm" onclick="reparoIniciarAtendimento(${a.id})">Iniciar atendimento (reparo)</button>`;
+  if (fase === 'em_diagnostico_reparo') return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de diagnóstico</button>`;
+  if (fase === 'orcamento_enviado') {
+    return `
+      <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
+      <button class="btn btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>`;
+  }
+  if (fase === 'executando_reparo') return `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de liberação</button>`;
+  return '';
+}
+
 function acoesOS(a, visita) {
   if (a.finalizada) {
     return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço. Abra uma nova O.S. se precisar de um novo atendimento.</span>`;
   }
+  // O.S. de atendimento (chat): o administrador pode agir como backup do pós-venda/reparo se
+  // precisar, além das telas dedicadas de cada setor
+  if (a.tipo === 'atendimento' && a.fase_atendimento) return acoesOSAtendimento(a);
   if (!a.confirmado_cliente_em) {
     return `
       <button class="btn btn-primary btn-sm" onclick="confirmarClienteOS(${a.id})">✓ Confirmar cliente</button>
@@ -2514,7 +2561,51 @@ function fmtDataHora(iso) {
 // linha do tempo completa: abertura -> confirmação do cliente -> deslocamento -> relatório ->
 // aprovação do gestor -> feedback do cliente -> finalização da O.S. Cada etapa aparece sempre
 // (feita ou em aberto), na ordem — só a reprovação interrompe a sequência normal.
+// linha do tempo de uma O.S. de atendimento (nascida do chat) — segue o fluxo de pós-venda/setor
+// reparo, bem diferente do fluxo normal (sem confirmação de cliente/deslocamento/feedback)
+function timelineOSAtendimento(a) {
+  const passos = [
+    { label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' },
+    { label: 'Em atendimento (chat)', data: a.criado_em, estado: 'feito' },
+  ];
+  if (!a.encaminhado_pos_venda_em) {
+    passos.push({ label: 'Aguardando encaminhamento pro pós-venda', data: null, estado: 'pendente' });
+    return renderizarTimelineOS(passos);
+  }
+  passos.push({ label: `Encaminhado pro pós-venda${a.motivo_pos_venda ? ' — ' + esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '') : ''}`, data: a.encaminhado_pos_venda_em, estado: 'feito' });
+
+  if (a.motivo_pos_venda === 'cliente_envia_equipamento') {
+    passos.push(a.equipamento_recebido_em
+      ? { label: 'Equipamento recebido e diagnosticado pelo setor de reparo', data: a.equipamento_recebido_em, estado: 'feito' }
+      : { label: 'Aguardando equipamento chegar no setor de reparo', data: null, estado: 'pendente' });
+    if (!a.equipamento_recebido_em || a.fase_atendimento === 'em_diagnostico_reparo') return renderizarTimelineOS(passos);
+  }
+
+  passos.push(a.pos_venda_orcamento_enviado_em
+    ? { label: 'Orçamento enviado ao cliente', data: a.pos_venda_orcamento_enviado_em, estado: 'feito' }
+    : { label: 'Aguardando pós-venda enviar o orçamento', data: null, estado: 'pendente' });
+  if (!a.pos_venda_orcamento_enviado_em) return renderizarTimelineOS(passos);
+
+  if (a.pos_venda_decisao === 'reprovado') {
+    passos.push({ label: 'Cliente não aprovou o orçamento', data: a.pos_venda_decisao_em, estado: 'reprovado' });
+    return renderizarTimelineOS(passos);
+  }
+  passos.push(a.pos_venda_decisao === 'aprovado'
+    ? { label: 'Cliente aprovou o orçamento', data: a.pos_venda_decisao_em, estado: 'feito' }
+    : { label: 'Aguardando decisão do cliente sobre o orçamento', data: null, estado: 'pendente' });
+  if (a.pos_venda_decisao !== 'aprovado') return renderizarTimelineOS(passos);
+
+  passos.push(a.finalizada
+    ? { label: 'Equipamento liberado pelo setor de reparo', data: a.finalizado_em, estado: 'feito' }
+    : { label: 'Aguardando o setor de reparo executar e liberar o equipamento', data: null, estado: 'pendente' });
+  passos.push(a.finalizada
+    ? { label: 'O.S. finalizada', data: a.finalizado_em, estado: 'feito' }
+    : { label: 'Aguardando finalização da O.S.', data: null, estado: 'pendente' });
+  return renderizarTimelineOS(passos);
+}
+
 function timelineOS(a, visita) {
+  if (a.tipo === 'atendimento' && a.fase_atendimento) return timelineOSAtendimento(a);
   const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
 
   passos.push(a.confirmado_cliente_em
@@ -2596,7 +2687,7 @@ function detalheCompletoOS(a, visita) {
         <div class="os-relatorio-box-titulo">Relatório enviado pelo técnico</div>
         ${detalheRelatorioVisita(visita)}
         ${visita.laudo && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfLaudoAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
-      </div>` : `<div class="admin-note" style="margin-top:14px;">O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.</div>`}
+      </div>` : `<div class="admin-note" style="margin-top:14px;">${a.tipo === 'atendimento' ? 'Ainda não há relatório — acompanhe o andamento na linha do tempo abaixo.' : 'O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.'}</div>`}
     ${a.visita_retorno_id ? `
       <div class="os-relatorio-box" style="margin-top:14px;">
         <div class="os-relatorio-box-titulo">Relatório de retorno enviado pelo técnico</div>
@@ -5335,6 +5426,8 @@ function mostrarFormUsuario(usuario) {
         <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()">
           <option value="tecnico" ${usuario && usuario.papel === 'tecnico' ? 'selected' : ''}>Técnico</option>
           <option value="producao" ${usuario && usuario.papel === 'producao' ? 'selected' : ''}>Produção</option>
+          <option value="pos_venda" ${usuario && usuario.papel === 'pos_venda' ? 'selected' : ''}>Pós-venda</option>
+          <option value="reparo" ${usuario && usuario.papel === 'reparo' ? 'selected' : ''}>Setor Reparo</option>
           <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
           <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
         </select></div>
@@ -5571,6 +5664,7 @@ async function abrirChatAtendimentoTecnico(id) {
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${chamado.status === 'aguardando_tecnico' ? `<button class="btn btn-primary btn-sm" onclick="assumirAtendimento(${chamado.id})">Assumir atendimento</button>` : ''}
         ${chamado.os_id ? `<button class="btn-outline-sm" onclick="ir('agenda')">Ver O.S. ${esc(chamado.numero_os || '')}</button>` : ''}
+        ${chamado.os_id && chamado.status !== 'encerrado' ? `<button class="btn btn-primary btn-sm" onclick="encaminharPosVenda(${chamado.os_id})">Encaminhar pro pós-venda</button>` : ''}
         <button class="btn-outline-sm" onclick="ir('fila-atendimento')">‹ Voltar</button>
       </div>
     </div>
@@ -5608,6 +5702,19 @@ async function enviarMensagemAtendimentoTecnico() {
   finally { campo.disabled = false; campo.focus(); }
 }
 
+// motivo digitado por número, no mesmo estilo simples usado no resto do sistema (ex: reprovarVisita)
+async function encaminharPosVenda(agendaId) {
+  const escolha = prompt('Motivo do encaminhamento pro pós-venda:\n1 - Cliente vai enviar o equipamento\n2 - Técnico vai até o cliente\n3 - Vamos enviar uma peça pro cliente\n\nDigite 1, 2 ou 3:');
+  const motivos = { '1': 'cliente_envia_equipamento', '2': 'tecnico_visita', '3': 'peca_enviada' };
+  const motivo = motivos[(escolha || '').trim()];
+  if (!motivo) return;
+  try {
+    await api(`/api/agenda/${agendaId}/encaminhar-pos-venda`, { method: 'POST', body: { motivo } });
+    mostrarToast('Encaminhado pro pós-venda.');
+    ir('fila-atendimento');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
 async function assumirAtendimento(id) {
   try {
     await api(`/api/chamados/${id}/assumir`, { method: 'POST', body: {} });
@@ -5631,6 +5738,104 @@ async function renderPainelAtendimentos() {
       <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_tecnico || '—'}</div><div class="stat-label">Tempo médio técnico</div></div>
       <div class="stat-tile"><div class="stat-valor">${stats.aguardando}</div><div class="stat-label">Aguardando</div></div>
     </div>`;
+}
+
+// ---------- pós-venda / setor reparo ----------
+
+const MOTIVO_POS_VENDA_LABEL = {
+  cliente_envia_equipamento: 'Cliente vai enviar o equipamento',
+  tecnico_visita: 'Técnico vai até o cliente',
+  peca_enviada: 'Envio de peça pro cliente',
+};
+
+async function renderFilaPosVenda() {
+  const { agenda } = await api('/api/agenda/fila-pos-venda');
+  window._agendaCache = agenda;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Pós-venda</h1><p>Atendimentos que não resolveram no chat e precisam de orçamento.</p></div>
+    <div class="atendimento-grid">
+      ${agenda.length ? agenda.map((a) => cardPosVenda(a)).join('') : '<p class="empty">Nenhum atendimento aguardando o pós-venda agora.</p>'}
+    </div>`;
+}
+
+function cardPosVenda(a) {
+  const aguardandoDecisao = a.fase_atendimento === 'orcamento_enviado';
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">${esc(numeroOS(a))}</span>
+      </div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-resumo">${esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '—')}</div>
+      <div class="atendimento-status">${aguardandoDecisao ? tag('Orçamento enviado — aguardando cliente', 'amber') : tag('Aguardando pós-venda', 'blue')}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        ${aguardandoDecisao ? `
+          <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
+          <button class="btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>
+        ` : `
+          ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>
+        `}
+      </div>
+    </div>`;
+}
+
+async function posVendaAguardandoEquipamento(id) {
+  try { await api(`/api/agenda/${id}/pos-venda/aguardando-equipamento`, { method: 'POST' }); mostrarToast('Encaminhado pro setor de reparo.'); renderFilaPosVenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function posVendaOrcamentoEnviado(id) {
+  try { await api(`/api/agenda/${id}/pos-venda/orcamento-enviado`, { method: 'POST' }); mostrarToast('Orçamento marcado como enviado.'); renderFilaPosVenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function posVendaDecisao(id, aprovado) {
+  if (!confirm(aprovado ? 'Confirma que o cliente aprovou o orçamento? A O.S. vai pro setor de reparo executar o serviço.' : 'Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada.')) return;
+  try { await api(`/api/agenda/${id}/pos-venda/decisao`, { method: 'POST', body: { aprovado } }); mostrarToast(aprovado ? 'Aprovado — encaminhado pro reparo.' : 'O.S. finalizada.'); renderFilaPosVenda(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function renderFilaReparo() {
+  const { agenda } = await api('/api/agenda/fila-reparo');
+  window._agendaCache = agenda;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Setor Reparo</h1><p>Equipamentos aguardando chegada, diagnóstico ou execução do reparo.</p></div>
+    <div class="atendimento-grid">
+      ${agenda.length ? agenda.map((a) => cardReparo(a)).join('') : '<p class="empty">Nenhum atendimento no setor de reparo agora.</p>'}
+    </div>`;
+}
+
+function cardReparo(a) {
+  let statusTag, acao;
+  if (a.fase_atendimento === 'aguardando_equipamento') {
+    statusTag = tag('Aguardando equipamento', 'amber');
+    acao = `<button class="btn btn-primary btn-sm" onclick="reparoIniciarAtendimento(${a.id})">Iniciar atendimento</button>`;
+  } else if (a.fase_atendimento === 'em_diagnostico_reparo') {
+    statusTag = tag('Em diagnóstico', 'blue');
+    acao = a.tecnico_id === USER.id ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de diagnóstico</button>` : `<span style="font-size:11.5px; color:var(--ink-soft);">Designado a ${esc(a.tecnico_nome || 'outro técnico')}.</span>`;
+  } else {
+    statusTag = tag('Orçamento aprovado — executar reparo', 'green');
+    acao = `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Preencher relatório de liberação</button>`;
+  }
+  return `
+    <div class="atendimento-card">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">${esc(numeroOS(a))}</span>
+      </div>
+      <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
+      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-status">${statusTag}</div>
+      <div style="margin-top:10px;">${acao}</div>
+    </div>`;
+}
+
+async function reparoIniciarAtendimento(id) {
+  try { await api(`/api/agenda/${id}/reparo/iniciar-atendimento`, { method: 'POST' }); mostrarToast('Atendimento iniciado — preencha o relatório quando concluir o diagnóstico.'); renderFilaReparo(); }
+  catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- toast ----------

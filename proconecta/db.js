@@ -165,6 +165,16 @@ function migrar(data) {
       const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
       a.orcamento_aprovado_em = (temPecas && jaAprovado) ? (a.feedback_cliente_em || a.criado_em || new Date().toISOString()) : null;
     }
+    // fluxo de pós-venda/reparo (só usado em O.S. tipo "atendimento", nascidas de um chamado do
+    // chat) — ver server.js, seção "pós-venda / setor reparo"
+    if (a.fase_atendimento === undefined) a.fase_atendimento = null;
+    if (a.motivo_pos_venda === undefined) a.motivo_pos_venda = null;
+    if (a.encaminhado_pos_venda_em === undefined) a.encaminhado_pos_venda_em = null;
+    if (a.equipamento_recebido_em === undefined) a.equipamento_recebido_em = null;
+    if (a.pos_venda_orcamento_enviado_em === undefined) a.pos_venda_orcamento_enviado_em = null;
+    if (a.pos_venda_decisao === undefined) a.pos_venda_decisao = null;
+    if (a.pos_venda_decisao_em === undefined) a.pos_venda_decisao_em = null;
+    if (a.tecnico_chat_id === undefined) a.tecnico_chat_id = null;
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
