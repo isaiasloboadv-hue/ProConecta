@@ -5597,11 +5597,11 @@ async function carregarHistoricoAtendimentoCliente() {
 function renderMensagensChat(containerId, mensagens, visao) {
   const alvo = document.getElementById(containerId);
   if (!alvo) return;
-  const proprioAutor = visao === 'cliente' ? 'cliente' : 'tecnico';
+  const proprioAutor = visao === 'cliente' ? 'cliente' : visao === 'pos_venda' ? 'pos_venda' : 'tecnico';
   alvo.innerHTML = (mensagens || []).length ? (mensagens || []).map((m) => {
     if (m.autor === 'sistema') return `<div class="chat-sistema">${esc(m.texto)}</div>`;
     const proprio = m.autor === proprioAutor;
-    const rotulo = m.autor === 'ia' ? 'Assistente' : proprio ? 'Você' : (m.autor === 'tecnico' ? 'Técnico' : 'Cliente');
+    const rotulo = m.autor === 'ia' ? 'Assistente' : proprio ? 'Você' : (m.autor === 'tecnico' ? 'Técnico' : m.autor === 'pos_venda' ? 'Pós-venda' : 'Cliente');
     return `<div class="chat-msg ${proprio ? 'chat-msg-proprio' : 'chat-msg-outro'} chat-msg-${m.autor}">
       <div class="chat-msg-rotulo">${rotulo}</div>
       <div class="chat-msg-texto">${esc(m.texto)}</div>
@@ -5637,6 +5637,7 @@ async function renderFilaAtendimento() {
 
 function legendaStatusChamado(c) {
   if (c.os_finalizada) return tag('Finalizado', 'green');
+  if (c.os_fase_atendimento && c.os_fase_atendimento !== 'em_atendimento') return tag('Pós-venda', 'purple');
   if (c.status === 'aguardando_tecnico') return tag('Aguardando técnico', 'amber');
   if (c.status === 'convertido_os') return tag('Em atendimento', 'green');
   return tag(c.status, 'blue');
@@ -5646,8 +5647,9 @@ function cardAtendimentoFila(c) {
   const naoLido = c.tecnico_id && !c.lida_tecnico;
   const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
   const resumo = c.resumo_ia || (primeiraDoCliente ? primeiraDoCliente.texto : '');
+  const encerradoOuEncaminhado = c.os_finalizada || (c.os_fase_atendimento && c.os_fase_atendimento !== 'em_atendimento');
   return `
-    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''} ${c.os_finalizada ? 'atendimento-card-finalizado' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">
+    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''} ${encerradoOuEncaminhado ? 'atendimento-card-finalizado' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">
       <div class="atendimento-card-topo">
         <span class="atendimento-numero">ATENDIMENTO #${c.id}</span>
         ${c.prioridade === 'alta' ? '<span class="tag tag-falha">ALTA</span>' : ''}
@@ -5791,6 +5793,7 @@ function cardPosVenda(a) {
       <div class="atendimento-resumo">${esc(MOTIVO_POS_VENDA_LABEL[a.motivo_pos_venda] || '—')}</div>
       <div class="atendimento-status">${aguardandoDecisao ? tag('Orçamento enviado — aguardando cliente', 'amber') : tag('Aguardando pós-venda', 'blue')}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        ${a.origem_chamado_id ? `<button class="btn-outline-sm" onclick="abrirChatAtendimentoPosVenda(${a.origem_chamado_id})">💬 Iniciar atendimento</button>` : ''}
         ${aguardandoDecisao ? `
           <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
           <button class="btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>
@@ -5816,6 +5819,69 @@ async function posVendaDecisao(id, aprovado) {
   if (!confirm(aprovado ? 'Confirma que o cliente aprovou o orçamento? A O.S. vai pro setor de reparo executar o serviço.' : 'Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada.')) return;
   try { await api(`/api/agenda/${id}/pos-venda/decisao`, { method: 'POST', body: { aprovado } }); mostrarToast(aprovado ? 'Aprovado — encaminhado pro reparo.' : 'O.S. finalizada.'); renderFilaPosVenda(); }
   catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- pós-venda: chat com o cliente (mesma conversa iniciada pelo técnico) ----------
+// pós-venda usa o chat pra combinar o envio do orçamento por fora do sistema (e-mail, etc.) —
+// os botões de aguardando equipamento / orçamento enviado / decisão do cliente ficam disponíveis
+// aqui também, além do card na fila.
+
+let _atPvChamado = null;
+let _atPvPoll = null;
+
+async function abrirChatAtendimentoPosVenda(chamadoId) {
+  clearInterval(_atPvPoll);
+  const { chamado } = await api(`/api/chamados/${chamadoId}`);
+  _atPvChamado = chamado;
+  const a = (window._agendaCache || []).find((x) => x.id === chamado.os_id) || {};
+  const aguardandoDecisao = a.fase_atendimento === 'orcamento_enviado';
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atendimento #${chamado.id}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        ${aguardandoDecisao ? `
+          <button class="btn btn-primary btn-sm" onclick="posVendaDecisao(${a.id}, true)">Cliente aprovou</button>
+          <button class="btn-ghost btn-sm" onclick="posVendaDecisao(${a.id}, false)">Cliente não aprovou</button>
+        ` : a.fase_atendimento === 'aguardando_pos_venda' ? `
+          ${a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.equipamento_recebido_em ? `<button class="btn-outline-sm" onclick="posVendaAguardandoEquipamento(${a.id})">Aguardando equipamento</button>` : ''}
+          <button class="btn btn-primary btn-sm" onclick="posVendaOrcamentoEnviado(${a.id})">Orçamento enviado</button>
+        ` : ''}
+        <button class="btn-outline-sm" onclick="ir('fila-pos-venda')">‹ Voltar</button>
+      </div>
+    </div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      ${chamado.status !== 'encerrado' ? `
+        <div class="chat-compositor">
+          <textarea id="at-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoPosVenda();}"></textarea>
+          <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoPosVenda()">Enviar</button>
+        </div>` : '<p class="empty" style="margin-top:10px;">Atendimento encerrado.</p>'}
+    </div>`;
+  renderMensagensChat('at-mensagens', chamado.mensagens, 'pos_venda');
+  if (chamado.status !== 'encerrado') _atPvPoll = setInterval(atualizarAtendimentoPosVenda, 4000);
+}
+
+async function atualizarAtendimentoPosVenda() {
+  if (!_atPvChamado) return;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atPvChamado.id}`);
+    _atPvChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'pos_venda');
+  } catch (e) { /* silencioso */ }
+}
+
+async function enviarMensagemAtendimentoPosVenda() {
+  const campo = document.getElementById('at-texto');
+  const texto = campo.value.trim();
+  if (!texto || !_atPvChamado) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    const { chamado } = await api(`/api/chamados/${_atPvChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _atPvChamado = chamado;
+    renderMensagensChat('at-mensagens', chamado.mensagens, 'pos_venda');
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
 }
 
 async function renderFilaReparo() {

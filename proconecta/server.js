@@ -100,6 +100,28 @@ function agendaComDetalhes(data, item) {
   };
 }
 
+// fecha o chamado (chat) vinculado quando a O.S. de atendimento finaliza de vez — libera o
+// cliente pra abrir um novo atendimento. Se o técnico encerrou direto no chat, isso acontece na
+// hora; se passou pelo pós-venda, só quando o pós-venda/reparo realmente concluir (aprovado e
+// reparado, ou reprovado pelo cliente) — enquanto isso o chamado continua "aberto" e bloqueando
+// um novo chamado do cliente, mesmo com a conversa parada.
+function chamadoEstaComPosVenda(data, chamado) {
+  if (!chamado.os_id) return false;
+  const os = data.agenda.find((a) => a.id === chamado.os_id);
+  return !!(os && os.tipo === 'atendimento' && os.fase_atendimento && os.fase_atendimento !== 'em_atendimento');
+}
+
+function encerrarChamadoDaOS(data, agendaItem) {
+  if (!agendaItem.origem_chamado_id) return;
+  const chamado = data.chamados.find((c) => c.id === agendaItem.origem_chamado_id);
+  if (!chamado || chamado.status === 'encerrado') return;
+  const agora = new Date().toISOString();
+  chamado.status = 'encerrado';
+  chamado.resolvido_em = agora;
+  chamado.atualizado_em = agora;
+  chamado.mensagens.push({ autor: 'sistema', texto: 'Atendimento encerrado.', criado_em: agora });
+}
+
 // "2026-09-20T14:00" -> "20/09 às 14:00", pro texto das notificações push
 function fmtDataHoraCurta(isoDataHora) {
   if (!isoDataHora) return '';
@@ -782,6 +804,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     } else {
       agendaItem.finalizada = true;
       agendaItem.finalizado_em = agora;
+      encerrarChamadoDaOS(data, agendaItem);
       db.save(data);
     }
     return enviarJSON(res, 201, { visita: visitaReparo });
@@ -1972,7 +1995,9 @@ rota('GET', /^\/api\/chamados$/, async (req, res) => {
   } else if (query.fila === '1') {
     lista = data.chamados.filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id);
   } else {
-    lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status !== 'encerrado');
+    // fica listado mesmo depois de encerrado — é o card apagado (igual O.S. finalizada) que
+    // mostra pro técnico que aquele atendimento já foi concluído, em vez de simplesmente sumir
+    lista = data.chamados.filter((c) => c.tecnico_id === user.id);
   }
   lista = lista.sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || '')).map((c) => chamadoComDetalhes(data, c));
   enviarJSON(res, 200, { chamados: lista });
@@ -1987,6 +2012,7 @@ rota('GET', /^\/api\/chamados\/(\d+)$/, async (req, res, m) => {
   if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
   if (user.papel === 'cliente' && chamado.cliente_id !== user.cliente_id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
   if (user.papel === 'tecnico' && chamado.tecnico_id !== user.id && chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
+  if (user.papel === 'pos_venda' && !chamadoEstaComPosVenda(data, chamado)) return enviarJSON(res, 403, { erro: 'Este atendimento ainda não está com o pós-venda.' });
   if (user.papel === 'cliente') { chamado.lida_cliente = true; db.save(data); }
   else if (user.papel === 'tecnico' && chamado.tecnico_id === user.id) { chamado.lida_tecnico = true; db.save(data); }
   enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado) });
@@ -2011,6 +2037,9 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
   } else if (user.papel === 'tecnico') {
     if (chamado.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
     autor = 'tecnico';
+  } else if (user.papel === 'pos_venda') {
+    if (!chamadoEstaComPosVenda(data, chamado)) return enviarJSON(res, 403, { erro: 'Este atendimento ainda não está com o pós-venda.' });
+    autor = 'pos_venda';
   } else if (user.papel === 'administrador') {
     autor = 'tecnico';
   } else {
@@ -2155,6 +2184,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encerrar-atendimento$/, async (req, res, m)
   const agora = new Date().toISOString();
   item.finalizada = true;
   item.finalizado_em = agora;
+  encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -2175,6 +2205,11 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
   item.fase_atendimento = 'aguardando_pos_venda';
   item.motivo_pos_venda = body.motivo;
   item.encaminhado_pos_venda_em = new Date().toISOString();
+  const chamadoOrigem = item.origem_chamado_id ? data.chamados.find((c) => c.id === item.origem_chamado_id) : null;
+  if (chamadoOrigem) {
+    chamadoOrigem.mensagens.push({ autor: 'sistema', texto: 'Atendimento encaminhado pro setor de pós-venda.', criado_em: item.encaminhado_pos_venda_em });
+    chamadoOrigem.atualizado_em = item.encaminhado_pos_venda_em;
+  }
   db.save(data);
   const posVendas = data.usuarios.filter((u) => u.papel === 'pos_venda');
   const cliente = data.clientes.find((c) => c.id === item.cliente_id);
@@ -2254,6 +2289,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
     item.pos_venda_decisao_em = agora;
     item.finalizada = true;
     item.finalizado_em = agora;
+    encerrarChamadoDaOS(data, item);
     db.save(data);
   }
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
