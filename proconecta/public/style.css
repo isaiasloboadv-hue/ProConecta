@@ -451,6 +451,8 @@ tr:last-child td{border-bottom:none;}
 .atendimento-card{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:.15s;background:#fff;}
 .atendimento-card:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}
 .atendimento-card.atendimento-urgente{border-color:var(--red);}
+.atendimento-card-finalizado{background:#EBEEF2;opacity:.7;filter:saturate(.5);}
+.atendimento-card-finalizado:hover{opacity:.9;}
 .atendimento-card-topo{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
 .atendimento-numero{font-size:10.5px;font-weight:800;letter-spacing:.4px;color:var(--ink-soft);text-transform:uppercase;}
 .atendimento-cliente{font-weight:700;font-size:14.5px;color:var(--navy);margin-bottom:2px;}

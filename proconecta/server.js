@@ -1860,6 +1860,7 @@ function chamadoComDetalhes(data, c) {
     equipamento_modelo: equipamento ? equipamento.modelo : null,
     numero_os: os ? (os.numero_os || `OS-${String(os.id).padStart(6, '0')}`) : null,
     os_fase_atendimento: os ? os.fase_atendimento : null,
+    os_finalizada: os ? !!os.finalizada : false,
   };
 }
 

@@ -5635,10 +5635,11 @@ async function renderFilaAtendimento() {
     </div>`;
 }
 
-function legendaStatusChamado(status) {
-  if (status === 'aguardando_tecnico') return tag('Aguardando técnico', 'amber');
-  if (status === 'convertido_os') return tag('Em atendimento', 'green');
-  return tag(status, 'blue');
+function legendaStatusChamado(c) {
+  if (c.os_finalizada) return tag('Finalizado', 'green');
+  if (c.status === 'aguardando_tecnico') return tag('Aguardando técnico', 'amber');
+  if (c.status === 'convertido_os') return tag('Em atendimento', 'green');
+  return tag(c.status, 'blue');
 }
 
 function cardAtendimentoFila(c) {
@@ -5646,7 +5647,7 @@ function cardAtendimentoFila(c) {
   const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
   const resumo = c.resumo_ia || (primeiraDoCliente ? primeiraDoCliente.texto : '');
   return `
-    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">
+    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''} ${c.os_finalizada ? 'atendimento-card-finalizado' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">
       <div class="atendimento-card-topo">
         <span class="atendimento-numero">ATENDIMENTO #${c.id}</span>
         ${c.prioridade === 'alta' ? '<span class="tag tag-falha">ALTA</span>' : ''}
@@ -5655,7 +5656,7 @@ function cardAtendimentoFila(c) {
       <div class="atendimento-cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</div>
       ${c.equipamento_tipo ? `<div class="atendimento-equip">${esc(c.equipamento_tipo)}${c.equipamento_modelo ? ' — ' + esc(c.equipamento_modelo) : ''}</div>` : ''}
       ${resumo ? `<div class="atendimento-resumo">${esc(resumo.slice(0, 140))}</div>` : ''}
-      <div class="atendimento-status">${legendaStatusChamado(c.status)}</div>
+      <div class="atendimento-status">${legendaStatusChamado(c)}</div>
     </div>`;
 }
 
