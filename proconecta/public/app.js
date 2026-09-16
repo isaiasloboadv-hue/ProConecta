@@ -2192,9 +2192,8 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
   if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
-  doc.setFontSize(26); doc.setFont(undefined, 'bold');
-  doc.setTextColor(...PDF_COR.blueBright); doc.text('PRO', pageW / 2 - 4, 265, { align: 'right' });
-  doc.setTextColor(...PDF_COR.white); doc.text('Marking', pageW / 2 + 2, 265, { align: 'left' });
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('LAUDO TÉCNICO', pageW / 2, 420, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
@@ -4294,8 +4293,8 @@ function wLinhaBlocoPagina(fillHex, conteudo, altura, alinhamento) {
   });
 }
 
-function wCapa(r, logoDataUri) {
-  const DESLOC_TOPO = 3969; // ~7cm — empurra logo/"PRO Marking" pra baixo, mais perto do centro
+function wCapa(r, logoDataUri, titulo, subtitulo) {
+  const DESLOC_TOPO = 3969; // ~7cm — empurra logo/nome da empresa pra baixo, mais perto do centro
   const DESLOC_BASE = 567; // ~1cm — sobe o slogan, tirando ele da borda inferior
 
   const topo = [];
@@ -4311,21 +4310,18 @@ function wCapa(r, logoDataUri) {
   topo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: logoDataUri ? undefined : { before: DESLOC_TOPO },
-    children: [
-      new docx.TextRun({ text: 'PRO', bold: true, color: '2E86FF', size: 40 }),
-      new docx.TextRun({ text: 'Marking', bold: true, color: 'FFFFFF', size: 40 }),
-    ],
+    children: [new docx.TextRun({ text: empresaNome(), bold: true, color: 'FFFFFF', size: 40 })],
   }));
 
   const meio = [
     new docx.Paragraph({
       alignment: docx.AlignmentType.CENTER,
       spacing: { after: 160 },
-      children: [new docx.TextRun({ text: 'RELATÓRIO TÉCNICO', bold: true, color: 'FFFFFF', size: 36 })],
+      children: [new docx.TextRun({ text: (titulo || 'RELATÓRIO TÉCNICO').toUpperCase(), bold: true, color: 'FFFFFF', size: 36 })],
     }),
     new docx.Paragraph({
       alignment: docx.AlignmentType.CENTER,
-      children: [new docx.TextRun({ text: (r.empresa ? String(r.empresa) : '—').toUpperCase(), color: 'C8D8EC', size: 24 })],
+      children: [new docx.TextRun({ text: (subtitulo != null ? subtitulo : (r.empresa ? String(r.empresa) : '—')).toUpperCase(), color: 'C8D8EC', size: 24 })],
     }),
   ];
 
@@ -4566,7 +4562,21 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
     y += alturaMax;
   }
 
-  cabecalho();
+  // ===== capa (mesmo estilo navy do relatório completo) =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('FICHA DO EQUIPAMENTO', pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(r.condicao === 'novo' ? 'EQUIPAMENTO NOVO' : r.condicao === 'usado' ? 'EQUIPAMENTO USADO' : '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
 
   tituloCentro('Dados do equipamento');
   if ((r.campos || []).length) {
@@ -4597,11 +4607,30 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
     });
   }
 
+  // ===== página de contato (mesmo padrão dos outros relatórios) =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+
   return doc.output('bloburl');
 }
 
-// Word enxuto da Ficha do equipamento — mesmo conteúdo do PDF acima, sem capa nem página de
-// contato do relatório completo. Reaproveita os mesmos blocos (wTitulo/wLinhaCampos/fotos).
+// Word da Ficha do equipamento — mesma estrutura de 3 seções do relatório completo (capa navy,
+// conteúdo, página de contato), reaproveitando os mesmos blocos (wCapa/wTitulo/wLinhaCampos/fotos).
 async function gerarWordFichaEquipamento(r, logoDataUri) {
   const children = [];
   if (logoDataUri) {
@@ -4646,13 +4675,27 @@ async function gerarWordFichaEquipamento(r, logoDataUri) {
   }
 
   const tamanhoPagina = { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) };
+  const semMargem = { top: 0, bottom: 0, left: 0, right: 0, header: 0, footer: 0 };
+  const subtituloCapa = r.condicao === 'novo' ? 'EQUIPAMENTO NOVO' : r.condicao === 'usado' ? 'EQUIPAMENTO USADO' : '—';
+
   const doc = new docx.Document({
-    sections: [{
-      properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
-      children,
-    }],
+    sections: [
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wCapa(r, logoDataUri, 'Ficha do Equipamento', subtituloCapa), wEspacoInvisivel(WORD_COR.navy)],
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
+        children,
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wPaginaContato(logoDataUri), wEspacoInvisivel('F2E9D8')],
+      },
+    ],
   });
-  return docx.Packer.toBlob(doc);
+  const blob = await docx.Packer.toBlob(doc);
+  return pintarFechoSecaoCapaWord(blob, WORD_COR.navy);
 }
 
 async function baixarWordRelatorioManutencao(i) {
@@ -4794,9 +4837,8 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
   if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
-  doc.setFontSize(26); doc.setFont(undefined, 'bold');
-  doc.setTextColor(...PDF_COR.blueBright); doc.text('PRO', pageW / 2 - 4, 265, { align: 'right' });
-  doc.setTextColor(...PDF_COR.white); doc.text('Marking', pageW / 2 + 2, 265, { align: 'left' });
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('RELATÓRIO TÉCNICO', pageW / 2, 420, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
