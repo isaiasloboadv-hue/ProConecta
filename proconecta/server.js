@@ -62,13 +62,22 @@ function exigirPapel(user, papeis) {
   return user && papeis.includes(user.papel);
 }
 
-// menus que compõem o papel "suporte" (união do antigo técnico de campo + setor reparo) — o
-// administrador escolhe, por usuário, se libera todos ou só alguns (ver acesso_total/menus no
-// cadastro). Pra qualquer outro papel, ou pra quem tem acesso_total, considera liberado — só
-// restringe de verdade quando é suporte E acesso_total === false.
-const MENUS_SUPORTE = ['agenda', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo'];
+// menus de topo do sidebar (ver NAV no app.js) que cada tipo de acesso pode ter — quem cadastra o
+// usuário escolhe, por pessoa, se libera todos ou só alguns (ver acesso_total/menus no cadastro).
+// Quem tem acesso_total considera tudo liberado — só restringe de verdade quando acesso_total ===
+// false, e aí só os menus marcados aqui aparecem pra essa pessoa.
+const MENUS_POR_PAPEL = {
+  suporte: ['agenda', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo'],
+  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios'],
+  cliente: ['biblioteca', 'equipamentos', 'chamados'],
+  producao: ['biblioteca', 'clientes', 'equipamentos'],
+  pos_venda: ['fila-pos-venda'],
+  estoque: ['fila-estoque'],
+};
 // o token (JWT) só carrega id/papel/nome/cliente_id (ver gerarToken) — acesso_total/menus não vêm
-// nele, então sempre busca o cadastro completo em `data.usuarios` pelo id antes de decidir.
+// nele, então sempre busca o cadastro completo em `data.usuarios` pelo id antes de decidir. Único
+// uso hoje é o submenu "Setor Reparo" do suporte (as outras rotas não são gated por menu, só por
+// papel — o filtro dos demais menus acontece no sidebar do front, ver navDoUsuario em app.js).
 function temAcessoMenu(data, user, chave) {
   if (!user) return false;
   const completo = data.usuarios.find((u) => u.id === user.id) || user;
@@ -76,22 +85,28 @@ function temAcessoMenu(data, user, chave) {
   if (completo.acesso_total !== false) return true;
   return Array.isArray(completo.menus) && completo.menus.includes(chave);
 }
-function sanitizarMenusSuporte(body) {
+function sanitizarMenusAcesso(papel, body) {
   const acesso_total = body.acesso_total !== false;
-  const menus = Array.isArray(body.menus) ? body.menus.filter((m) => MENUS_SUPORTE.includes(m)) : [];
+  const validos = MENUS_POR_PAPEL[papel] || [];
+  const menus = Array.isArray(body.menus) ? body.menus.filter((m) => validos.includes(m)) : [];
   return { acesso_total, menus };
 }
 
-// cada líder de setor (Suporte, Pós-venda, Estoque) tem seu próprio administrador, que só cadastra
-// gente do próprio setor e clientes — assim o cadastro de usuários não fica todo dependendo de um
-// administrador único. Produção usa um único login compartilhado (não precisa de administrador
-// próprio, ver pedido do Isaías), por isso não entra nessa lista. Um administrador sem
-// `departamento` (campo vazio) é o administrador geral: continua enxergando e cadastrando todo mundo,
-// inclusive outros administradores — é sempre o caso da conta master (ADMIN_EMAIL).
-const DEPARTAMENTOS_ADMIN = ['suporte', 'pos_venda', 'estoque'];
+// cada líder de setor (Suporte, Pós-venda) tem seu próprio administrador, que só cadastra gente do
+// próprio setor — assim o cadastro de usuários não fica todo dependendo de um administrador único.
+// Clientes ficam visíveis pros administradores de Suporte e Pós-venda (as duas frentes que lidam
+// direto com cliente) — não entram no escopo de um eventual administrador de outro setor. Produção
+// usa um único login compartilhado (não precisa de administrador próprio) e Estoque não tem mais
+// administrador dedicado (só o geral cuida), por isso nenhum dos dois entra nessa lista. Um
+// administrador sem `departamento` (campo vazio) é o administrador geral: continua enxergando e
+// cadastrando todo mundo, inclusive outros administradores — é sempre o caso da conta master
+// (ADMIN_EMAIL).
+const DEPARTAMENTOS_ADMIN = ['suporte', 'pos_venda'];
 function papelGerenciavelPorAdmin(admin, papelAlvo) {
   if (!admin.departamento) return true;
-  return papelAlvo === admin.departamento || papelAlvo === 'cliente';
+  if (papelAlvo === admin.departamento) return true;
+  if (papelAlvo === 'cliente') return admin.departamento === 'suporte' || admin.departamento === 'pos_venda';
+  return false;
 }
 
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
@@ -1978,7 +1993,7 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
   const convite_token = gerarTokenConvite();
-  const { acesso_total, menus } = sanitizarMenusSuporte(body);
+  const { acesso_total, menus } = sanitizarMenusAcesso(body.papel, body);
   const departamento = body.papel === 'administrador' && !admin.departamento && DEPARTAMENTOS_ADMIN.includes(body.departamento) ? body.departamento : null;
   const novo = {
     id: nextId(data, 'usuarios'),
@@ -2041,7 +2056,7 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   if (data.usuarios.some((u) => u.id !== alvo.id && u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
-  const { acesso_total, menus } = sanitizarMenusSuporte(body);
+  const { acesso_total, menus } = sanitizarMenusAcesso(body.papel, body);
   const departamento = body.papel === 'administrador'
     ? (admin.departamento ? (alvo.departamento || null) : (DEPARTAMENTOS_ADMIN.includes(body.departamento) ? body.departamento : null))
     : null;

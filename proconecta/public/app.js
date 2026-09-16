@@ -13,7 +13,7 @@ let relatorioAgendaAtual = null;
 const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
 // Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
-const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda', estoque: 'Estoque' };
+const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
@@ -355,16 +355,41 @@ function sincronizarApp() {
 
 // ---------- menu em cascata ----------
 
-// itens de menu que compõem o papel "suporte" (união do antigo técnico de campo + setor reparo)
-// — usado tanto pra montar o NAV completo quanto pela tela de cadastro, que mostra essa mesma
-// lista como caixinhas de acesso (ver checkboxSuporte / SUPORTE_MENUS_LABEL).
-const SUPORTE_MENUS_LABEL = {
-  'agenda': 'Minha agenda',
-  'fila-atendimento': 'Fila de Atendimento',
-  'relatorio-manutencao': 'Relatório',
-  'calendario-tecnico': 'Calendário',
-  'biblioteca': 'Biblioteca',
-  'fila-reparo': 'Setor Reparo',
+// menus de topo (ver NAV logo abaixo) que cada tipo de acesso pode ter — usado tanto pra montar o
+// sidebar de fato (navDoUsuario) quanto pela tela de cadastro, que mostra essa mesma lista como
+// caixinhas de acesso (ver campo-menus-acesso em mostrarFormUsuario). Quem cadastra o usuário
+// escolhe se libera tudo ou só alguns desses itens.
+const MENUS_LABEL_POR_PAPEL = {
+  suporte: {
+    'agenda': 'Minha agenda',
+    'fila-atendimento': 'Fila de Atendimento',
+    'relatorio-manutencao': 'Relatório',
+    'calendario-tecnico': 'Calendário',
+    'biblioteca': 'Biblioteca',
+    'fila-reparo': 'Setor Reparo',
+  },
+  administrador: {
+    'agenda': 'Agenda geral',
+    'painel-atendimentos': 'Atendimentos',
+    'solicitacao-atendimento': 'Solicitação de Atendimento',
+    'aprovacoes-visitas': 'Ordem de Serviço',
+    'biblioteca': 'Biblioteca',
+    'clientes': 'Clientes',
+    'equipamentos': 'Equipamentos',
+    'usuarios': 'Usuários',
+  },
+  cliente: {
+    'biblioteca': 'Biblioteca',
+    'equipamentos': 'Meus equipamentos',
+    'chamados': 'Atendimento',
+  },
+  producao: {
+    'biblioteca': 'Biblioteca',
+    'clientes': 'Clientes',
+    'equipamentos': 'Equipamentos',
+  },
+  pos_venda: { 'fila-pos-venda': 'Pós-venda' },
+  estoque: { 'fila-estoque': 'Estoque' },
 };
 
 const NAV = {
@@ -454,12 +479,12 @@ const NAV = {
   ],
 };
 
-// lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto pra
-// "suporte" sem acesso_total, que só vê os itens de topo que o administrador marcou em `menus`
-// (ver SUPORTE_MENUS_LABEL/checkboxes no cadastro).
+// lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
+// tem acesso_total, que aí só vê os itens de topo marcados em `menus` (ver MENUS_LABEL_POR_PAPEL /
+// checkboxes no cadastro). Vale pra qualquer tipo de acesso, não só suporte.
 function navDoUsuario() {
   const nav = NAV[USER.papel] || [];
-  if (USER.papel !== 'suporte' || USER.acesso_total !== false) return nav;
+  if (USER.acesso_total !== false) return nav;
   const menus = Array.isArray(USER.menus) ? USER.menus : [];
   return nav.filter((node) => menus.includes(node.key));
 }
@@ -6340,7 +6365,7 @@ async function renderUsuarios() {
       <div class="user-row">
         <div class="u-avatar-lg">${initials(u.nome)}</div>
         <div class="u-info">
-          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[u.papel] || u.papel)}</span>${u.papel === 'administrador' ? ` <span class="tag tag-papel">${u.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[u.departamento] || u.departamento) : 'Geral'}</span>` : ''}${u.papel === 'suporte' && u.acesso_total === false ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">Acesso personalizado</span>' : ''}${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
+          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[u.papel] || u.papel)}</span>${u.papel === 'administrador' ? ` <span class="tag tag-papel">${u.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[u.departamento] || u.departamento) : 'Geral'}</span>` : ''}${u.acesso_total === false ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">Acesso personalizado</span>' : ''}${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
           <div class="u-line2">${esc(u.email)} ${u.cargo ? '· ' + esc(u.cargo) : ''} ${u.setor ? '· ' + esc(u.setor) : ''}</div>
         </div>
         <span class="badge ${u.status === 'ativo' ? 'badge-ativo' : 'badge-convite'}">${u.status === 'ativo' ? 'Ativo' : 'Convite enviado'}</span>
@@ -6388,21 +6413,15 @@ function mostrarFormUsuario(usuario) {
           ${Object.entries(DEPARTAMENTO_ADMIN_LABEL).map(([chave, label]) => `
             <option value="${chave}" ${usuario && usuario.departamento === chave ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
-        <p style="color:var(--ink-soft); font-size:12.5px; margin:6px 0 0;">Esse administrador só vai poder cadastrar usuários do setor escolhido e clientes — não vê nem mexe nos outros setores.</p>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin:6px 0 0;">Esse administrador só vai poder cadastrar usuários do setor escolhido — não vê nem mexe nos outros setores.</p>
       </div>
-      <div id="campo-suporte-acesso" class="panel" style="background:var(--blue-pale-2); margin:4px 0 14px;">
+      <div id="campo-menus-acesso" class="panel" style="background:var(--blue-pale-2); margin:4px 0 14px;">
         <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;">
-          <input type="checkbox" id="nu-acesso-total" style="width:auto;" onchange="alternarChecklistSuporte()" ${!usuario || usuario.acesso_total !== false ? 'checked' : ''}>
+          <input type="checkbox" id="nu-acesso-total" style="width:auto;" onchange="alternarChecklistMenus()" ${!usuario || usuario.acesso_total !== false ? 'checked' : ''}>
           Liberar todos os menus
         </label>
-        <p style="color:var(--ink-soft); font-size:12.5px; margin:4px 0 10px;">Desmarque pra escolher só os menus que esse usuário de Suporte pode acessar (ex: só quem cuida da manutenção interna precisa do Setor Reparo).</p>
-        <div id="nu-menus-lista" style="display:flex; flex-direction:column; gap:8px;">
-          ${Object.entries(SUPORTE_MENUS_LABEL).map(([chave, label]) => `
-            <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;">
-              <input type="checkbox" class="nu-menu-item" value="${chave}" style="width:auto;" ${usuario && Array.isArray(usuario.menus) && usuario.menus.includes(chave) ? 'checked' : ''}>
-              ${label}
-            </label>`).join('')}
-        </div>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin:4px 0 10px;">Desmarque pra escolher só os menus que esse usuário pode acessar.</p>
+        <div id="nu-menus-lista" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarUsuario()">${usuario ? 'Salvar alterações' : 'Salvar e enviar convite'}</button>
@@ -6425,18 +6444,38 @@ function cancelarEdicaoUsuario() {
   usuarioEmEdicaoId = null;
   document.getElementById('form-usuario').innerHTML = '';
 }
+// reconstrói a lista de checkboxes conforme o tipo de acesso escolhido no momento — cada papel tem
+// seu próprio conjunto de menus (ver MENUS_LABEL_POR_PAPEL). Se o papel escolhido é o mesmo que o
+// usuário já tinha, pré-marca o que ele já tinha liberado; se mudou de papel, começa do zero (os
+// menus do papel antigo não fazem sentido pro novo).
+function atualizarChecklistMenus() {
+  const papel = document.getElementById('nu-papel').value;
+  const usuario = usuarioEmEdicaoId ? (window._usuariosCache || []).find((u) => u.id === usuarioEmEdicaoId) : null;
+  const mapa = MENUS_LABEL_POR_PAPEL[papel] || {};
+  const lista = document.getElementById('nu-menus-lista');
+  if (!lista) return;
+  const veioDoMesmoPapel = usuario && usuario.papel === papel;
+  lista.innerHTML = Object.entries(mapa).map(([chave, label]) => `
+    <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;">
+      <input type="checkbox" class="nu-menu-item" value="${chave}" style="width:auto;" ${veioDoMesmoPapel && Array.isArray(usuario.menus) && usuario.menus.includes(chave) ? 'checked' : ''}>
+      ${label}
+    </label>`).join('');
+  const totalEl = document.getElementById('nu-acesso-total');
+  if (totalEl) totalEl.checked = veioDoMesmoPapel ? usuario.acesso_total !== false : true;
+}
 function alternarCampoCliente() {
   const papel = document.getElementById('nu-papel').value;
   document.getElementById('campo-cliente').style.display = papel === 'cliente' ? '' : 'none';
-  const campoSuporte = document.getElementById('campo-suporte-acesso');
-  if (campoSuporte) campoSuporte.style.display = papel === 'suporte' ? '' : 'none';
+  const campoMenus = document.getElementById('campo-menus-acesso');
+  if (campoMenus) campoMenus.style.display = MENUS_LABEL_POR_PAPEL[papel] ? '' : 'none';
   const campoDepartamento = document.getElementById('campo-admin-departamento');
   if (campoDepartamento) campoDepartamento.style.display = papel === 'administrador' && !USER.departamento ? '' : 'none';
-  alternarChecklistSuporte();
+  atualizarChecklistMenus();
+  alternarChecklistMenus();
 }
 // desmarcar "Liberar todos os menus" revela os checkboxes de cada menu pra personalizar; marcado,
 // os checkboxes ficam desabilitados (o usuário tem tudo, independente do que estava marcado antes)
-function alternarChecklistSuporte() {
+function alternarChecklistMenus() {
   const totalEl = document.getElementById('nu-acesso-total');
   const lista = document.getElementById('nu-menus-lista');
   if (!totalEl || !lista) return;
@@ -6457,8 +6496,9 @@ async function salvarUsuario() {
     papel,
     cliente_id: papel === 'cliente' ? Number(document.getElementById('nu-cliente').value) : null,
   };
-  if (papel === 'suporte') {
-    body.acesso_total = document.getElementById('nu-acesso-total').checked;
+  const totalEl = document.getElementById('nu-acesso-total');
+  if (totalEl) {
+    body.acesso_total = totalEl.checked;
     body.menus = body.acesso_total ? [] : Array.from(document.querySelectorAll('.nu-menu-item:checked')).map((el) => el.value);
   }
   if (papel === 'administrador') {
