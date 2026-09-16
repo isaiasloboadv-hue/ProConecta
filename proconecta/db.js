@@ -246,6 +246,12 @@ function migrar(data) {
     // são todos do tipo "completo" (o formulário manual de sempre).
     if (!r.tipo) r.tipo = 'completo';
     if (!Array.isArray(r.campos)) r.campos = [];
+    if (r.mtbf_encontrado === undefined) r.mtbf_encontrado = '';
+    if (r.resultado_ensaio === undefined) r.resultado_ensaio = '';
+    if (!Array.isArray(r.ciclos)) r.ciclos = [];
+    if (r.conclusao_ensaio === undefined) r.conclusao_ensaio = '';
+    if (r.tecnico_cargo === undefined) r.tecnico_cargo = '';
+    if (r.tecnico_setor === undefined) r.tecnico_setor = '';
   }
   protegerAdminMaster(data);
   return data;

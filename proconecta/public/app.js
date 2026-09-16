@@ -349,9 +349,10 @@ const NAV = {
   tecnico: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
     { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
-    { key: 'relatorio-manutencao', label: 'Criar Relatório', children: [
+    { key: 'relatorio-manutencao', label: 'Relatório', children: [
       { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
-      { key: 'relatorio-automatico', label: 'Gerar relatório automático', page: 'relatorio-automatico' },
+      { key: 'relatorio-automatico', label: 'Lev. Estoque Etiqueta', page: 'relatorio-automatico' },
+      { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
     ]},
     { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
@@ -503,6 +504,7 @@ async function ir(pagina) {
     if (pagina === 'agenda') return renderAgenda();
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
     if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
+    if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
@@ -3494,7 +3496,7 @@ async function renderRelatorioManutencao() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Criar Relatório</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S., fica salvo só aqui no seu histórico</p></div>
+      <div><h1>Relatório</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S., fica salvo só aqui no seu histórico</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManutencao()">+ Novo relatório</button>
     </div>
     <div class="panel"><table>
@@ -3503,10 +3505,10 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
-            <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
+            ${r.tipo !== 'ciclagem' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
             <button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
@@ -3520,6 +3522,9 @@ function descricaoRelatorioManutencao(r) {
     const partes = (r.campos || []).slice(0, 2).map((c) => `${esc(c.campo)}: ${esc(c.valor)}`);
     return partes.length ? partes.join(' · ') : 'Ficha do equipamento';
   }
+  if (r.tipo === 'ciclagem') {
+    return `${esc(r.equipamento)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
+  }
   return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
 }
 
@@ -3530,7 +3535,7 @@ function descricaoRelatorioManutencao(r) {
 function renderRelatorioAutomatico() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Gerar relatório automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados (mesmo se a etiqueta estiver em inglês, vem traduzido) e já deixa a ficha pronta pra você revisar antes de salvar.</p></div>
+    <div class="page-head"><h1>Lev. Estoque Etiqueta</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados (mesmo se a etiqueta estiver em inglês, vem traduzido) e já deixa a ficha pronta pra você revisar antes de salvar.</p></div>
     <div class="panel" style="text-align:center;">
       <div id="ra-preview" style="margin-bottom:14px;"></div>
       <label class="photo-add" style="display:inline-flex;">
@@ -3658,6 +3663,157 @@ async function salvarFicha() {
     const url = gerarPdfFichaEquipamento(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Ficha atualizada e PDF gerado.' : 'Ficha salva e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+// ---------- Ensaio de Ciclagem (tryout: ciclos de teste com amostras OK/com desvio) ----------
+
+let ciclagemDraft = null;
+function ensaioCiclagemPadrao() {
+  return { tipo: 'ciclagem', empresa: '', equipamento: '', data_conclusao: '', mtbf_encontrado: '', resultado_ensaio: '', ciclos: [], conclusao_ensaio: '' };
+}
+
+function mostrarFormCiclagem(existente) {
+  ciclagemDraft = existente ? JSON.parse(JSON.stringify(existente)) : ensaioCiclagemPadrao();
+  const d = ciclagemDraft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Ensaio de Ciclagem</h1><p>Ciclos de teste (tryout) — amostras OK e com desvio por ciclo. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Dados gerais</h2>
+      <div class="form-grid">
+        <div><label>Cliente*</label><input id="ec-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Equipamento*</label><input id="ec-equipamento" value="${esc(d.equipamento)}"></div>
+        <div><label>Data</label><input id="ec-data" type="date" value="${esc(d.data_conclusao)}"></div>
+        <div><label>MTBF encontrado</label><input id="ec-mtbf" placeholder="ex: N/A" value="${esc(d.mtbf_encontrado)}"></div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:12px; margin-top:-6px;">MTBF = tempo médio entre falhas. Cálculo: (tempo total de funcionamento − tempo perdido) / número total de falhas.</p>
+      <label>Resultado do ensaio*</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap;">
+        ${[['aprovado', 'Aprovado'], ['reprovado', 'Reprovado']].map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="ec-resultado" value="${v}" style="width:auto;" ${d.resultado_ensaio === v ? 'checked' : ''}> ${l}</label>`).join('')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Ciclos*</h2>
+      <div id="ec-ciclos"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarCicloEnsaio()">+ Adicionar ciclo</button>
+    </div>
+
+    <div class="panel">
+      <h2>Resumo</h2>
+      <div id="ec-resumo"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Conclusão</h2>
+      <input id="ec-conclusao" placeholder="ex: OK" value="${esc(d.conclusao_ensaio)}">
+    </div>
+
+    <div class="panel">
+      <h2>Responsável</h2>
+      <div class="form-grid">
+        <div><label>Nome</label><input value="${esc(USER.nome)}" disabled></div>
+        <div><label>Cargo</label><input value="${esc(USER.cargo || '')}" disabled></div>
+        <div><label>Setor</label><input value="${esc(USER.setor || '')}" disabled></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarCiclagem()">Gerar PDF e salvar</button>
+      </div>
+    </div>`;
+  renderCiclosEnsaio();
+}
+
+function renderCiclosEnsaio() {
+  const alvo = document.getElementById('ec-ciclos');
+  if (!alvo) return;
+  alvo.innerHTML = ciclagemDraft.ciclos.map((c, i) => {
+    const ok = Number(c.qtd_ok) || 0, desvio = Number(c.qtd_desvio) || 0;
+    const avaliadas = ok + desvio;
+    const percentual = avaliadas ? ((desvio / avaliadas) * 100).toFixed(2) : '0.00';
+    return `
+    <div class="panel" style="background:var(--blue-pale-2); margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <b>Ciclo ${i + 1}</b>
+        <button class="step-rm" onclick="removerCicloEnsaio(${i})">×</button>
+      </div>
+      <div class="form-grid">
+        <div><label>Tipo de amostra</label><input value="${esc(c.tipo_amostra)}" oninput="ciclagemDraft.ciclos[${i}].tipo_amostra=this.value;"></div>
+        <div><label>Quantidade</label><input value="${esc(c.quantidade)}" oninput="ciclagemDraft.ciclos[${i}].quantidade=this.value;"></div>
+        <div><label>Hora inicial</label><input type="time" value="${esc(c.hora_inicial)}" oninput="ciclagemDraft.ciclos[${i}].hora_inicial=this.value;"></div>
+        <div><label>Hora final</label><input type="time" value="${esc(c.hora_final)}" oninput="ciclagemDraft.ciclos[${i}].hora_final=this.value;"></div>
+        <div><label>Amostras OK</label><input type="number" min="0" value="${ok}" onchange="ciclagemDraft.ciclos[${i}].qtd_ok=this.value; renderCiclosEnsaio();"></div>
+        <div><label>Amostras com desvio</label><input type="number" min="0" value="${desvio}" onchange="ciclagemDraft.ciclos[${i}].qtd_desvio=this.value; renderCiclosEnsaio();"></div>
+      </div>
+      <div class="form-grid">
+        <div class="full"><label>Descrição do(s) desvio(s)</label><input value="${esc(c.descricao_desvio)}" oninput="ciclagemDraft.ciclos[${i}].descricao_desvio=this.value;"></div>
+      </div>
+      <p style="font-size:12.5px; color:var(--ink-soft); margin:4px 0 0;">Percentual de desvio: <b>${percentual}%</b></p>
+    </div>`;
+  }).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhum ciclo adicionado ainda.</p>';
+  renderResumoEnsaio();
+}
+function adicionarCicloEnsaio() {
+  ciclagemDraft.ciclos.push({ tipo_amostra: '', quantidade: '', hora_inicial: '', hora_final: '', qtd_ok: 0, qtd_desvio: 0, descricao_desvio: '' });
+  renderCiclosEnsaio();
+}
+function removerCicloEnsaio(i) { ciclagemDraft.ciclos.splice(i, 1); renderCiclosEnsaio(); }
+
+function renderResumoEnsaio() {
+  const alvo = document.getElementById('ec-resumo');
+  if (!alvo) return;
+  const totais = totaisEnsaioCiclagem(ciclagemDraft);
+  alvo.innerHTML = `
+    <div class="form-grid">
+      <div><label>Total de ciclos</label><input value="${totais.totalCiclos}" disabled></div>
+      <div><label>Amostras avaliadas</label><input value="${totais.avaliadas}" disabled></div>
+      <div><label>Amostras aprovadas (OK)</label><input value="${totais.ok}" disabled></div>
+      <div><label>Amostras reprovadas (desvio)</label><input value="${totais.desvio}" disabled></div>
+      <div><label>% de reprovação</label><input value="${totais.percentual}%" disabled></div>
+    </div>`;
+}
+
+// soma os ciclos pra tirar os totais — usado na tela, no PDF e no Word, sempre a partir dos
+// ciclos de verdade (nunca fica um total "solto" desatualizado se algum ciclo mudar depois).
+function totaisEnsaioCiclagem(r) {
+  const ciclos = r.ciclos || [];
+  let ok = 0, desvio = 0;
+  ciclos.forEach((c) => { ok += Number(c.qtd_ok) || 0; desvio += Number(c.qtd_desvio) || 0; });
+  const avaliadas = ok + desvio;
+  const percentual = avaliadas ? ((desvio / avaliadas) * 100).toFixed(2) : '0.00';
+  return { totalCiclos: ciclos.length, ok, desvio, avaliadas, percentual };
+}
+
+async function salvarCiclagem() {
+  const d = ciclagemDraft;
+  d.empresa = document.getElementById('ec-empresa').value;
+  d.equipamento = document.getElementById('ec-equipamento').value;
+  d.data_conclusao = document.getElementById('ec-data').value;
+  d.mtbf_encontrado = document.getElementById('ec-mtbf').value;
+  const resultado = document.querySelector('input[name="ec-resultado"]:checked');
+  d.resultado_ensaio = resultado ? resultado.value : '';
+  d.conclusao_ensaio = document.getElementById('ec-conclusao').value;
+
+  if (!d.empresa.trim() || !d.equipamento.trim()) { alert('Preencha ao menos Cliente e Equipamento.'); return; }
+  if (!d.resultado_ensaio) { alert('Marque o resultado do ensaio (Aprovado ou Reprovado).'); return; }
+  if (!d.ciclos.length) { alert('Adicione ao menos um ciclo.'); return; }
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfEnsaioCiclagem(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Ensaio atualizado e PDF gerado.' : 'Ensaio salvo e PDF gerado.');
     renderRelatorioManutencao();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
@@ -3988,6 +4144,7 @@ async function editarRelatorioManutencao(i) {
   const r = await relatorioManutCompleto(i);
   if (!r) return;
   if (r.tipo === 'ficha') mostrarFormFicha(r);
+  else if (r.tipo === 'ciclagem') mostrarFormCiclagem(r);
   else mostrarFormRelatorioManutencao(r);
 }
 
@@ -4008,7 +4165,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
@@ -4699,12 +4856,288 @@ async function gerarWordFichaEquipamento(r, logoDataUri) {
   return pintarFechoSecaoCapaWord(blob, WORD_COR.navy);
 }
 
+// PDF do Ensaio de Ciclagem — mesma capa/cores/logo dos outros relatórios; tabela de ciclos
+// desenhada linha a linha (sem plugin de tabela), com os totais sempre recalculados dos ciclos.
+function gerarPdfEnsaioCiclagem(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Ensaio de Ciclagem', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13 + 16;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  const COLS_CICLOS = ['Ciclo', 'Tipo', 'Qtd.', 'Hora ini.', 'Hora fim', 'OK', 'Desvio', '% desv.', 'Descrição do(s) desvio(s)'];
+  const FRACS_CICLOS = [0.06, 0.12, 0.07, 0.09, 0.09, 0.07, 0.08, 0.08, 0.34];
+  function linhaTabelaCiclos(valores, cabecalhoLinha) {
+    const larguras = FRACS_CICLOS.map((f) => largura * f);
+    doc.setFontSize(7.5);
+    const conteudos = valores.map((v, i) => doc.splitTextToSize(limparPdf(v), larguras[i] - 6));
+    let alturaMax = 16;
+    conteudos.forEach((linhas) => { const h = Math.max(16, linhas.length * 9 + 6); if (h > alturaMax) alturaMax = h; });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    larguras.forEach((w, i) => {
+      if (cabecalhoLinha) { doc.setFillColor(...PDF_COR.blue); doc.rect(cx, y, w, alturaMax, 'F'); }
+      else { doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.rect(cx, y, w, alturaMax, 'S'); }
+      doc.setFont(undefined, cabecalhoLinha ? 'bold' : 'normal');
+      doc.setTextColor(...(cabecalhoLinha ? PDF_COR.white : PDF_COR.ink));
+      doc.text(conteudos[i], cx + 3, y + 11);
+      cx += w;
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('ENSAIO DE CICLAGEM', pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados gerais');
+  linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 0.5 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.5 }]);
+  linhaCampos([{ label: 'Data', valor: r.data_conclusao, frac: 0.5 }, { label: 'MTBF encontrado', valor: r.mtbf_encontrado, frac: 0.5 }]);
+  {
+    const altura = 20;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('RESULTADO:', margem + 7, y + 13);
+    let cx = margem + 7 + doc.getTextWidth('RESULTADO: ') + 4;
+    [['aprovado', 'APROVADO'], ['reprovado', 'REPROVADO']].forEach(([v, l]) => {
+      doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.9);
+      doc.rect(cx, y + 13 - 7, 7, 7, 'S');
+      if (r.resultado_ensaio === v) { doc.setFillColor(...PDF_COR.ink); doc.rect(cx + 1.2, y + 13 - 5.8, 4.6, 4.6, 'F'); }
+      doc.text(l, cx + 11, y + 13);
+      cx += 11 + doc.getTextWidth(l) + 14;
+    });
+    y += altura;
+  }
+  y += 16;
+
+  tituloCentro('Ciclos');
+  linhaTabelaCiclos(COLS_CICLOS, true);
+  const ciclos = r.ciclos || [];
+  if (ciclos.length) {
+    ciclos.forEach((c, i) => {
+      const ok = Number(c.qtd_ok) || 0, desvio = Number(c.qtd_desvio) || 0;
+      const avaliadas = ok + desvio;
+      const percentual = avaliadas ? ((desvio / avaliadas) * 100).toFixed(2) + '%' : '0.00%';
+      linhaTabelaCiclos([String(i + 1), c.tipo_amostra, c.quantidade, c.hora_inicial, c.hora_final, String(ok), String(desvio), percentual, c.descricao_desvio], false);
+    });
+  } else {
+    linhaTabelaCiclos(['—', '—', '—', '—', '—', '—', '—', '—', 'Nenhum ciclo registrado'], false);
+  }
+  y += 16;
+
+  tituloCentro('Resumo');
+  {
+    const t = totaisEnsaioCiclagem(r);
+    linhaCampos([{ label: 'Total de ciclos', valor: String(t.totalCiclos), frac: 0.34 }, { label: 'Amostras avaliadas', valor: String(t.avaliadas), frac: 0.33 }, { label: '% de reprovação', valor: t.percentual + '%', frac: 0.33 }]);
+    linhaCampos([{ label: 'Amostras aprovadas (OK)', valor: String(t.ok), frac: 0.5 }, { label: 'Amostras reprovadas (desvio)', valor: String(t.desvio), frac: 0.5 }]);
+  }
+  linhaCampos([{ label: 'Conclusão', valor: r.conclusao_ensaio, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Responsável');
+  linhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.4 }, { label: 'Cargo', valor: r.tecnico_cargo, frac: 0.3 }, { label: 'Setor', valor: r.tecnico_setor, frac: 0.3 }]);
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+
+  return doc.output('bloburl');
+}
+
+// Word do Ensaio de Ciclagem — mesma estrutura de 3 seções (capa/conteúdo/contato) dos outros.
+async function gerarWordEnsaioCiclagem(r, logoDataUri) {
+  const children = [];
+  if (logoDataUri) {
+    try {
+      children.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 60 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 46, height: 53 } })],
+      }));
+    } catch (e) {}
+  }
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 20 },
+    children: [new docx.TextRun({ text: empresaNome(), bold: true, color: WORD_COR.navy, size: 24 })],
+  }));
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 220 },
+    border: { bottom: { color: WORD_COR.blue, space: 6, style: docx.BorderStyle.SINGLE, size: 8 } },
+    children: [new docx.TextRun({ text: 'Ensaio de Ciclagem', bold: true, color: WORD_COR.ink, size: 30 })],
+  }));
+
+  children.push(wTitulo('Dados gerais'));
+  children.push(wLinhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 0.5 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.5 }]));
+  children.push(wLinhaCampos([{ label: 'Data', valor: r.data_conclusao, frac: 0.5 }, { label: 'MTBF encontrado', valor: r.mtbf_encontrado, frac: 0.5 }]));
+  children.push(wLinhaOpcoes([['aprovado', 'APROVADO'], ['reprovado', 'REPROVADO']], r.resultado_ensaio));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
+
+  children.push(wTitulo('Ciclos'));
+  children.push(wTabelaCiclos(r.ciclos || []));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Resumo'));
+  {
+    const t = totaisEnsaioCiclagem(r);
+    children.push(wLinhaCampos([{ label: 'Total de ciclos', valor: String(t.totalCiclos), frac: 0.34 }, { label: 'Amostras avaliadas', valor: String(t.avaliadas), frac: 0.33 }, { label: '% de reprovação', valor: t.percentual + '%', frac: 0.33 }]));
+    children.push(wLinhaCampos([{ label: 'Amostras aprovadas (OK)', valor: String(t.ok), frac: 0.5 }, { label: 'Amostras reprovadas (desvio)', valor: String(t.desvio), frac: 0.5 }]));
+  }
+  children.push(wLinhaCampos([{ label: 'Conclusão', valor: r.conclusao_ensaio, frac: 1 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
+
+  children.push(wTitulo('Responsável'));
+  children.push(wLinhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.4 }, { label: 'Cargo', valor: r.tecnico_cargo, frac: 0.3 }, { label: 'Setor', valor: r.tecnico_setor, frac: 0.3 }]));
+
+  const tamanhoPagina = { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) };
+  const semMargem = { top: 0, bottom: 0, left: 0, right: 0, header: 0, footer: 0 };
+
+  const doc = new docx.Document({
+    sections: [
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wCapa(r, logoDataUri, 'Ensaio de Ciclagem'), wEspacoInvisivel(WORD_COR.navy)],
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
+        children,
+      },
+      {
+        properties: { page: { size: tamanhoPagina, margin: semMargem } },
+        children: [wPaginaContato(logoDataUri), wEspacoInvisivel('F2E9D8')],
+      },
+    ],
+  });
+  const blob = await docx.Packer.toBlob(doc);
+  return pintarFechoSecaoCapaWord(blob, WORD_COR.navy);
+}
+
+// tabela de ciclos pro Word — mesmo padrão visual da wTabelaPecas (cabeçalho navy, bordas finas)
+function wTabelaCiclos(ciclos) {
+  const margins = { top: 60, bottom: 60, left: 80, right: 80 };
+  const larguraTotal = wLarguraConteudo();
+  const fracs = [0.06, 0.12, 0.07, 0.09, 0.09, 0.07, 0.08, 0.08, 0.34];
+  const larguras = fracs.map((f) => Math.round(larguraTotal * f));
+  const rotulos = ['Ciclo', 'Tipo', 'Qtd.', 'Hora ini.', 'Hora fim', 'OK', 'Desvio', '% desv.', 'Descrição do(s) desvio(s)'];
+  const headerCell = (t, i) => new docx.TableCell({
+    width: { size: larguras[i], type: docx.WidthType.DXA },
+    shading: { fill: WORD_COR.navy, type: docx.ShadingType.CLEAR, color: 'auto' },
+    margins,
+    children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, bold: true, color: 'FFFFFF', size: 15 })] })],
+  });
+  const cell = (t, i) => new docx.TableCell({ width: { size: larguras[i], type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, size: 15, color: WORD_COR.ink })] })] });
+  const linhas = [new docx.TableRow({ children: rotulos.map((t, i) => headerCell(t, i)) })];
+  if (!ciclos.length) {
+    linhas.push(new docx.TableRow({ children: [new docx.TableCell({ columnSpan: rotulos.length, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhum ciclo registrado', italics: true, color: WORD_COR.inkSoft, size: 15 })] })] })] }));
+  } else {
+    ciclos.forEach((c, i) => {
+      const ok = Number(c.qtd_ok) || 0, desvio = Number(c.qtd_desvio) || 0;
+      const avaliadas = ok + desvio;
+      const percentual = (avaliadas ? ((desvio / avaliadas) * 100).toFixed(2) : '0.00') + '%';
+      linhas.push(new docx.TableRow({ children: [
+        cell(String(i + 1), 0), cell(c.tipo_amostra || '—', 1), cell(c.quantidade || '—', 2), cell(c.hora_inicial || '—', 3),
+        cell(c.hora_final || '—', 4), cell(String(ok), 5), cell(String(desvio), 6), cell(percentual, 7), cell(c.descricao_desvio || '—', 8),
+      ] }));
+    });
+  }
+  return new docx.Table({
+    width: { size: larguraTotal, type: docx.WidthType.DXA },
+    columnWidths: larguras,
+    layout: docx.TableLayoutType.FIXED,
+    borders: wBordaFinaTabela(),
+    rows: linhas,
+  });
+}
+
 async function baixarWordRelatorioManutencao(i) {
   const r = await relatorioManutCompleto(i);
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const blob = r.tipo === 'ficha' ? await gerarWordFichaEquipamento(r, logo) : await gerarWordRelatorioManutencao(r, logo);
+    const blob = r.tipo === 'ficha' ? await gerarWordFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? await gerarWordEnsaioCiclagem(r, logo) : await gerarWordRelatorioManutencao(r, logo);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -4738,6 +5171,10 @@ function nomeArquivoRelatorioManutencao(r) {
     const serieCampo = (r.campos || []).find((c) => /s[ée]rie/i.test(c.campo || ''));
     const serie = limpar(serieCampo && serieCampo.valor);
     return serie ? `ficha-equipamento - ${serie}` : `ficha-equipamento-${r.id || ''}`;
+  }
+  if (r.tipo === 'ciclagem') {
+    const cliente = limpar(r.empresa) || 'ensaio-ciclagem';
+    return `ensaio-ciclagem - ${cliente}`;
   }
   const empresa = limpar(r.empresa) || 'relatorio';
   const serie = limpar(r.numero_serie);

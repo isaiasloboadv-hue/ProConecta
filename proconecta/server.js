@@ -1585,23 +1585,51 @@ function sanitizarCamposFicha(lista) {
     .filter((c) => c.campo || c.valor);
 }
 
+// normaliza os ciclos do Ensaio de Ciclagem — tira linhas totalmente vazias, garante número nas
+// quantidades. O percentual de desvio de cada ciclo é calculado na hora de exibir (PDF/Word/tela),
+// não fica salvo, pra nunca ficar desatualizado se o técnico editar uma quantidade depois.
+function sanitizarCiclos(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((c) => ({
+      tipo_amostra: String((c && c.tipo_amostra) || '').trim(),
+      quantidade: String((c && c.quantidade) || '').trim(),
+      hora_inicial: String((c && c.hora_inicial) || '').trim(),
+      hora_final: String((c && c.hora_final) || '').trim(),
+      qtd_ok: Math.max(0, Number(c && c.qtd_ok) || 0),
+      qtd_desvio: Math.max(0, Number(c && c.qtd_desvio) || 0),
+      descricao_desvio: String((c && c.descricao_desvio) || '').trim(),
+    }))
+    .filter((c) => c.tipo_amostra || c.quantidade || c.hora_inicial || c.hora_final || c.qtd_ok || c.qtd_desvio || c.descricao_desvio);
+}
+
 // POST /api/relatorios-manutencao — cria um relatório avulso; salva na hora, sem aprovação do admin.
-// Dois formatos possíveis: "completo" (formulário manual de sempre) ou "ficha" (só os dados que a
-// etiqueta do equipamento tem — vindo do "Gerar relatório automático"), diferenciados por body.tipo.
+// Três formatos possíveis, diferenciados por body.tipo: "completo" (formulário manual de sempre),
+// "ficha" (só os dados que a etiqueta do equipamento tem, vindo do Lev. Estoque Etiqueta) ou
+// "ciclagem" (Ensaio de Ciclagem — ciclos de teste com amostras OK/com desvio).
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
+  const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
     if (body.condicao !== 'novo' && body.condicao !== 'usado') return enviarJSON(res, 400, { erro: 'Marque se o equipamento é Novo ou Usado.' });
     if (!fotos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos uma foto (da etiqueta ou do equipamento).' });
+  } else if (tipo === 'ciclagem') {
+    if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
+      return enviarJSON(res, 400, { erro: 'Cliente e equipamento são obrigatórios.' });
+    }
+    if (body.resultado_ensaio !== 'aprovado' && body.resultado_ensaio !== 'reprovado') {
+      return enviarJSON(res, 400, { erro: 'Marque o resultado do ensaio (Aprovado ou Reprovado).' });
+    }
+    if (!ciclos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos um ciclo.' });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
   const data = db.load();
-  // o token de login só carrega id/papel/nome — busca o cadastro completo pra pegar o e-mail
+  // o token de login só carrega id/papel/nome — busca o cadastro completo pra pegar e-mail/cargo/setor
   const autor = data.usuarios.find((u) => u.id === user.id);
   const item = {
     id: nextId(data, 'relatorios_manutencao'),
@@ -1618,9 +1646,14 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     data_fabricacao: body.data_fabricacao || '',
     acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
     tecnico_nome: user.nome, tecnico_email: (autor && autor.email) || '',
+    tecnico_cargo: (autor && autor.cargo) || '', tecnico_setor: (autor && autor.setor) || '',
     data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
     laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
     pecas: Array.isArray(body.pecas) ? body.pecas : [],
+    mtbf_encontrado: tipo === 'ciclagem' ? (body.mtbf_encontrado || '') : '',
+    resultado_ensaio: tipo === 'ciclagem' && (body.resultado_ensaio === 'aprovado' || body.resultado_ensaio === 'reprovado') ? body.resultado_ensaio : '',
+    ciclos: tipo === 'ciclagem' ? ciclos : [],
+    conclusao_ensaio: tipo === 'ciclagem' ? (body.conclusao_ensaio || '') : '',
     fotos,
     criado_em: new Date().toISOString(),
   };
@@ -1630,7 +1663,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
 });
 
 // PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou.
-// O tipo (completo/ficha) é fixo desde a criação — só os campos daquele tipo são atualizados.
+// O tipo (completo/ficha/ciclagem) é fixo desde a criação — só os campos daquele tipo são atualizados.
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
@@ -1646,6 +1679,23 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
       campos: sanitizarCamposFicha(body.campos),
       fotos,
+    });
+  } else if (item.tipo === 'ciclagem') {
+    if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
+      return enviarJSON(res, 400, { erro: 'Cliente e equipamento são obrigatórios.' });
+    }
+    if (body.resultado_ensaio !== 'aprovado' && body.resultado_ensaio !== 'reprovado') {
+      return enviarJSON(res, 400, { erro: 'Marque o resultado do ensaio (Aprovado ou Reprovado).' });
+    }
+    const ciclos = sanitizarCiclos(body.ciclos);
+    if (!ciclos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos um ciclo.' });
+    Object.assign(item, {
+      empresa: body.empresa || '', equipamento: body.equipamento || '',
+      data_conclusao: body.data_conclusao || '',
+      mtbf_encontrado: body.mtbf_encontrado || '',
+      resultado_ensaio: body.resultado_ensaio,
+      ciclos,
+      conclusao_ensaio: body.conclusao_ensaio || '',
     });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
