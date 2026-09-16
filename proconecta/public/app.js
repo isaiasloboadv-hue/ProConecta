@@ -349,7 +349,10 @@ const NAV = {
   tecnico: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
     { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
-    { key: 'relatorio-manutencao', label: 'Criar Relatório', page: 'relatorio-manutencao' },
+    { key: 'relatorio-manutencao', label: 'Criar Relatório', children: [
+      { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
+      { key: 'relatorio-automatico', label: 'Gerar relatório automático', page: 'relatorio-automatico' },
+    ]},
     { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -499,6 +502,7 @@ async function ir(pagina) {
   try {
     if (pagina === 'agenda') return renderAgenda();
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
+    if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
@@ -3512,12 +3516,49 @@ async function renderRelatorioManutencao() {
     </table></div>`;
 }
 
+// tela "Gerar relatório automático": tira foto da etiqueta/placa do equipamento, manda pra IA ler
+// e pré-preenche o mesmo formulário do relatório manual (mostrarFormRelatorioManutencao) — o
+// técnico revisa/completa e salva normalmente. Não cria nada sozinho, só acelera o preenchimento.
+function renderRelatorioAutomatico() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Gerar relatório automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados e já deixa o relatório pré-preenchido pra você revisar antes de salvar.</p></div>
+    <div class="panel" style="text-align:center;">
+      <div id="ra-preview" style="margin-bottom:14px;"></div>
+      <label class="photo-add" style="display:inline-flex;">
+        <span class="plus">📷</span>Tirar foto da etiqueta
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="processarFotoEtiqueta(event)">
+      </label>
+      <div id="ra-status" style="margin-top:12px; color:var(--ink-soft); font-size:13px;"></div>
+    </div>`;
+}
+
+async function processarFotoEtiqueta(event) {
+  const arquivos = event.target.files;
+  if (!arquivos || !arquivos.length) return;
+  const [dataUrl] = await lerFotosComoDataUrl(arquivos);
+  const preview = document.getElementById('ra-preview');
+  const status = document.getElementById('ra-status');
+  if (preview) preview.innerHTML = `<img src="${dataUrl}" style="max-width:260px; border-radius:10px; border:1px solid var(--line);">`;
+  if (status) status.textContent = 'Lendo a etiqueta...';
+  try {
+    const { extraido } = await api('/api/relatorios-manutencao/ler-etiqueta', { method: 'POST', body: { foto: dataUrl } });
+    const draft = relatorioManutPadrao();
+    Object.assign(draft, extraido);
+    mostrarFormRelatorioManutencao(draft);
+    mostrarToast('Etiqueta lida — revise os dados antes de salvar.');
+  } catch (e) {
+    if (status) status.textContent = 'Erro: ' + e.message;
+  }
+}
+
 let relatorioManutDraft = null;
 function relatorioManutPadrao() {
   return {
     empresa: '', contato: '', telefone: '',
     tipo_servico: '', tipo_servico_outros: '',
     marca: '', equipamento: '', numero_serie: '',
+    condicao: '',
     garantia: '', garantia_obs: '',
     data_fabricacao: '',
     acessorios: '', defeito_informado: '',
@@ -3562,6 +3603,11 @@ function mostrarFormRelatorioManutencao(existente) {
         <div><label>Equipamento*</label><input id="rm-equipamento" value="${esc(d.equipamento)}"></div>
         <div><label>Nº de série</label><input id="rm-numero_serie" value="${esc(d.numero_serie)}"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="rm-data_fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(d.data_fabricacao)}"></div>
+      </div>
+      <label>Condição do equipamento</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        ${[['novo', 'Novo'], ['usado', 'Usado']].map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rm-condicao" value="${v}" style="width:auto;" ${d.condicao === v ? 'checked' : ''}> ${l}</label>`).join('')}
       </div>
       <label>Garantia</label>
       <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
@@ -3802,6 +3848,8 @@ async function salvarRelatorioManutencao() {
   d.equipamento = document.getElementById('rm-equipamento').value;
   d.numero_serie = document.getElementById('rm-numero_serie').value;
   d.data_fabricacao = document.getElementById('rm-data_fabricacao').value;
+  const condicao = document.querySelector('input[name="rm-condicao"]:checked');
+  d.condicao = condicao ? condicao.value : '';
   const garantia = document.querySelector('input[name="rm-garantia"]:checked');
   d.garantia = garantia ? garantia.value : '';
   d.garantia_obs = document.getElementById('rm-garantia_obs').value;
@@ -4285,6 +4333,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
 
   children.push(wTitulo('Dados do equipamento'));
   children.push(wLinhaCampos([{ label: 'Marca', valor: r.marca, frac: 0.34 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.4 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.26 }]));
+  children.push(wLinhaCampos([{ label: 'Condição', valor: r.condicao === 'novo' ? 'Novo' : r.condicao === 'usado' ? 'Usado' : '—', frac: 1 }]));
   children.push(wLinhaGarantiaData(r.garantia, r.data_fabricacao));
   children.push(wLinhaCampos([{ label: 'Acessórios', valor: r.acessorios, frac: 1 }]));
   children.push(wLinhaCampos([{ label: 'Defeito informado', valor: r.defeito_informado, frac: 1 }]));
@@ -4513,6 +4562,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
 
   tituloCentro('Dados do equipamento');
   linhaCampos([{ label: 'Marca', valor: r.marca, frac: 0.34 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.4 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.26 }]);
+  linhaCampos([{ label: 'Condição', valor: r.condicao === 'novo' ? 'Novo' : r.condicao === 'usado' ? 'Usado' : '—', frac: 1 }]);
   {
     const wGarantia = largura * 0.62, wData = largura - wGarantia, altura = 20;
     if (y + altura > pageH - margem) novaPagina();

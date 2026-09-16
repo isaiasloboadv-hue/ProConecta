@@ -120,6 +120,53 @@ async function chamarClaude(mensagens, nomeEmpresa) {
   return resp.json();
 }
 
+// lê a etiqueta/placa de identificação de um equipamento a partir de uma foto (dataUrl) e devolve
+// os campos que dá pra extrair dela — usado pelo "Gerar relatório automático" no relatório de
+// manutenção. Chamada avulsa à API (sem histórico/ferramentas), só pra visão + extração de texto.
+async function lerEtiqueta(fotoDataUrl) {
+  const m = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(String(fotoDataUrl || ''));
+  if (!m) throw new Error('Foto inválida.');
+  const [, mediaType, base64] = m;
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 512,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: 'Essa é uma foto da etiqueta/placa de identificação de um equipamento industrial. Leia com atenção as informações impressas nela e devolva SOMENTE um JSON (sem texto antes ou depois, sem markdown), no formato exato: {"marca":"","equipamento":"","numero_serie":"","data_fabricacao":""}. "equipamento" é o tipo/modelo do equipamento. "data_fabricacao" no formato MM/AAAA, se aparecer. Deixe "" em qualquer campo que não conseguir ler com certeza — nunca invente um valor.' },
+        ],
+      }],
+    }),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.text().catch(() => '');
+    throw new Error(`Erro na API da Anthropic: ${resp.status} ${corpo}`);
+  }
+  const dados = await resp.json();
+  const texto = (dados.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  let extraido;
+  try {
+    const limpo = texto.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+    extraido = JSON.parse(limpo);
+  } catch (e) {
+    throw new Error('Não consegui ler os dados dessa etiqueta — tente tirar a foto de novo, mais perto e com boa luz.');
+  }
+  return {
+    marca: String(extraido.marca || ''),
+    equipamento: String(extraido.equipamento || ''),
+    numero_serie: String(extraido.numero_serie || ''),
+    data_fabricacao: String(extraido.data_fabricacao || ''),
+  };
+}
+
 const MAX_RODADAS_FERRAMENTA = 5;
 const MAX_MENSAGENS_HISTORICO = 20;
 
@@ -184,4 +231,4 @@ async function processarTurno(data, chamado) {
   return textoFinal;
 }
 
-module.exports = { ativa, processarTurno };
+module.exports = { ativa, processarTurno, lerEtiqueta };

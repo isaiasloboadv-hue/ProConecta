@@ -1559,6 +1559,23 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
 
+// POST /api/relatorios-manutencao/ler-etiqueta — recebe a foto da etiqueta/placa do equipamento,
+// manda pra IA extrair marca/equipamento/nº série/data de fabricação e devolve pra pré-preencher
+// o formulário no front (não salva nada aqui — só a leitura). Exige a IA configurada.
+rota('POST', /^\/api\/relatorios-manutencao\/ler-etiqueta$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'A leitura automática por IA não está configurada neste sistema.' });
+  const body = await lerCorpo(req);
+  if (!body.foto) return enviarJSON(res, 400, { erro: 'Envie uma foto da etiqueta.' });
+  try {
+    const extraido = await ia.lerEtiqueta(body.foto);
+    enviarJSON(res, 200, { extraido });
+  } catch (e) {
+    enviarJSON(res, 502, { erro: e.message });
+  }
+});
+
 // POST /api/relatorios-manutencao — cria um relatório avulso; salva na hora, sem aprovação do admin
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -1578,6 +1595,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
     tipo_servico: body.tipo_servico || '', tipo_servico_outros: body.tipo_servico_outros || '',
     marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+    condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     data_fabricacao: body.data_fabricacao || '',
     acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
@@ -1608,6 +1626,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
     empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
     tipo_servico: body.tipo_servico || '', tipo_servico_outros: body.tipo_servico_outros || '',
     marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+    condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     data_fabricacao: body.data_fabricacao || '',
     acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
