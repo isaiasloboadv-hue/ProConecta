@@ -82,7 +82,8 @@ const FERRAMENTAS = [
   },
 ];
 
-const SYSTEM_PROMPT = `Você é o assistente de suporte técnico da PRO Marking, atendendo o cliente pelo chat do Pro Conecta (pode ser o app ou o WhatsApp — não faz diferença pra você).
+function montarSystemPrompt(nomeEmpresa) {
+  return `Você é o assistente de suporte técnico da ${nomeEmpresa}, atendendo o cliente pelo chat do Pro Conecta (pode ser o app ou o WhatsApp — não faz diferença pra você).
 
 Seu trabalho: ajudar o cliente a resolver o problema do equipamento dele, passo a passo, consultando a ferramenta buscar_biblioteca — que é a base de conhecimento real da empresa (defeitos, causas e soluções já registrados pelos técnicos). NUNCA invente uma causa ou solução que não esteja na biblioteca.
 
@@ -94,8 +95,9 @@ Como conduzir a conversa:
 - Se o cliente confirmar que resolveu, use resolver_atendimento.
 - Se a biblioteca não tiver nada relevante, ou depois de tentar os passos e não resolver, use escalar_tecnico pra um técnico de verdade continuar — explique isso pro cliente com naturalidade, sem parecer que "desistiu".
 - Nunca escale sem antes tentar ajudar com a biblioteca, a menos que o problema seja claramente grave/urgente (ex: risco de segurança) — nesse caso escale direto com urgente=true.`;
+}
 
-async function chamarClaude(mensagens) {
+async function chamarClaude(mensagens, nomeEmpresa) {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -106,7 +108,7 @@ async function chamarClaude(mensagens) {
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: montarSystemPrompt(nomeEmpresa),
       tools: FERRAMENTAS,
       messages: mensagens,
     }),
@@ -126,6 +128,7 @@ const MAX_MENSAGENS_HISTORICO = 20;
 // direto no chamado, acrescenta a resposta da IA em chamado.mensagens e devolve esse texto —
 // quem chamou decide o que fazer com ele (mostrar no chat, mandar por WhatsApp, etc.).
 async function processarTurno(data, chamado) {
+  const nomeEmpresa = (data.empresas.find((e) => e.id === 1) || {}).nome || 'nossa empresa';
   const historico = chamado.mensagens
     .filter((m) => m.autor === 'cliente' || m.autor === 'ia')
     .slice(-MAX_MENSAGENS_HISTORICO)
@@ -134,7 +137,7 @@ async function processarTurno(data, chamado) {
   let mensagens = historico;
   let textoFinal = '';
   for (let rodada = 0; rodada < MAX_RODADAS_FERRAMENTA; rodada++) {
-    const resposta = await chamarClaude(mensagens);
+    const resposta = await chamarClaude(mensagens, nomeEmpresa);
     const blocosTexto = resposta.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
     const blocosFerramenta = resposta.content.filter((b) => b.type === 'tool_use');
 

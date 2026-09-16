@@ -139,7 +139,8 @@ function fmtDataHoraCurta(isoDataHora) {
 let vapidConfigurado = false;
 function garantirVapidConfigurado(data) {
   if (vapidConfigurado) return;
-  webpush.setVapidDetails('mailto:contato@promarking.com.br', data.vapid.publicKey, data.vapid.privateKey);
+  const emailContato = ((data.empresas.find((e) => e.id === 1) || {}).emails || [])[0] || 'contato@example.com';
+  webpush.setVapidDetails(`mailto:${emailContato}`, data.vapid.publicKey, data.vapid.privateKey);
   vapidConfigurado = true;
 }
 
@@ -357,6 +358,14 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
 });
 
+// dados de marca da empresa (nome, contato, cores) — pública porque a tela de login também usa,
+// antes de qualquer autenticação. Hoje só existe uma empresa (id 1); ver db.js.
+rota('GET', /^\/api\/empresa$/, async (req, res) => {
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === 1);
+  enviarJSON(res, 200, { empresa });
+});
+
 // GET /api/me
 rota('GET', /^\/api\/me$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -448,6 +457,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const novoId = nextId(data, 'agenda');
   const item = {
     id: novoId,
+    empresa_id: 1,
     numero_os: numeroOSDigitado || `OS-${String(novoId).padStart(6, '0')}`,
     tecnico_id: Number(body.tecnico_id),
     cliente_id: Number(body.cliente_id),
@@ -784,7 +794,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     const rodada = data.visitas.filter((v) => v.agenda_id === agendaItem.id).length + 1;
     const agora = new Date().toISOString();
     const visitaReparo = {
-      id: nextId(data, 'visitas'), agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id,
+      id: nextId(data, 'visitas'), empresa_id: 1, agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id,
       rodada, criado_em: agora,
       analise: body.analise || '', causa: body.causa || laudoCompleto.laudo_tecnico || '', correcao: body.correcao || laudoCompleto.servico_realizado || '',
       resultado: body.resultado || 'solucionado', relevante_biblioteca: !!body.relevante_biblioteca,
@@ -877,7 +887,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   // retrabalho por feedback negativo do cliente): gera um SEGUNDO relatório, separado do
   // original, e já entra aprovado — sem passar de novo pela fila do gestor
   if (agendaItem.retorno_pendente_tecnico) {
-    const visitaRetorno = { id: nextId(data, 'visitas'), agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, rodada: 2, criado_em: new Date().toISOString(), ...camposVisita };
+    const visitaRetorno = { id: nextId(data, 'visitas'), empresa_id: 1, agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, rodada: 2, criado_em: new Date().toISOString(), ...camposVisita };
     visitaRetorno.status_aprovacao = 'aprovado';
     visitaRetorno.aprovado_por = null;
     visitaRetorno.data_aprovacao = new Date().toISOString();
@@ -900,7 +910,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   if (visita) {
     Object.assign(visita, camposVisita, { atualizado_em: new Date().toISOString() });
   } else {
-    visita = { id: nextId(data, 'visitas'), agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, criado_em: new Date().toISOString(), ...camposVisita };
+    visita = { id: nextId(data, 'visitas'), empresa_id: 1, agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, criado_em: new Date().toISOString(), ...camposVisita };
     data.visitas.push(visita);
   }
   agendaItem.status = 'concluida';
@@ -928,6 +938,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     } else {
       data.registros.push({
         id: nextId(data, 'registros'),
+        empresa_id: 1,
         tipo: 'defeito',
         origem: 'visita',
         visita_id: visita.id,
@@ -1263,6 +1274,7 @@ rota('POST', /^\/api\/registros$/, async (req, res) => {
   const data = db.load();
   const item = {
     id: nextId(data, 'registros'),
+    empresa_id: 1,
     tipo: body.tipo,
     origem: 'manual',
     autor_id: user.id,
@@ -1560,6 +1572,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const autor = data.usuarios.find((u) => u.id === user.id);
   const item = {
     id: nextId(data, 'relatorios_manutencao'),
+    empresa_id: 1,
     autor_id: user.id,
     autor_nome: user.nome,
     empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
@@ -1638,6 +1651,7 @@ rota('POST', /^\/api\/clientes$/, async (req, res) => {
   const data = db.load();
   const item = {
     id: nextId(data, 'clientes'),
+    empresa_id: 1,
     nome_empresa: body.nome_empresa.trim(),
     contato: body.contato || '',
     telefone: body.telefone || '',
@@ -1714,6 +1728,7 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const data = db.load();
   const item = {
     id: nextId(data, 'equipamentos'),
+    empresa_id: 1,
     cliente_id: null,
     tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
   };
@@ -1779,6 +1794,7 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
   if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
   const item = {
     id: nextId(data, 'equipamentos'),
+    empresa_id: 1,
     cliente_id: cliente.id,
     tipo: catalogo.tipo,
     modelo: catalogo.modelo,
@@ -1825,6 +1841,7 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   const convite_token = gerarTokenConvite();
   const novo = {
     id: nextId(data, 'usuarios'),
+    empresa_id: 1,
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', cliente_id: body.cliente_id || null,
@@ -1950,6 +1967,7 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
   const agora = new Date().toISOString();
   const chamado = {
     id: nextId(data, 'chamados'),
+    empresa_id: 1,
     cliente_id: user.cliente_id,
     telefone_whatsapp: null,
     origem: 'app',
@@ -2138,6 +2156,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   const novoId = nextId(data, 'agenda');
   const osItem = {
     id: novoId,
+    empresa_id: 1,
     numero_os: `OS-${String(novoId).padStart(6, '0')}`,
     tecnico_id: user.id,
     cliente_id: chamado.cliente_id,
@@ -2191,7 +2210,8 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   db.save(data);
 
   if (chamado.origem === 'whatsapp' && chamado.telefone_whatsapp) {
-    whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, `${user.nome}, da PRO Marking, assumiu seu atendimento e vai continuar por aqui.`).catch(() => {});
+    const nomeEmpresa = (data.empresas.find((e) => e.id === 1) || {}).nome || 'a empresa';
+    whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, `${user.nome}, de ${nomeEmpresa}, assumiu seu atendimento e vai continuar por aqui.`).catch(() => {});
   }
   enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado), agenda: agendaComDetalhes(data, osItem) });
 });

@@ -1,7 +1,7 @@
 {
   "name": "Pro Conecta",
   "short_name": "Pro Conecta",
-  "description": "Gestão técnica e biblioteca de manutenção da Pro Conecta / Bvol Tech",
+  "description": "Gestão técnica e biblioteca de manutenção de equipamentos",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

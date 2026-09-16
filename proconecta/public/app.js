@@ -76,6 +76,24 @@ async function api(path, opts = {}) {
   }
 }
 
+// dados de marca da empresa dona da instalação (nome, contato) — buscados uma vez no boot,
+// antes até do login, e usados em vez de texto fixo nos PDFs/Word e telas de contato. Assim
+// instalar o sistema pra outra empresa não exige mexer em código, só nas variáveis de ambiente
+// (ver db.js). Os valores de fallback abaixo só entram em jogo se a busca falhar.
+window._empresa = null;
+async function carregarEmpresa() {
+  try { window._empresa = (await api('/api/empresa')).empresa; } catch (e) {}
+}
+function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
+function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
+function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || '12 99718-7506'; }
+function empresaTelefone() { return (window._empresa && window._empresa.telefone) || '12 3902-3453'; }
+function empresaEmails() {
+  return (window._empresa && Array.isArray(window._empresa.emails) && window._empresa.emails.length)
+    ? window._empresa.emails
+    : ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'];
+}
+
 async function fazerLogin() {
   const email = document.getElementById('login-email').value;
   const senha = document.getElementById('login-senha').value;
@@ -1329,8 +1347,8 @@ async function renderRelatorioCorretiva(item) {
       <p style="font-size:13.5px; line-height:1.6;">
         O equipamento <b>${esc(item.equipamento_modelo || item.equipamento_tipo || '')}</b> está coberto por uma garantia de 1 ano a partir da data de entrega.
         Esta garantia cobre defeitos de fabricação e mão de obra. Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>
-        <b>WhatsApp:</b> 12 99718-7506 &nbsp; <b>Telefone:</b> 12 3902-3453<br>
-        <b>E-mail:</b> suporte@promarking.com.br / tecnico@promarking.com.br
+        <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
+        <b>E-mail:</b> ${empresaEmails().slice(0, 2).join(' / ')}
       </p>
     </div>
 
@@ -1924,8 +1942,8 @@ async function renderLaudoTecnico(item) {
       <h2>Sobre o equipamento</h2>
       <p style="font-size:13.5px; line-height:1.6;">
         Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>
-        <b>WhatsApp:</b> 12 99718-7506 &nbsp; <b>Telefone:</b> 12 3902-3453<br>
-        <b>E-mail:</b> suporte@promarking.com.br / atendimento@promarking.com.br / tecnico@promarking.com.br / posvenda@promarking.com.br
+        <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
+        <b>E-mail:</b> ${empresaEmails().join(' / ')}
       </p>
     </div>
 
@@ -2104,7 +2122,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text('PRO Marking', pageW / 2, y, { align: 'center' });
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
     y += 15;
     doc.setFontSize(13); doc.setFont(undefined, 'bold');
     doc.text('Laudo Técnico', pageW / 2, y, { align: 'center' });
@@ -2328,16 +2346,16 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   doc.rect(0, 0, pageW, pageH, 'F');
   if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text('PRO Marking', pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text('WhatsApp: 12 99718-7506', pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text('Telefone: 12 3902-3453', pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
   doc.setFont(undefined, 'bold');
   doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email, i) => {
+  empresaEmails().forEach((email, i) => {
     doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
   });
 
@@ -3378,8 +3396,8 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   doc.text(linhasAtt, margem + 14, yUpdate + 12);
 
   doc.setFontSize(7); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text('PRO Marking', margem + 14, pageH - margem - 16);
-  doc.text('promarking.com.br', margem + 14, pageH - margem - 6);
+  doc.text(empresaNome(), margem + 14, pageH - margem - 16);
+  doc.text(empresaSite(), margem + 14, pageH - margem - 6);
 
   // ----- coluna direita -----
   let y2 = topoConteudo + 8;
@@ -4185,7 +4203,7 @@ function wPaginaContato(logoDataUri) {
   conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 260 },
-    children: [new docx.TextRun({ text: 'PRO Marking', bold: true, color: WORD_COR.navy, size: 26 })],
+    children: [new docx.TextRun({ text: empresaNome(), bold: true, color: WORD_COR.navy, size: 26 })],
   }));
   conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
@@ -4195,19 +4213,19 @@ function wPaginaContato(logoDataUri) {
   conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 60 },
-    children: [new docx.TextRun({ text: 'WhatsApp: 12 99718-7506', color: WORD_COR.ink, size: 18 })],
+    children: [new docx.TextRun({ text: `WhatsApp: ${empresaWhatsapp()}`, color: WORD_COR.ink, size: 18 })],
   }));
   conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 220 },
-    children: [new docx.TextRun({ text: 'Telefone: 12 3902-3453', color: WORD_COR.ink, size: 18 })],
+    children: [new docx.TextRun({ text: `Telefone: ${empresaTelefone()}`, color: WORD_COR.ink, size: 18 })],
   }));
   conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 100 },
     children: [new docx.TextRun({ text: 'E-mail:', bold: true, color: WORD_COR.ink, size: 18 })],
   }));
-  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email) => {
+  empresaEmails().forEach((email) => {
     conteudo.push(new docx.Paragraph({
       alignment: docx.AlignmentType.CENTER,
       spacing: { after: 40 },
@@ -4244,7 +4262,7 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
   children.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 20 },
-    children: [new docx.TextRun({ text: 'PRO Marking', bold: true, color: WORD_COR.navy, size: 24 })],
+    children: [new docx.TextRun({ text: empresaNome(), bold: true, color: WORD_COR.navy, size: 24 })],
   }));
   children.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
@@ -4394,7 +4412,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
     if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text('PRO Marking', pageW / 2, y, { align: 'center' });
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
     y += 15;
     doc.setFontSize(13); doc.setFont(undefined, 'bold');
     doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
@@ -4645,16 +4663,16 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   doc.rect(0, 0, pageW, pageH, 'F');
   if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text('PRO Marking', pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text('WhatsApp: 12 99718-7506', pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text('Telefone: 12 3902-3453', pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
   doc.setFont(undefined, 'bold');
   doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'].forEach((email, i) => {
+  empresaEmails().forEach((email, i) => {
     doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
   });
 
@@ -6134,3 +6152,4 @@ function mostrarToast(texto) {
 }
 
 tentarSessaoExistente();
+carregarEmpresa();

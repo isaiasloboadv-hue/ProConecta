@@ -41,8 +41,39 @@ function seed() {
     relatorios_manutencao: [],
     push_subscriptions: [],
     vapid: null,
+    empresas: [],
     _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1 },
   };
+}
+
+// dados da empresa "dona" da instalação — hoje só existe a de id 1, mas já mora numa lista própria
+// (com empresa_id nos demais registros) pra um dia dar pra ter mais de uma empresa usando o mesmo
+// sistema sem redesenhar o banco. Configurável por variável de ambiente: uma instalação nova (outra
+// empresa comprando o sistema) só precisa trocar as variáveis no hospedeiro, sem mexer em código.
+// Roda a cada carregamento, então mudar a variável de ambiente reflete sem precisar apagar o banco.
+function sincronizarEmpresaPadrao(data) {
+  if (!data.empresas) data.empresas = [];
+  let empresa = data.empresas.find((e) => e.id === 1);
+  if (!empresa) {
+    empresa = {
+      id: 1,
+      nome: 'PRO Marking',
+      site: 'promarking.com.br',
+      whatsapp: '12 99718-7506',
+      telefone: '12 3902-3453',
+      emails: ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'],
+      cor_primaria: '#0A2647',
+      cor_secundaria: '#0E7C86',
+    };
+    data.empresas.push(empresa);
+  }
+  if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
+  if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
+  if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;
+  if (process.env.EMPRESA_TELEFONE) empresa.telefone = process.env.EMPRESA_TELEFONE;
+  if (process.env.EMPRESA_EMAILS) empresa.emails = process.env.EMPRESA_EMAILS.split(',').map((e) => e.trim()).filter(Boolean);
+  if (process.env.EMPRESA_COR_PRIMARIA) empresa.cor_primaria = process.env.EMPRESA_COR_PRIMARIA;
+  if (process.env.EMPRESA_COR_SECUNDARIA) empresa.cor_secundaria = process.env.EMPRESA_COR_SECUNDARIA;
 }
 
 // se as variáveis de ambiente ADMIN_EMAIL/ADMIN_SENHA estiverem definidas e ainda não existir
@@ -92,6 +123,14 @@ function migrar(data) {
   if (!data.chamados) data.chamados = [];
   if (data.chamados_rr_index === undefined) data.chamados_rr_index = 0;
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
+  sincronizarEmpresaPadrao(data);
+  // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
+  // existe essa empresa mesmo, então todo registro já criado pertence a ela.
+  for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao]) {
+    for (const item of lista) {
+      if (item.empresa_id === undefined) item.empresa_id = 1;
+    }
+  }
   // "chamados" virou o atendimento por chat (IA -> técnico), unificando o que antes era
   // conversas_whatsapp (histórico solto por telefone) com o antigo chamado (só criado quando a
   // IA escalava). Bancos antigos que ainda tenham chamados no formato de antes do chat ganham os
@@ -214,6 +253,7 @@ function carregarDoArquivo() {
   if (!fs.existsSync(DB_PATH)) {
     const data = seed();
     bootstrapAdminMaster(data);
+    sincronizarEmpresaPadrao(data);
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
     return data;
   }
@@ -249,6 +289,7 @@ async function inicializarPostgres() {
   if (r.rows.length === 0) {
     const data = seed();
     bootstrapAdminMaster(data);
+    sincronizarEmpresaPadrao(data);
     await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
     cache = data;
   } else {
