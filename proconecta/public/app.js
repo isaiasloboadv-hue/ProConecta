@@ -3499,12 +3499,12 @@ async function renderRelatorioManutencao() {
       <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManutencao()">+ Novo relatório</button>
     </div>
     <div class="panel"><table>
-      <tr><th>Data</th><th>Empresa</th><th>Equipamento</th><th></th></tr>
+      <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
       ${relatorios.length ? relatorios.map((r, i) => `
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
-          <td data-label="Empresa">${esc(r.empresa)}</td>
-          <td data-label="Equipamento">${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''}</td>
+          <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             <button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>
@@ -3516,13 +3516,22 @@ async function renderRelatorioManutencao() {
     </table></div>`;
 }
 
+function descricaoRelatorioManutencao(r) {
+  if (r.tipo === 'ficha') {
+    const partes = (r.campos || []).slice(0, 2).map((c) => `${esc(c.campo)}: ${esc(c.valor)}`);
+    return partes.length ? partes.join(' · ') : 'Ficha do equipamento';
+  }
+  return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
+}
+
 // tela "Gerar relatório automático": tira foto da etiqueta/placa do equipamento, manda pra IA ler
-// e pré-preenche o mesmo formulário do relatório manual (mostrarFormRelatorioManutencao) — o
-// técnico revisa/completa e salva normalmente. Não cria nada sozinho, só acelera o preenchimento.
+// e abre a Ficha do equipamento (mostrarFormFicha) já com os campos que a etiqueta tiver — é a
+// própria etiqueta que decide quais campos existem (marca, nº de série, potência, tensão...), não
+// é uma lista fixa. O técnico revisa/ajusta e salva; a foto tirada aqui já entra na ficha.
 function renderRelatorioAutomatico() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Gerar relatório automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados e já deixa o relatório pré-preenchido pra você revisar antes de salvar.</p></div>
+    <div class="page-head"><h1>Gerar relatório automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados (mesmo se a etiqueta estiver em inglês, vem traduzido) e já deixa a ficha pronta pra você revisar antes de salvar.</p></div>
     <div class="panel" style="text-align:center;">
       <div id="ra-preview" style="margin-bottom:14px;"></div>
       <label class="photo-add" style="display:inline-flex;">
@@ -3543,13 +3552,114 @@ async function processarFotoEtiqueta(event) {
   if (status) status.textContent = 'Lendo a etiqueta...';
   try {
     const { extraido } = await api('/api/relatorios-manutencao/ler-etiqueta', { method: 'POST', body: { foto: dataUrl } });
-    const draft = relatorioManutPadrao();
-    Object.assign(draft, extraido);
-    mostrarFormRelatorioManutencao(draft);
+    const draft = fichaEquipamentoPadrao();
+    draft.campos = Array.isArray(extraido.campos) ? extraido.campos : [];
+    draft.fotos = [dataUrl];
+    mostrarFormFicha(draft);
     mostrarToast('Etiqueta lida — revise os dados antes de salvar.');
   } catch (e) {
     if (status) status.textContent = 'Erro: ' + e.message;
   }
+}
+
+// ---------- Ficha do equipamento (relatório enxuto: só o que a etiqueta tem + condição + fotos) ----------
+
+let fichaDraft = null;
+function fichaEquipamentoPadrao() {
+  return { tipo: 'ficha', condicao: '', campos: [], fotos: [] };
+}
+
+function mostrarFormFicha(existente) {
+  fichaDraft = existente ? JSON.parse(JSON.stringify(existente)) : fichaEquipamentoPadrao();
+  const d = fichaDraft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar ficha do equipamento' : 'Ficha do equipamento'}</h1><p>Dados lidos da etiqueta — revise, ajuste ou adicione campos, e confirme a condição antes de salvar.</p></div>
+
+    <div class="panel">
+      <h2>Condição do equipamento</h2>
+      <div style="display:flex; gap:18px; flex-wrap:wrap;">
+        ${[['novo', 'Novo'], ['usado', 'Usado']].map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="fc-condicao" value="${v}" style="width:auto;" ${d.condicao === v ? 'checked' : ''}> ${l}</label>`).join('')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados da etiqueta</h2>
+      <div class="steps-list" id="fc-campos"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarCampoFicha()">+ Adicionar campo</button>
+    </div>
+
+    <div class="panel">
+      <h2>Fotos*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Foto da etiqueta e/ou do equipamento.</p>
+      <div class="step-photos" id="fc-fotos"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotosFicha(event)">
+        </label>
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">+</span>Galeria
+          <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosFicha(event)">
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarFicha()">Gerar PDF e salvar</button>
+      </div>
+    </div>`;
+  renderCamposFicha();
+  renderFotosFicha();
+}
+
+function renderCamposFicha() {
+  document.getElementById('fc-campos').innerHTML = fichaDraft.campos.map((c, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input placeholder="Campo (ex: Potência)" value="${esc(c.campo || '')}" style="flex:1;" oninput="fichaDraft.campos[${i}].campo=this.value;">
+        <input placeholder="Valor" value="${esc(c.valor || '')}" style="flex:1;" oninput="fichaDraft.campos[${i}].valor=this.value;">
+        <button class="step-rm" onclick="removerCampoFicha(${i})">×</button>
+      </div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhum campo lido — adicione manualmente se precisar.</p>';
+}
+function adicionarCampoFicha() { fichaDraft.campos.push({ campo: '', valor: '' }); renderCamposFicha(); }
+function removerCampoFicha(i) { fichaDraft.campos.splice(i, 1); renderCamposFicha(); }
+
+function renderFotosFicha() {
+  document.getElementById('fc-fotos').innerHTML = fichaDraft.fotos.map((f, j) => `
+    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do equipamento">
+      <button class="photo-rm" onclick="removerFotoFicha(${j})">×</button>
+    </div>`).join('');
+}
+function removerFotoFicha(j) { fichaDraft.fotos.splice(j, 1); renderFotosFicha(); }
+function adicionarFotosFicha(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    fichaDraft.fotos.push(...dataUrls);
+    renderFotosFicha();
+  });
+}
+
+async function salvarFicha() {
+  const d = fichaDraft;
+  const condicao = document.querySelector('input[name="fc-condicao"]:checked');
+  d.condicao = condicao ? condicao.value : '';
+  if (!d.fotos.length) { alert('Adicione ao menos uma foto (da etiqueta ou do equipamento).'); return; }
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfFichaEquipamento(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Ficha atualizada e PDF gerado.' : 'Ficha salva e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 let relatorioManutDraft = null;
@@ -3877,7 +3987,8 @@ async function salvarRelatorioManutencao() {
 async function editarRelatorioManutencao(i) {
   const r = await relatorioManutCompleto(i);
   if (!r) return;
-  mostrarFormRelatorioManutencao(r);
+  if (r.tipo === 'ficha') mostrarFormFicha(r);
+  else mostrarFormRelatorioManutencao(r);
 }
 
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
@@ -3897,7 +4008,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
@@ -3910,7 +4021,7 @@ async function abrirFotosRelatorioManutencao(i) {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Fotos — ${esc(r.empresa)}</h1><p>${esc(r.equipamento)}</p></div>
+      <div><h1>Fotos — ${r.tipo === 'ficha' ? 'Ficha do equipamento' : esc(r.empresa)}</h1><p>${r.tipo === 'ficha' ? (r.campos || []).slice(0, 2).map((c) => `${esc(c.campo)}: ${esc(c.valor)}`).join(' · ') : esc(r.equipamento)}</p></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${temFotos ? `<button class="btn btn-primary btn-sm" onclick="baixarTodasFotosRelatorioManutencao(${i})">⬇ Baixar todas as fotos</button>` : ''}
         <button class="btn-outline-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
@@ -4393,12 +4504,163 @@ async function gerarWordRelatorioManutencao(r, logoDataUri) {
   return pintarFechoSecaoCapaWord(blob, WORD_COR.navy);
 }
 
+// PDF enxuto da Ficha do equipamento — só os dados que a etiqueta tiver (lista dinâmica de
+// campo/valor), condição (novo/usado) e fotos. Sem capa nem os blocos do relatório completo.
+function gerarPdfFichaEquipamento(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Ficha do Equipamento', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13 + 16;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  cabecalho();
+
+  tituloCentro('Dados do equipamento');
+  if ((r.campos || []).length) {
+    r.campos.forEach((c) => linhaCampos([{ label: c.campo, valor: c.valor, frac: 1 }]));
+  } else {
+    linhaCampos([{ label: 'Dados', valor: 'Nenhum dado lido da etiqueta.', frac: 1 }]);
+  }
+  linhaCampos([{ label: 'Condição', valor: r.condicao === 'novo' ? 'Novo' : r.condicao === 'usado' ? 'Usado' : '—', frac: 1 }]);
+  y += 16;
+
+  linhaCampos([{ label: 'Técnico', valor: r.tecnico_nome, frac: 0.5 }, { label: 'Data', valor: fmtData(r.criado_em), frac: 0.5 }]);
+  y += 16;
+
+  if ((r.fotos || []).length) {
+    tituloCentro('Fotos');
+    const cols = 2, gap = 10;
+    const wFoto = (largura - gap * (cols - 1)) / cols;
+    const hFoto = wFoto * 0.75;
+    let cx = margem, col = 0;
+    r.fotos.forEach((f) => {
+      if (y + hFoto > pageH - margem) novaPagina();
+      const m = /^data:image\/(\w+);/.exec(f);
+      const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+      try { doc.addImage(f, formato, cx, y, wFoto, hFoto); } catch (e) {}
+      doc.setDrawColor(...PDF_COR.line); doc.rect(cx, y, wFoto, hFoto, 'S');
+      col++;
+      if (col >= cols) { col = 0; cx = margem; y += hFoto + gap; } else { cx += wFoto + gap; }
+    });
+  }
+
+  return doc.output('bloburl');
+}
+
+// Word enxuto da Ficha do equipamento — mesmo conteúdo do PDF acima, sem capa nem página de
+// contato do relatório completo. Reaproveita os mesmos blocos (wTitulo/wLinhaCampos/fotos).
+async function gerarWordFichaEquipamento(r, logoDataUri) {
+  const children = [];
+  if (logoDataUri) {
+    try {
+      children.push(new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: 60 },
+        children: [new docx.ImageRun({ data: dataUriParaUint8Array(logoDataUri), transformation: { width: 46, height: 53 } })],
+      }));
+    } catch (e) {}
+  }
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 20 },
+    children: [new docx.TextRun({ text: empresaNome(), bold: true, color: WORD_COR.navy, size: 24 })],
+  }));
+  children.push(new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: { after: 220 },
+    border: { bottom: { color: WORD_COR.blue, space: 6, style: docx.BorderStyle.SINGLE, size: 8 } },
+    children: [new docx.TextRun({ text: 'Ficha do Equipamento', bold: true, color: WORD_COR.ink, size: 30 })],
+  }));
+
+  children.push(wTitulo('Dados do equipamento'));
+  if ((r.campos || []).length) {
+    r.campos.forEach((c) => children.push(wLinhaCampos([{ label: c.campo, valor: c.valor, frac: 1 }])));
+  } else {
+    children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhum dado lido da etiqueta.', italics: true, color: WORD_COR.inkSoft, size: 20 })] }));
+  }
+  children.push(wLinhaCampos([{ label: 'Condição', valor: r.condicao === 'novo' ? 'Novo' : r.condicao === 'usado' ? 'Usado' : '—', frac: 1 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 80 } }));
+
+  children.push(wTitulo('Técnico responsável'));
+  children.push(wLinhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.5 }, { label: 'Data', valor: fmtData(r.criado_em), frac: 0.5 }]));
+  children.push(new docx.Paragraph({ spacing: { after: 160 } }));
+
+  children.push(wTitulo('Fotos', { centralizado: true, manterProximo: true, after: 260 }));
+  if ((r.fotos || []).length) {
+    children.push(wTabelaFotosBloco(r.fotos));
+  } else {
+    children.push(new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma foto anexada.', italics: true, color: WORD_COR.inkSoft, size: 20 })] }));
+  }
+
+  const tamanhoPagina = { width: docx.convertMillimetersToTwip(210), height: docx.convertMillimetersToTwip(297) };
+  const doc = new docx.Document({
+    sections: [{
+      properties: { page: { size: tamanhoPagina, margin: { top: 300, bottom: 300, left: 300, right: 300, header: 0, footer: 0 } } },
+      children,
+    }],
+  });
+  return docx.Packer.toBlob(doc);
+}
+
 async function baixarWordRelatorioManutencao(i) {
   const r = await relatorioManutCompleto(i);
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const blob = await gerarWordRelatorioManutencao(r, logo);
+    const blob = r.tipo === 'ficha' ? await gerarWordFichaEquipamento(r, logo) : await gerarWordRelatorioManutencao(r, logo);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -4428,6 +4690,11 @@ function periodoManut(dIni, dFim) {
 // ex.: relatório da Montreal com nº série 12345678 vira "Montreal - 12345678"
 function nomeArquivoRelatorioManutencao(r) {
   function limpar(v) { return String(v || '').trim().replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ').trim(); }
+  if (r.tipo === 'ficha') {
+    const serieCampo = (r.campos || []).find((c) => /s[ée]rie/i.test(c.campo || ''));
+    const serie = limpar(serieCampo && serieCampo.valor);
+    return serie ? `ficha-equipamento - ${serie}` : `ficha-equipamento-${r.id || ''}`;
+  }
   const empresa = limpar(r.empresa) || 'relatorio';
   const serie = limpar(r.numero_serie);
   return serie ? `${empresa} - ${serie}` : empresa;

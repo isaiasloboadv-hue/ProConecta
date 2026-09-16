@@ -242,6 +242,10 @@ function migrar(data) {
       const autor = data.usuarios.find((u) => u.id === r.autor_id);
       if (autor && autor.email) r.tecnico_email = autor.email;
     }
+    // relatórios criados antes da "ficha de equipamento" (leitura automática de etiqueta) existir
+    // são todos do tipo "completo" (o formulário manual de sempre).
+    if (!r.tipo) r.tipo = 'completo';
+    if (!Array.isArray(r.campos)) r.campos = [];
   }
   protegerAdminMaster(data);
   return data;

@@ -121,8 +121,13 @@ async function chamarClaude(mensagens, nomeEmpresa) {
 }
 
 // lê a etiqueta/placa de identificação de um equipamento a partir de uma foto (dataUrl) e devolve
-// os campos que dá pra extrair dela — usado pelo "Gerar relatório automático" no relatório de
-// manutenção. Chamada avulsa à API (sem histórico/ferramentas), só pra visão + extração de texto.
+// uma lista de campos (nome + valor) com tudo que der pra identificar nela — usado pelo "Gerar
+// relatório automático" no relatório de manutenção. É a própria etiqueta que decide quais campos
+// existem (marca, nº de série, potência, tensão, corrente, etc.) — não é uma lista fixa, porque
+// cada tipo de equipamento tem uma etiqueta diferente. Se a etiqueta estiver em inglês (comum em
+// equipamento importado), os nomes dos campos vêm traduzidos pro português — só o nome do campo,
+// o valor impresso (números, códigos) fica como está. Chamada avulsa à API (sem histórico/
+// ferramentas), só pra visão + extração de texto.
 async function lerEtiqueta(fotoDataUrl) {
   const m = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(String(fotoDataUrl || ''));
   if (!m) throw new Error('Foto inválida.');
@@ -136,12 +141,12 @@ async function lerEtiqueta(fotoDataUrl) {
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 512,
+      max_tokens: 1024,
       messages: [{
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: 'Essa é uma foto da etiqueta/placa de identificação de um equipamento industrial. Leia com atenção as informações impressas nela e devolva SOMENTE um JSON (sem texto antes ou depois, sem markdown), no formato exato: {"marca":"","equipamento":"","numero_serie":"","data_fabricacao":""}. "equipamento" é o tipo/modelo do equipamento. "data_fabricacao" no formato MM/AAAA, se aparecer. Deixe "" em qualquer campo que não conseguir ler com certeza — nunca invente um valor.' },
+          { type: 'text', text: 'Essa é uma foto da etiqueta/placa de identificação de um equipamento industrial. Leia com atenção TODAS as informações impressas nela (marca, modelo, número de série, potência, tensão, corrente, frequência, ano/data de fabricação, peso, capacidade, grau de proteção IP, código do fabricante etc. — qualquer dado de identificação que a etiqueta tiver, não invente campos que não estejam lá) e devolva SOMENTE um JSON (sem texto antes ou depois, sem markdown), no formato exato: {"campos":[{"campo":"","valor":""}]}, um item por informação encontrada, na ordem em que aparecem na etiqueta. Se a etiqueta estiver em inglês ou outro idioma, traduza o NOME de cada campo pro português (ex.: "Serial Number" vira "Número de Série", "Power" vira "Potência", "Voltage" vira "Tensão") mas mantenha o VALOR exatamente como está impresso (números, unidades, códigos). Se não conseguir ler nada com confiança, devolva {"campos":[]} — nunca invente um valor.' },
         ],
       }],
     }),
@@ -159,11 +164,11 @@ async function lerEtiqueta(fotoDataUrl) {
   } catch (e) {
     throw new Error('Não consegui ler os dados dessa etiqueta — tente tirar a foto de novo, mais perto e com boa luz.');
   }
+  const campos = Array.isArray(extraido.campos) ? extraido.campos : [];
   return {
-    marca: String(extraido.marca || ''),
-    equipamento: String(extraido.equipamento || ''),
-    numero_serie: String(extraido.numero_serie || ''),
-    data_fabricacao: String(extraido.data_fabricacao || ''),
+    campos: campos
+      .map((c) => ({ campo: String((c && c.campo) || '').trim(), valor: String((c && c.valor) || '').trim() }))
+      .filter((c) => c.campo && c.valor),
   };
 }
 

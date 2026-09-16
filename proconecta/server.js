@@ -1576,12 +1576,27 @@ rota('POST', /^\/api\/relatorios-manutencao\/ler-etiqueta$/, async (req, res) =>
   }
 });
 
-// POST /api/relatorios-manutencao — cria um relatório avulso; salva na hora, sem aprovação do admin
+// normaliza a lista de campos de uma "ficha de equipamento" (o que a IA leu da etiqueta, com
+// possíveis ajustes do técnico) — tira linhas totalmente vazias, garante string em tudo.
+function sanitizarCamposFicha(lista) {
+  if (!Array.isArray(lista)) return [];
+  return lista
+    .map((c) => ({ campo: String((c && c.campo) || '').trim(), valor: String((c && c.valor) || '').trim() }))
+    .filter((c) => c.campo || c.valor);
+}
+
+// POST /api/relatorios-manutencao — cria um relatório avulso; salva na hora, sem aprovação do admin.
+// Dois formatos possíveis: "completo" (formulário manual de sempre) ou "ficha" (só os dados que a
+// etiqueta do equipamento tem — vindo do "Gerar relatório automático"), diferenciados por body.tipo.
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
+  const tipo = body.tipo === 'ficha' ? 'ficha' : 'completo';
+  const fotos = Array.isArray(body.fotos) ? body.fotos : [];
+  if (tipo === 'ficha') {
+    if (!fotos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos uma foto (da etiqueta ou do equipamento).' });
+  } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
   const data = db.load();
@@ -1590,12 +1605,14 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const item = {
     id: nextId(data, 'relatorios_manutencao'),
     empresa_id: 1,
+    tipo,
     autor_id: user.id,
     autor_nome: user.nome,
     empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
     tipo_servico: body.tipo_servico || '', tipo_servico_outros: body.tipo_servico_outros || '',
     marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
     condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
+    campos: tipo === 'ficha' ? sanitizarCamposFicha(body.campos) : [],
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     data_fabricacao: body.data_fabricacao || '',
     acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
@@ -1603,7 +1620,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
     laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
     pecas: Array.isArray(body.pecas) ? body.pecas : [],
-    fotos: Array.isArray(body.fotos) ? body.fotos : [],
+    fotos,
     criado_em: new Date().toISOString(),
   };
   data.relatorios_manutencao.push(item);
@@ -1611,30 +1628,41 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   enviarJSON(res, 201, { relatorio: item });
 });
 
-// PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou
+// PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou.
+// O tipo (completo/ficha) é fixo desde a criação — só os campos daquele tipo são atualizados.
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
-    return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
-  }
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
-  Object.assign(item, {
-    empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
-    tipo_servico: body.tipo_servico || '', tipo_servico_outros: body.tipo_servico_outros || '',
-    marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
-    condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
-    garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
-    data_fabricacao: body.data_fabricacao || '',
-    acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
-    data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
-    laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
-    pecas: Array.isArray(body.pecas) ? body.pecas : [],
-    fotos: Array.isArray(body.fotos) ? body.fotos : [],
-  });
+  const fotos = Array.isArray(body.fotos) ? body.fotos : [];
+  if (item.tipo === 'ficha') {
+    if (!fotos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos uma foto (da etiqueta ou do equipamento).' });
+    Object.assign(item, {
+      condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
+      campos: sanitizarCamposFicha(body.campos),
+      fotos,
+    });
+  } else {
+    if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
+      return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
+    }
+    Object.assign(item, {
+      empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
+      tipo_servico: body.tipo_servico || '', tipo_servico_outros: body.tipo_servico_outros || '',
+      marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+      condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
+      garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
+      data_fabricacao: body.data_fabricacao || '',
+      acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
+      data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
+      laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
+      pecas: Array.isArray(body.pecas) ? body.pecas : [],
+      fotos,
+    });
+  }
   db.save(data);
   enviarJSON(res, 200, { relatorio: item });
 });
