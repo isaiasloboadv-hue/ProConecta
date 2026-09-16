@@ -11,6 +11,9 @@ let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
 const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque' };
+// setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
+// Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
+const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda', estoque: 'Estoque' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
@@ -6337,7 +6340,7 @@ async function renderUsuarios() {
       <div class="user-row">
         <div class="u-avatar-lg">${initials(u.nome)}</div>
         <div class="u-info">
-          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[u.papel] || u.papel)}</span>${u.papel === 'suporte' && u.acesso_total === false ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">Acesso personalizado</span>' : ''}${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
+          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[u.papel] || u.papel)}</span>${u.papel === 'administrador' ? ` <span class="tag tag-papel">${u.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[u.departamento] || u.departamento) : 'Geral'}</span>` : ''}${u.papel === 'suporte' && u.acesso_total === false ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">Acesso personalizado</span>' : ''}${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
           <div class="u-line2">${esc(u.email)} ${u.cargo ? '· ' + esc(u.cargo) : ''} ${u.setor ? '· ' + esc(u.setor) : ''}</div>
         </div>
         <span class="badge ${u.status === 'ativo' ? 'badge-ativo' : 'badge-convite'}">${u.status === 'ativo' ? 'Ativo' : 'Convite enviado'}</span>
@@ -6347,9 +6350,25 @@ async function renderUsuarios() {
       </div>`).join('')}`;
 }
 let usuarioEmEdicaoId = null;
+// um administrador de departamento (USER.departamento preenchido) só pode cadastrar gente do
+// próprio setor e clientes — nem vê a opção "Administrador" (não pode criar outro administrador).
+// O administrador geral (USER.departamento vazio) continua vendo todas as opções, como sempre foi.
+// Editando o próprio cadastro, sempre mostra (travado) o próprio tipo de acesso, mesmo que não
+// esteja entre os que dá pra cadastrar — ninguém pode mudar o próprio tipo de acesso.
+function papeisCadastraveis(usuario) {
+  if (usuario && usuario.id === USER.id) return [usuario.papel];
+  if (USER.papel === 'administrador' && USER.departamento) return [USER.departamento, 'cliente'];
+  return ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente'];
+}
 function mostrarFormUsuario(usuario) {
   usuarioEmEdicaoId = usuario ? usuario.id : null;
   const clientes = window._clientesCache || [];
+  const opcoesPapel = {
+    suporte: 'Suporte', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque',
+    administrador: 'Administrador', cliente: 'Cliente',
+  };
+  const permitidos = papeisCadastraveis(usuario);
+  const papelPadrao = usuario ? usuario.papel : permitidos[0];
   document.getElementById('form-usuario').innerHTML = `
     <div class="panel"><div class="panel-head">${usuario ? 'Editar usuário' : 'Novo usuário'}</div>
       <div class="form-grid">
@@ -6357,15 +6376,19 @@ function mostrarFormUsuario(usuario) {
         <div><label>E-mail</label><input id="nu-email" value="${usuario ? esc(usuario.email) : ''}"></div>
         <div><label>Cargo</label><input id="nu-cargo" value="${usuario ? esc(usuario.cargo || '') : ''}"></div>
         <div><label>Setor</label><input id="nu-setor" value="${usuario ? esc(usuario.setor || '') : ''}"></div>
-        <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()">
-          <option value="suporte" ${!usuario || usuario.papel === 'suporte' ? 'selected' : ''}>Suporte</option>
-          <option value="producao" ${usuario && usuario.papel === 'producao' ? 'selected' : ''}>Produção</option>
-          <option value="pos_venda" ${usuario && usuario.papel === 'pos_venda' ? 'selected' : ''}>Pós-venda</option>
-          <option value="estoque" ${usuario && usuario.papel === 'estoque' ? 'selected' : ''}>Estoque</option>
-          <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
-          <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
+        <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()" ${usuario && usuario.id === USER.id ? 'disabled' : ''}>
+          ${permitidos.map((p) => `<option value="${p}" ${papelPadrao === p ? 'selected' : ''}>${opcoesPapel[p]}</option>`).join('')}
         </select></div>
         <div id="campo-cliente"><label>Empresa (cliente)</label>${campoClienteHTML('nu-cliente', clientes)}</div>
+      </div>
+      <div id="campo-admin-departamento" class="panel" style="background:var(--blue-pale-2); margin:4px 0 14px;">
+        <label>Departamento que este administrador vai gerenciar</label>
+        <select id="nu-departamento" ${usuario && usuario.id === USER.id ? 'disabled' : ''}>
+          <option value="">Administrador geral (todos os setores)</option>
+          ${Object.entries(DEPARTAMENTO_ADMIN_LABEL).map(([chave, label]) => `
+            <option value="${chave}" ${usuario && usuario.departamento === chave ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin:6px 0 0;">Esse administrador só vai poder cadastrar usuários do setor escolhido e clientes — não vê nem mexe nos outros setores.</p>
       </div>
       <div id="campo-suporte-acesso" class="panel" style="background:var(--blue-pale-2); margin:4px 0 14px;">
         <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;">
@@ -6407,6 +6430,8 @@ function alternarCampoCliente() {
   document.getElementById('campo-cliente').style.display = papel === 'cliente' ? '' : 'none';
   const campoSuporte = document.getElementById('campo-suporte-acesso');
   if (campoSuporte) campoSuporte.style.display = papel === 'suporte' ? '' : 'none';
+  const campoDepartamento = document.getElementById('campo-admin-departamento');
+  if (campoDepartamento) campoDepartamento.style.display = papel === 'administrador' && !USER.departamento ? '' : 'none';
   alternarChecklistSuporte();
 }
 // desmarcar "Liberar todos os menus" revela os checkboxes de cada menu pra personalizar; marcado,
@@ -6435,6 +6460,10 @@ async function salvarUsuario() {
   if (papel === 'suporte') {
     body.acesso_total = document.getElementById('nu-acesso-total').checked;
     body.menus = body.acesso_total ? [] : Array.from(document.querySelectorAll('.nu-menu-item:checked')).map((el) => el.value);
+  }
+  if (papel === 'administrador') {
+    const campoDepartamento = document.getElementById('nu-departamento');
+    body.departamento = campoDepartamento ? (campoDepartamento.value || null) : null;
   }
   try {
     if (usuarioEmEdicaoId) {

@@ -168,6 +168,10 @@ function migrar(data) {
     if (u.papel === 'tecnico' || u.papel === 'reparo') u.papel = 'suporte';
     if (u.acesso_total === undefined) u.acesso_total = true;
     if (!Array.isArray(u.menus)) u.menus = [];
+    // departamento de um administrador (Suporte/Pós-venda/Estoque) — vazio (null) é o administrador
+    // geral, que continua vendo e cadastrando todo mundo (é sempre o caso de quem já existia antes
+    // dessa separação por departamento existir).
+    if (u.departamento === undefined) u.departamento = null;
   }
   for (const c of data.clientes) {
     for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado', 'email']) {

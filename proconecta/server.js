@@ -82,6 +82,18 @@ function sanitizarMenusSuporte(body) {
   return { acesso_total, menus };
 }
 
+// cada líder de setor (Suporte, Pós-venda, Estoque) tem seu próprio administrador, que só cadastra
+// gente do próprio setor e clientes — assim o cadastro de usuários não fica todo dependendo de um
+// administrador único. Produção usa um único login compartilhado (não precisa de administrador
+// próprio, ver pedido do Isaías), por isso não entra nessa lista. Um administrador sem
+// `departamento` (campo vazio) é o administrador geral: continua enxergando e cadastrando todo mundo,
+// inclusive outros administradores — é sempre o caso da conta master (ADMIN_EMAIL).
+const DEPARTAMENTOS_ADMIN = ['suporte', 'pos_venda', 'estoque'];
+function papelGerenciavelPorAdmin(admin, papelAlvo) {
+  if (!admin.departamento) return true;
+  return papelAlvo === admin.departamento || papelAlvo === 'cliente';
+}
+
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
 function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
@@ -1942,7 +1954,11 @@ rota('GET', /^\/api\/usuarios$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê usuários.' });
   const data = db.load();
-  enviarJSON(res, 200, { usuarios: data.usuarios.map(usuarioPublico) });
+  const admin = data.usuarios.find((u) => u.id === user.id) || user;
+  const usuarios = admin.departamento
+    ? data.usuarios.filter((u) => u.id === admin.id || papelGerenciavelPorAdmin(admin, u.papel))
+    : data.usuarios;
+  enviarJSON(res, 200, { usuarios: usuarios.map(usuarioPublico) });
 });
 
 // POST /api/usuarios  (administrador cadastra usuário — envia convite de primeiro acesso, sem senha)
@@ -1954,18 +1970,23 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'nome, email e papel são obrigatórios.' });
   }
   const data = db.load();
+  const admin = data.usuarios.find((u) => u.id === user.id) || user;
+  if (!papelGerenciavelPorAdmin(admin, body.papel)) {
+    return enviarJSON(res, 403, { erro: 'Você só pode cadastrar usuários do seu departamento e clientes.' });
+  }
   if (data.usuarios.some((u) => u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
   const convite_token = gerarTokenConvite();
   const { acesso_total, menus } = sanitizarMenusSuporte(body);
+  const departamento = body.papel === 'administrador' && !admin.departamento && DEPARTAMENTOS_ADMIN.includes(body.departamento) ? body.departamento : null;
   const novo = {
     id: nextId(data, 'usuarios'),
     empresa_id: 1,
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', cliente_id: body.cliente_id || null,
-    acesso_total, menus,
+    acesso_total, menus, departamento,
     status: 'convite_enviado', convite_token,
     salt: null, hash: null,
   };
@@ -1981,8 +2002,12 @@ rota('POST', /^\/api\/usuarios\/(\d+)\/reenviar-convite$/, async (req, res, m) =
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador reenvia convites.' });
   const data = db.load();
+  const admin = data.usuarios.find((u) => u.id === user.id) || user;
   const u = data.usuarios.find((x) => x.id === Number(m[1]));
   if (!u) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  if (!papelGerenciavelPorAdmin(admin, u.papel)) {
+    return enviarJSON(res, 403, { erro: 'Você só pode reenviar convites do seu departamento e clientes.' });
+  }
   if (u.status !== 'convite_enviado') return enviarJSON(res, 400, { erro: 'Este usuário já ativou a conta.' });
   u.convite_token = gerarTokenConvite();
   db.save(data);
@@ -2000,20 +2025,31 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
     return enviarJSON(res, 400, { erro: 'nome, email e papel são obrigatórios.' });
   }
   const data = db.load();
+  const admin = data.usuarios.find((u) => u.id === user.id) || user;
   const alvo = data.usuarios.find((u) => u.id === Number(m[1]));
   if (!alvo) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
   if (alvo.protegido && alvo.id !== user.id) {
     return enviarJSON(res, 403, { erro: 'Esta conta é protegida e só pode ser editada por ela mesma.' });
   }
+  const editandoASiMesmo = alvo.id === admin.id;
+  if (editandoASiMesmo && body.papel !== alvo.papel) {
+    return enviarJSON(res, 403, { erro: 'Você não pode alterar seu próprio tipo de acesso.' });
+  }
+  if (!editandoASiMesmo && (!papelGerenciavelPorAdmin(admin, alvo.papel) || !papelGerenciavelPorAdmin(admin, body.papel))) {
+    return enviarJSON(res, 403, { erro: 'Você só pode editar usuários do seu departamento e clientes.' });
+  }
   if (data.usuarios.some((u) => u.id !== alvo.id && u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
   const { acesso_total, menus } = sanitizarMenusSuporte(body);
+  const departamento = body.papel === 'administrador'
+    ? (admin.departamento ? (alvo.departamento || null) : (DEPARTAMENTOS_ADMIN.includes(body.departamento) ? body.departamento : null))
+    : null;
   Object.assign(alvo, {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
-    acesso_total, menus,
+    acesso_total, menus, departamento,
   });
   db.save(data);
   enviarJSON(res, 200, { usuario: usuarioPublico(alvo) });
@@ -2026,10 +2062,14 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   const id = Number(m[1]);
   if (id === user.id) return enviarJSON(res, 400, { erro: 'Você não pode excluir a si mesmo.' });
   const data = db.load();
+  const admin = data.usuarios.find((u) => u.id === user.id) || user;
   const idx = data.usuarios.findIndex((u) => u.id === id);
   if (idx === -1) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
   if (data.usuarios[idx].protegido) {
     return enviarJSON(res, 403, { erro: 'Esta conta é protegida e não pode ser excluída.' });
+  }
+  if (!papelGerenciavelPorAdmin(admin, data.usuarios[idx].papel)) {
+    return enviarJSON(res, 403, { erro: 'Você só pode excluir usuários do seu departamento e clientes.' });
   }
   data.usuarios.splice(idx, 1);
   db.save(data);
