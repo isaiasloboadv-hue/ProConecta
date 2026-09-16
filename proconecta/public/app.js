@@ -3577,7 +3577,7 @@ function mostrarFormFicha(existente) {
     <div class="page-head"><h1>${editando ? 'Editar ficha do equipamento' : 'Ficha do equipamento'}</h1><p>Dados lidos da etiqueta — revise, ajuste ou adicione campos, e confirme a condição antes de salvar.</p></div>
 
     <div class="panel">
-      <h2>Condição do equipamento</h2>
+      <h2>Condição do equipamento*</h2>
       <div style="display:flex; gap:18px; flex-wrap:wrap;">
         ${[['novo', 'Novo'], ['usado', 'Usado']].map(([v, l]) => `
           <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="fc-condicao" value="${v}" style="width:auto;" ${d.condicao === v ? 'checked' : ''}> ${l}</label>`).join('')}
@@ -3648,6 +3648,7 @@ async function salvarFicha() {
   const d = fichaDraft;
   const condicao = document.querySelector('input[name="fc-condicao"]:checked');
   d.condicao = condicao ? condicao.value : '';
+  if (!d.condicao) { alert('Marque se o equipamento é Novo ou Usado.'); return; }
   if (!d.fotos.length) { alert('Adicione ao menos uma foto (da etiqueta ou do equipamento).'); return; }
   try {
     const { relatorio } = d.id

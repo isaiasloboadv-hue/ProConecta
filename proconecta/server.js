@@ -1595,6 +1595,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const tipo = body.tipo === 'ficha' ? 'ficha' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   if (tipo === 'ficha') {
+    if (body.condicao !== 'novo' && body.condicao !== 'usado') return enviarJSON(res, 400, { erro: 'Marque se o equipamento é Novo ou Usado.' });
     if (!fotos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos uma foto (da etiqueta ou do equipamento).' });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
@@ -1639,6 +1640,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   if (item.tipo === 'ficha') {
+    if (body.condicao !== 'novo' && body.condicao !== 'usado') return enviarJSON(res, 400, { erro: 'Marque se o equipamento é Novo ou Usado.' });
     if (!fotos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos uma foto (da etiqueta ou do equipamento).' });
     Object.assign(item, {
       condicao: (body.condicao === 'novo' || body.condicao === 'usado') ? body.condicao : '',
