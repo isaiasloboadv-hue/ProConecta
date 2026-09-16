@@ -62,6 +62,26 @@ function exigirPapel(user, papeis) {
   return user && papeis.includes(user.papel);
 }
 
+// menus que compõem o papel "suporte" (união do antigo técnico de campo + setor reparo) — o
+// administrador escolhe, por usuário, se libera todos ou só alguns (ver acesso_total/menus no
+// cadastro). Pra qualquer outro papel, ou pra quem tem acesso_total, considera liberado — só
+// restringe de verdade quando é suporte E acesso_total === false.
+const MENUS_SUPORTE = ['agenda', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo'];
+// o token (JWT) só carrega id/papel/nome/cliente_id (ver gerarToken) — acesso_total/menus não vêm
+// nele, então sempre busca o cadastro completo em `data.usuarios` pelo id antes de decidir.
+function temAcessoMenu(data, user, chave) {
+  if (!user) return false;
+  const completo = data.usuarios.find((u) => u.id === user.id) || user;
+  if (completo.papel !== 'suporte') return true;
+  if (completo.acesso_total !== false) return true;
+  return Array.isArray(completo.menus) && completo.menus.includes(chave);
+}
+function sanitizarMenusSuporte(body) {
+  const acesso_total = body.acesso_total !== false;
+  const menus = Array.isArray(body.menus) ? body.menus.filter((m) => MENUS_SUPORTE.includes(m)) : [];
+  return { acesso_total, menus };
+}
+
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
 function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
@@ -410,7 +430,7 @@ rota('GET', /^\/api\/agenda$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = data.agenda;
-  if (user.papel === 'tecnico' && query.todas !== '1') {
+  if (user.papel === 'suporte' && query.todas !== '1') {
     lista = lista.filter((a) => a.tecnico_id === user.id);
   } else if (user.papel === 'cliente') {
     lista = lista.filter((a) => a.cliente_id === user.cliente_id);
@@ -746,7 +766,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-cliente$/, async (req, res, m) =>
 // deslocamento DO RETORNO em vez de mexer no deslocamento original, já concluído.
 rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado inicia o deslocamento.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado inicia o deslocamento.' });
   const data = db.load();
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
@@ -776,7 +796,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
 // POST /api/visitas  (técnico registra o diário técnico de uma atividade)
 rota('POST', /^\/api\/visitas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const agendaItem = data.agenda.find((a) => a.id === Number(body.agenda_id));
@@ -787,7 +807,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   // mesmo formulário do laudo técnico, mas nasce já aprovado (sem fila do gestor) e não segue o
   // fluxo normal de deslocamento/orçamento/feedback do cliente — ver "pós-venda / setor reparo"
   if (agendaItem.tipo === 'atendimento' && ['em_diagnostico_reparo', 'executando_reparo'].includes(agendaItem.fase_atendimento)) {
-    if (!exigirPapel(user, ['reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o setor de reparo preenche este relatório.' });
+    if (!exigirPapel(user, ['suporte', 'administrador']) || !temAcessoMenu(data, user, 'fila-reparo')) return enviarJSON(res, 403, { erro: 'Só o setor de reparo preenche este relatório.' });
     const laudoCompleto = { ...(body.laudo || {}), ...dadosAtendimentoBloqueados(data, agendaItem, user) };
     const erroLaudo = validarLaudoTecnico(laudoCompleto);
     if (erroLaudo) return enviarJSON(res, 400, { erro: erroLaudo });
@@ -968,14 +988,14 @@ rota('GET', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const visita = data.visitas.find((v) => v.id === Number(m[1]));
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
-  if (user.papel === 'tecnico' && visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
+  if (user.papel === 'suporte' && visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
   enviarJSON(res, 200, { visita: await hidratarFotosProfundo(visita) });
 });
 
 // POST /api/visitas/:id/enviar-relatorio  (envia o PDF do relatório corretivo por e-mail)
 rota('POST', /^\/api\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico envia o relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico envia o relatório.' });
   const body = await lerCorpo(req);
   if (!body.pdf_base64 || !Array.isArray(body.emails) || body.emails.length === 0) {
     return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
@@ -996,7 +1016,7 @@ rota('GET', /^\/api\/visitas$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = data.visitas;
-  if (user.papel === 'tecnico' && query.todas !== '1') lista = lista.filter((v) => v.tecnico_id === user.id);
+  if (user.papel === 'suporte' && query.todas !== '1') lista = lista.filter((v) => v.tecnico_id === user.id);
   if (query.status) lista = lista.filter((v) => v.status_aprovacao === query.status);
   lista = lista.map((v) => {
     const eq = data.equipamentos.find((e) => e.id === v.equipamento_id);
@@ -1124,7 +1144,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reabrir$/, async (req, res, m) => {
 // POST /api/visitas/:id/solicitar-reabertura — técnico pede para reabrir um relatório concluído
 rota('POST', /^\/api\/visitas\/(\d+)\/solicitar-reabertura$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita reabertura.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita reabertura.' });
   const body = await lerCorpo(req);
   const data = db.load();
   const visita = data.visitas.find((v) => v.id === Number(m[1]));
@@ -1267,7 +1287,7 @@ rota('GET', /^\/api\/registros\/fila$/, async (req, res) => {
 // POST /api/registros — técnico ou administrador envia um novo registro
 rota('POST', /^\/api\/registros$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só técnico, produção ou administrador podem enviar registros.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só técnico, produção ou administrador podem enviar registros.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const erro = validarRegistro(body);
   if (erro) return enviarJSON(res, 400, { erro });
@@ -1363,7 +1383,7 @@ rota('PUT', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
 // caso já publicado na biblioteca (não é dono do registro, por isso não pode editar direto)
 rota('POST', /^\/api\/registros\/(\d+)\/solicitar-edicao$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita edição.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita edição.' });
   const body = await lerCorpo(req);
   if (!body.comentario || !body.comentario.trim()) return enviarJSON(res, 400, { erro: 'Descreva o que precisa ser corrigido.' });
   const data = db.load();
@@ -1461,7 +1481,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
   let notificacoes = [];
-  if (user.papel === 'tecnico' || user.papel === 'producao') {
+  if (user.papel === 'suporte' || user.papel === 'producao') {
     notificacoes = data.registros
       .filter((r) => r.autor_id === user.id && r.status === 'alteracao_sugerida' && !r.lida)
       .map((r) => ({ id: r.id, tipo: 'alteracao_sugerida', texto: `Alteração sugerida em "${r.titulo}"`, registro_id: r.id }));
@@ -1486,7 +1506,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
           return { id: a.id, tipo: 'os_atribuida', texto: `Nova Ordem de Serviço atribuída a você${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: a.id };
         })
     );
-    if (user.papel === 'tecnico') {
+    if (user.papel === 'suporte') {
       notificacoes = notificacoes.concat(
         data.chamados
           .filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id)
@@ -1540,7 +1560,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
 // o técnico realmente abre o PDF/Word/fotos de um relatório específico.
 rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
   const lista = data.relatorios_manutencao
     .filter((r) => r.autor_id === user.id)
@@ -1552,7 +1572,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
 // GET /api/relatorios-manutencao/:id — reabrir um relatório já criado (pra gerar o PDF de novo)
 rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
@@ -1564,7 +1584,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // o formulário no front (não salva nada aqui — só a leitura). Exige a IA configurada.
 rota('POST', /^\/api\/relatorios-manutencao\/ler-etiqueta$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'A leitura automática por IA não está configurada neste sistema.' });
   const body = await lerCorpo(req);
   if (!body.foto) return enviarJSON(res, 400, { erro: 'Envie uma foto da etiqueta.' });
@@ -1609,7 +1629,7 @@ function sanitizarCiclos(lista) {
 // "ciclagem" (Ensaio de Ciclagem — ciclos de teste com amostras OK/com desvio).
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
@@ -1666,7 +1686,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
 // O tipo (completo/ficha/ciclagem) é fixo desde a criação — só os campos daquele tipo são atualizados.
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
@@ -1722,7 +1742,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // DELETE /api/relatorios-manutencao/:id — o próprio autor pode apagar um relatório que criou
 rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
   const idx = data.relatorios_manutencao.findIndex((r) => r.id === Number(m[1]) && r.autor_id === user.id);
   if (idx === -1) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
@@ -1938,12 +1958,14 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
   const convite_token = gerarTokenConvite();
+  const { acesso_total, menus } = sanitizarMenusSuporte(body);
   const novo = {
     id: nextId(data, 'usuarios'),
     empresa_id: 1,
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', cliente_id: body.cliente_id || null,
+    acesso_total, menus,
     status: 'convite_enviado', convite_token,
     salt: null, hash: null,
   };
@@ -1986,10 +2008,12 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   if (data.usuarios.some((u) => u.id !== alvo.id && u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
+  const { acesso_total, menus } = sanitizarMenusSuporte(body);
   Object.assign(alvo, {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
+    acesso_total, menus,
   });
   db.save(data);
   enviarJSON(res, 200, { usuario: usuarioPublico(alvo) });
@@ -2035,7 +2059,7 @@ function chamadoComDetalhes(data, c) {
 }
 
 async function enviarPushTecnicos(data, payload) {
-  const tecnicos = data.usuarios.filter((u) => u.papel === 'tecnico');
+  const tecnicos = data.usuarios.filter((u) => u.papel === 'suporte');
   await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, payload).catch(() => {})));
 }
 
@@ -2134,7 +2158,7 @@ rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
 // (administrador sempre vê tudo).
 rota('GET', /^\/api\/chamados$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista;
@@ -2159,10 +2183,10 @@ rota('GET', /^\/api\/chamados\/(\d+)$/, async (req, res, m) => {
   const chamado = data.chamados.find((c) => c.id === Number(m[1]));
   if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
   if (user.papel === 'cliente' && chamado.cliente_id !== user.cliente_id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
-  if (user.papel === 'tecnico' && chamado.tecnico_id !== user.id && chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
+  if (user.papel === 'suporte' && chamado.tecnico_id !== user.id && chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
   if (user.papel === 'pos_venda' && !chamadoEstaComPosVenda(data, chamado)) return enviarJSON(res, 403, { erro: 'Este atendimento ainda não está com o pós-venda.' });
   if (user.papel === 'cliente') { chamado.lida_cliente = true; db.save(data); }
-  else if (user.papel === 'tecnico' && chamado.tecnico_id === user.id) { chamado.lida_tecnico = true; db.save(data); }
+  else if (user.papel === 'suporte' && chamado.tecnico_id === user.id) { chamado.lida_tecnico = true; db.save(data); }
   enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado) });
 });
 
@@ -2182,7 +2206,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
   if (user.papel === 'cliente') {
     if (chamado.cliente_id !== user.cliente_id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
     autor = 'cliente';
-  } else if (user.papel === 'tecnico') {
+  } else if (user.papel === 'suporte') {
     if (chamado.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
     autor = 'tecnico';
   } else if (user.papel === 'pos_venda') {
@@ -2234,7 +2258,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
 // agendamento depois se precisar de visita.
 rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador assumem atendimentos.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador assumem atendimentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
   const chamado = data.chamados.find((c) => c.id === Number(m[1]));
@@ -2334,7 +2358,7 @@ const MOTIVOS_POS_VENDA = ['cliente_envia_equipamento', 'tecnico_visita', 'peca_
 // precisar do pós-venda/reparo — finaliza a O.S. na hora
 rota('POST', /^\/api\/agenda\/(\d+)\/encerrar-atendimento$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encerra o atendimento.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encerra o atendimento.' });
   const data = db.load();
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
@@ -2353,7 +2377,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encerrar-atendimento$/, async (req, res, m)
 // não resolveu remotamente
 rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encaminha pro pós-venda.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encaminha pro pós-venda.' });
   const body = await lerCorpo(req);
   if (!MOTIVOS_POS_VENDA.includes(body.motivo)) return enviarJSON(res, 400, { erro: 'Motivo inválido.' });
   const data = db.load();
@@ -2442,7 +2466,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
       // conserto de verdade e libera com um segundo relatório
       item.fase_atendimento = 'executando_reparo';
       db.save(data);
-      const reparos = data.usuarios.filter((u) => u.papel === 'reparo');
+      const reparos = data.usuarios.filter((u) => u.papel === 'suporte' && temAcessoMenu(data, u, 'fila-reparo'));
       await Promise.all(reparos.map((r) => enviarPush(data, r.id, {
         titulo: 'Orçamento aprovado — executar reparo',
         corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${numeroOSItem}.`,
@@ -2485,8 +2509,8 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
 // o técnico do reparo assume a O.S. (fica designado a ele) e libera o relatório
 rota('POST', /^\/api\/agenda\/(\d+)\/reparo\/iniciar-atendimento$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o setor de reparo faz isso.' });
   const data = db.load();
+  if (!exigirPapel(user, ['suporte', 'administrador']) || !temAcessoMenu(data, user, 'fila-reparo')) return enviarJSON(res, 403, { erro: 'Só o setor de reparo faz isso.' });
   const item = data.agenda.find((a) => a.id === Number(m[1]));
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
@@ -2514,7 +2538,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/estoque\/confirmar-chegada$/, async (req, r
   if (item.estoque_recebido_em) return enviarJSON(res, 400, { erro: 'A chegada já foi confirmada.' });
   item.estoque_recebido_em = new Date().toISOString();
   db.save(data);
-  const reparos = data.usuarios.filter((u) => u.papel === 'reparo');
+  const reparos = data.usuarios.filter((u) => u.papel === 'suporte' && temAcessoMenu(data, u, 'fila-reparo'));
   const cliente = data.clientes.find((c) => c.id === item.cliente_id);
   await Promise.all(reparos.map((r) => enviarPush(data, r.id, {
     titulo: 'Equipamento pronto pro diagnóstico',
@@ -2608,8 +2632,8 @@ rota('GET', /^\/api\/agenda\/fila-pos-venda$/, async (req, res) => {
 // designado ao técnico logado (diagnóstico) e o que está liberado pra execução do reparo
 rota('GET', /^\/api\/agenda\/fila-reparo$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['reparo', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o setor de reparo acessa esta fila.' });
   const data = db.load();
+  if (!exigirPapel(user, ['suporte', 'administrador']) || !temAcessoMenu(data, user, 'fila-reparo')) return enviarJSON(res, 403, { erro: 'Só o setor de reparo acessa esta fila.' });
   const lista = data.agenda
     .filter((a) => a.tipo === 'atendimento' && !a.finalizada && (
       (a.fase_atendimento === 'aguardando_equipamento' && !!a.estoque_recebido_em) ||
@@ -2652,7 +2676,7 @@ rota('GET', /^\/api\/chamados\/stats$/, async (req, res) => {
 // Fica online só quem tá realmente disponível pra receber atendimento agora.
 rota('POST', /^\/api\/tecnico\/online$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['tecnico'])) return enviarJSON(res, 403, { erro: 'Só técnico controla a própria presença.' });
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só técnico controla a própria presença.' });
   const body = await lerCorpo(req);
   const data = db.load();
   const usuario = data.usuarios.find((u) => u.id === user.id);

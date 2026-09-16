@@ -161,6 +161,13 @@ function migrar(data) {
     // ele ficou online pela última vez, e decide a ordem da fila entre quem está online agora
     if (u.online === undefined) u.online = false;
     if (u.online_desde === undefined) u.online_desde = null;
+    // unificação dos papéis "Técnico" (campo) e "Setor Reparo" (interno) num único papel
+    // "suporte" — o que cada um pode acessar agora é decidido por acesso_total/menus, não mais
+    // por papéis separados. acesso_total=true preserva o acesso completo que já tinham antes
+    // dessa mudança, pro admin restringir depois se quiser.
+    if (u.papel === 'tecnico' || u.papel === 'reparo') u.papel = 'suporte';
+    if (u.acesso_total === undefined) u.acesso_total = true;
+    if (!Array.isArray(u.menus)) u.menus = [];
   }
   for (const c of data.clientes) {
     for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado', 'email']) {

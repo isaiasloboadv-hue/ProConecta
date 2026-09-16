@@ -6,7 +6,7 @@
 
 function proximoTecnicoOnline(data) {
   const online = (data.usuarios || [])
-    .filter((u) => u.papel === 'tecnico' && u.online)
+    .filter((u) => u.papel === 'suporte' && u.online)
     .sort((a, b) => (a.online_desde || '').localeCompare(b.online_desde || ''));
   if (!online.length) return null;
   data.chamados_rr_index = data.chamados_rr_index || 0;

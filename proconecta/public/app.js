@@ -10,7 +10,7 @@ let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
-const PAPEL_LABEL = { tecnico: 'Técnico', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', reparo: 'Setor Reparo', estoque: 'Estoque' };
+const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque' };
 const TIPO_OS_LABEL = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Treinamento online',
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
@@ -283,8 +283,15 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
-  if (['tecnico', 'administrador', 'producao', 'cliente', 'pos_venda', 'reparo', 'estoque'].includes(USER.papel)) ativarNotificacoesPush();
-  const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', reparo: 'fila-reparo', estoque: 'fila-estoque' }[USER.papel] || 'agenda';
+  if (['suporte', 'administrador', 'producao', 'cliente', 'pos_venda', 'estoque'].includes(USER.papel)) ativarNotificacoesPush();
+  const primeiraPaginaPermitida = (function primeiraPagina(nodes) {
+    for (const node of nodes) {
+      if (node.page) return node.page;
+      if (node.children) { const p = primeiraPagina(node.children); if (p) return p; }
+    }
+    return null;
+  })(navDoUsuario());
+  const paginaInicial = { administrador: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', estoque: 'fila-estoque' }[USER.papel] || primeiraPaginaPermitida || 'agenda';
   ir(paginaInicial);
 }
 
@@ -295,7 +302,7 @@ function initials(nome) {
 function renderHeaderRight() {
   const el = document.getElementById('headerRight');
   el.innerHTML = `
-    ${USER.papel === 'tecnico' ? `
+    ${USER.papel === 'suporte' ? `
     <button class="btn-presenca ${USER.online ? 'online' : 'offline'}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
       <span class="presenca-bolinha"></span><span class="presenca-label">${USER.online ? 'Online' : 'Offline'}</span>
     </button>` : ''}
@@ -345,8 +352,20 @@ function sincronizarApp() {
 
 // ---------- menu em cascata ----------
 
+// itens de menu que compõem o papel "suporte" (união do antigo técnico de campo + setor reparo)
+// — usado tanto pra montar o NAV completo quanto pela tela de cadastro, que mostra essa mesma
+// lista como caixinhas de acesso (ver checkboxSuporte / SUPORTE_MENUS_LABEL).
+const SUPORTE_MENUS_LABEL = {
+  'agenda': 'Minha agenda',
+  'fila-atendimento': 'Fila de Atendimento',
+  'relatorio-manutencao': 'Relatório',
+  'calendario-tecnico': 'Calendário',
+  'biblioteca': 'Biblioteca',
+  'fila-reparo': 'Setor Reparo',
+};
+
 const NAV = {
-  tecnico: [
+  suporte: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
     { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
     { key: 'relatorio-manutencao', label: 'Relatório', children: [
@@ -367,6 +386,7 @@ const NAV = {
       { key: 'meus-registros', label: 'Meus registros', page: 'meus-registros' },
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
+    { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
@@ -426,13 +446,20 @@ const NAV = {
   pos_venda: [
     { key: 'fila-pos-venda', label: 'Pós-venda', page: 'fila-pos-venda' },
   ],
-  reparo: [
-    { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
-  ],
   estoque: [
     { key: 'fila-estoque', label: 'Estoque', page: 'fila-estoque' },
   ],
 };
+
+// lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto pra
+// "suporte" sem acesso_total, que só vê os itens de topo que o administrador marcou em `menus`
+// (ver SUPORTE_MENUS_LABEL/checkboxes no cadastro).
+function navDoUsuario() {
+  const nav = NAV[USER.papel] || [];
+  if (USER.papel !== 'suporte' || USER.acesso_total !== false) return nav;
+  const menus = Array.isArray(USER.menus) ? USER.menus : [];
+  return nav.filter((node) => menus.includes(node.key));
+}
 
 function buscarCaminho(nodes, pagina, caminho) {
   for (const node of nodes) {
@@ -464,7 +491,7 @@ function renderNavNodes(nodes, nivel) {
 
 function montarSidebar() {
   const label = 'Acesso ' + (PAPEL_LABEL[USER.papel] || 'cliente').toLowerCase();
-  const nav = NAV[USER.papel] || [];
+  const nav = navDoUsuario();
   document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
   renderHeaderRight();
   aplicarEstadoMenuMobile();
@@ -494,7 +521,7 @@ function fecharMenuMobile() {
 
 async function ir(pagina) {
   paginaAtual = pagina;
-  const caminho = buscarCaminho(NAV[USER.papel] || [], pagina, []);
+  const caminho = buscarCaminho(navDoUsuario(), pagina, []);
   if (caminho) caminho.forEach((k) => navAbertos.add(k));
   fecharMenuMobile();
   montarSidebar();
@@ -972,7 +999,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
     api('/api/usuarios'), api('/api/equipamentos'), api('/api/clientes'),
     agendaItem ? Promise.resolve(null) : api('/api/agenda/proximo-numero'),
   ]);
-  const tecnicos = usuarios.filter((u) => u.papel === 'tecnico');
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
   window._clientesCache = clientes;
   window._equipamentosCache = equipamentos;
   document.getElementById('form-nova-atividade').innerHTML = `
@@ -2093,7 +2120,7 @@ async function concluirLaudoTecnico() {
   }
   if (r.enviado) localStorage.removeItem(chaveRascunho);
   const eraRetorno = laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico;
-  const eraReparo = laudoAgendaAtual && laudoAgendaAtual.tipo === 'atendimento' && USER.papel === 'reparo';
+  const eraReparo = laudoAgendaAtual && laudoAgendaAtual.tipo === 'atendimento' && ['em_diagnostico_reparo', 'executando_reparo'].includes(laudoAgendaAtual.fase_atendimento);
   mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : eraReparo ? 'Relatório enviado.' : (eraRetorno ? 'Relatório de retorno enviado — o administrador foi avisado.' : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.'));
   if (eraReparo) renderFilaReparo();
   else renderAgenda();
@@ -3025,7 +3052,7 @@ async function abrirDetalheDefeito(i, origem) {
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="abrirPdfBiblioteca('defeito', ${i})">Abrir PDF</button>
         ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="abrirEditarDefeito(${i}, '${origem || ''}')">Editar</button>` : ''}
-        ${USER.papel === 'tecnico' ? `<button class="btn-outline-sm" onclick="solicitarEdicaoBiblioteca('defeito', ${i})">Solicitar edição</button>` : ''}
+        ${USER.papel === 'suporte' ? `<button class="btn-outline-sm" onclick="solicitarEdicaoBiblioteca('defeito', ${i})">Solicitar edição</button>` : ''}
         <button class="btn-outline-sm" onclick="${voltar}">‹ Voltar</button>
       </div>
     </div>
@@ -3176,7 +3203,7 @@ async function abrirDetalheProcedimento(i, origem) {
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="abrirPdfBiblioteca('procedimento', ${i})">Abrir PDF</button>
         ${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="abrirEditarProcedimento(${i}, '${origem || ''}')">Editar</button>` : ''}
-        ${USER.papel === 'tecnico' ? `<button class="btn-outline-sm" onclick="solicitarEdicaoBiblioteca('procedimento', ${i})">Solicitar edição</button>` : ''}
+        ${USER.papel === 'suporte' ? `<button class="btn-outline-sm" onclick="solicitarEdicaoBiblioteca('procedimento', ${i})">Solicitar edição</button>` : ''}
         <button class="btn-outline-sm" onclick="${voltar}">‹ Voltar</button>
       </div>
     </div>
@@ -6310,7 +6337,7 @@ async function renderUsuarios() {
       <div class="user-row">
         <div class="u-avatar-lg">${initials(u.nome)}</div>
         <div class="u-info">
-          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(u.papel)}</span>${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
+          <div class="u-line1">${esc(u.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[u.papel] || u.papel)}</span>${u.papel === 'suporte' && u.acesso_total === false ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">Acesso personalizado</span>' : ''}${u.protegido ? ' <span class="tag" style="background:var(--blue-pale); color:var(--blue);">🔒 Protegida</span>' : ''}</div>
           <div class="u-line2">${esc(u.email)} ${u.cargo ? '· ' + esc(u.cargo) : ''} ${u.setor ? '· ' + esc(u.setor) : ''}</div>
         </div>
         <span class="badge ${u.status === 'ativo' ? 'badge-ativo' : 'badge-convite'}">${u.status === 'ativo' ? 'Ativo' : 'Convite enviado'}</span>
@@ -6331,15 +6358,28 @@ function mostrarFormUsuario(usuario) {
         <div><label>Cargo</label><input id="nu-cargo" value="${usuario ? esc(usuario.cargo || '') : ''}"></div>
         <div><label>Setor</label><input id="nu-setor" value="${usuario ? esc(usuario.setor || '') : ''}"></div>
         <div><label>Tipo de acesso</label><select id="nu-papel" onchange="alternarCampoCliente()">
-          <option value="tecnico" ${usuario && usuario.papel === 'tecnico' ? 'selected' : ''}>Técnico</option>
+          <option value="suporte" ${!usuario || usuario.papel === 'suporte' ? 'selected' : ''}>Suporte</option>
           <option value="producao" ${usuario && usuario.papel === 'producao' ? 'selected' : ''}>Produção</option>
           <option value="pos_venda" ${usuario && usuario.papel === 'pos_venda' ? 'selected' : ''}>Pós-venda</option>
-          <option value="reparo" ${usuario && usuario.papel === 'reparo' ? 'selected' : ''}>Setor Reparo</option>
           <option value="estoque" ${usuario && usuario.papel === 'estoque' ? 'selected' : ''}>Estoque</option>
           <option value="administrador" ${usuario && usuario.papel === 'administrador' ? 'selected' : ''}>Administrador</option>
           <option value="cliente" ${usuario && usuario.papel === 'cliente' ? 'selected' : ''}>Cliente</option>
         </select></div>
         <div id="campo-cliente"><label>Empresa (cliente)</label>${campoClienteHTML('nu-cliente', clientes)}</div>
+      </div>
+      <div id="campo-suporte-acesso" class="panel" style="background:var(--blue-pale-2); margin:4px 0 14px;">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;">
+          <input type="checkbox" id="nu-acesso-total" style="width:auto;" onchange="alternarChecklistSuporte()" ${!usuario || usuario.acesso_total !== false ? 'checked' : ''}>
+          Liberar todos os menus
+        </label>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin:4px 0 10px;">Desmarque pra escolher só os menus que esse usuário de Suporte pode acessar (ex: só quem cuida da manutenção interna precisa do Setor Reparo).</p>
+        <div id="nu-menus-lista" style="display:flex; flex-direction:column; gap:8px;">
+          ${Object.entries(SUPORTE_MENUS_LABEL).map(([chave, label]) => `
+            <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;">
+              <input type="checkbox" class="nu-menu-item" value="${chave}" style="width:auto;" ${usuario && Array.isArray(usuario.menus) && usuario.menus.includes(chave) ? 'checked' : ''}>
+              ${label}
+            </label>`).join('')}
+        </div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarUsuario()">${usuario ? 'Salvar alterações' : 'Salvar e enviar convite'}</button>
@@ -6365,6 +6405,19 @@ function cancelarEdicaoUsuario() {
 function alternarCampoCliente() {
   const papel = document.getElementById('nu-papel').value;
   document.getElementById('campo-cliente').style.display = papel === 'cliente' ? '' : 'none';
+  const campoSuporte = document.getElementById('campo-suporte-acesso');
+  if (campoSuporte) campoSuporte.style.display = papel === 'suporte' ? '' : 'none';
+  alternarChecklistSuporte();
+}
+// desmarcar "Liberar todos os menus" revela os checkboxes de cada menu pra personalizar; marcado,
+// os checkboxes ficam desabilitados (o usuário tem tudo, independente do que estava marcado antes)
+function alternarChecklistSuporte() {
+  const totalEl = document.getElementById('nu-acesso-total');
+  const lista = document.getElementById('nu-menus-lista');
+  if (!totalEl || !lista) return;
+  const liberado = totalEl.checked;
+  lista.style.opacity = liberado ? '0.5' : '1';
+  lista.querySelectorAll('.nu-menu-item').forEach((el) => { el.disabled = liberado; });
 }
 async function salvarUsuario() {
   const papel = document.getElementById('nu-papel').value;
@@ -6379,6 +6432,10 @@ async function salvarUsuario() {
     papel,
     cliente_id: papel === 'cliente' ? Number(document.getElementById('nu-cliente').value) : null,
   };
+  if (papel === 'suporte') {
+    body.acesso_total = document.getElementById('nu-acesso-total').checked;
+    body.menus = body.acesso_total ? [] : Array.from(document.querySelectorAll('.nu-menu-item:checked')).map((el) => el.value);
+  }
   try {
     if (usuarioEmEdicaoId) {
       await api(`/api/usuarios/${usuarioEmEdicaoId}`, { method: 'PUT', body });
