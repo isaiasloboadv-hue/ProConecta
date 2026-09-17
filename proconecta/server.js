@@ -1009,7 +1009,7 @@ rota('GET', /^\/api\/mensagens\/usuarios$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
   const data = db.load();
-  const usuarios = data.usuarios.filter((u) => u.papel !== 'cliente' && u.id !== user.id && u.status === 'ativo').map(usuarioPublico);
+  const usuarios = data.usuarios.filter((u) => u.papel !== 'cliente' && u.id !== user.id).map(usuarioPublico);
   enviarJSON(res, 200, { usuarios });
 });
 
