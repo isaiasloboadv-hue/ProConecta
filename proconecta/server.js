@@ -535,7 +535,9 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     orcamento_aprovado_em: null,
     orcamento_reprovado_em: null,
     retorno_pendente_tecnico: false,
+    retorno_confirmado_cliente_em: null,
     retorno_deslocamento_iniciado_em: null,
+    retorno_chegada_confirmada_em: null,
   };
   data.agenda.push(item);
   db.save(data);
@@ -830,11 +832,12 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
-  if (!item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento.' });
   if (item.retorno_pendente_tecnico) {
+    if (!item.retorno_confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento do retorno.' });
     if (item.retorno_deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
     item.retorno_deslocamento_iniciado_em = new Date().toISOString();
   } else {
+    if (!item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento.' });
     if (item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
     item.deslocamento_iniciado_em = new Date().toISOString();
   }
@@ -845,6 +848,56 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
     enviarPush(data, admin.id, {
       titulo: 'Técnico a caminho',
       corpo: `${user.nome} iniciou o deslocamento para ${cliente ? cliente.nome_empresa : 'o cliente'} (${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}).`,
+      url: '/',
+    }).catch(() => {});
+  });
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/retorno/confirmar-cliente — administrador confirma que o cliente já
+// aceitou o retorno do técnico (peças que exigiram um novo deslocamento, ou retrabalho por
+// feedback negativo). Espelha /confirmar-cliente, mas pro retorno — sem isso o técnico não
+// consegue iniciar o deslocamento do retorno.
+rota('POST', /^\/api\/agenda\/(\d+)\/retorno\/confirmar-cliente$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador confirma o cliente.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (!item.retorno_pendente_tecnico) return enviarJSON(res, 400, { erro: 'Esta O.S. não tem retorno pendente.' });
+  if (item.retorno_confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'O cliente já foi confirmado para o retorno.' });
+  item.retorno_confirmado_cliente_em = new Date().toISOString();
+  db.save(data);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Cliente confirmado (retorno)',
+    corpo: `O cliente confirmou o retorno da O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')} — já pode iniciar o deslocamento quando for a hora.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/retorno/confirmar-chegada — o técnico avisa que já chegou no cliente pro
+// retorno (depois do deslocamento do retorno já iniciado); só a partir daqui ele consegue enviar
+// o relatório do retorno.
+rota('POST', /^\/api\/agenda\/(\d+)\/retorno\/confirmar-chegada$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado registra a chegada.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (!item.retorno_pendente_tecnico) return enviarJSON(res, 400, { erro: 'Esta O.S. não tem retorno pendente.' });
+  if (!item.retorno_deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Inicie o deslocamento do retorno antes de registrar a chegada.' });
+  if (item.retorno_chegada_confirmada_em) return enviarJSON(res, 400, { erro: 'A chegada já foi registrada.' });
+  item.retorno_chegada_confirmada_em = new Date().toISOString();
+  db.save(data);
+  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  admins.forEach((admin) => {
+    enviarPush(data, admin.id, {
+      titulo: 'Técnico chegou (retorno)',
+      corpo: `${user.nome} chegou pro retorno da O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
       url: '/',
     }).catch(() => {});
   });
@@ -2471,7 +2524,9 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     orcamento_aprovado_em: null,
     orcamento_reprovado_em: null,
     retorno_pendente_tecnico: false,
+    retorno_confirmado_cliente_em: null,
     retorno_deslocamento_iniciado_em: null,
+    retorno_chegada_confirmada_em: null,
     origem_chamado_id: chamado.id,
     // fluxo de pós-venda/reparo — nasce em "em_atendimento" (ainda no chat com o técnico);
     // ver seção "pós-venda / setor reparo" mais abaixo

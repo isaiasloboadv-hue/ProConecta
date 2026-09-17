@@ -998,7 +998,10 @@ function faseAtualOS(a) {
   if (a.tipo === 'atendimento' && a.fase_atendimento) return FASE_ATENDIMENTO_TARJA[a.fase_atendimento] || FASE_ATENDIMENTO_TARJA.em_atendimento;
   if (visita && visita.status_aprovacao === 'aprovado' && a.visita_tem_pecas && !a.orcamento_aprovado_em) return { label: 'Orçamento', cor: 'orange' };
   if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
-    return a.retorno_deslocamento_iniciado_em ? { label: 'Técnico a caminho', cor: 'blue' } : { label: 'Aguardando deslocamento', cor: 'amber' };
+    if (a.retorno_chegada_confirmada_em) return { label: 'Chegou (retorno)', cor: 'teal' };
+    if (a.retorno_deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
+    if (a.retorno_confirmado_cliente_em) return { label: 'Aguardando deslocamento', cor: 'amber' };
+    return { label: 'Confirmar cliente (retorno)', cor: 'red' };
   }
   if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) return { label: 'Aguardando feedback', cor: 'pink' };
   if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
@@ -2597,8 +2600,18 @@ function acoesOS(a, visita) {
       <button class="btn btn-ghost btn-sm" onclick="orcamentoReprovadoOS(${a.id})" style="color:var(--red);">Orçamento reprovado</button>
       <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
+    let statusRetorno;
+    if (!a.retorno_confirmado_cliente_em) {
+      statusRetorno = `<button class="btn btn-primary btn-sm" onclick="confirmarClienteRetornoOS(${a.id})">✓ Confirmar cliente (retorno)</button>`;
+    } else if (!a.retorno_deslocamento_iniciado_em) {
+      statusRetorno = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico iniciar o deslocamento do retorno.</span>`;
+    } else if (!a.retorno_chegada_confirmada_em) {
+      statusRetorno = `<span style="font-size:11.5px; color:var(--ink-soft);">Técnico a caminho — aguardando registrar a chegada.</span>`;
+    } else {
+      statusRetorno = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico enviar o relatório de retorno.</span>`;
+    }
     acoes = `
-      <span style="font-size:11.5px; color:var(--ink-soft);">Aguardando o técnico enviar o relatório de retorno.</span>
+      ${statusRetorno}
       <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado' && !a.feedback_cliente_em) {
     acoes = `
@@ -2678,6 +2691,15 @@ async function retrabalhoOS(id) {
   if (!confirm('Confirma que o cliente deu um feedback negativo e precisa de um retorno do técnico? Isso marca a O.S. como retrabalho.')) return;
   try { await api(`/api/agenda/${id}/retrabalho`, { method: 'POST' }); mostrarToast('Retrabalho registrado — o técnico foi avisado.'); voltarListaOS(); }
   catch (e) { alert('Erro ao registrar retrabalho: ' + e.message); }
+}
+
+// mesma lógica de confirmarClienteOS, só que pro retorno do técnico (peças que exigiram um
+// novo deslocamento, ou retrabalho por feedback negativo) — libera o técnico pra iniciar o
+// deslocamento do retorno
+async function confirmarClienteRetornoOS(id) {
+  if (!confirm('Confirma que o cliente já aceitou o retorno do técnico? Isso libera o técnico para iniciar o deslocamento do retorno.')) return;
+  try { await api(`/api/agenda/${id}/retorno/confirmar-cliente`, { method: 'POST' }); mostrarToast('Cliente confirmado — o técnico já pode prosseguir com o retorno.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao confirmar: ' + e.message); }
 }
 
 function cardOSAdmin(a) {
@@ -2844,9 +2866,17 @@ function timelineOS(a, visita) {
   // deslocamento desse retorno usa o mesmo rótulo do deslocamento original — mesma etapa,
   // só que numa segunda volta.
   if (a.retorno_pendente_tecnico || a.visita_retorno_id) {
+    passos.push(a.retorno_confirmado_cliente_em
+      ? { label: 'Cliente confirmou o retorno', data: a.retorno_confirmado_cliente_em, estado: 'feito' }
+      : { label: 'Aguardando confirmação do cliente (retorno)', data: null, estado: 'pendente' });
+
     passos.push(a.retorno_deslocamento_iniciado_em
       ? { label: 'Técnico iniciou o deslocamento', data: a.retorno_deslocamento_iniciado_em, estado: 'feito' }
       : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
+
+    passos.push(a.retorno_chegada_confirmada_em
+      ? { label: 'Técnico confirmou a chegada', data: a.retorno_chegada_confirmada_em, estado: 'feito' }
+      : { label: 'Aguardando chegada do técnico', data: null, estado: 'pendente' });
 
     const visitaRetorno = (window._visitasRetornoPorAgenda || {})[a.id];
     passos.push(a.visita_retorno_id
@@ -3048,6 +3078,7 @@ function botaoDeslocamento(a) {
   // retorno — o mesmo botão/rótulo do deslocamento original, só que num segundo momento
   if (a.retorno_pendente_tecnico) {
     if (a.retorno_deslocamento_iniciado_em) return '';
+    if (!a.retorno_confirmado_cliente_em) return `<span class="tag" style="background:var(--line); color:var(--ink-soft); margin-right:6px;">Aguardando confirmação do cliente</span>`;
     return `<button class="btn-outline-sm" onclick="iniciarDeslocamento(${a.id})" style="margin-right:6px;">🚗 Iniciar deslocamento</button>`;
   }
   if (a.status === 'concluida') return '';
@@ -3061,6 +3092,23 @@ async function iniciarDeslocamento(id) {
   try {
     const { agenda } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
     mostrarToast('Deslocamento iniciado — o administrador foi avisado.');
+    if (Array.isArray(window._agendaCache)) {
+      const idx = window._agendaCache.findIndex((a) => a.id === id);
+      if (idx !== -1) window._agendaCache[idx] = agenda;
+    }
+    if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
+    else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
+    else renderAgenda();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// botão "Registrar chegada" do retorno: só depois de iniciar o deslocamento do retorno, e antes
+// de poder enviar o relatório de retorno
+async function registrarChegadaRetorno(id) {
+  if (!confirm('Confirma que você já chegou no cliente para o retorno?')) return;
+  try {
+    const { agenda } = await api(`/api/agenda/${id}/retorno/confirmar-chegada`, { method: 'POST' });
+    mostrarToast('Chegada registrada — já pode preencher o relatório de retorno.');
     if (Array.isArray(window._agendaCache)) {
       const idx = window._agendaCache.findIndex((a) => a.id === id);
       if (idx !== -1) window._agendaCache[idx] = agenda;
@@ -5733,7 +5781,13 @@ function acoesOSCalendarioTecnico(a, visita) {
     return `<span style="font-size:11.5px; color:var(--ink-soft);">Designada a ${esc(a.tecnico_nome || 'outro técnico')} — você pode visualizar, mas só quem está designado executa esta O.S.</span>`;
   }
   if (a.retorno_pendente_tecnico) {
-    return `${botaoDeslocamento(a)}${a.retorno_deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Enviar relatório de retorno</button>` : ''}`;
+    let botaoRetorno = '';
+    if (a.retorno_deslocamento_iniciado_em && !a.retorno_chegada_confirmada_em) {
+      botaoRetorno = `<button class="btn-outline-sm" onclick="registrarChegadaRetorno(${a.id})" style="margin-right:6px;">📍 Registrar chegada</button>`;
+    } else if (a.retorno_chegada_confirmada_em) {
+      botaoRetorno = `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Enviar relatório de retorno</button>`;
+    }
+    return `${botaoDeslocamento(a)}${botaoRetorno}`;
   }
   if (a.status !== 'concluida') {
     return `${botaoDeslocamento(a)}${a.deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;
