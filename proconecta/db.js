@@ -193,6 +193,14 @@ function migrar(data) {
     }
     if (a.lida_tecnico === undefined) a.lida_tecnico = false;
     if (a.deslocamento_iniciado_em === undefined) a.deslocamento_iniciado_em = null;
+    if (a.chegada_confirmada_em === undefined) {
+      // mesma lógica do confirmado_cliente_em: O.S. que já tinham relatório enviado (ou já
+      // finalizadas) antes desse controle existir já passaram desse ponto na prática — só as
+      // que ainda estão a caminho, sem relatório, passam a exigir o registro da chegada.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      const jaAvancou = a.finalizada || visitaDoItem;
+      a.chegada_confirmada_em = jaAvancou ? (a.deslocamento_iniciado_em || a.criado_em || new Date().toISOString()) : null;
+    }
     if (a.lembrete_deslocamento_enviado === undefined) a.lembrete_deslocamento_enviado = false;
     if (a.confirmado_cliente_em === undefined) {
       // O.S. que já tinham avançado (deslocamento, relatório ou já finalizadas) antes desse

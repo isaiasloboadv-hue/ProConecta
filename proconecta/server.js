@@ -529,6 +529,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     criado_em: new Date().toISOString(),
     lida_tecnico: false,
     deslocamento_iniciado_em: null,
+    chegada_confirmada_em: null,
     lembrete_deslocamento_enviado: false,
     confirmado_cliente_em: null,
     feedback_cliente_em: null,
@@ -848,6 +849,32 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
     enviarPush(data, admin.id, {
       titulo: 'Técnico a caminho',
       corpo: `${user.nome} iniciou o deslocamento para ${cliente ? cliente.nome_empresa : 'o cliente'} (${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}).`,
+      url: '/',
+    }).catch(() => {});
+  });
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/confirmar-chegada — o técnico avisa que já chegou no cliente (depois do
+// deslocamento já iniciado); só a partir daqui ele consegue preencher o relatório da visita. Se
+// a O.S. estiver com um retorno pendente, use /retorno/confirmar-chegada em vez desta.
+rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado registra a chegada.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  if (!item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Inicie o deslocamento antes de registrar a chegada.' });
+  if (item.chegada_confirmada_em) return enviarJSON(res, 400, { erro: 'A chegada já foi registrada.' });
+  item.chegada_confirmada_em = new Date().toISOString();
+  db.save(data);
+  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  admins.forEach((admin) => {
+    enviarPush(data, admin.id, {
+      titulo: 'Técnico chegou',
+      corpo: `${user.nome} chegou no cliente da O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
       url: '/',
     }).catch(() => {});
   });
@@ -2517,6 +2544,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     criado_em: agora.toISOString(),
     lida_tecnico: true,
     deslocamento_iniciado_em: null,
+    chegada_confirmada_em: null,
     lembrete_deslocamento_enviado: false,
     // o cliente já pediu o atendimento pelo chat — não faz sentido pedir confirmação de novo
     confirmado_cliente_em: agora.toISOString(),

@@ -1007,6 +1007,7 @@ function faseAtualOS(a) {
   if (visita && visita.status_aprovacao === 'aprovado') return { label: 'Aguardando finalização', cor: 'teal' };
   if (visita && visita.status_aprovacao === 'reprovado') return { label: 'Relatório reprovado', cor: 'red' };
   if (visita) return { label: 'Relatório em análise', cor: 'orange' };
+  if (a.chegada_confirmada_em) return { label: 'Chegou', cor: 'teal' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
   if (!a.confirmado_cliente_em) return { label: 'Confirmação cliente', cor: 'purple' };
   return { label: 'Aguardando deslocamento', cor: 'amber' };
@@ -2632,7 +2633,10 @@ function acoesOS(a, visita) {
   } else if (visita && visita.status_aprovacao === 'alteracao_sugerida') {
     acoes = `<span class="tag tag-amber">Edição sugerida${visita.comentario_edicao ? ': ' + esc(visita.comentario_edicao) : ''} — aguardando o técnico reenviar</span>`;
   } else {
-    acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">Aguardando execução pelo técnico.</span>`;
+    let statusExecucao = 'Aguardando execução pelo técnico.';
+    if (a.deslocamento_iniciado_em && !a.chegada_confirmada_em) statusExecucao = 'Técnico a caminho — aguardando registrar a chegada.';
+    else if (a.chegada_confirmada_em) statusExecucao = 'Técnico chegou — aguardando o relatório.';
+    acoes = `<span style="font-size:11.5px; color:var(--ink-soft);">${statusExecucao}</span>`;
   }
   acoes += `
       <button class="btn-outline-sm" onclick="editarOS(${a.id})">Editar</button>
@@ -2836,6 +2840,10 @@ function timelineOS(a, visita) {
   passos.push(a.deslocamento_iniciado_em
     ? { label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' }
     : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
+
+  passos.push(a.chegada_confirmada_em
+    ? { label: 'Técnico confirmou a chegada', data: a.chegada_confirmada_em, estado: 'feito' }
+    : { label: 'Aguardando chegada do técnico', data: null, estado: 'pendente' });
 
   passos.push(visita
     ? { label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' }
@@ -3092,6 +3100,23 @@ async function iniciarDeslocamento(id) {
   try {
     const { agenda } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
     mostrarToast('Deslocamento iniciado — o administrador foi avisado.');
+    if (Array.isArray(window._agendaCache)) {
+      const idx = window._agendaCache.findIndex((a) => a.id === id);
+      if (idx !== -1) window._agendaCache[idx] = agenda;
+    }
+    if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
+    else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
+    else renderAgenda();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// botão "Registrar chegada": só depois de iniciar o deslocamento, e antes de poder executar
+// (preencher o relatório) — mesmo padrão do registrarChegadaRetorno, pro primeiro deslocamento
+async function confirmarChegada(id) {
+  if (!confirm('Confirma que você já chegou no cliente?')) return;
+  try {
+    const { agenda } = await api(`/api/agenda/${id}/confirmar-chegada`, { method: 'POST' });
+    mostrarToast('Chegada registrada — já pode executar o atendimento.');
     if (Array.isArray(window._agendaCache)) {
       const idx = window._agendaCache.findIndex((a) => a.id === id);
       if (idx !== -1) window._agendaCache[idx] = agenda;
@@ -5790,7 +5815,13 @@ function acoesOSCalendarioTecnico(a, visita) {
     return `${botaoDeslocamento(a)}${botaoRetorno}`;
   }
   if (a.status !== 'concluida') {
-    return `${botaoDeslocamento(a)}${a.deslocamento_iniciado_em ? `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>` : ''}`;
+    let botaoExec = '';
+    if (a.deslocamento_iniciado_em && !a.chegada_confirmada_em) {
+      botaoExec = `<button class="btn-outline-sm" onclick="confirmarChegada(${a.id})" style="margin-right:6px;">📍 Registrar chegada</button>`;
+    } else if (a.chegada_confirmada_em) {
+      botaoExec = `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>`;
+    }
+    return `${botaoDeslocamento(a)}${botaoExec}`;
   }
   if (a.visita_id && a.visita_status === 'aprovado') {
     return botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
