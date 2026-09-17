@@ -1652,6 +1652,8 @@ rota('POST', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
     titulo: `Mensagem de ${remetente ? remetente.nome : 'alguém'}`,
     corpo: texto.length > 120 ? texto.slice(0, 117) + '...' : texto,
     url: '/',
+    tipo: 'chat_interno',
+    remetente_id: user.id,
   }).catch(() => {});
   enviarJSON(res, 201, { mensagem });
 });

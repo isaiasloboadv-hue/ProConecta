@@ -97,6 +97,30 @@ function empresaEmails() {
     : ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'];
 }
 
+// o service worker não enxerga o localStorage da página (mundos separados) — pra conseguir
+// responder uma mensagem do chat interno direto pela notificação, sem abrir o app, ele precisa
+// do token de um jeito que também dê pra ler de lá. Mesmo banco/loja que o sw.js usa (ver
+// obterTokenSalvo em sw.js) — só a página escreve, só o service worker lê.
+function abrirTokenSWDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('proconecta-sw', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('auth');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function salvarTokenSW(token) {
+  try {
+    const db = await abrirTokenSWDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('auth', 'readwrite');
+      const store = tx.objectStore('auth');
+      if (token) store.put(token, 'token'); else store.delete('token');
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { /* sem IndexedDB — resposta pela notificação simplesmente não funciona */ }
+}
+
 async function fazerLogin() {
   const email = document.getElementById('login-email').value;
   const senha = document.getElementById('login-senha').value;
@@ -107,6 +131,7 @@ async function fazerLogin() {
     TOKEN = data.token;
     USER = data.usuario;
     localStorage.setItem('pc_token', TOKEN);
+    salvarTokenSW(TOKEN);
     entrarNoApp();
   } catch (e) {
     erroEl.textContent = e.message;
@@ -119,6 +144,7 @@ function sair() {
   if (sinoTimer) clearInterval(sinoTimer);
   desmontarWidgetChatInterno();
   localStorage.removeItem('pc_token');
+  salvarTokenSW(null);
   document.getElementById('appView').style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
 }
@@ -128,6 +154,7 @@ async function tentarSessaoExistente() {
   try {
     const data = await api('/api/me');
     USER = data.usuario;
+    salvarTokenSW(TOKEN);
     entrarNoApp();
   } catch (e) {
     TOKEN = null; localStorage.removeItem('pc_token');
