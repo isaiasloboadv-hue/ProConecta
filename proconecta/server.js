@@ -981,6 +981,146 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });
 });
 
+// ---------- mensagens internas (equipe — cliente não participa) ----------
+
+function conversaComDetalhes(data, conversa, meuId) {
+  const membros = conversa.membros.map((id) => data.usuarios.find((u) => u.id === id)).filter(Boolean);
+  let nome = conversa.nome;
+  if (conversa.tipo === 'individual') {
+    const outro = membros.find((m) => m.id !== meuId);
+    nome = outro ? outro.nome : '(usuário removido)';
+  }
+  const mensagensDaConversa = data.mensagens.filter((m) => m.conversa_id === conversa.id);
+  const ultima = mensagensDaConversa[mensagensDaConversa.length - 1] || null;
+  const lidoAte = (conversa.lido_ate && conversa.lido_ate[meuId]) || 0;
+  const naoLidas = mensagensDaConversa.filter((m) => m.autor_id !== meuId && m.criado_em > lidoAte).length;
+  return {
+    id: conversa.id,
+    tipo: conversa.tipo,
+    nome,
+    membros: membros.map(usuarioPublico),
+    ultima_mensagem: ultima ? { texto: ultima.texto, autor_id: ultima.autor_id, criado_em: ultima.criado_em } : null,
+    nao_lidas: naoLidas,
+  };
+}
+
+// GET /api/mensagens/usuarios — família de trabalho (sem cliente), pra iniciar conversas novas
+rota('GET', /^\/api\/mensagens\/usuarios$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
+  const data = db.load();
+  const usuarios = data.usuarios.filter((u) => u.papel !== 'cliente' && u.id !== user.id && u.status === 'ativo').map(usuarioPublico);
+  enviarJSON(res, 200, { usuarios });
+});
+
+// GET /api/mensagens/conversas
+rota('GET', /^\/api\/mensagens\/conversas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
+  const data = db.load();
+  const minhas = data.conversas
+    .filter((c) => c.membros.includes(user.id))
+    .map((c) => conversaComDetalhes(data, c, user.id))
+    .sort((a, b) => (b.ultima_mensagem ? b.ultima_mensagem.criado_em : 0) - (a.ultima_mensagem ? a.ultima_mensagem.criado_em : 0));
+  enviarJSON(res, 200, { conversas: minhas });
+});
+
+// POST /api/mensagens/conversas { tipo: 'individual'|'grupo', membro_id, membros: [], nome }
+rota('POST', /^\/api\/mensagens\/conversas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const naoClientes = (id) => data.usuarios.some((u) => u.id === id && u.papel !== 'cliente');
+
+  if (body.tipo === 'grupo') {
+    const nome = (body.nome || '').trim();
+    const membrosSelecionados = Array.isArray(body.membros) ? body.membros.map(Number).filter(naoClientes) : [];
+    if (!nome) return enviarJSON(res, 400, { erro: 'Dê um nome para o grupo.' });
+    if (membrosSelecionados.length < 2) return enviarJSON(res, 400, { erro: 'Escolha pelo menos 2 outras pessoas para o grupo.' });
+    const membros = Array.from(new Set([user.id, ...membrosSelecionados]));
+    const id = nextId(data, 'conversas');
+    const conversa = { id, tipo: 'grupo', nome, membros, lido_ate: {}, criado_por: user.id, criado_em: Date.now() };
+    data.conversas.push(conversa);
+    db.save(data);
+    return enviarJSON(res, 200, { conversa: conversaComDetalhes(data, conversa, user.id) });
+  }
+
+  const outroId = Number(body.membro_id);
+  if (!naoClientes(outroId)) return enviarJSON(res, 404, { erro: 'Pessoa não encontrada.' });
+  if (outroId === user.id) return enviarJSON(res, 400, { erro: 'Escolha outra pessoa para conversar.' });
+
+  let conversa = data.conversas.find(
+    (c) => c.tipo === 'individual' && c.membros.includes(user.id) && c.membros.includes(outroId)
+  );
+  if (!conversa) {
+    const id = nextId(data, 'conversas');
+    conversa = { id, tipo: 'individual', nome: null, membros: [user.id, outroId], lido_ate: {}, criado_por: user.id, criado_em: Date.now() };
+    data.conversas.push(conversa);
+    db.save(data);
+  }
+  enviarJSON(res, 200, { conversa: conversaComDetalhes(data, conversa, user.id) });
+});
+
+// GET /api/mensagens/conversas/:id/mensagens?desde=timestamp
+rota('GET', /^\/api\/mensagens\/conversas\/(\d+)\/mensagens$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
+  const conversaId = Number(m[1]);
+  const data = db.load();
+  const conversa = data.conversas.find((c) => c.id === conversaId);
+  if (!conversa || !conversa.membros.includes(user.id)) return enviarJSON(res, 404, { erro: 'Conversa não encontrada.' });
+
+  const { query } = url.parse(req.url, true);
+  const desde = Number(query.desde) || 0;
+  const mensagens = data.mensagens
+    .filter((msg) => msg.conversa_id === conversaId && msg.criado_em > desde)
+    .map((msg) => {
+      const autor = data.usuarios.find((u) => u.id === msg.autor_id);
+      return { ...msg, autor_nome: autor ? autor.nome : '?' };
+    });
+  enviarJSON(res, 200, { mensagens });
+});
+
+// POST /api/mensagens/conversas/:id/mensagens { texto }
+rota('POST', /^\/api\/mensagens\/conversas\/(\d+)\/mensagens$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
+  const conversaId = Number(m[1]);
+  const body = await lerCorpo(req);
+  const texto = (body.texto || '').trim();
+  if (!texto) return enviarJSON(res, 400, { erro: 'A mensagem não pode ser vazia.' });
+  if (texto.length > 4000) return enviarJSON(res, 400, { erro: 'Mensagem muito longa.' });
+
+  const data = db.load();
+  const conversa = data.conversas.find((c) => c.id === conversaId);
+  if (!conversa || !conversa.membros.includes(user.id)) return enviarJSON(res, 404, { erro: 'Conversa não encontrada.' });
+
+  const id = nextId(data, 'mensagens');
+  const mensagem = { id, conversa_id: conversaId, autor_id: user.id, texto, criado_em: Date.now() };
+  data.mensagens.push(mensagem);
+  conversa.lido_ate = conversa.lido_ate || {};
+  conversa.lido_ate[user.id] = mensagem.criado_em;
+  db.save(data);
+
+  const autor = data.usuarios.find((u) => u.id === user.id);
+  enviarJSON(res, 200, { mensagem: { ...mensagem, autor_nome: autor.nome } });
+});
+
+// POST /api/mensagens/conversas/:id/lida — marca tudo como lido até agora
+rota('POST', /^\/api\/mensagens\/conversas\/(\d+)\/lida$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'tecnico'])) return enviarJSON(res, 403, { erro: 'Mensagens são só entre administrador e técnicos.' });
+  const conversaId = Number(m[1]);
+  const data = db.load();
+  const conversa = data.conversas.find((c) => c.id === conversaId);
+  if (!conversa || !conversa.membros.includes(user.id)) return enviarJSON(res, 404, { erro: 'Conversa não encontrada.' });
+  conversa.lido_ate = conversa.lido_ate || {};
+  conversa.lido_ate[user.id] = Date.now();
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // ---------- chamados de serviço (cliente) ----------
 
 // GET /api/chamados

@@ -6,6 +6,11 @@ let USER = null;
 let paginaAtual = null;
 let navAbertos = new Set();
 let sinoTimer = null;
+let mensagensNaoLidas = 0;
+let mensagensBadgeTimer = null;
+let mensagensPollTimer = null;
+let conversaChatAtiva = null;
+let ultimoTsMensagemChat = 0;
 let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
@@ -79,6 +84,8 @@ async function fazerLogin() {
 function sair() {
   TOKEN = null; USER = null; navAbertos = new Set();
   if (sinoTimer) clearInterval(sinoTimer);
+  if (mensagensBadgeTimer) clearInterval(mensagensBadgeTimer);
+  if (mensagensPollTimer) clearInterval(mensagensPollTimer);
   localStorage.removeItem('pc_token');
   document.getElementById('appView').style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
@@ -101,6 +108,10 @@ function entrarNoApp() {
   montarSidebar();
   atualizarSino();
   sinoTimer = setInterval(atualizarSino, 15000);
+  if (USER.papel !== 'cliente') {
+    atualizarContadorMensagens();
+    mensagensBadgeTimer = setInterval(atualizarContadorMensagens, 15000);
+  }
   const paginaInicial = { administrador: 'agenda', tecnico: 'agenda', cliente: 'biblioteca-defeitos' }[USER.papel] || 'agenda';
   ir(paginaInicial);
 }
@@ -135,6 +146,7 @@ function renderHeaderRight() {
 const NAV = {
   tecnico: [
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
+    { key: 'mensagens', label: 'Mensagens', page: 'mensagens' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -151,6 +163,7 @@ const NAV = {
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
     { key: 'aprovacoes-visitas', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
+    { key: 'mensagens', label: 'Mensagens', page: 'mensagens' },
     { key: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -208,7 +221,8 @@ function renderNavNodes(nodes, nivel) {
       `;
     }
     const ativo = paginaAtual === node.page;
-    return `<button class="nav-leaf ${ativo ? 'active' : ''}" style="padding-left:${indent}px" onclick="ir('${node.page}')"><span class="dot"></span>${node.label}</button>`;
+    const badge = node.page === 'mensagens' && mensagensNaoLidas > 0 ? `<span class="count">${mensagensNaoLidas}</span>` : '';
+    return `<button class="nav-leaf ${ativo ? 'active' : ''}" style="padding-left:${indent}px" onclick="ir('${node.page}')"><span class="dot"></span>${node.label}${badge}</button>`;
   }).join('');
 }
 
@@ -233,6 +247,7 @@ async function ir(pagina) {
   main.innerHTML = '<div class="empty">Carregando...</div>';
   try {
     if (pagina === 'agenda') return renderAgenda();
+    if (pagina === 'mensagens') return renderMensagens();
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
     if (pagina === 'biblioteca-procedimentos') return renderBibliotecaProcedimentos();
@@ -372,6 +387,212 @@ document.addEventListener('click', (e) => {
   const sino = document.getElementById('btn-bell');
   if (painel && !painel.contains(e.target) && sino && !sino.contains(e.target)) painel.classList.remove('show');
 });
+
+// ---------- MENSAGENS (chat interno: administrador ⇄ técnicos, sem cliente) ----------
+
+async function atualizarContadorMensagens() {
+  try {
+    const { conversas } = await api('/api/mensagens/conversas');
+    mensagensNaoLidas = conversas.reduce((soma, c) => soma + c.nao_lidas, 0);
+    if (paginaAtual !== 'mensagens') montarSidebar();
+  } catch (e) { /* silencioso */ }
+}
+
+async function renderMensagens() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head">
+      <h1>Mensagens</h1>
+      <p>Converse direto com a equipe (administrador e técnicos) — clientes não participam.</p>
+    </div>
+    <div class="chat-wrap">
+      <div class="chat-sidebar">
+        <div class="chat-sidebar-acoes">
+          <button class="btn btn-ghost btn-sm" onclick="abrirModalMensagens('individual')">＋ Conversa</button>
+          <button class="btn btn-ghost btn-sm" onclick="abrirModalMensagens('grupo')">👪 Grupo</button>
+        </div>
+        <div id="chat-lista-conversas" class="chat-lista-conversas"></div>
+      </div>
+      <div class="chat-main" id="chat-main">
+        <div class="empty"><div class="big">💬</div>Selecione uma conversa ou comece uma nova.</div>
+      </div>
+    </div>
+  `;
+  conversaChatAtiva = null;
+  clearInterval(mensagensPollTimer);
+  await carregarListaConversasChat();
+}
+
+async function carregarListaConversasChat() {
+  const { conversas } = await api('/api/mensagens/conversas');
+  window._conversasChatCache = conversas;
+  const box = document.getElementById('chat-lista-conversas');
+  if (!box) return;
+  if (conversas.length === 0) {
+    box.innerHTML = '<div class="empty" style="padding:20px 10px;">Nenhuma conversa ainda.</div>';
+    return;
+  }
+  box.innerHTML = conversas.map((c) => {
+    const previa = c.ultima_mensagem
+      ? (c.tipo === 'grupo' ? esc((c.membros.find((m) => m.id === c.ultima_mensagem.autor_id) || {}).nome?.split(' ')[0] || '') + ': ' : '') + esc(c.ultima_mensagem.texto)
+      : 'Nenhuma mensagem ainda';
+    const hora = c.ultima_mensagem ? new Date(c.ultima_mensagem.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    return `
+      <div class="chat-item ${conversaChatAtiva && conversaChatAtiva.id === c.id ? 'ativo' : ''}" onclick="abrirConversaChat(${c.id})">
+        <span class="chat-avatar">${c.tipo === 'grupo' ? '👪' : initials(c.nome)}</span>
+        <div class="chat-item-info">
+          <div class="chat-item-topo"><span class="chat-item-nome">${esc(c.nome)}</span><span class="chat-item-hora">${hora}</span></div>
+          <div class="chat-item-previa">${previa}</div>
+        </div>
+        ${c.nao_lidas > 0 ? `<span class="chat-item-badge">${c.nao_lidas}</span>` : ''}
+      </div>`;
+  }).join('');
+}
+
+async function abrirConversaChat(conversaId) {
+  const conversa = (window._conversasChatCache || []).find((c) => c.id === conversaId);
+  if (!conversa) return;
+  conversaChatAtiva = conversa;
+  ultimoTsMensagemChat = 0;
+  clearInterval(mensagensPollTimer);
+
+  const painel = document.getElementById('chat-main');
+  painel.innerHTML = `
+    <div class="chat-header">
+      <span class="chat-avatar">${conversa.tipo === 'grupo' ? '👪' : initials(conversa.nome)}</span>
+      <div>
+        <div class="chat-header-nome">${esc(conversa.nome)}</div>
+        ${conversa.tipo === 'grupo' ? `<div class="chat-header-membros">${esc(conversa.membros.map((m) => m.nome.split(' ')[0]).join(', '))}</div>` : ''}
+      </div>
+    </div>
+    <div class="chat-mensagens" id="chat-mensagens"></div>
+    <form class="chat-form" onsubmit="event.preventDefault(); enviarMensagemChat();">
+      <input type="text" id="chat-input" placeholder="Digite uma mensagem" autocomplete="off">
+      <button type="submit" class="btn btn-primary">Enviar</button>
+    </form>
+  `;
+  await carregarListaConversasChat();
+  await carregarMensagensChat();
+  await api(`/api/mensagens/conversas/${conversa.id}/lida`, { method: 'POST' });
+  atualizarContadorMensagens();
+  mensagensPollTimer = setInterval(async () => {
+    await carregarMensagensChat();
+    await api(`/api/mensagens/conversas/${conversa.id}/lida`, { method: 'POST' });
+  }, 2500);
+}
+
+async function carregarMensagensChat() {
+  if (!conversaChatAtiva) return;
+  const { mensagens } = await api(`/api/mensagens/conversas/${conversaChatAtiva.id}/mensagens?desde=${ultimoTsMensagemChat}`);
+  if (mensagens.length === 0) return;
+  const box = document.getElementById('chat-mensagens');
+  if (!box) return;
+  const estavaNoFim = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  mensagens.forEach((msg) => {
+    ultimoTsMensagemChat = Math.max(ultimoTsMensagemChat, msg.criado_em);
+    const meu = msg.autor_id === USER.id;
+    const bolha = document.createElement('div');
+    bolha.className = 'chat-bolha ' + (meu ? 'enviada' : 'recebida');
+    bolha.innerHTML = `
+      ${!meu && conversaChatAtiva.tipo === 'grupo' ? `<div class="chat-bolha-autor">${esc(msg.autor_nome)}</div>` : ''}
+      <div class="chat-bolha-texto">${esc(msg.texto)}</div>
+      <div class="chat-bolha-hora">${new Date(msg.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>
+    `;
+    box.appendChild(bolha);
+  });
+  if (estavaNoFim) box.scrollTop = box.scrollHeight;
+}
+
+async function enviarMensagemChat() {
+  const input = document.getElementById('chat-input');
+  const texto = input.value.trim();
+  if (!texto || !conversaChatAtiva) return;
+  input.value = '';
+  try {
+    await api(`/api/mensagens/conversas/${conversaChatAtiva.id}/mensagens`, { method: 'POST', body: { texto } });
+    await carregarMensagensChat();
+    const box = document.getElementById('chat-mensagens');
+    if (box) box.scrollTop = box.scrollHeight;
+    await carregarListaConversasChat();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+let modoModalMensagens = 'individual';
+let selecionadosModalMensagens = new Set();
+
+async function abrirModalMensagens(modo) {
+  modoModalMensagens = modo;
+  selecionadosModalMensagens = new Set();
+  const { usuarios } = await api('/api/mensagens/usuarios');
+  window._usuariosChatCache = usuarios;
+
+  let modal = document.getElementById('modal-mensagens');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-mensagens';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  renderModalMensagens();
+}
+
+function renderModalMensagens() {
+  const modal = document.getElementById('modal-mensagens');
+  const usuarios = window._usuariosChatCache || [];
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:400px;">
+      <h3>${modoModalMensagens === 'grupo' ? 'Novo grupo' : 'Nova conversa'}</h3>
+      ${modoModalMensagens === 'grupo' ? `<input type="text" id="modal-mensagens-nome" placeholder="Nome do grupo" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px;font-family:inherit;">` : '<p>Escolha com quem conversar.</p>'}
+      <div class="chat-modal-lista">
+        ${usuarios.length === 0
+          ? '<div class="empty" style="padding:14px;">Ninguém mais da equipe cadastrado ainda.</div>'
+          : usuarios.map((u) => `
+            <div class="chat-modal-item ${selecionadosModalMensagens.has(u.id) ? 'selecionado' : ''}" onclick="selecionarUsuarioModalMensagens(${u.id})">
+              <span class="chat-avatar" style="width:32px;height:32px;font-size:12px;">${initials(u.nome)}</span>
+              <span>${esc(u.nome)} <span style="color:var(--ink-soft);font-size:12px;">(${PAPEL_LABEL[u.papel] || u.papel})</span></span>
+            </div>`).join('')}
+      </div>
+      <div class="modal-actions" style="margin-top:14px;">
+        ${modoModalMensagens === 'grupo' ? '<button class="btn btn-primary" onclick="confirmarGrupoMensagens()">Criar grupo</button>' : ''}
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-mensagens').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function selecionarUsuarioModalMensagens(usuarioId) {
+  if (modoModalMensagens === 'individual') {
+    document.getElementById('modal-mensagens').classList.remove('show');
+    try {
+      const { conversa } = await api('/api/mensagens/conversas', { method: 'POST', body: { tipo: 'individual', membro_id: usuarioId } });
+      await carregarListaConversasChat();
+      abrirConversaChat(conversa.id);
+    } catch (e) {
+      alert(e.message);
+    }
+    return;
+  }
+  if (selecionadosModalMensagens.has(usuarioId)) selecionadosModalMensagens.delete(usuarioId);
+  else selecionadosModalMensagens.add(usuarioId);
+  renderModalMensagens();
+}
+
+async function confirmarGrupoMensagens() {
+  const nome = document.getElementById('modal-mensagens-nome').value.trim();
+  try {
+    const { conversa } = await api('/api/mensagens/conversas', {
+      method: 'POST',
+      body: { tipo: 'grupo', nome, membros: Array.from(selecionadosModalMensagens) },
+    });
+    document.getElementById('modal-mensagens').classList.remove('show');
+    await carregarListaConversasChat();
+    abrirConversaChat(conversa.id);
+  } catch (e) {
+    alert(e.message);
+  }
+}
 
 // ---------- AGENDA ----------
 async function carregarAgendaComVisitas() {

@@ -66,7 +66,10 @@ function seed() {
     // com fluxo de aprovação (em_analise -> aprovado | alteracao_sugerida -> em_analise ...)
     registros: [],
     chamados: [],
-    _seq: { usuarios: 5, clientes: 2, equipamentos: 4, agenda: 2, visitas: 1, registros: 1, chamados: 1 },
+    // mensagens internas (equipe: administrador/técnico — cliente não participa)
+    conversas: [],
+    mensagens: [],
+    _seq: { usuarios: 5, clientes: 2, equipamentos: 4, agenda: 2, visitas: 1, registros: 1, chamados: 1, conversas: 1, mensagens: 1 },
   };
 }
 
@@ -75,8 +78,12 @@ function seed() {
 function migrar(data) {
   if (!data.registros) data.registros = [];
   if (!data.chamados) data.chamados = [];
+  if (!data.conversas) data.conversas = [];
+  if (!data.mensagens) data.mensagens = [];
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
+  if (!data._seq.conversas) data._seq.conversas = 1;
+  if (!data._seq.mensagens) data._seq.mensagens = 1;
   for (const u of data.usuarios) {
     if (!u.status) u.status = 'ativo';
     if (u.convite_token === undefined) u.convite_token = null;
