@@ -222,6 +222,7 @@ function migrar(data) {
       const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
       a.orcamento_aprovado_em = (temPecas && jaAprovado) ? (a.feedback_cliente_em || a.criado_em || new Date().toISOString()) : null;
     }
+    if (a.orcamento_reprovado_em === undefined) a.orcamento_reprovado_em = null;
     // fluxo de pós-venda/reparo (só usado em O.S. tipo "atendimento", nascidas de um chamado do
     // chat) — ver server.js, seção "pós-venda / setor reparo"
     if (a.fase_atendimento === undefined) a.fase_atendimento = null;

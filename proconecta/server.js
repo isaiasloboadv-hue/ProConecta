@@ -533,6 +533,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     confirmado_cliente_em: null,
     feedback_cliente_em: null,
     orcamento_aprovado_em: null,
+    orcamento_reprovado_em: null,
     retorno_pendente_tecnico: false,
     retorno_deslocamento_iniciado_em: null,
   };
@@ -640,6 +641,33 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-aprovado$/, async (req, res, m) =
       url: '/',
     }).catch(() => {});
   }
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/orcamento-reprovado — o cliente não aprovou o orçamento das peças
+// fornecidas pelo técnico; não tem mais serviço a fazer, então a O.S. é finalizada direto (mesmo
+// comportamento de quando o cliente reprova pelo caminho do pós-venda).
+rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-reprovado$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra a decisão do orçamento.' });
+  const data = db.load();
+  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  if (!visita || visita.status_aprovacao !== 'aprovado') {
+    return enviarJSON(res, 400, { erro: 'Só é possível decidir o orçamento depois do relatório aprovado.' });
+  }
+  if (!visita.laudo || !Array.isArray(visita.laudo.pecas) || visita.laudo.pecas.length === 0) {
+    return enviarJSON(res, 400, { erro: 'Este relatório não tem peças fornecidas.' });
+  }
+  if (item.orcamento_aprovado_em) return enviarJSON(res, 400, { erro: 'O orçamento já foi aprovado.' });
+  if (item.orcamento_reprovado_em) return enviarJSON(res, 400, { erro: 'O orçamento já foi reprovado.' });
+  const agora = new Date().toISOString();
+  item.orcamento_reprovado_em = agora;
+  item.finalizada = true;
+  item.finalizado_em = agora;
+  db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
@@ -2441,6 +2469,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     confirmado_cliente_em: agora.toISOString(),
     feedback_cliente_em: null,
     orcamento_aprovado_em: null,
+    orcamento_reprovado_em: null,
     retorno_pendente_tecnico: false,
     retorno_deslocamento_iniciado_em: null,
     origem_chamado_id: chamado.id,

@@ -2568,6 +2568,9 @@ function acoesOSAtendimento(a) {
 
 function acoesOS(a, visita) {
   if (a.finalizada) {
+    if (a.orcamento_reprovado_em) {
+      return `<span class="tag tag-falha">✗ Finalizada em ${fmtData(a.finalizado_em)} — cliente não aprovou o orçamento das peças. Abra uma nova O.S. se precisar de um novo atendimento.</span>`;
+    }
     return `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Finalizada em ${fmtData(a.finalizado_em)} — cliente já confirmou o serviço. Abra uma nova O.S. se precisar de um novo atendimento.</span>`;
   }
   // O.S. de atendimento (chat): o administrador pode agir como backup do pós-venda/reparo se
@@ -2591,6 +2594,7 @@ function acoesOS(a, visita) {
       <button class="btn-outline-sm" onclick="reabrirVisita(${visita.id})">Reabrir</button>
       <button class="btn-outline-sm" onclick="excluirVisita(${visita.id})" style="color:var(--red); border-color:var(--red);">Excluir relatório</button>
       <button class="btn btn-primary btn-sm" onclick="orcamentoAprovadoOS(${a.id})">Orçamento aprovado</button>
+      <button class="btn btn-ghost btn-sm" onclick="orcamentoReprovadoOS(${a.id})" style="color:var(--red);">Orçamento reprovado</button>
       <button class="btn-outline-sm" onclick="finalizarForcadoOS(${a.id})" style="color:var(--ink-soft);">⏭ Pular etapas e finalizar</button>`;
   } else if (visita && visita.status_aprovacao === 'aprovado' && a.retorno_pendente_tecnico) {
     acoes = `
@@ -2660,6 +2664,12 @@ async function orcamentoAprovadoOS(id) {
   if (!confirm('Confirma que o orçamento das peças fornecidas foi aprovado?')) return;
   try { await api(`/api/agenda/${id}/orcamento-aprovado`, { method: 'POST' }); mostrarToast('Orçamento aprovado.'); voltarListaOS(); }
   catch (e) { alert('Erro ao aprovar orçamento: ' + e.message); }
+}
+
+async function orcamentoReprovadoOS(id) {
+  if (!confirm('Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada, sem mais serviço a fazer.')) return;
+  try { await api(`/api/agenda/${id}/orcamento-reprovado`, { method: 'POST' }); mostrarToast('Orçamento reprovado — O.S. finalizada.'); voltarListaOS(); }
+  catch (e) { alert('Erro ao reprovar orçamento: ' + e.message); }
 }
 
 // feedback negativo do cliente: precisa de um retorno do técnico (ex.: novo treinamento) —
@@ -2820,6 +2830,10 @@ function timelineOS(a, visita) {
 
   // orçamento: só aparece quando o relatório tem peças fornecidas
   if (a.visita_tem_pecas) {
+    if (a.orcamento_reprovado_em) {
+      passos.push({ label: 'Cliente não aprovou o orçamento', data: a.orcamento_reprovado_em, estado: 'reprovado' });
+      return renderizarTimelineOS(passos);
+    }
     passos.push(a.orcamento_aprovado_em
       ? { label: 'Orçamento aprovado', data: a.orcamento_aprovado_em, estado: 'feito' }
       : { label: 'Aguardando aprovação do orçamento', data: null, estado: 'pendente' });
