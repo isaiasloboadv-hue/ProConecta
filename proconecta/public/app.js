@@ -42,6 +42,26 @@ const CHECKLIST_CORRETIVA = [
   'I/O da máquina', 'Sistema de refrigeração', 'Acompanhamento da linha',
   'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
 ];
+// checklist do Termo de Manutenção Preventiva Laser (Relatório > Manual > Preventiva)
+const CHECKLIST_PREVENTIVA_LASER = [
+  'Fonte', 'CPA-D', 'CLP', 'Contator', 'Relé', 'Fonte tripla', 'Filtro de linha',
+  'Placa de controle', 'Pré-filtro', 'Filtro cooler', 'Filtro intermediário', 'Filtro principal',
+  'Lente para refração', 'Lente de sacrifício', 'Calibração', 'Projeção', 'Ressonador',
+  'Utilização de nobreak', 'Aterramento da máquina', 'Tomada dedicada', 'USB do fabricante',
+  'Chiller', 'Computador', 'Válvula', 'Regulador de pressão', 'Sistema de segurança',
+  'Comando Pneumático', 'Comando Elétrico',
+];
+// grupos de fotos obrigatórias do Termo de Manutenção Preventiva Laser — cada grupo vira um
+// bloco {comentario, fotos} igual ao relatório completo, com o rótulo já preenchido no
+// comentário (esse aqui não é editável pelo técnico, é só o título do grupo)
+const GRUPOS_FOTOS_PREVENTIVA = [
+  { label: 'Painel elétrico do equipamento', obrigatorio: true },
+  { label: 'Equipamento', obrigatorio: true },
+  { label: 'Tensões de entrada e saída da fonte tripla', obrigatorio: true },
+  { label: 'Potência antes de executar o serviço', obrigatorio: true },
+  { label: 'Potência após executar o serviço', obrigatorio: true },
+  { label: 'Fotos adicionais', obrigatorio: false },
+];
 const UF_REGIAO = {
   AC: 'Norte', AP: 'Norte', AM: 'Norte', PA: 'Norte', RO: 'Norte', RR: 'Norte', TO: 'Norte',
   AL: 'Nordeste', BA: 'Nordeste', CE: 'Nordeste', MA: 'Nordeste', PB: 'Nordeste', PE: 'Nordeste', PI: 'Nordeste', RN: 'Nordeste', SE: 'Nordeste',
@@ -429,7 +449,10 @@ const NAV = {
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
     { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
     { key: 'relatorio-manutencao', label: 'Relatório', children: [
-      { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
+      { key: 'relatorio-manual', label: 'Manual', children: [
+        { key: 'relatorio-manual-completo', label: 'Completo', page: 'relatorio-manutencao' },
+        { key: 'relatorio-manual-preventiva', label: 'Preventiva', page: 'relatorio-preventiva' },
+      ]},
       { key: 'relatorio-automatico', label: 'Lev. Estoque Etiqueta', page: 'relatorio-automatico' },
       { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
     ]},
@@ -590,6 +613,7 @@ async function ir(pagina) {
   try {
     if (pagina === 'agenda') return renderAgenda();
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
+    if (pagina === 'relatorio-preventiva') return mostrarFormRelatorioPreventiva();
     if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
     if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
@@ -3662,6 +3686,236 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// Termo de Manutenção Preventiva Laser — mesma escala de cores (PDF_COR) e mesmo esqueleto
+// (capa navy + cabeçalho + títulos + caixas com borda) do relatório de manutenção interna acima,
+// com as seções próprias do termo: check-list de 28 itens, peças, fotos por grupo, pesquisa de
+// satisfação e assinaturas.
+function gerarPdfRelatorioPreventiva(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Termo de Manutenção Preventiva Laser', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t, sub, apertado) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      y += apertado ? 4 : 16;
+    }
+  }
+
+  function tituloEsquerda(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem, y); y += 14;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
+  doc.text('PREVENTIVA LASER', pageW / 2, 438, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do atendimento');
+  linhaCampos([{ label: 'Data inicial', valor: r.data_inicial, frac: 0.34 }, { label: 'Data final', valor: r.data_final, frac: 0.33 }, { label: 'O.S. Nº', valor: `${r.os_uf}/${r.os_numero}/${r.os_ano}`, frac: 0.33 }]);
+  linhaCampos([{ label: 'Modelo da máquina', valor: r.modelo_maquina, frac: 0.5 }, { label: 'Nº de série', valor: r.numero_serie, frac: 0.5 }]);
+  linhaCampos([{ label: 'Serviço realizado', valor: r.servico_realizado, frac: 0.5 }, { label: 'Técnico', valor: r.tecnico_nome, frac: 0.5 }]);
+  linhaCampos([{ label: 'Empresa (cliente)', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}`, frac: 1 }]);
+  linhaCampos([{ label: 'Setor da máquina', valor: r.setor_maquina, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Check-list de verificação');
+  (r.checklist || []).forEach((c, i) => {
+    if (y + 16 > pageH - margem) novaPagina();
+    const resp = c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A';
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${resp}`), margem, y); y += 12;
+    if (c.observacao) {
+      doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      const linhas = doc.splitTextToSize(limparPdf('Obs: ' + c.observacao), largura - 12);
+      doc.text(linhas, margem + 12, y); y += linhas.length * 11;
+    }
+  });
+  y += 8;
+  { if (y > pageH - margem - 30) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text('OBSERVAÇÕES DO CHECK-LIST', margem, y); y += 13; doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_checklist) || '—', largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 16; }
+
+  tituloCentro('Serviços realizados', 'O que foi feito na máquina');
+  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.servico_feito) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+
+  tituloEsquerda('Peças fornecidas');
+  {
+    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.6 }, { t: 'Código PMK', frac: 0.28 }];
+    const larguras = cols.map((c) => largura * c.frac);
+    if (y + 20 > pageH - margem) novaPagina();
+    let cx = margem;
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
+    y += 18;
+    const pecas = r.pecas || [];
+    if (!pecas.length) {
+      if (y + 18 > pageH - margem) novaPagina();
+      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem + 6, y + 12);
+      y += 18;
+    } else {
+      pecas.forEach((p, i) => {
+        if (y + 18 > pageH - margem) novaPagina();
+        cx = margem;
+        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—'];
+        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
+        y += 18;
+      });
+    }
+    y += 16;
+  }
+
+  const temFotos = (r.fotos || []).some((bloco) => bloco && Array.isArray(bloco.fotos) && bloco.fotos.length);
+  if (temFotos) {
+    const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
+    if (y + 34 + hImgFoto > pageH - margem) novaPagina();
+  }
+  tituloCentro('Fotos', null, true);
+  (r.fotos || []).forEach((bloco) => {
+    const fotosDoBloco = (bloco && bloco.fotos) || [];
+    if (y > pageH - margem - 20) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(limparPdf(bloco && bloco.comentario) || '—', margem, y); y += 12;
+    if (fotosDoBloco.length) {
+      const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+      for (let i = 0; i < fotosDoBloco.length; i += 2) {
+        if (y + hImg > pageH - margem) novaPagina();
+        [fotosDoBloco[i], fotosDoBloco[i + 1]].forEach((f, j) => {
+          if (!f) return;
+          const cx = margem + j * (wImg + gap);
+          try {
+            const m = /^data:image\/(\w+);/.exec(f);
+            const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+            doc.setDrawColor(...PDF_COR.line);
+            doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+            doc.addImage(f, formato, cx, y, wImg, hImg);
+          } catch (e) {}
+        });
+        y += hImg + gap;
+      }
+    } else {
+      doc.setFontSize(8.5); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma foto anexada.', margem, y); y += 14;
+    }
+    y += 6;
+  });
+
+  tituloCentro('Pesquisa de satisfação');
+  linhaCampos([{ label: 'Avaliação', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
+  if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário', valor: r.satisfacao_comentario, frac: 1 }]);
+  y += 8;
+
+  if (y > 560) novaPagina();
+  tituloCentro('Assinaturas');
+  {
+    const wImg = 220, hImg = 90;
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
+    doc.text(limparPdf(`Técnico: ${r.assinatura_tecnico_nome}`), margem + largura / 2, y);
+    y += 8;
+    try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
+    try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
+  }
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
+
+  return doc.output('bloburl');
+}
+
 // ---------- CRIAR RELATÓRIO (manutenção interna, avulso — sem vínculo com O.S./agenda) ----------
 
 async function renderRelatorioManutencao() {
@@ -3679,11 +3933,11 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             ${r.tipo !== 'ciclagem' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            <button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>
+            ${r.tipo !== 'preventiva' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
@@ -3698,6 +3952,9 @@ function descricaoRelatorioManutencao(r) {
   }
   if (r.tipo === 'ciclagem') {
     return `${esc(r.equipamento)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
+  }
+  if (r.tipo === 'preventiva') {
+    return `${esc(r.modelo_maquina)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
   }
   return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
 }
@@ -4319,7 +4576,392 @@ async function editarRelatorioManutencao(i) {
   if (!r) return;
   if (r.tipo === 'ficha') mostrarFormFicha(r);
   else if (r.tipo === 'ciclagem') mostrarFormCiclagem(r);
+  else if (r.tipo === 'preventiva') mostrarFormRelatorioPreventiva(r);
   else mostrarFormRelatorioManutencao(r);
+}
+
+// ---------- Relatório > Manual > Preventiva (Termo de Manutenção Preventiva Laser) ----------
+// relatório avulso de manutenção interna, mesma família do Relatório Manual (relatorios_manutencao,
+// tipo "preventiva"), com check-list próprio, pesquisa de satisfação e assinatura — segue o mesmo
+// padrão visual (.panel/.form-grid) e a mesma escala de cores de PDF (PDF_COR) do relatório principal.
+let relatorioPreventivaDraft = null;
+function relatorioPreventivaPadrao() {
+  return {
+    tipo: 'preventiva',
+    os_uf: '', os_numero: '', os_ano: '',
+    data_inicial: '', data_final: '',
+    modelo_maquina: '', numero_serie: '',
+    servico_realizado: 'Preventiva',
+    empresa: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '',
+    setor_maquina: '',
+    checklist: CHECKLIST_PREVENTIVA_LASER.map((item) => ({ item, resposta: '', observacao: '' })),
+    observacoes_checklist: '',
+    servico_feito: '',
+    pecas: [],
+    fotos: GRUPOS_FOTOS_PREVENTIVA.map((g) => ({ comentario: g.label, fotos: [] })),
+    observacoes_servico: '',
+    satisfacao_estrelas: 0,
+    satisfacao_comentario: '',
+    satisfacao_autoriza: '',
+    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
+    emails_copia: [''],
+  };
+}
+
+function mostrarFormRelatorioPreventiva(existente) {
+  relatorioPreventivaDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioPreventivaPadrao();
+  const d = relatorioPreventivaDraft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva Laser</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Identificação</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Nº preenchido no ato do atendimento.</p>
+      <div class="form-grid">
+        <div><label>O.S. Nº — UF*</label><input id="rp-os_uf" maxlength="2" placeholder="UF" value="${esc(d.os_uf)}" style="text-transform:uppercase;"></div>
+        <div><label>O.S. Nº — Número*</label><input id="rp-os_numero" placeholder="000" value="${esc(d.os_numero)}"></div>
+        <div><label>O.S. Nº — Ano*</label><input id="rp-os_ano" placeholder="0000" value="${esc(d.os_ano)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados do atendimento</h2>
+      <div class="form-grid">
+        <div><label>Data inicial*</label><input id="rp-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
+        <div><label>Data final*</label><input id="rp-data_final" type="date" value="${esc(d.data_final)}"></div>
+        <div><label>Modelo da máquina*</label><input id="rp-modelo_maquina" value="${esc(d.modelo_maquina)}"></div>
+        <div><label>Número de série*</label><input id="rp-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
+        <div><label>Serviço realizado*</label><input id="rp-servico_realizado" value="${esc(d.servico_realizado)}"></div>
+        <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
+        <div class="full"><label>Empresa (cliente)*</label><input id="rp-empresa" value="${esc(d.empresa)}"></div>
+        <div class="full"><label>Endereço*</label><input id="rp-endereco" value="${esc(d.endereco)}"></div>
+        <div><label>Número*</label><input id="rp-numero" value="${esc(d.numero)}"></div>
+        <div><label>Bairro*</label><input id="rp-bairro" value="${esc(d.bairro)}"></div>
+        <div><label>Estado*</label><input id="rp-estado" maxlength="2" placeholder="UF" value="${esc(d.estado)}" style="text-transform:uppercase;"></div>
+        <div><label>Cidade*</label><input id="rp-cidade" value="${esc(d.cidade)}"></div>
+        <div><label>CEP*</label><input id="rp-cep" placeholder="00000-000" value="${esc(d.cep)}"></div>
+        <div class="full"><label>Setor onde a máquina está instalada*</label><input id="rp-setor_maquina" value="${esc(d.setor_maquina)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Check-list de verificação*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <div id="rp-checklist"></div>
+      <label style="margin-top:10px;">Observações*</label>
+      <textarea id="rp-observacoes_checklist" placeholder="Observações gerais sobre o check-list">${esc(d.observacoes_checklist)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Serviços realizados</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Manutenção realizada / resultados de amostra</p>
+      <label>O que foi feito na máquina*</label>
+      <textarea id="rp-servico_feito" placeholder="Descreva a manutenção realizada e os resultados obtidos...">${esc(d.servico_feito)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Peças fornecidas</h2>
+      <div class="steps-list" id="rp-pecas"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarPecaPreventiva()">+ Adicionar peça</button>
+    </div>
+
+    <div class="panel">
+      <h2>Fotos</h2>
+      ${GRUPOS_FOTOS_PREVENTIVA.map((g, idx) => `
+        <div style="margin-bottom:18px;">
+          <label>${esc(g.label)}${g.obrigatorio ? '*' : ''}</label>
+          ${!g.obrigatorio ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Caso tenha mais algum registro importante</p>` : ''}
+          <div class="step-photos" id="rp-fotos-${idx}"></div>
+          <label class="photo-add">
+            <span class="plus">+</span>Anexar fotos
+            <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosPreventiva(${idx}, event)">
+          </label>
+        </div>`).join('')}
+    </div>
+
+    <div class="panel">
+      <h2>Observações do serviço*</h2>
+      <textarea id="rp-observacoes_servico" placeholder="Observações adicionais do técnico...">${esc(d.observacoes_servico)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Pesquisa de satisfação</h2>
+      <label>Qual a sua avaliação sobre o atendimento preventivo realizado?*</label>
+      <div id="rp-estrelas" style="margin-bottom:18px;"></div>
+      <label>Caso tenha algo para apontar dentro do processo de interação para este atendimento</label>
+      <input id="rp-satisfacao_comentario" placeholder="Sua resposta" value="${esc(d.satisfacao_comentario)}">
+      <label style="margin-top:10px;">Podemos publicar o seu feedback nos canais de comunicação?*</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rp-autoriza" value="sim" style="width:auto;" ${d.satisfacao_autoriza === 'sim' ? 'checked' : ''}> Sim, autorizo o uso do meu feedback</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rp-autoriza" value="nao" style="width:auto;" ${d.satisfacao_autoriza === 'nao' ? 'checked' : ''}> Não autorizo o uso do meu feedback</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Assinatura*</h2>
+      <div class="row2">
+        ${blocoAssinaturaPreventiva('cliente', 'Cliente')}
+        ${blocoAssinaturaPreventiva('tecnico', 'Técnico')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Envio do termo*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">E-mails que devem receber uma cópia deste termo assim que ele for concluído.</p>
+      <div id="rp-emails"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarEmailPreventiva()">+ Adicionar e-mail</button>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPreventiva()">Concluir e enviar termo</button>
+      </div>
+    </div>`;
+  renderChecklistPreventiva();
+  renderPecasPreventiva();
+  GRUPOS_FOTOS_PREVENTIVA.forEach((g, idx) => renderFotosGrupoPreventiva(idx));
+  renderEstrelasPreventiva();
+  renderEmailsPreventiva();
+  montarAssinaturaPreventiva('cliente');
+  montarAssinaturaPreventiva('tecnico');
+}
+
+function blocoAssinaturaPreventiva(chave, titulo) {
+  return `
+    <div>
+      <label>${titulo}</label>
+      <input id="rp-assinatura-${chave}-nome" placeholder="Nome do ${titulo.toLowerCase()}" value="${esc((relatorioPreventivaDraft['assinatura_' + chave + '_nome']) || '')}" oninput="relatorioPreventivaDraft.assinatura_${chave}_nome=this.value;">
+      <canvas id="rp-canvas-${chave}" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div id="rp-assinatura-${chave}-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="ampliarAssinaturaPreventiva('${chave}')">⤢ Ampliar para assinar</button>
+        <button class="btn-outline-sm" onclick="limparAssinaturaPreventiva('${chave}')">Limpar</button>
+      </div>
+    </div>`;
+}
+
+function renderChecklistPreventiva() {
+  document.getElementById('rp-checklist').innerHTML = relatorioPreventivaDraft.checklist.map((c, i) => `
+    <div class="step-item" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <b style="color:var(--navy); font-size:13.5px;">${String(i + 1).padStart(2, '0')} ${esc(c.item)}</b>
+        <div style="display:flex; gap:6px;">
+          ${['sim', 'nao', 'na'].map((v) => `<button type="button" class="btn-outline-sm" style="${c.resposta === v ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="marcarChecklistPreventiva(${i}, '${v}')">${v === 'sim' ? 'Sim' : v === 'nao' ? 'Não' : 'N/A'}</button>`).join('')}
+        </div>
+      </div>
+      <input placeholder="Observação (opcional)" value="${esc(c.observacao)}" oninput="relatorioPreventivaDraft.checklist[${i}].observacao=this.value;">
+    </div>`).join('');
+}
+function marcarChecklistPreventiva(i, valor) {
+  relatorioPreventivaDraft.checklist[i].resposta = valor;
+  renderChecklistPreventiva();
+}
+
+function renderPecasPreventiva() {
+  document.getElementById('rp-pecas').innerHTML = relatorioPreventivaDraft.pecas.map((p, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioPreventivaDraft.pecas[${i}].descricao=this.value;">
+        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioPreventivaDraft.pecas[${i}].codigo_pmk=this.value;">
+        <button class="step-rm" onclick="removerPecaPreventiva(${i})">×</button>
+      </div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
+}
+function adicionarPecaPreventiva() { relatorioPreventivaDraft.pecas.push({ descricao: '', codigo_pmk: '' }); renderPecasPreventiva(); }
+function removerPecaPreventiva(i) { relatorioPreventivaDraft.pecas.splice(i, 1); renderPecasPreventiva(); }
+
+function renderFotosGrupoPreventiva(idx) {
+  const el = document.getElementById('rp-fotos-' + idx);
+  if (!el) return;
+  el.innerHTML = relatorioPreventivaDraft.fotos[idx].fotos.map((f, j) => `
+    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="${esc(GRUPOS_FOTOS_PREVENTIVA[idx].label)}">
+      <button class="photo-rm" onclick="removerFotoPreventiva(${idx}, ${j})">×</button>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:12.5px;">Nenhuma foto anexada ainda.</p>';
+}
+function adicionarFotosPreventiva(idx, event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    relatorioPreventivaDraft.fotos[idx].fotos.push(...dataUrls);
+    renderFotosGrupoPreventiva(idx);
+  });
+}
+function removerFotoPreventiva(idx, j) { relatorioPreventivaDraft.fotos[idx].fotos.splice(j, 1); renderFotosGrupoPreventiva(idx); }
+
+function renderEstrelasPreventiva() {
+  document.getElementById('rp-estrelas').innerHTML = [1, 2, 3, 4, 5].map((n) => `
+    <button type="button" onclick="marcarEstrelaPreventiva(${n})" style="background:none; border:none; cursor:pointer; font-size:28px; color:${n <= relatorioPreventivaDraft.satisfacao_estrelas ? 'var(--blue)' : '#D8E2EF'};">★</button>
+  `).join('');
+}
+function marcarEstrelaPreventiva(n) { relatorioPreventivaDraft.satisfacao_estrelas = n; renderEstrelasPreventiva(); }
+
+function renderEmailsPreventiva() {
+  document.getElementById('rp-emails').innerHTML = relatorioPreventivaDraft.emails_copia.map((em, i) => `
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input placeholder="nome@empresa.com" value="${esc(em)}" oninput="relatorioPreventivaDraft.emails_copia[${i}]=this.value;">
+      ${relatorioPreventivaDraft.emails_copia.length > 1 ? `<button class="btn-outline-sm" onclick="removerEmailPreventiva(${i})">×</button>` : ''}
+    </div>`).join('');
+}
+function adicionarEmailPreventiva() { relatorioPreventivaDraft.emails_copia.push(''); renderEmailsPreventiva(); }
+function removerEmailPreventiva(i) { relatorioPreventivaDraft.emails_copia.splice(i, 1); renderEmailsPreventiva(); }
+
+// ---------- assinatura (canvas) — mesmo mecanismo do relatório corretivo, prefixo "rp-" ----------
+const assinaturaEstadoPreventiva = {};
+function montarAssinaturaPreventiva(chave) {
+  const canvas = document.getElementById('rp-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  assinaturaEstadoPreventiva[chave] = { desenhando: false, temTraco: false };
+  if (relatorioPreventivaDraft['assinatura_' + chave + '_img']) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); assinaturaEstadoPreventiva[chave].temTraco = true; atualizarStatusAssinaturaPreventiva(chave); };
+    img.src = relatorioPreventivaDraft['assinatura_' + chave + '_img'];
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); assinaturaEstadoPreventiva[chave].desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!assinaturaEstadoPreventiva[chave].desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); assinaturaEstadoPreventiva[chave].temTraco = true; }
+  function parar() {
+    if (!assinaturaEstadoPreventiva[chave].desenhando) return;
+    assinaturaEstadoPreventiva[chave].desenhando = false;
+    if (assinaturaEstadoPreventiva[chave].temTraco) {
+      relatorioPreventivaDraft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
+      atualizarStatusAssinaturaPreventiva(chave);
+    }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinaturaPreventiva(chave) {
+  const el = document.getElementById(`rp-assinatura-${chave}-status`);
+  if (el) { el.textContent = assinaturaEstadoPreventiva[chave].temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = assinaturaEstadoPreventiva[chave].temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinaturaPreventiva(chave) {
+  const canvas = document.getElementById('rp-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  assinaturaEstadoPreventiva[chave].temTraco = false;
+  relatorioPreventivaDraft['assinatura_' + chave + '_img'] = null;
+  atualizarStatusAssinaturaPreventiva(chave);
+}
+function ampliarAssinaturaPreventiva(chave) {
+  let modal = document.getElementById('modal-assinatura');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-assinatura';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Assinar</h3>
+      <p>Desenhe a assinatura com o dedo ou o mouse.</p>
+      <canvas id="modal-canvas" width="900" height="380" style="width:100%; height:260px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-canvas').getContext('2d').clearRect(0,0,900,380)">Limpar</button>
+        <button class="btn btn-primary" onclick="confirmarAssinaturaModalPreventiva('${chave}')">Usar esta assinatura</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-assinatura').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+  const canvas = document.getElementById('modal-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  let desenhando = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar); canvas.addEventListener('mousemove', mover); window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false }); canvas.addEventListener('touchmove', mover, { passive: false }); canvas.addEventListener('touchend', parar);
+}
+function confirmarAssinaturaModalPreventiva(chave) {
+  const modalCanvas = document.getElementById('modal-canvas');
+  const destino = document.getElementById('rp-canvas-' + chave);
+  const ctxDestino = destino.getContext('2d');
+  ctxDestino.clearRect(0, 0, destino.width, destino.height);
+  ctxDestino.drawImage(modalCanvas, 0, 0, destino.width, destino.height);
+  assinaturaEstadoPreventiva[chave].temTraco = true;
+  relatorioPreventivaDraft['assinatura_' + chave + '_img'] = destino.toDataURL('image/png');
+  atualizarStatusAssinaturaPreventiva(chave);
+  document.getElementById('modal-assinatura').classList.remove('show');
+}
+
+// ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
+async function concluirRelatorioPreventiva() {
+  const d = relatorioPreventivaDraft;
+  d.os_uf = document.getElementById('rp-os_uf').value;
+  d.os_numero = document.getElementById('rp-os_numero').value;
+  d.os_ano = document.getElementById('rp-os_ano').value;
+  d.data_inicial = document.getElementById('rp-data_inicial').value;
+  d.data_final = document.getElementById('rp-data_final').value;
+  d.modelo_maquina = document.getElementById('rp-modelo_maquina').value;
+  d.numero_serie = document.getElementById('rp-numero_serie').value;
+  d.servico_realizado = document.getElementById('rp-servico_realizado').value;
+  d.empresa = document.getElementById('rp-empresa').value;
+  d.endereco = document.getElementById('rp-endereco').value;
+  d.numero = document.getElementById('rp-numero').value;
+  d.bairro = document.getElementById('rp-bairro').value;
+  d.estado = document.getElementById('rp-estado').value;
+  d.cidade = document.getElementById('rp-cidade').value;
+  d.cep = document.getElementById('rp-cep').value;
+  d.setor_maquina = document.getElementById('rp-setor_maquina').value;
+  d.observacoes_checklist = document.getElementById('rp-observacoes_checklist').value;
+  d.servico_feito = document.getElementById('rp-servico_feito').value;
+  d.observacoes_servico = document.getElementById('rp-observacoes_servico').value;
+  d.satisfacao_comentario = document.getElementById('rp-satisfacao_comentario').value;
+  const autoriza = document.querySelector('input[name="rp-autoriza"]:checked');
+  d.satisfacao_autoriza = autoriza ? autoriza.value : '';
+  d.assinatura_cliente_nome = document.getElementById('rp-assinatura-cliente-nome').value;
+  d.assinatura_tecnico_nome = document.getElementById('rp-assinatura-tecnico-nome').value;
+
+  const obrigatorios = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
+    'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
+    'observacoes_checklist', 'servico_feito', 'observacoes_servico'];
+  for (const campo of obrigatorios) {
+    if (!String(d[campo] || '').trim()) return alert('Preencha todos os campos obrigatórios de "Identificação" e "Dados do atendimento".');
+  }
+  if (d.checklist.some((c) => !c.resposta)) return alert('Responda todos os itens do check-list (Sim/Não/N/A).');
+  for (const g of GRUPOS_FOTOS_PREVENTIVA) {
+    const idx = GRUPOS_FOTOS_PREVENTIVA.indexOf(g);
+    if (g.obrigatorio && !d.fotos[idx].fotos.length) return alert(`Anexe ao menos uma foto em "${g.label}".`);
+  }
+  if (!d.satisfacao_estrelas) return alert('Selecione a avaliação por estrelas da pesquisa de satisfação.');
+  if (!d.satisfacao_autoriza) return alert('Responda se autoriza o uso do feedback.');
+  if (!d.assinatura_cliente_nome || !d.assinatura_cliente_img) return alert('Colete o nome e a assinatura do cliente.');
+  if (!d.assinatura_tecnico_nome || !d.assinatura_tecnico_img) return alert('Colete o nome e a assinatura do técnico.');
+  const emails = d.emails_copia.map((e) => e.trim()).filter(Boolean);
+  if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
+  d.emails_copia = emails;
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioPreventiva(relatorio, logo);
+    window.open(url, '_blank');
+    const assunto = encodeURIComponent(`Termo de Manutenção Preventiva Laser — ${d.empresa}`);
+    const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o Termo de Manutenção Preventiva Laser (OS ${d.os_uf}/${d.os_numero}/${d.os_ano}) referente ao atendimento em ${d.empresa}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
+    window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
+    mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
@@ -4339,7 +4981,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
@@ -5349,6 +5991,11 @@ function nomeArquivoRelatorioManutencao(r) {
   if (r.tipo === 'ciclagem') {
     const cliente = limpar(r.empresa) || 'ensaio-ciclagem';
     return `ensaio-ciclagem - ${cliente}`;
+  }
+  if (r.tipo === 'preventiva') {
+    const serie = limpar(r.numero_serie);
+    const empresaPrev = limpar(r.empresa) || 'termo-preventiva-laser';
+    return serie ? `${empresaPrev} - ${serie}` : empresaPrev;
   }
   const empresa = limpar(r.empresa) || 'relatorio';
   const serie = limpar(r.numero_serie);

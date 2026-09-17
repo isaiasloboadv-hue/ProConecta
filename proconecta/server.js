@@ -318,6 +318,48 @@ function validarRelatorio(r) {
   return null;
 }
 
+// ---------- Termo de Manutenção Preventiva Laser (Relatório > Manual > Preventiva) ----------
+// relatório avulso de manutenção interna (não vinculado a nenhuma O.S.), mesma família do
+// "Relatório Manual" (relatorios_manutencao), com seu próprio checklist e fluxo de assinatura.
+const CHECKLIST_PREVENTIVA_LASER = [
+  'Fonte', 'CPA-D', 'CLP', 'Contator', 'Relé', 'Fonte tripla', 'Filtro de linha',
+  'Placa de controle', 'Pré-filtro', 'Filtro cooler', 'Filtro intermediário', 'Filtro principal',
+  'Lente para refração', 'Lente de sacrifício', 'Calibração', 'Projeção', 'Ressonador',
+  'Utilização de nobreak', 'Aterramento da máquina', 'Tomada dedicada', 'USB do fabricante',
+  'Chiller', 'Computador', 'Válvula', 'Regulador de pressão', 'Sistema de segurança',
+  'Comando Pneumático', 'Comando Elétrico',
+];
+// índices do array body.fotos (blocos {comentario, fotos}) que são obrigatórios — os 5
+// primeiros grupos do termo; "Fotos adicionais" (índice 5) é opcional
+const GRUPOS_FOTOS_PREVENTIVA_OBRIGATORIOS = [0, 1, 2, 3, 4];
+
+function validarRelatorioPreventivaLaser(r) {
+  if (!r || typeof r !== 'object') return 'Dados do termo são obrigatórios.';
+  const camposTexto = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
+    'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
+    'observacoes_checklist', 'servico_feito', 'observacoes_servico'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!Array.isArray(r.checklist) || r.checklist.length !== CHECKLIST_PREVENTIVA_LASER.length) {
+    return 'Check-list de verificação incompleto.';
+  }
+  for (const item of r.checklist) {
+    if (!item || !['sim', 'nao', 'na'].includes(item.resposta)) return 'Todo item do check-list precisa de uma resposta (Sim/Não/N/A).';
+  }
+  const fotos = Array.isArray(r.fotos) ? r.fotos : [];
+  for (const idx of GRUPOS_FOTOS_PREVENTIVA_OBRIGATORIOS) {
+    const bloco = fotos[idx];
+    if (!bloco || !Array.isArray(bloco.fotos) || !bloco.fotos.length) return 'Anexe as fotos obrigatórias do termo.';
+  }
+  if (!(r.satisfacao_estrelas >= 1 && r.satisfacao_estrelas <= 5)) return 'Avaliação de satisfação (estrelas) é obrigatória.';
+  if (r.satisfacao_autoriza !== 'sim' && r.satisfacao_autoriza !== 'nao') return 'Responda se autoriza o uso do feedback.';
+  if (!r.assinatura_cliente_nome || !r.assinatura_cliente_img) return 'Assinatura do cliente é obrigatória.';
+  if (!r.assinatura_tecnico_nome || !r.assinatura_tecnico_img) return 'Assinatura do técnico é obrigatória.';
+  if (!Array.isArray(r.emails_copia) || r.emails_copia.length === 0) return 'Informe ao menos um e-mail para envio do termo.';
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -1848,7 +1890,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
@@ -1862,6 +1904,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       return enviarJSON(res, 400, { erro: 'Marque o resultado do ensaio (Aprovado ou Reprovado).' });
     }
     if (!ciclos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos um ciclo.' });
+  } else if (tipo === 'preventiva') {
+    const erroPreventiva = validarRelatorioPreventivaLaser(body);
+    if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -1893,6 +1938,25 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     conclusao_ensaio: tipo === 'ciclagem' ? (body.conclusao_ensaio || '') : '',
     fotos,
     criado_em: new Date().toISOString(),
+    ...(tipo === 'preventiva' ? {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico_realizado: body.servico_realizado || '',
+      endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      setor_maquina: body.setor_maquina || '',
+      checklist: Array.isArray(body.checklist) ? body.checklist : [],
+      observacoes_checklist: body.observacoes_checklist || '',
+      servico_feito: body.servico_feito || '',
+      observacoes_servico: body.observacoes_servico || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_comentario: body.satisfacao_comentario || '',
+      satisfacao_autoriza: body.satisfacao_autoriza || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+    } : {}),
   };
   data.relatorios_manutencao.push(item);
   db.save(data);
@@ -1933,6 +1997,29 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       resultado_ensaio: body.resultado_ensaio,
       ciclos,
       conclusao_ensaio: body.conclusao_ensaio || '',
+    });
+  } else if (item.tipo === 'preventiva') {
+    const erroPreventiva = validarRelatorioPreventivaLaser(body);
+    if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+    Object.assign(item, {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico_realizado: body.servico_realizado || '',
+      empresa: body.empresa || '', endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      setor_maquina: body.setor_maquina || '',
+      checklist: Array.isArray(body.checklist) ? body.checklist : [],
+      observacoes_checklist: body.observacoes_checklist || '',
+      servico_feito: body.servico_feito || '',
+      observacoes_servico: body.observacoes_servico || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_comentario: body.satisfacao_comentario || '',
+      satisfacao_autoriza: body.satisfacao_autoriza || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      fotos,
     });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
