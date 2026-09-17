@@ -6349,19 +6349,37 @@ async function salvarAtrelamento() {
 }
 
 // ---------- USUÁRIOS (cadastro por convite) ----------
+// filtro da lista de usuários por tipo de acesso (fica lembrado enquanto a tela estiver aberta,
+// mesmo depois de criar/editar/excluir alguém — só reseta se sair e voltar pra tela).
+let usuariosFiltroPapel = 'todos';
+function alternarFiltroUsuarios() {
+  usuariosFiltroPapel = document.getElementById('filtro-usuarios-papel').value;
+  renderUsuarios();
+}
 async function renderUsuarios() {
   const [{ usuarios }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/clientes')]);
   window._clientesCache = clientes;
   window._usuariosCache = usuarios;
   const main = document.getElementById('main');
+  const papeisPresentes = [...new Set(usuarios.map((u) => u.papel))];
+  if (!papeisPresentes.includes(usuariosFiltroPapel)) usuariosFiltroPapel = 'todos';
+  const listaFiltrada = usuariosFiltroPapel === 'todos' ? usuarios : usuarios.filter((u) => u.papel === usuariosFiltroPapel);
   main.innerHTML = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
-      <div><h1>Usuários</h1><p>${usuarios.length} cadastrado(s)</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormUsuario()">+ Novo usuário</button>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Usuários</h1><p>${listaFiltrada.length}${usuariosFiltroPapel !== 'todos' ? ' de ' + usuarios.length : ''} cadastrado(s)</p></div>
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div><label style="display:block; font-size:12px; color:var(--ink-soft); margin-bottom:4px;">Filtrar por tipo de acesso</label>
+          <select id="filtro-usuarios-papel" onchange="alternarFiltroUsuarios()">
+            <option value="todos" ${usuariosFiltroPapel === 'todos' ? 'selected' : ''}>Todos</option>
+            ${papeisPresentes.map((p) => `<option value="${p}" ${usuariosFiltroPapel === p ? 'selected' : ''}>${esc(PAPEL_LABEL[p] || p)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="mostrarFormUsuario()">+ Novo usuário</button>
+      </div>
     </div>
     <div id="form-usuario"></div>
     <div id="convite-resultado"></div>
-    ${usuarios.map((u) => `
+    ${listaFiltrada.map((u) => `
       <div class="user-row">
         <div class="u-avatar-lg">${initials(u.nome)}</div>
         <div class="u-info">
