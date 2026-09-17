@@ -42,8 +42,10 @@ const CHECKLIST_CORRETIVA = [
   'I/O da máquina', 'Sistema de refrigeração', 'Acompanhamento da linha',
   'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
 ];
-// checklist do Termo de Manutenção Preventiva Laser (Relatório > Manual > Preventiva)
-const CHECKLIST_PREVENTIVA_LASER = [
+// check-list padrão do Termo de Manutenção Preventiva (Relatório > Manual > Preventiva) — o
+// equipamento pode ser variado (não só laser), então isso é só um ponto de partida: o técnico
+// pode adicionar, renomear ou remover itens antes de enviar, pra adequar ao equipamento atendido.
+const CHECKLIST_PREVENTIVA_PADRAO = [
   'Fonte', 'CPA-D', 'CLP', 'Contator', 'Relé', 'Fonte tripla', 'Filtro de linha',
   'Placa de controle', 'Pré-filtro', 'Filtro cooler', 'Filtro intermediário', 'Filtro principal',
   'Lente para refração', 'Lente de sacrifício', 'Calibração', 'Projeção', 'Ressonador',
@@ -51,7 +53,7 @@ const CHECKLIST_PREVENTIVA_LASER = [
   'Chiller', 'Computador', 'Válvula', 'Regulador de pressão', 'Sistema de segurança',
   'Comando Pneumático', 'Comando Elétrico',
 ];
-// grupos de fotos obrigatórias do Termo de Manutenção Preventiva Laser — cada grupo vira um
+// grupos de fotos obrigatórias do Termo de Manutenção Preventiva — cada grupo vira um
 // bloco {comentario, fotos} igual ao relatório completo, com o rótulo já preenchido no
 // comentário (esse aqui não é editável pelo técnico, é só o título do grupo)
 const GRUPOS_FOTOS_PREVENTIVA = [
@@ -3686,7 +3688,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   return doc.output('bloburl');
 }
 
-// Termo de Manutenção Preventiva Laser — mesma escala de cores (PDF_COR) e mesmo esqueleto
+// Termo de Manutenção Preventiva — mesma escala de cores (PDF_COR) e mesmo esqueleto
 // (capa navy + cabeçalho + títulos + caixas com borda) do relatório de manutenção interna acima,
 // com as seções próprias do termo: check-list de 28 itens, peças, fotos por grupo, pesquisa de
 // satisfação e assinaturas.
@@ -3709,7 +3711,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
     y += 15;
     doc.setFontSize(13); doc.setFont(undefined, 'bold');
-    doc.text('Termo de Manutenção Preventiva Laser', pageW / 2, y, { align: 'center' });
+    doc.text('Termo de Manutenção Preventiva', pageW / 2, y, { align: 'center' });
     y += 10;
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
     doc.line(margem, y, pageW - margem, y);
@@ -3771,7 +3773,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
-  doc.text('PREVENTIVA LASER', pageW / 2, 438, { align: 'center' });
+  doc.text('PREVENTIVA', pageW / 2, 438, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
@@ -4580,7 +4582,7 @@ async function editarRelatorioManutencao(i) {
   else mostrarFormRelatorioManutencao(r);
 }
 
-// ---------- Relatório > Manual > Preventiva (Termo de Manutenção Preventiva Laser) ----------
+// ---------- Relatório > Manual > Preventiva (Termo de Manutenção Preventiva) ----------
 // relatório avulso de manutenção interna, mesma família do Relatório Manual (relatorios_manutencao,
 // tipo "preventiva"), com check-list próprio, pesquisa de satisfação e assinatura — segue o mesmo
 // padrão visual (.panel/.form-grid) e a mesma escala de cores de PDF (PDF_COR) do relatório principal.
@@ -4594,7 +4596,7 @@ function relatorioPreventivaPadrao() {
     servico_realizado: 'Preventiva',
     empresa: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '',
     setor_maquina: '',
-    checklist: CHECKLIST_PREVENTIVA_LASER.map((item) => ({ item, resposta: '', observacao: '' })),
+    checklist: CHECKLIST_PREVENTIVA_PADRAO.map((item) => ({ item, resposta: '', observacao: '' })),
     observacoes_checklist: '',
     servico_feito: '',
     pecas: [],
@@ -4615,7 +4617,7 @@ function mostrarFormRelatorioPreventiva(existente) {
   const editando = !!d.id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva Laser</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
 
     <div class="panel">
       <h2>Identificação</h2>
@@ -4649,8 +4651,9 @@ function mostrarFormRelatorioPreventiva(existente) {
 
     <div class="panel">
       <h2>Check-list de verificação*</h2>
-      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Já vem com os itens mais comuns de equipamento a laser — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
       <div id="rp-checklist"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistPreventiva()">+ Adicionar item</button>
       <label style="margin-top:10px;">Observações*</label>
       <textarea id="rp-observacoes_checklist" placeholder="Observações gerais sobre o check-list">${esc(d.observacoes_checklist)}</textarea>
     </div>
@@ -4749,16 +4752,28 @@ function renderChecklistPreventiva() {
   document.getElementById('rp-checklist').innerHTML = relatorioPreventivaDraft.checklist.map((c, i) => `
     <div class="step-item" style="margin-bottom:10px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-        <b style="color:var(--navy); font-size:13.5px;">${String(i + 1).padStart(2, '0')} ${esc(c.item)}</b>
-        <div style="display:flex; gap:6px;">
+        <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:160px;">
+          <span style="color:var(--navy); font-size:13.5px; font-weight:700;">${String(i + 1).padStart(2, '0')}</span>
+          <input placeholder="Nome do item" value="${esc(c.item)}" style="flex:1;" oninput="relatorioPreventivaDraft.checklist[${i}].item=this.value;">
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
           ${['sim', 'nao', 'na'].map((v) => `<button type="button" class="btn-outline-sm" style="${c.resposta === v ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="marcarChecklistPreventiva(${i}, '${v}')">${v === 'sim' ? 'Sim' : v === 'nao' ? 'Não' : 'N/A'}</button>`).join('')}
+          <button class="step-rm" onclick="removerItemChecklistPreventiva(${i})">×</button>
         </div>
       </div>
       <input placeholder="Observação (opcional)" value="${esc(c.observacao)}" oninput="relatorioPreventivaDraft.checklist[${i}].observacao=this.value;">
-    </div>`).join('');
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhum item no check-list — adicione ao menos um.</p>';
 }
 function marcarChecklistPreventiva(i, valor) {
   relatorioPreventivaDraft.checklist[i].resposta = valor;
+  renderChecklistPreventiva();
+}
+function adicionarItemChecklistPreventiva() {
+  relatorioPreventivaDraft.checklist.push({ item: '', resposta: '', observacao: '' });
+  renderChecklistPreventiva();
+}
+function removerItemChecklistPreventiva(i) {
+  relatorioPreventivaDraft.checklist.splice(i, 1);
   renderChecklistPreventiva();
 }
 
@@ -4936,6 +4951,8 @@ async function concluirRelatorioPreventiva() {
   for (const campo of obrigatorios) {
     if (!String(d[campo] || '').trim()) return alert('Preencha todos os campos obrigatórios de "Identificação" e "Dados do atendimento".');
   }
+  if (!d.checklist.length) return alert('Adicione ao menos um item no check-list.');
+  if (d.checklist.some((c) => !String(c.item || '').trim())) return alert('Dê um nome a todos os itens do check-list, ou remova os que estiverem em branco.');
   if (d.checklist.some((c) => !c.resposta)) return alert('Responda todos os itens do check-list (Sim/Não/N/A).');
   for (const g of GRUPOS_FOTOS_PREVENTIVA) {
     const idx = GRUPOS_FOTOS_PREVENTIVA.indexOf(g);
@@ -4956,8 +4973,8 @@ async function concluirRelatorioPreventiva() {
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioPreventiva(relatorio, logo);
     window.open(url, '_blank');
-    const assunto = encodeURIComponent(`Termo de Manutenção Preventiva Laser — ${d.empresa}`);
-    const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o Termo de Manutenção Preventiva Laser (OS ${d.os_uf}/${d.os_numero}/${d.os_ano}) referente ao atendimento em ${d.empresa}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
+    const assunto = encodeURIComponent(`Termo de Manutenção Preventiva — ${d.empresa}`);
+    const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o Termo de Manutenção Preventiva (OS ${d.os_uf}/${d.os_numero}/${d.os_ano}) referente ao atendimento em ${d.empresa}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
     window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
     mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
     renderRelatorioManutencao();
@@ -5994,7 +6011,7 @@ function nomeArquivoRelatorioManutencao(r) {
   }
   if (r.tipo === 'preventiva') {
     const serie = limpar(r.numero_serie);
-    const empresaPrev = limpar(r.empresa) || 'termo-preventiva-laser';
+    const empresaPrev = limpar(r.empresa) || 'termo-preventiva';
     return serie ? `${empresaPrev} - ${serie}` : empresaPrev;
   }
   const empresa = limpar(r.empresa) || 'relatorio';

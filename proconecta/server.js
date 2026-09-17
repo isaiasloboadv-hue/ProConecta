@@ -318,22 +318,18 @@ function validarRelatorio(r) {
   return null;
 }
 
-// ---------- Termo de Manutenção Preventiva Laser (Relatório > Manual > Preventiva) ----------
+// ---------- Termo de Manutenção Preventiva (Relatório > Manual > Preventiva) ----------
 // relatório avulso de manutenção interna (não vinculado a nenhuma O.S.), mesma família do
 // "Relatório Manual" (relatorios_manutencao), com seu próprio checklist e fluxo de assinatura.
-const CHECKLIST_PREVENTIVA_LASER = [
-  'Fonte', 'CPA-D', 'CLP', 'Contator', 'Relé', 'Fonte tripla', 'Filtro de linha',
-  'Placa de controle', 'Pré-filtro', 'Filtro cooler', 'Filtro intermediário', 'Filtro principal',
-  'Lente para refração', 'Lente de sacrifício', 'Calibração', 'Projeção', 'Ressonador',
-  'Utilização de nobreak', 'Aterramento da máquina', 'Tomada dedicada', 'USB do fabricante',
-  'Chiller', 'Computador', 'Válvula', 'Regulador de pressão', 'Sistema de segurança',
-  'Comando Pneumático', 'Comando Elétrico',
-];
+// O equipamento atendido pode ser variado (não só laser), então o checklist não tem uma lista
+// fixa de itens nem um tamanho fixo — o front já vem com um modelo pronto (equipamento a laser),
+// mas o técnico pode adicionar, renomear ou remover itens; aqui só valida que cada item tenha
+// nome e resposta.
 // índices do array body.fotos (blocos {comentario, fotos}) que são obrigatórios — os 5
 // primeiros grupos do termo; "Fotos adicionais" (índice 5) é opcional
 const GRUPOS_FOTOS_PREVENTIVA_OBRIGATORIOS = [0, 1, 2, 3, 4];
 
-function validarRelatorioPreventivaLaser(r) {
+function validarRelatorioPreventiva(r) {
   if (!r || typeof r !== 'object') return 'Dados do termo são obrigatórios.';
   const camposTexto = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
     'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
@@ -341,10 +337,11 @@ function validarRelatorioPreventivaLaser(r) {
   for (const c of camposTexto) {
     if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
   }
-  if (!Array.isArray(r.checklist) || r.checklist.length !== CHECKLIST_PREVENTIVA_LASER.length) {
-    return 'Check-list de verificação incompleto.';
+  if (!Array.isArray(r.checklist) || !r.checklist.length) {
+    return 'Adicione ao menos um item no check-list.';
   }
   for (const item of r.checklist) {
+    if (!item || !String(item.item || '').trim()) return 'Todo item do check-list precisa de um nome.';
     if (!item || !['sim', 'nao', 'na'].includes(item.resposta)) return 'Todo item do check-list precisa de uma resposta (Sim/Não/N/A).';
   }
   const fotos = Array.isArray(r.fotos) ? r.fotos : [];
@@ -1905,7 +1902,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     }
     if (!ciclos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos um ciclo.' });
   } else if (tipo === 'preventiva') {
-    const erroPreventiva = validarRelatorioPreventivaLaser(body);
+    const erroPreventiva = validarRelatorioPreventiva(body);
     if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
@@ -1999,7 +1996,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       conclusao_ensaio: body.conclusao_ensaio || '',
     });
   } else if (item.tipo === 'preventiva') {
-    const erroPreventiva = validarRelatorioPreventivaLaser(body);
+    const erroPreventiva = validarRelatorioPreventiva(body);
     if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
     Object.assign(item, {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
