@@ -6994,12 +6994,15 @@ async function renderFilaEstoque() {
 
 function cardEstoqueChegada(a) {
   return `
-    <div class="atendimento-card">
+    <div class="atendimento-card" style="cursor:pointer;" onclick="abrirDetalheEstoque(${a.id})">
       <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
       <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
-      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-equip">${a.equipamento_tipo ? esc(a.equipamento_tipo) + (a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : '') : 'Equipamento não vinculado a esta O.S.'}</div>
       <div class="atendimento-status">${tag('Aguardando chegada do cliente', 'amber')}</div>
-      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada</button></div>
+      <div style="margin-top:10px; display:flex; gap:8px;" onclick="event.stopPropagation()">
+        <button class="btn-outline-sm" onclick="abrirDetalheEstoque(${a.id})">Ver detalhes</button>
+        <button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada</button>
+      </div>
     </div>`;
 }
 
@@ -7007,13 +7010,46 @@ function cardEstoqueSaida(a) {
   const label = a.motivo_pos_venda === 'peca_enviada' ? 'Confirmar envio da peça' : 'Confirmar saída do equipamento';
   const resumo = a.motivo_pos_venda === 'peca_enviada' ? 'Orçamento aprovado — peça pronta pra envio' : 'Equipamento reparado pelo setor de reparo';
   return `
-    <div class="atendimento-card">
+    <div class="atendimento-card" style="cursor:pointer;" onclick="abrirDetalheEstoque(${a.id})">
       <div class="atendimento-card-topo"><span class="atendimento-numero">${esc(numeroOS(a))}</span></div>
       <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
-      ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
+      <div class="atendimento-equip">${a.equipamento_tipo ? esc(a.equipamento_tipo) + (a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : '') : 'Equipamento não vinculado a esta O.S.'}</div>
       <div class="atendimento-resumo">${esc(resumo)}</div>
       <div class="atendimento-status">${tag('Pronto pra saída', 'purple')}</div>
-      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button></div>
+      <div style="margin-top:10px; display:flex; gap:8px;" onclick="event.stopPropagation()">
+        <button class="btn-outline-sm" onclick="abrirDetalheEstoque(${a.id})">Ver detalhes</button>
+        <button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button>
+      </div>
+    </div>`;
+}
+
+// tela separada com os dados completos do cliente e do equipamento antes de confirmar chegada ou
+// saída — sem isso o estoque só via o resuminho do card (e se o equipamento não estava vinculado
+// à O.S., nem isso aparecia).
+function abrirDetalheEstoque(id) {
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const aguardandoChegada = a.fase_atendimento === 'aguardando_equipamento';
+  const label = a.motivo_pos_venda === 'peca_enviada' ? 'Confirmar envio da peça' : 'Confirmar saída do equipamento';
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
+      <button class="btn-outline-sm" onclick="renderFilaEstoque()">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <div class="kv"><b>Empresa:</b> ${esc(a.cliente_nome || '—')} <span class="sep">·</span> <b>Contato:</b> ${esc(a.cliente_contato || '—')} <span class="sep">·</span> <b>Telefone:</b> ${esc(a.cliente_telefone || '—')}</div>
+      <div class="kv"><b>E-mail:</b> ${esc(a.cliente_email || '—')}</div>
+      ${a.cliente_endereco ? `<div class="kv"><b>Endereço:</b> ${esc(a.cliente_endereco)}${a.cliente_numero ? ', ' + esc(a.cliente_numero) : ''} — ${esc(a.cliente_bairro || '—')}, ${esc(a.cliente_cidade || '—')}/${esc(a.cliente_estado || '—')}</div>` : ''}
+      <div class="kv"><b>Equipamento:</b> ${esc(a.equipamento_tipo || '—')} — ${esc(a.equipamento_modelo || '—')}</div>
+      <div class="kv"><b>Número de série:</b> ${esc(a.equipamento_serie || '—')} <span class="sep">·</span> <b>Data de fabricação:</b> ${esc(a.equipamento_data_fabricacao || '—')}</div>
+      <div class="kv"><b>Técnico do reparo:</b> ${esc(a.tecnico_nome || '—')}</div>
+      <div class="admin-note" style="margin-top:14px;">${aguardandoChegada ? 'Aguardando o equipamento chegar (enviado pelo cliente).' : (a.motivo_pos_venda === 'peca_enviada' ? 'Orçamento aprovado — peça pronta pra envio.' : 'Equipamento reparado pelo setor de reparo — pronto pra sair.')}</div>
+      <div style="margin-top:16px;">
+        ${aguardandoChegada
+          ? `<button class="btn btn-primary btn-sm" onclick="estoqueConfirmarChegada(${a.id})">Confirmar chegada</button>`
+          : `<button class="btn btn-primary btn-sm" onclick="estoqueConfirmarSaida(${a.id})">${label}</button>`}
+      </div>
     </div>`;
 }
 
