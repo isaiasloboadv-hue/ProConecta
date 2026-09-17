@@ -67,13 +67,16 @@ function exigirPapel(user, papeis) {
 // Quem tem acesso_total considera tudo liberado — só restringe de verdade quando acesso_total ===
 // false, e aí só os menus marcados aqui aparecem pra essa pessoa.
 const MENUS_POR_PAPEL = {
-  suporte: ['agenda', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo'],
-  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios'],
+  suporte: ['agenda', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
+  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios', 'chat-interno'],
   cliente: ['biblioteca', 'equipamentos', 'chamados'],
-  producao: ['biblioteca', 'clientes', 'equipamentos'],
-  pos_venda: ['fila-pos-venda'],
-  estoque: ['fila-estoque'],
+  producao: ['biblioteca', 'clientes', 'equipamentos', 'chat-interno'],
+  pos_venda: ['fila-pos-venda', 'chat-interno'],
+  estoque: ['fila-estoque', 'chat-interno'],
 };
+// todo tipo de acesso interno (todo mundo menos cliente) pode usar o chat interno — é comunicação
+// entre a própria equipe, cliente não faz parte.
+const PAPEIS_CHAT_INTERNO = ['suporte', 'administrador', 'producao', 'pos_venda', 'estoque'];
 // o token (JWT) só carrega id/papel/nome/cliente_id (ver gerarToken) — acesso_total/menus não vêm
 // nele, então sempre busca o cadastro completo em `data.usuarios` pelo id antes de decidir. Único
 // uso hoje é o submenu "Setor Reparo" do suporte (as outras rotas não são gated por menu, só por
@@ -1574,6 +1577,83 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
     );
   }
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });
+});
+
+// ---------- chat interno (mensagens diretas entre a equipe — cliente não participa) ----------
+// bem mais simples que o atendimento por chat (chamados): é só uma lista achatada de mensagens
+// remetente->destinatário, e a "conversa" entre duas pessoas é filtrada na hora, sem thread própria.
+
+// GET /api/chat-interno/contatos — todo mundo que não é cliente, com prévia da última mensagem e
+// contagem de não lidas, ordenado como o WhatsApp (quem conversou mais recente primeiro).
+rota('GET', /^\/api\/chat-interno\/contatos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_CHAT_INTERNO)) return enviarJSON(res, 403, { erro: 'Só a equipe interna usa o chat interno.' });
+  const data = db.load();
+  const contatos = data.usuarios
+    .filter((u) => u.papel !== 'cliente' && u.id !== user.id)
+    .map((u) => {
+      const conversa = data.mensagens_internas.filter((m) =>
+        (m.remetente_id === user.id && m.destinatario_id === u.id) || (m.remetente_id === u.id && m.destinatario_id === user.id));
+      const ultima = conversa.reduce((max, m) => (!max || m.criado_em > max.criado_em ? m : max), null);
+      const nao_lidas = conversa.filter((m) => m.destinatario_id === user.id && m.remetente_id === u.id && !m.lida).length;
+      return {
+        id: u.id, nome: u.nome, papel: u.papel, departamento: u.departamento || null,
+        ultima_mensagem_texto: ultima ? ultima.texto : null,
+        ultima_mensagem_em: ultima ? ultima.criado_em : null,
+        ultima_mensagem_propria: ultima ? ultima.remetente_id === user.id : false,
+        nao_lidas,
+      };
+    })
+    .sort((a, b) => (b.ultima_mensagem_em || '').localeCompare(a.ultima_mensagem_em || '') || a.nome.localeCompare(b.nome));
+  enviarJSON(res, 200, { contatos });
+});
+
+// GET /api/chat-interno/:outroId/mensagens — abre a conversa e marca as mensagens dele pra mim
+// como lidas (igual abrir uma conversa no WhatsApp).
+rota('GET', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_CHAT_INTERNO)) return enviarJSON(res, 403, { erro: 'Só a equipe interna usa o chat interno.' });
+  const outroId = Number(m[1]);
+  const data = db.load();
+  const outro = data.usuarios.find((u) => u.id === outroId);
+  if (!outro || outro.papel === 'cliente') return enviarJSON(res, 404, { erro: 'Contato não encontrado.' });
+  const mensagens = data.mensagens_internas
+    .filter((msg) => (msg.remetente_id === user.id && msg.destinatario_id === outroId) || (msg.remetente_id === outroId && msg.destinatario_id === user.id))
+    .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  let mudou = false;
+  for (const msg of mensagens) {
+    if (msg.destinatario_id === user.id && msg.remetente_id === outroId && !msg.lida) { msg.lida = true; mudou = true; }
+  }
+  if (mudou) db.save(data);
+  enviarJSON(res, 200, { mensagens, contato: { id: outro.id, nome: outro.nome, papel: outro.papel } });
+});
+
+// POST /api/chat-interno/:outroId/mensagens — manda uma mensagem e avisa o destinatário por push
+rota('POST', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_CHAT_INTERNO)) return enviarJSON(res, 403, { erro: 'Só a equipe interna usa o chat interno.' });
+  const outroId = Number(m[1]);
+  if (outroId === user.id) return enviarJSON(res, 400, { erro: 'Você não pode mandar mensagem pra si mesmo.' });
+  const body = await lerCorpo(req);
+  const texto = (body.texto || '').trim();
+  if (!texto) return enviarJSON(res, 400, { erro: 'Escreva uma mensagem.' });
+  const data = db.load();
+  const outro = data.usuarios.find((u) => u.id === outroId);
+  if (!outro || outro.papel === 'cliente') return enviarJSON(res, 404, { erro: 'Contato não encontrado.' });
+  const remetente = data.usuarios.find((u) => u.id === user.id);
+  const mensagem = {
+    id: nextId(data, 'mensagens_internas'),
+    remetente_id: user.id, destinatario_id: outroId, texto,
+    criado_em: new Date().toISOString(), lida: false,
+  };
+  data.mensagens_internas.push(mensagem);
+  db.save(data);
+  await enviarPush(data, outroId, {
+    titulo: `Mensagem de ${remetente ? remetente.nome : 'alguém'}`,
+    corpo: texto.length > 120 ? texto.slice(0, 117) + '...' : texto,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 201, { mensagem });
 });
 
 // ---------- relatórios de manutenção interna (avulsos, sem vínculo com O.S./agenda) ----------

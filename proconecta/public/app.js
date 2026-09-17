@@ -367,6 +367,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'calendario-tecnico': 'Calendário',
     'biblioteca': 'Biblioteca',
     'fila-reparo': 'Setor Reparo',
+    'chat-interno': 'Mensagens',
   },
   administrador: {
     'agenda': 'Agenda geral',
@@ -377,6 +378,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
     'usuarios': 'Usuários',
+    'chat-interno': 'Mensagens',
   },
   cliente: {
     'biblioteca': 'Biblioteca',
@@ -387,9 +389,10 @@ const MENUS_LABEL_POR_PAPEL = {
     'biblioteca': 'Biblioteca',
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
+    'chat-interno': 'Mensagens',
   },
-  pos_venda: { 'fila-pos-venda': 'Pós-venda' },
-  estoque: { 'fila-estoque': 'Estoque' },
+  pos_venda: { 'fila-pos-venda': 'Pós-venda', 'chat-interno': 'Mensagens' },
+  estoque: { 'fila-estoque': 'Estoque', 'chat-interno': 'Mensagens' },
 };
 
 const NAV = {
@@ -415,6 +418,7 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
+    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
@@ -440,6 +444,7 @@ const NAV = {
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
     { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
+    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   cliente: [
     { key: 'biblioteca', label: 'Biblioteca', children: [
@@ -470,12 +475,15 @@ const NAV = {
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
+    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   pos_venda: [
     { key: 'fila-pos-venda', label: 'Pós-venda', page: 'fila-pos-venda' },
+    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   estoque: [
     { key: 'fila-estoque', label: 'Estoque', page: 'fila-estoque' },
+    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
 };
 
@@ -582,6 +590,7 @@ async function ir(pagina) {
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
     if (pagina === 'fila-solicitacao-atendimento') return renderFilaSolicitacaoAtendimento();
+    if (pagina === 'chat-interno') return renderChatInterno();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -7062,6 +7071,90 @@ async function estoqueConfirmarSaida(id) {
   if (!confirm('Confirma que saiu rumo ao cliente? A O.S. será finalizada.')) return;
   try { await api(`/api/agenda/${id}/estoque/confirmar-saida`, { method: 'POST' }); mostrarToast('Saída confirmada — O.S. finalizada.'); renderFilaEstoque(); }
   catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- chat interno (mensagens diretas entre a equipe, sem o cliente) ----------
+
+async function renderChatInterno() {
+  clearInterval(_chatInternoPoll);
+  const { contatos } = await api('/api/chat-interno/contatos');
+  window._chatInternoContatos = contatos;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Mensagens</h1><p>Converse direto com qualquer pessoa da equipe.</p></div>
+    <div class="panel" id="chat-interno-lista">${listaContatosInternosHTML(contatos)}</div>`;
+}
+
+function listaContatosInternosHTML(contatos) {
+  if (!contatos.length) return '<p class="empty">Nenhum outro usuário cadastrado ainda.</p>';
+  return contatos.map((c) => `
+    <div class="user-row" style="cursor:pointer;" onclick="abrirConversaInterna(${c.id})">
+      <div class="u-avatar-lg">${initials(c.nome)}</div>
+      <div class="u-info">
+        <div class="u-line1">${esc(c.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[c.papel] || c.papel)}</span>${c.papel === 'administrador' ? ` <span class="tag tag-papel">${c.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[c.departamento] || c.departamento) : 'Geral'}</span>` : ''}${c.nao_lidas ? ` <span class="tag" style="background:var(--blue); color:#fff;">${c.nao_lidas}</span>` : ''}</div>
+        <div class="u-line2">${c.ultima_mensagem_texto ? (c.ultima_mensagem_propria ? 'Você: ' : '') + esc(c.ultima_mensagem_texto) : 'Nenhuma mensagem ainda'}</div>
+      </div>
+      ${c.ultima_mensagem_em ? `<span class="badge">${fmtData(c.ultima_mensagem_em)}</span>` : ''}
+    </div>`).join('');
+}
+
+let _chatInternoAtual = null;
+let _chatInternoPoll = null;
+
+async function abrirConversaInterna(id) {
+  clearInterval(_chatInternoPoll);
+  const { mensagens, contato } = await api(`/api/chat-interno/${id}/mensagens`);
+  _chatInternoAtual = contato;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(contato.nome)}</h1><p>${esc(PAPEL_LABEL[contato.papel] || contato.papel)}</p></div>
+      <button class="btn-outline-sm" onclick="renderChatInterno()">‹ Voltar</button>
+    </div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="ci-mensagens"></div>
+      <div class="chat-compositor">
+        <textarea id="ci-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemInterna();}"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="enviarMensagemInterna()">Enviar</button>
+      </div>
+    </div>`;
+  renderMensagensInternas(mensagens);
+  _chatInternoPoll = setInterval(atualizarConversaInterna, 4000);
+}
+
+async function atualizarConversaInterna() {
+  if (!_chatInternoAtual) return;
+  try {
+    const { mensagens } = await api(`/api/chat-interno/${_chatInternoAtual.id}/mensagens`);
+    renderMensagensInternas(mensagens);
+  } catch (e) { /* silencioso — tenta de novo no próximo ciclo */ }
+}
+
+async function enviarMensagemInterna() {
+  if (!_chatInternoAtual) return;
+  const campo = document.getElementById('ci-texto');
+  const texto = campo.value.trim();
+  if (!texto) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    await api(`/api/chat-interno/${_chatInternoAtual.id}/mensagens`, { method: 'POST', body: { texto } });
+    const { mensagens } = await api(`/api/chat-interno/${_chatInternoAtual.id}/mensagens`);
+    renderMensagensInternas(mensagens);
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+function renderMensagensInternas(mensagens) {
+  const alvo = document.getElementById('ci-mensagens');
+  if (!alvo) return;
+  alvo.innerHTML = mensagens.length ? mensagens.map((m) => {
+    const proprio = m.remetente_id === USER.id;
+    return `<div class="chat-msg ${proprio ? 'chat-msg-proprio' : 'chat-msg-outro'}">
+      <div class="chat-msg-texto">${esc(m.texto)}</div>
+      <div class="chat-msg-hora">${fmtData(m.criado_em)}</div>
+    </div>`;
+  }).join('') : '<p class="empty">Nenhuma mensagem ainda — diga oi!</p>';
+  alvo.scrollTop = alvo.scrollHeight;
 }
 
 // ---------- administrador: Solicitação de Atendimento (motivo "técnico vai até o cliente") ----------

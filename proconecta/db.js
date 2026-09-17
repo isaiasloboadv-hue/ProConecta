@@ -42,7 +42,8 @@ function seed() {
     push_subscriptions: [],
     vapid: null,
     empresas: [],
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1 },
+    mensagens_internas: [],
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1 },
   };
 }
 
@@ -123,6 +124,7 @@ function migrar(data) {
   if (!data.chamados) data.chamados = [];
   if (data.chamados_rr_index === undefined) data.chamados_rr_index = 0;
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
+  if (!data.mensagens_internas) data.mensagens_internas = [];
   sincronizarEmpresaPadrao(data);
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
@@ -152,6 +154,7 @@ function migrar(data) {
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
   if (!data._seq.relatorios_manutencao) data._seq.relatorios_manutencao = 1;
+  if (!data._seq.mensagens_internas) data._seq.mensagens_internas = 1;
   for (const u of data.usuarios) {
     if (!u.status) u.status = 'ativo';
     if (u.convite_token === undefined) u.convite_token = null;
