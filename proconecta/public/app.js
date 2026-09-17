@@ -2881,7 +2881,7 @@ function timelineOS(a, visita) {
     const visitaRetorno = (window._visitasRetornoPorAgenda || {})[a.id];
     passos.push(a.visita_retorno_id
       ? { label: 'Técnico enviou o relatório de retorno', data: visitaRetorno ? visitaRetorno.criado_em : null, estado: 'feito' }
-      : { label: a.retrabalho ? 'Aguardando retorno do técnico para retrabalho' : 'Aguardando retorno do técnico', data: null, estado: 'pendente' });
+      : { label: a.retrabalho ? 'Aguardando relatório retrabalho' : 'Aguardando retorno do técnico', data: null, estado: 'pendente' });
   }
 
   passos.push(a.feedback_cliente_em
