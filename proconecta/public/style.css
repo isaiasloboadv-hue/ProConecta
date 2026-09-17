@@ -447,6 +447,45 @@ tr:last-child td{border-bottom:none;}
 .chat-compositor textarea{flex:1;resize:none;min-height:42px;}
 @media(max-width:600px){ .chat-msg{max-width:90%;} }
 
+/* ---------- chat interno: widget flutuante (tipo Facebook Messenger) ---------- */
+/* fica fora do fluxo normal da página (position:fixed, fora do #main) de propósito — assim
+   navegar pelo sistema nunca fecha nem reseta a conversa que está aberta. */
+.chat-widget{position:fixed;right:20px;bottom:20px;z-index:150;display:flex;flex-direction:column;align-items:flex-end;gap:12px;}
+.chat-widget-launcher{
+  width:54px;height:54px;border-radius:50%;background:var(--blue);color:#fff;border:none;
+  box-shadow:0 6px 18px rgba(7,15,28,.3);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;position:relative;font-size:22px;line-height:1;flex-shrink:0;
+}
+.chat-widget-launcher:hover{filter:brightness(1.08);}
+.chat-widget-badge{
+  position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:11px;font-weight:800;
+  min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  padding:0 5px;border:2px solid #fff;
+}
+.chat-widget-painel{
+  width:320px;max-width:calc(100vw - 32px);height:440px;max-height:70vh;background:#fff;
+  border-radius:14px;box-shadow:0 12px 36px rgba(7,15,28,.28);display:flex;flex-direction:column;
+  overflow:hidden;border:1px solid var(--line);
+}
+.chat-widget-topo{background:var(--navy);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.chat-widget-topo #chat-widget-titulo{flex:1;font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chat-widget-voltar,.chat-widget-fechar{background:none;border:none;color:#fff;font-size:19px;cursor:pointer;padding:0 4px;line-height:1;}
+.chat-widget-voltar:hover,.chat-widget-fechar:hover{opacity:.8;}
+.chat-widget-corpo{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;}
+.chat-widget-contatos{flex:1;overflow-y:auto;}
+.chat-widget-corpo .user-row{padding:8px 10px;gap:8px;margin-bottom:6px;}
+.chat-widget-corpo .u-avatar-lg{width:34px;height:34px;font-size:12px;}
+.chat-widget-corpo .u-info .u-line1{font-size:12.5px;}
+.chat-widget-corpo .u-info .u-line2{font-size:11px;}
+.chat-widget-corpo .badge{font-size:10px;padding:3px 7px;flex-shrink:0;}
+.chat-widget-corpo .chat-mensagens{flex:1;max-height:none;min-height:0;}
+.chat-widget-corpo .chat-compositor{margin-top:8px;flex-shrink:0;}
+.chat-widget-corpo .chat-compositor textarea{min-height:34px;font-size:13px;}
+@media(max-width:480px){
+  .chat-widget{right:14px;bottom:14px;}
+  .chat-widget-painel{position:fixed;left:14px;right:14px;bottom:78px;width:auto;height:65vh;max-height:65vh;}
+}
+
 .atendimento-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px;}
 .atendimento-card{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:.15s;background:#fff;}
 .atendimento-card:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}

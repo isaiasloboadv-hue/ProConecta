@@ -117,6 +117,7 @@ async function fazerLogin() {
 function sair() {
   TOKEN = null; USER = null; navAbertos = new Set();
   if (sinoTimer) clearInterval(sinoTimer);
+  desmontarWidgetChatInterno();
   localStorage.removeItem('pc_token');
   document.getElementById('appView').style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
@@ -286,6 +287,7 @@ function entrarNoApp() {
   sinoTimer = setInterval(atualizarSino, 15000);
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
+  montarWidgetChatInterno();
   if (['suporte', 'administrador', 'producao', 'cliente', 'pos_venda', 'estoque'].includes(USER.papel)) ativarNotificacoesPush();
   const primeiraPaginaPermitida = (function primeiraPagina(nodes) {
     for (const node of nodes) {
@@ -418,7 +420,6 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
-    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
@@ -444,7 +445,6 @@ const NAV = {
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
     { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
-    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   cliente: [
     { key: 'biblioteca', label: 'Biblioteca', children: [
@@ -475,15 +475,12 @@ const NAV = {
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
-    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   pos_venda: [
     { key: 'fila-pos-venda', label: 'Pós-venda', page: 'fila-pos-venda' },
-    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
   estoque: [
     { key: 'fila-estoque', label: 'Estoque', page: 'fila-estoque' },
-    { key: 'chat-interno', label: 'Mensagens', page: 'chat-interno' },
   ],
 };
 
@@ -590,7 +587,6 @@ async function ir(pagina) {
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
     if (pagina === 'fila-solicitacao-atendimento') return renderFilaSolicitacaoAtendimento();
-    if (pagina === 'chat-interno') return renderChatInterno();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -7074,21 +7070,92 @@ async function estoqueConfirmarSaida(id) {
 }
 
 // ---------- chat interno (mensagens diretas entre a equipe, sem o cliente) ----------
+// widget flutuante tipo Facebook Messenger — fica sobreposto no canto inferior direito em
+// qualquer tela do sistema (não é uma página, vive fora do #main, então navegar não fecha ele).
 
-async function renderChatInterno() {
+function temAcessoChatInterno() {
+  if (!['suporte', 'administrador', 'producao', 'pos_venda', 'estoque'].includes(USER.papel)) return false;
+  if (USER.acesso_total !== false) return true;
+  return Array.isArray(USER.menus) && USER.menus.includes('chat-interno');
+}
+
+let chatWidgetAberto = false;
+let chatWidgetTela = 'lista'; // 'lista' | 'conversa'
+let _chatInternoAtual = null;
+let _chatInternoPoll = null;
+let _chatWidgetBadgePoll = null;
+
+function montarWidgetChatInterno() {
+  if (!temAcessoChatInterno() || document.getElementById('chat-widget')) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div id="chat-widget" class="chat-widget">
+      <div id="chat-widget-painel" class="chat-widget-painel" style="display:none;">
+        <div class="chat-widget-topo">
+          <button id="chat-widget-voltar" class="chat-widget-voltar" style="display:none;" onclick="chatWidgetMostrarLista()">‹</button>
+          <span id="chat-widget-titulo">Mensagens</span>
+          <button class="chat-widget-fechar" onclick="alternarChatWidget()">✕</button>
+        </div>
+        <div id="chat-widget-corpo" class="chat-widget-corpo"></div>
+      </div>
+      <button id="chat-widget-launcher" class="chat-widget-launcher" onclick="alternarChatWidget()" title="Mensagens">
+        💬<span id="chat-widget-badge" class="chat-widget-badge" style="display:none;">0</span>
+      </button>
+    </div>`);
+  atualizarBadgeChatWidget();
+  _chatWidgetBadgePoll = setInterval(atualizarBadgeChatWidget, 15000);
+}
+
+function desmontarWidgetChatInterno() {
+  clearInterval(_chatWidgetBadgePoll);
   clearInterval(_chatInternoPoll);
+  chatWidgetAberto = false; _chatInternoAtual = null;
+  const w = document.getElementById('chat-widget');
+  if (w) w.remove();
+}
+
+async function atualizarBadgeChatWidget() {
+  if (!temAcessoChatInterno()) return;
+  try {
+    const { contatos } = await api('/api/chat-interno/contatos');
+    window._chatInternoContatos = contatos;
+    const total = contatos.reduce((soma, c) => soma + (c.nao_lidas || 0), 0);
+    const badge = document.getElementById('chat-widget-badge');
+    if (badge) { badge.style.display = total ? 'flex' : 'none'; badge.textContent = total > 99 ? '99+' : total; }
+    if (chatWidgetAberto && chatWidgetTela === 'lista') renderListaContatosWidget(contatos);
+  } catch (e) { /* silencioso */ }
+}
+
+function alternarChatWidget() {
+  chatWidgetAberto = !chatWidgetAberto;
+  const painel = document.getElementById('chat-widget-painel');
+  if (!painel) return;
+  painel.style.display = chatWidgetAberto ? 'flex' : 'none';
+  if (chatWidgetAberto) chatWidgetMostrarLista();
+  else { clearInterval(_chatInternoPoll); _chatInternoAtual = null; }
+}
+
+async function chatWidgetMostrarLista() {
+  chatWidgetTela = 'lista';
+  clearInterval(_chatInternoPoll);
+  _chatInternoAtual = null;
+  document.getElementById('chat-widget-voltar').style.display = 'none';
+  document.getElementById('chat-widget-titulo').textContent = 'Mensagens';
   const { contatos } = await api('/api/chat-interno/contatos');
   window._chatInternoContatos = contatos;
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="page-head"><h1>Mensagens</h1><p>Converse direto com qualquer pessoa da equipe.</p></div>
-    <div class="panel" id="chat-interno-lista">${listaContatosInternosHTML(contatos)}</div>`;
+  renderListaContatosWidget(contatos);
+}
+
+function renderListaContatosWidget(contatos) {
+  if (chatWidgetTela !== 'lista') return;
+  const corpo = document.getElementById('chat-widget-corpo');
+  if (!corpo) return;
+  corpo.innerHTML = `<div class="chat-widget-contatos">${listaContatosInternosHTML(contatos)}</div>`;
 }
 
 function listaContatosInternosHTML(contatos) {
   if (!contatos.length) return '<p class="empty">Nenhum outro usuário cadastrado ainda.</p>';
   return contatos.map((c) => `
-    <div class="user-row" style="cursor:pointer;" onclick="abrirConversaInterna(${c.id})">
+    <div class="user-row" style="cursor:pointer;" onclick="chatWidgetAbrirConversa(${c.id})">
       <div class="u-avatar-lg">${initials(c.nome)}</div>
       <div class="u-info">
         <div class="u-line1">${esc(c.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[c.papel] || c.papel)}</span>${c.papel === 'administrador' ? ` <span class="tag tag-papel">${c.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[c.departamento] || c.departamento) : 'Geral'}</span>` : ''}${c.nao_lidas ? ` <span class="tag" style="background:var(--blue); color:#fff;">${c.nao_lidas}</span>` : ''}</div>
@@ -7098,28 +7165,22 @@ function listaContatosInternosHTML(contatos) {
     </div>`).join('');
 }
 
-let _chatInternoAtual = null;
-let _chatInternoPoll = null;
-
-async function abrirConversaInterna(id) {
+async function chatWidgetAbrirConversa(id) {
+  chatWidgetTela = 'conversa';
   clearInterval(_chatInternoPoll);
   const { mensagens, contato } = await api(`/api/chat-interno/${id}/mensagens`);
   _chatInternoAtual = contato;
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>${esc(contato.nome)}</h1><p>${esc(PAPEL_LABEL[contato.papel] || contato.papel)}</p></div>
-      <button class="btn-outline-sm" onclick="renderChatInterno()">‹ Voltar</button>
-    </div>
-    <div class="panel chat-panel">
-      <div class="chat-mensagens" id="ci-mensagens"></div>
-      <div class="chat-compositor">
-        <textarea id="ci-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemInterna();}"></textarea>
-        <button class="btn btn-primary btn-sm" onclick="enviarMensagemInterna()">Enviar</button>
-      </div>
+  document.getElementById('chat-widget-voltar').style.display = '';
+  document.getElementById('chat-widget-titulo').textContent = contato.nome;
+  document.getElementById('chat-widget-corpo').innerHTML = `
+    <div class="chat-mensagens" id="ci-mensagens"></div>
+    <div class="chat-compositor">
+      <textarea id="ci-texto" placeholder="Digite sua mensagem..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemInterna();}"></textarea>
+      <button class="btn btn-primary btn-sm" onclick="enviarMensagemInterna()">Enviar</button>
     </div>`;
   renderMensagensInternas(mensagens);
   _chatInternoPoll = setInterval(atualizarConversaInterna, 4000);
+  atualizarBadgeChatWidget();
 }
 
 async function atualizarConversaInterna() {
