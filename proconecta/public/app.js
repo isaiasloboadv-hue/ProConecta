@@ -7093,6 +7093,7 @@ function montarWidgetChatInterno() {
         <div class="chat-widget-topo">
           <button id="chat-widget-voltar" class="chat-widget-voltar" style="display:none;" onclick="chatWidgetMostrarLista()">‹</button>
           <span id="chat-widget-titulo">Mensagens</span>
+          <button id="chat-widget-nova" class="chat-widget-nova" onclick="chatWidgetMostrarNovaConversa()" title="Nova conversa">＋</button>
           <button class="chat-widget-fechar" onclick="alternarChatWidget()">✕</button>
         </div>
         <div id="chat-widget-corpo" class="chat-widget-corpo"></div>
@@ -7139,29 +7140,53 @@ async function chatWidgetMostrarLista() {
   clearInterval(_chatInternoPoll);
   _chatInternoAtual = null;
   document.getElementById('chat-widget-voltar').style.display = 'none';
+  document.getElementById('chat-widget-nova').style.display = '';
   document.getElementById('chat-widget-titulo').textContent = 'Mensagens';
   const { contatos } = await api('/api/chat-interno/contatos');
   window._chatInternoContatos = contatos;
   renderListaContatosWidget(contatos);
 }
 
+// a lista principal só mostra quem já tem conversa iniciada (igual o WhatsApp) — pra falar com
+// alguém novo é o botão "+" (chatWidgetMostrarNovaConversa) que mostra todo mundo pra escolher.
 function renderListaContatosWidget(contatos) {
   if (chatWidgetTela !== 'lista') return;
   const corpo = document.getElementById('chat-widget-corpo');
   if (!corpo) return;
-  corpo.innerHTML = `<div class="chat-widget-contatos">${listaContatosInternosHTML(contatos)}</div>`;
+  const iniciadas = contatos.filter((c) => c.ultima_mensagem_em);
+  corpo.innerHTML = iniciadas.length
+    ? `<div class="chat-widget-contatos">${listaContatosInternosHTML(iniciadas)}</div>`
+    : `<div class="chat-widget-vazio">
+        <p class="empty">Nenhuma conversa ainda.</p>
+        <button class="btn btn-primary btn-sm" onclick="chatWidgetMostrarNovaConversa()">+ Nova conversa</button>
+      </div>`;
 }
 
-function listaContatosInternosHTML(contatos) {
+async function chatWidgetMostrarNovaConversa() {
+  chatWidgetTela = 'nova-conversa';
+  clearInterval(_chatInternoPoll);
+  _chatInternoAtual = null;
+  document.getElementById('chat-widget-voltar').style.display = '';
+  document.getElementById('chat-widget-nova').style.display = 'none';
+  document.getElementById('chat-widget-titulo').textContent = 'Nova conversa';
+  const { contatos } = await api('/api/chat-interno/contatos');
+  window._chatInternoContatos = contatos;
+  document.getElementById('chat-widget-corpo').innerHTML =
+    `<div class="chat-widget-contatos">${listaContatosInternosHTML(contatos, true)}</div>`;
+}
+
+// modoPicker esconde a prévia da última mensagem/contador — vira só uma lista de nomes pra
+// escolher com quem falar, igual o "Nova conversa" do WhatsApp.
+function listaContatosInternosHTML(contatos, modoPicker) {
   if (!contatos.length) return '<p class="empty">Nenhum outro usuário cadastrado ainda.</p>';
   return contatos.map((c) => `
     <div class="user-row" style="cursor:pointer;" onclick="chatWidgetAbrirConversa(${c.id})">
       <div class="u-avatar-lg">${initials(c.nome)}</div>
       <div class="u-info">
-        <div class="u-line1">${esc(c.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[c.papel] || c.papel)}</span>${c.papel === 'administrador' ? ` <span class="tag tag-papel">${c.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[c.departamento] || c.departamento) : 'Geral'}</span>` : ''}${c.nao_lidas ? ` <span class="tag" style="background:var(--blue); color:#fff;">${c.nao_lidas}</span>` : ''}</div>
-        <div class="u-line2">${c.ultima_mensagem_texto ? (c.ultima_mensagem_propria ? 'Você: ' : '') + esc(c.ultima_mensagem_texto) : 'Nenhuma mensagem ainda'}</div>
+        <div class="u-line1">${esc(c.nome)} <span class="tag tag-papel">${esc(PAPEL_LABEL[c.papel] || c.papel)}</span>${c.papel === 'administrador' ? ` <span class="tag tag-papel">${c.departamento ? esc(DEPARTAMENTO_ADMIN_LABEL[c.departamento] || c.departamento) : 'Geral'}</span>` : ''}${!modoPicker && c.nao_lidas ? ` <span class="tag" style="background:var(--blue); color:#fff;">${c.nao_lidas}</span>` : ''}</div>
+        ${modoPicker ? '' : `<div class="u-line2">${c.ultima_mensagem_texto ? (c.ultima_mensagem_propria ? 'Você: ' : '') + esc(c.ultima_mensagem_texto) : 'Nenhuma mensagem ainda'}</div>`}
       </div>
-      ${c.ultima_mensagem_em ? `<span class="badge">${fmtData(c.ultima_mensagem_em)}</span>` : ''}
+      ${!modoPicker && c.ultima_mensagem_em ? `<span class="badge">${fmtData(c.ultima_mensagem_em)}</span>` : ''}
     </div>`).join('');
 }
 
@@ -7171,6 +7196,7 @@ async function chatWidgetAbrirConversa(id) {
   const { mensagens, contato } = await api(`/api/chat-interno/${id}/mensagens`);
   _chatInternoAtual = contato;
   document.getElementById('chat-widget-voltar').style.display = '';
+  document.getElementById('chat-widget-nova').style.display = 'none';
   document.getElementById('chat-widget-titulo').textContent = contato.nome;
   document.getElementById('chat-widget-corpo').innerHTML = `
     <div class="chat-mensagens" id="ci-mensagens"></div>
