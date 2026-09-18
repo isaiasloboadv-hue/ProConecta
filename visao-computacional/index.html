@@ -35,6 +35,7 @@
   .btn-file{background:#fff;color:var(--ink-soft);border:1.5px solid var(--line);display:inline-flex;align-items:center;cursor:pointer;}
   .btn-file:hover{border-color:var(--blue);color:var(--blue);}
   .btn-file input{display:none;}
+  select#seletor-camera{background:#fff;color:var(--ink-soft);border:1.5px solid var(--line);border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13px;max-width:220px;}
   .resumo{display:flex;gap:22px;align-items:center;margin-top:20px;padding:18px;background:var(--blue-pale-2);border-radius:12px;flex-wrap:wrap;}
   .resumo-total{text-align:center;flex-shrink:0;}
   .resumo-num{font-size:34px;font-weight:800;color:var(--navy);line-height:1;}
@@ -117,7 +118,8 @@ function renderPainel() {
       </div>
       <div class="controls">
         <button class="btn-primary" id="btn-camera" onclick="ligarCameraPecas()">Ligar câmera</button>
-        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Trocar câmera</button>
+        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Virar câmera</button>
+        <select id="seletor-camera" class="hidden" onchange="trocarCameraPorId(this.value)"></select>
         <button class="btn-primary hidden" id="btn-capturar" onclick="capturarEAnalisar()">Capturar e analisar</button>
         <label class="btn-file">Enviar foto<input type="file" accept="image/*" onchange="arquivoSelecionadoPecas(event)"></label>
         <button class="btn-outline hidden" id="btn-nova" onclick="renderPainel()">Nova captura</button>
@@ -136,7 +138,8 @@ function renderPainel() {
       </div>
       <div class="controls">
         <button class="btn-primary" id="btn-camera" onclick="ligarCameraQr()">Ligar câmera</button>
-        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Trocar câmera</button>
+        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Virar câmera</button>
+        <select id="seletor-camera" class="hidden" onchange="trocarCameraPorId(this.value)"></select>
         <label class="btn-file">Enviar imagem<input type="file" accept="image/*" onchange="arquivoSelecionadoQr(event)"></label>
       </div>
       <div id="resultado"></div>
@@ -145,17 +148,20 @@ function renderPainel() {
 }
 
 // ---------- câmera ----------
+let dispositivoEscolhidoId = null;
+
 async function iniciarCamera(videoElId) {
   pararCamera();
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
+    const constraints = dispositivoEscolhidoId
+      ? { video: { deviceId: { exact: dispositivoEscolhidoId }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }
+      : { video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
     const video = document.getElementById(videoElId);
     if (!video) { pararCamera(); return false; }
     video.srcObject = stream;
     await video.play().catch(() => {});
+    await atualizarSeletorCameras();
     return true;
   } catch (e) {
     mostrarToast('Não foi possível acessar a câmera: ' + e.message);
@@ -168,10 +174,34 @@ function pararCamera() {
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
 }
 
+// alterna câmera frontal/traseira (útil no celular) — solta a escolha manual do seletor, se houver
 async function trocarCamera() {
+  dispositivoEscolhidoId = null;
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   const ok = await iniciarCamera('video');
   if (ok && modoAtual === 'qr') iniciarLoopQr();
+}
+
+// troca pra uma câmera específica escolhida no seletor (útil no notebook com webcam + câmera USB externa)
+async function trocarCameraPorId(deviceId) {
+  dispositivoEscolhidoId = deviceId || null;
+  const ok = await iniciarCamera('video');
+  if (ok && modoAtual === 'qr') iniciarLoopQr();
+}
+
+// os rótulos das câmeras só ficam disponíveis depois que a permissão é concedida —
+// por isso isso só é chamado depois de um getUserMedia bem-sucedido
+async function atualizarSeletorCameras() {
+  const seletor = document.getElementById('seletor-camera');
+  if (!seletor || !navigator.mediaDevices.enumerateDevices) return;
+  try {
+    const dispositivos = await navigator.mediaDevices.enumerateDevices();
+    const cameras = dispositivos.filter((d) => d.kind === 'videoinput');
+    if (cameras.length <= 1) { seletor.classList.add('hidden'); return; }
+    seletor.innerHTML = cameras.map((c, i) => `<option value="${esc(c.deviceId)}">${esc(c.label || 'Câmera ' + (i + 1))}</option>`).join('');
+    if (dispositivoEscolhidoId) seletor.value = dispositivoEscolhidoId;
+    seletor.classList.remove('hidden');
+  } catch (e) { /* enumerateDevices sem permissão prévia pode falhar em alguns navegadores — sem problema, o seletor só não aparece */ }
 }
 
 window.addEventListener('beforeunload', pararCamera);

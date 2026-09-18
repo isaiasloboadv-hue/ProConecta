@@ -40,6 +40,41 @@ O que já funciona:
    navegadores ainda vão exigir HTTPS para a câmera; o upload de foto
    sempre funciona como alternativa).
 
+## Testando com diferentes câmeras
+
+- **Webcam do notebook**: abra `http://localhost:8080` no próprio notebook
+  (veja "Como rodar" acima) — `localhost` já é um "contexto seguro", então
+  o navegador libera a câmera direto, sem configuração extra.
+- **Webcam + câmera USB externa no mesmo notebook**: ao ligar a câmera, se
+  o navegador detectar mais de um dispositivo de vídeo aparece um seletor
+  do lado do botão "Ligar câmera" — escolha ali qual usar. (Os nomes só
+  aparecem depois que você autoriza o acesso à câmera pela primeira vez.)
+- **Câmera do celular**: o desafio aqui é que a maioria dos navegadores só
+  libera a câmera em HTTPS (ou `localhost` — e o celular não é o
+  `localhost` do seu notebook). Duas formas de contornar isso, sem custo:
+  1. **Túnel temporário (mais rápido, só pra testar agora)**: com o
+     servidor local rodando (`python3 -m http.server 8080`), abra outro
+     terminal e rode:
+     ```
+     npx localtunnel --port 8080
+     ```
+     Isso devolve um link tipo `https://algo-aleatorio.loca.lt` — abra
+     esse link no navegador do celular (ele pode pedir pra confirmar que
+     você quer acessar; é normal). Fecha sozinho quando você encerra o
+     comando.
+  2. **Publicar de vez (link fixo, sempre em HTTPS)**: suba esta pasta
+     `visao-computacional/` no GitHub Pages, Netlify ou Vercel (arrastar
+     os 2 arquivos já é suficiente, não tem build) — você recebe uma URL
+     `https://...` fixa, sempre com câmera liberada, tanto no notebook
+     quanto no celular.
+  - Em ambos os casos, o "Virar câmera" alterna frontal/traseira no
+    celular; no computador, é o seletor de dispositivo que decide qual
+    câmera usar.
+  - Se preferir não mexer com rede agora, o **upload de foto** ("Enviar
+    foto"/"Enviar imagem") sempre funciona em qualquer navegador, sem
+    precisar de HTTPS — tira a foto com a câmera nativa do celular e
+    depois escolhe o arquivo na ferramenta.
+
 ## Por que assim
 
 Sem framework, sem `npm install`, um único arquivo — só a biblioteca jsQR
