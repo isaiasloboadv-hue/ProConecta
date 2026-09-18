@@ -356,6 +356,33 @@ function validarRelatorioPreventiva(r) {
   return null;
 }
 
+// ---------- Termo de Manutenção Corretiva (Relatório > Manual > Corretiva) ----------
+// mesma família do "Relatório Manual" (relatorios_manutencao) e mesma infraestrutura da
+// Preventiva (identificação, fotos por modelo de máquina — reaproveita EQUIPAMENTOS_PREVENTIVA
+// do front, pesquisa de satisfação, assinatura, envio por e-mail), mas sem check-list — no lugar
+// tem defeito informado / ações executadas / observações em texto livre.
+function validarRelatorioCorretiva(r) {
+  if (!r || typeof r !== 'object') return 'Dados do termo são obrigatórios.';
+  const camposTexto = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
+    'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
+    'defeito_informado', 'acoes_executadas', 'observacoes'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  const fotos = Array.isArray(r.fotos) ? r.fotos : [];
+  if (!fotos.length) return 'Selecione o modelo da máquina pra liberar os grupos de fotos.';
+  for (let idx = 0; idx < fotos.length - 1; idx++) {
+    const bloco = fotos[idx];
+    if (!bloco || !Array.isArray(bloco.fotos) || !bloco.fotos.length) return 'Anexe as fotos obrigatórias do termo.';
+  }
+  if (!(r.satisfacao_estrelas >= 1 && r.satisfacao_estrelas <= 5)) return 'Avaliação de satisfação (estrelas) é obrigatória.';
+  if (r.satisfacao_autoriza !== 'sim' && r.satisfacao_autoriza !== 'nao') return 'Responda se autoriza o uso do feedback.';
+  if (!r.assinatura_cliente_nome || !r.assinatura_cliente_img) return 'Assinatura do cliente é obrigatória.';
+  if (!r.assinatura_tecnico_nome || !r.assinatura_tecnico_img) return 'Assinatura do técnico é obrigatória.';
+  if (!Array.isArray(r.emails_copia) || r.emails_copia.length === 0) return 'Informe ao menos um e-mail para envio do termo.';
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -1886,7 +1913,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
@@ -1903,6 +1930,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'preventiva') {
     const erroPreventiva = validarRelatorioPreventiva(body);
     if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+  } else if (tipo === 'corretiva') {
+    const erroCorretiva = validarRelatorioCorretiva(body);
+    if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -1946,6 +1976,24 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       observacoes_checklist: body.observacoes_checklist || '',
       servico_feito: body.servico_feito || '',
       observacoes_servico: body.observacoes_servico || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_comentario: body.satisfacao_comentario || '',
+      satisfacao_autoriza: body.satisfacao_autoriza || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+    } : {}),
+    ...(tipo === 'corretiva' ? {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico_realizado: body.servico_realizado || '',
+      endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      setor_maquina: body.setor_maquina || '',
+      defeito_informado: body.defeito_informado || '',
+      acoes_executadas: body.acoes_executadas || '',
+      observacoes: body.observacoes || '',
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
@@ -2009,6 +2057,28 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       observacoes_checklist: body.observacoes_checklist || '',
       servico_feito: body.servico_feito || '',
       observacoes_servico: body.observacoes_servico || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_comentario: body.satisfacao_comentario || '',
+      satisfacao_autoriza: body.satisfacao_autoriza || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      fotos,
+    });
+  } else if (item.tipo === 'corretiva') {
+    const erroCorretiva = validarRelatorioCorretiva(body);
+    if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
+    Object.assign(item, {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico_realizado: body.servico_realizado || '',
+      empresa: body.empresa || '', endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      setor_maquina: body.setor_maquina || '',
+      defeito_informado: body.defeito_informado || '',
+      acoes_executadas: body.acoes_executadas || '',
+      observacoes: body.observacoes || '',
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
