@@ -492,6 +492,7 @@ const NAV = {
         { key: 'relatorio-manual-preventiva', label: 'Preventiva', page: 'relatorio-preventiva' },
         { key: 'relatorio-manual-corretiva', label: 'Corretiva', page: 'relatorio-corretiva' },
         { key: 'relatorio-manual-tecnico', label: 'Relatório Técnico', page: 'relatorio-tecnico' },
+        { key: 'relatorio-manual-aceite', label: 'Termo de Aceite', page: 'relatorio-aceite' },
       ]},
       { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
       { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
@@ -656,6 +657,7 @@ async function ir(pagina) {
     if (pagina === 'relatorio-preventiva') return mostrarFormRelatorioPreventiva();
     if (pagina === 'relatorio-corretiva') return mostrarFormRelatorioCorretiva();
     if (pagina === 'relatorio-tecnico') return mostrarFormRelatorioTecnico();
+    if (pagina === 'relatorio-aceite') return mostrarFormRelatorioAceite();
     if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
     if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
@@ -4192,11 +4194,11 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
-            ${r.tipo !== 'ciclagem' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
+            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
@@ -4212,7 +4214,7 @@ function descricaoRelatorioManutencao(r) {
   if (r.tipo === 'ciclagem') {
     return `${esc(r.equipamento)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
   }
-  if (r.tipo === 'preventiva' || r.tipo === 'corretiva') {
+  if (r.tipo === 'preventiva' || r.tipo === 'corretiva' || r.tipo === 'aceite_entrega') {
     return `${esc(r.modelo_maquina)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
   }
   return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
@@ -5032,6 +5034,7 @@ async function editarRelatorioManutencao(i) {
   else if (r.tipo === 'preventiva') mostrarFormRelatorioPreventiva(r);
   else if (r.tipo === 'corretiva') mostrarFormRelatorioCorretiva(r);
   else if (r.tipo === 'relatorio_tecnico') mostrarFormRelatorioTecnico(r);
+  else if (r.tipo === 'aceite_entrega') mostrarFormRelatorioAceite(r);
   else mostrarFormRelatorioManutencao(r);
 }
 
@@ -6391,6 +6394,575 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// ---------- Relatório > Manual > Termo de Aceite ----------
+// mesma família do Relatório Manual, avulso — reaproveita o check-list (CHECKLIST_CORRETIVA), o
+// aceite, a avaliação de desempenho e a assinatura do "Relatório técnico" ligado à O.S.
+// (renderRelatorioCorretiva, prefixo "rc-"), mas como termo independente: identificação com O.S.
+// e modelo de máquina escolhido de uma lista (mesma EQUIPAMENTOS_PREVENTIVA da Preventiva), sem
+// fotos ou peças.
+let relatorioAceiteDraft = null;
+function relatorioAceitePadrao() {
+  return {
+    tipo: 'aceite_entrega',
+    os_uf: '', os_numero: '', os_ano: '',
+    data_inicial: '', data_final: '',
+    modelo_maquina: '', numero_serie: '',
+    servico: '',
+    empresa: '', setor: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '', contato: '',
+    checklist: CHECKLIST_CORRETIVA.map((item) => ({ item, resposta: '', observacao: '' })),
+    observacoes: '',
+    aceite: '',
+    satisfacao_estrelas: 0, satisfacao_duvidas: '', satisfacao_apto: '',
+    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
+    emails_copia: [''],
+  };
+}
+
+function textoSobreEquipamentoAceite(modelo) {
+  return `A máquina está coberta por uma garantia de 1 ano a partir da data de entrega. Esta garantia cobre defeitos de fabricação e mão de obra. Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios de contato.<br><br>
+    <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
+    <b>E-mail:</b> ${empresaEmails().slice(0, 2).join(' / ')}<br><br>
+    Estamos confiantes de que o equipamento${modelo ? ` modelo <b>${esc(modelo)}</b>` : ''} atenderá às suas expectativas e necessidades de produção. Estamos à disposição para quaisquer perguntas adicionais ou assistência que você possa precisar.`;
+}
+
+function mostrarFormRelatorioAceite(existente) {
+  relatorioAceiteDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioAceitePadrao();
+  const d = relatorioAceiteDraft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Aceite da Entrega</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Identificação</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Nº preenchido no ato da entrega.</p>
+      <div class="form-grid">
+        <div><label>O.S. Nº — UF*</label><input id="rae-os_uf" maxlength="2" placeholder="UF" value="${esc(d.os_uf)}" style="text-transform:uppercase;"></div>
+        <div><label>O.S. Nº — Número*</label><input id="rae-os_numero" placeholder="000" value="${esc(d.os_numero)}"></div>
+        <div><label>O.S. Nº — Ano*</label><input id="rae-os_ano" placeholder="0000" value="${esc(d.os_ano)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados do cliente</h2>
+      <div class="form-grid">
+        <div><label>Data inicial*</label><input id="rae-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
+        <div><label>Data final*</label><input id="rae-data_final" type="date" value="${esc(d.data_final)}"></div>
+        <div>
+          <label>Modelo da máquina*</label>
+          <select id="rae-modelo_maquina" onchange="selecionarModeloAceite(this.value)">
+            <option value="" ${!d.modelo_maquina || !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'selected' : ''} disabled>Selecione...</option>
+            ${Object.keys(EQUIPAMENTOS_PREVENTIVA).map((nome) => `<option value="${esc(nome)}" ${d.modelo_maquina === nome ? 'selected' : ''}>${esc(nome)}</option>`).join('')}
+            <option value="Outro" ${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'selected' : ''}>Outro</option>
+          </select>
+        </div>
+        <div id="rae-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
+          <label>Especifique o modelo*</label>
+          <input id="rae-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}" oninput="atualizarSobreEquipamentoAceite();">
+        </div>
+        <div><label>Nº de série*</label><input id="rae-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
+        <div><label>Serviço*</label><input id="rae-servico" value="${esc(d.servico)}"></div>
+        <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
+        <div class="full"><label>Empresa*</label><input id="rae-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Setor*</label><input id="rae-setor" value="${esc(d.setor)}"></div>
+        <div class="full"><label>Endereço*</label><input id="rae-endereco" value="${esc(d.endereco)}"></div>
+        <div><label>Número*</label><input id="rae-numero" placeholder="Ex.: 123" value="${esc(d.numero)}"></div>
+        <div><label>Bairro*</label><input id="rae-bairro" placeholder="Ex.: Centro" value="${esc(d.bairro)}"></div>
+        <div>
+          <label>Estado*</label>
+          <select id="rae-estado" onchange="atualizarRegiaoAceite()">
+            <option value="">Selecione</option>
+            ${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}" ${d.estado === uf ? 'selected' : ''}>${uf}</option>`).join('')}
+          </select>
+          <p style="color:var(--ink-soft); font-size:12.5px; margin-top:4px;">Região: <span id="rae-regiao">${esc(UF_REGIAO[d.estado] || '—')}</span></p>
+        </div>
+        <div><label>Cidade*</label><input id="rae-cidade" placeholder="Ex.: Jundiaí" value="${esc(d.cidade)}"></div>
+        <div><label>CEP*</label><input id="rae-cep" placeholder="00000-000" value="${esc(d.cep)}"></div>
+        <div><label>Contato*</label><input id="rae-contato" value="${esc(d.contato)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Item / entrega / observação*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer pendência.</p>
+      <div id="rae-checklist"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistAceite()">+ Adicionar item</button>
+    </div>
+
+    <div class="panel">
+      <h2>Sobre o equipamento</h2>
+      <p id="rae-sobre-equipamento" style="font-size:13.5px; line-height:1.6;">${textoSobreEquipamentoAceite(d.modelo_maquina)}</p>
+    </div>
+
+    <div class="panel">
+      <h2>Observações*</h2>
+      <textarea id="rae-observacoes" placeholder="Observações adicionais sobre a entrega (obrigatório — escreva N/A se não houver)">${esc(d.observacoes)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Aceite*</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Por meio da assinatura deste termo, formalizamos o aceite da entrega técnica final deste serviço.</p>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none; margin-bottom:8px;"><input type="radio" name="rae-aceite" value="aceito" ${d.aceite === 'aceito' ? 'checked' : ''} style="width:auto;"> Li e aceito os termos acima</label>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none;"><input type="radio" name="rae-aceite" value="nao_aceito" ${d.aceite === 'nao_aceito' ? 'checked' : ''} style="width:auto;"> Não aceito</label>
+    </div>
+
+    <div class="panel">
+      <h2>Avaliação de desempenho*</h2>
+      <label>Em uma escala de 1 a 5, qual a sua satisfação com a entrega técnica?</label>
+      <div id="rae-estrelas" style="margin-bottom:18px;"></div>
+      <label>O técnico sanou todas as dúvidas na entrega da máquina?</label>
+      <div style="display:flex; gap:18px; margin-bottom:18px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rae-duvidas" value="sim" ${d.satisfacao_duvidas === 'sim' ? 'checked' : ''} style="width:auto;"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rae-duvidas" value="nao" ${d.satisfacao_duvidas === 'nao' ? 'checked' : ''} style="width:auto;"> Não</label>
+      </div>
+      <label>Você se julga apto a operar o equipamento?</label>
+      <div style="display:flex; gap:18px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rae-apto" value="sim" ${d.satisfacao_apto === 'sim' ? 'checked' : ''} style="width:auto;"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rae-apto" value="nao" ${d.satisfacao_apto === 'nao' ? 'checked' : ''} style="width:auto;"> Não</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Assinatura*</h2>
+      <div class="row2">
+        ${blocoAssinaturaAceite('cliente', 'Cliente')}
+        ${blocoAssinaturaAceite('tecnico', 'Técnico')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Envio do termo*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">E-mails que devem receber uma cópia deste termo assim que ele for concluído e assinado.</p>
+      <div id="rae-emails"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarEmailAceite()">+ Adicionar e-mail</button>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioAceite()">Concluir e enviar termo</button>
+      </div>
+    </div>`;
+  renderChecklistAceite();
+  renderEstrelasAceite();
+  renderEmailsAceite();
+  montarAssinaturaAceite('cliente');
+  montarAssinaturaAceite('tecnico');
+}
+
+function selecionarModeloAceite(nome) {
+  document.getElementById('rae-modelo_maquina-outro-wrap').style.display = nome === 'Outro' ? 'block' : 'none';
+  atualizarSobreEquipamentoAceite();
+}
+function atualizarSobreEquipamentoAceite() {
+  const selecionado = document.getElementById('rae-modelo_maquina').value;
+  const modelo = selecionado === 'Outro' ? document.getElementById('rae-modelo_maquina_outro').value : selecionado;
+  document.getElementById('rae-sobre-equipamento').innerHTML = textoSobreEquipamentoAceite(modelo);
+}
+function atualizarRegiaoAceite() {
+  const uf = document.getElementById('rae-estado').value;
+  document.getElementById('rae-regiao').textContent = UF_REGIAO[uf] || '—';
+}
+
+function renderChecklistAceite() {
+  document.getElementById('rae-checklist').innerHTML = relatorioAceiteDraft.checklist.map((c, i) => `
+    <div class="step-item" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:160px;">
+          <span style="color:var(--navy); font-size:13.5px; font-weight:700;">${String(i + 1).padStart(2, '0')}</span>
+          <input placeholder="Nome do item" value="${esc(c.item)}" style="flex:1;" oninput="relatorioAceiteDraft.checklist[${i}].item=this.value;">
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          ${['sim', 'nao', 'na'].map((v) => `<button type="button" class="btn-outline-sm" style="${c.resposta === v ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="marcarChecklistAceite(${i}, '${v}')">${v === 'sim' ? 'Sim' : v === 'nao' ? 'Não' : 'N/A'}</button>`).join('')}
+          <button class="step-rm" onclick="removerItemChecklistAceite(${i})">×</button>
+        </div>
+      </div>
+      <input placeholder="Observação (opcional)" value="${esc(c.observacao)}" oninput="relatorioAceiteDraft.checklist[${i}].observacao=this.value;">
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhum item no check-list — adicione ao menos um.</p>';
+}
+function marcarChecklistAceite(i, valor) { relatorioAceiteDraft.checklist[i].resposta = valor; renderChecklistAceite(); }
+function adicionarItemChecklistAceite() { relatorioAceiteDraft.checklist.push({ item: '', resposta: '', observacao: '' }); renderChecklistAceite(); }
+function removerItemChecklistAceite(i) { relatorioAceiteDraft.checklist.splice(i, 1); renderChecklistAceite(); }
+
+function renderEstrelasAceite() {
+  document.getElementById('rae-estrelas').innerHTML = [1, 2, 3, 4, 5].map((n) => `
+    <button type="button" onclick="marcarEstrelaAceite(${n})" style="background:none; border:none; cursor:pointer; font-size:28px; color:${n <= relatorioAceiteDraft.satisfacao_estrelas ? 'var(--blue)' : '#D8E2EF'};">★</button>
+  `).join('');
+}
+function marcarEstrelaAceite(n) { relatorioAceiteDraft.satisfacao_estrelas = n; renderEstrelasAceite(); }
+
+function renderEmailsAceite() {
+  document.getElementById('rae-emails').innerHTML = relatorioAceiteDraft.emails_copia.map((em, i) => `
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input placeholder="nome@empresa.com" value="${esc(em)}" oninput="relatorioAceiteDraft.emails_copia[${i}]=this.value;">
+      ${relatorioAceiteDraft.emails_copia.length > 1 ? `<button class="btn-outline-sm" onclick="removerEmailAceite(${i})">×</button>` : ''}
+    </div>`).join('');
+}
+function adicionarEmailAceite() { relatorioAceiteDraft.emails_copia.push(''); renderEmailsAceite(); }
+function removerEmailAceite(i) { relatorioAceiteDraft.emails_copia.splice(i, 1); renderEmailsAceite(); }
+
+// ---------- assinatura (canvas) — mesmo mecanismo do relatório preventivo, prefixo "rae-" ----------
+function blocoAssinaturaAceite(chave, titulo) {
+  return `
+    <div>
+      <label>${titulo}</label>
+      <input id="rae-assinatura-${chave}-nome" placeholder="Nome do ${titulo.toLowerCase()}" value="${esc((relatorioAceiteDraft['assinatura_' + chave + '_nome']) || '')}" oninput="relatorioAceiteDraft.assinatura_${chave}_nome=this.value;">
+      <canvas id="rae-canvas-${chave}" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div id="rae-assinatura-${chave}-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="ampliarAssinaturaAceite('${chave}')">⤢ Ampliar para assinar</button>
+        <button class="btn-outline-sm" onclick="limparAssinaturaAceite('${chave}')">Limpar</button>
+      </div>
+    </div>`;
+}
+const assinaturaEstadoAceite = {};
+function montarAssinaturaAceite(chave) {
+  const canvas = document.getElementById('rae-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  assinaturaEstadoAceite[chave] = { desenhando: false, temTraco: false };
+  if (relatorioAceiteDraft['assinatura_' + chave + '_img']) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); assinaturaEstadoAceite[chave].temTraco = true; atualizarStatusAssinaturaAceite(chave); };
+    img.src = relatorioAceiteDraft['assinatura_' + chave + '_img'];
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); assinaturaEstadoAceite[chave].desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!assinaturaEstadoAceite[chave].desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); assinaturaEstadoAceite[chave].temTraco = true; }
+  function parar() {
+    if (!assinaturaEstadoAceite[chave].desenhando) return;
+    assinaturaEstadoAceite[chave].desenhando = false;
+    if (assinaturaEstadoAceite[chave].temTraco) {
+      relatorioAceiteDraft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
+      atualizarStatusAssinaturaAceite(chave);
+    }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinaturaAceite(chave) {
+  const el = document.getElementById(`rae-assinatura-${chave}-status`);
+  if (el) { el.textContent = assinaturaEstadoAceite[chave].temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = assinaturaEstadoAceite[chave].temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinaturaAceite(chave) {
+  const canvas = document.getElementById('rae-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  assinaturaEstadoAceite[chave].temTraco = false;
+  relatorioAceiteDraft['assinatura_' + chave + '_img'] = null;
+  atualizarStatusAssinaturaAceite(chave);
+}
+function ampliarAssinaturaAceite(chave) {
+  let modal = document.getElementById('modal-assinatura');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-assinatura';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Assinar</h3>
+      <p>Desenhe a assinatura com o dedo ou o mouse.</p>
+      <canvas id="modal-canvas" width="900" height="380" style="width:100%; height:260px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-canvas').getContext('2d').clearRect(0,0,900,380)">Limpar</button>
+        <button class="btn btn-primary" onclick="confirmarAssinaturaModalAceite('${chave}')">Usar esta assinatura</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-assinatura').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+  const canvas = document.getElementById('modal-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  let desenhando = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar); canvas.addEventListener('mousemove', mover); window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false }); canvas.addEventListener('touchmove', mover, { passive: false }); canvas.addEventListener('touchend', parar);
+}
+function confirmarAssinaturaModalAceite(chave) {
+  const modalCanvas = document.getElementById('modal-canvas');
+  const destino = document.getElementById('rae-canvas-' + chave);
+  const ctxDestino = destino.getContext('2d');
+  ctxDestino.clearRect(0, 0, destino.width, destino.height);
+  ctxDestino.drawImage(modalCanvas, 0, 0, destino.width, destino.height);
+  assinaturaEstadoAceite[chave].temTraco = true;
+  relatorioAceiteDraft['assinatura_' + chave + '_img'] = destino.toDataURL('image/png');
+  atualizarStatusAssinaturaAceite(chave);
+  document.getElementById('modal-assinatura').classList.remove('show');
+}
+
+// ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
+async function concluirRelatorioAceite() {
+  const d = relatorioAceiteDraft;
+  d.os_uf = document.getElementById('rae-os_uf').value;
+  d.os_numero = document.getElementById('rae-os_numero').value;
+  d.os_ano = document.getElementById('rae-os_ano').value;
+  d.data_inicial = document.getElementById('rae-data_inicial').value;
+  d.data_final = document.getElementById('rae-data_final').value;
+  const modeloSelecionado = document.getElementById('rae-modelo_maquina').value;
+  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rae-modelo_maquina_outro').value : modeloSelecionado;
+  d.numero_serie = document.getElementById('rae-numero_serie').value;
+  d.servico = document.getElementById('rae-servico').value;
+  d.empresa = document.getElementById('rae-empresa').value;
+  d.setor = document.getElementById('rae-setor').value;
+  d.endereco = document.getElementById('rae-endereco').value;
+  d.numero = document.getElementById('rae-numero').value;
+  d.bairro = document.getElementById('rae-bairro').value;
+  d.estado = document.getElementById('rae-estado').value;
+  d.cidade = document.getElementById('rae-cidade').value;
+  d.cep = document.getElementById('rae-cep').value;
+  d.contato = document.getElementById('rae-contato').value;
+  d.observacoes = document.getElementById('rae-observacoes').value;
+  const aceite = document.querySelector('input[name="rae-aceite"]:checked');
+  d.aceite = aceite ? aceite.value : '';
+  const duvidas = document.querySelector('input[name="rae-duvidas"]:checked');
+  d.satisfacao_duvidas = duvidas ? duvidas.value : '';
+  const apto = document.querySelector('input[name="rae-apto"]:checked');
+  d.satisfacao_apto = apto ? apto.value : '';
+  d.assinatura_cliente_nome = document.getElementById('rae-assinatura-cliente-nome').value;
+  d.assinatura_tecnico_nome = document.getElementById('rae-assinatura-tecnico-nome').value;
+
+  const obrigatorios = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
+    'servico', 'empresa', 'setor', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'contato'];
+  for (const campo of obrigatorios) {
+    if (!String(d[campo] || '').trim()) return alert('Preencha todos os campos obrigatórios de "Identificação" e "Dados do cliente".');
+  }
+  if (!d.checklist.length) return alert('Adicione ao menos um item no check-list.');
+  if (d.checklist.some((c) => !String(c.item || '').trim())) return alert('Dê um nome a todos os itens do check-list, ou remova os que estiverem em branco.');
+  if (d.checklist.some((c) => !c.resposta)) return alert('Responda todos os itens do check-list (Sim/Não/N/A).');
+  if (!d.observacoes.trim()) return alert('Preencha as observações (escreva N/A se não houver).');
+  if (!d.aceite) return alert('Marque se o cliente aceita ou não os termos.');
+  if (!d.satisfacao_estrelas) return alert('Selecione a avaliação por estrelas.');
+  if (!d.satisfacao_duvidas) return alert('Responda se as dúvidas foram sanadas.');
+  if (!d.satisfacao_apto) return alert('Responda se o cliente se julga apto a operar o equipamento.');
+  if (!d.assinatura_cliente_nome || !d.assinatura_cliente_img) return alert('Colete o nome e a assinatura do cliente.');
+  if (!d.assinatura_tecnico_nome || !d.assinatura_tecnico_img) return alert('Colete o nome e a assinatura do técnico.');
+  const emails = d.emails_copia.map((e) => e.trim()).filter(Boolean);
+  if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
+  d.emails_copia = emails;
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioAceite(relatorio, logo);
+    window.open(url, '_blank');
+    const assunto = encodeURIComponent(`Termo de Aceite da Entrega — ${d.empresa}`);
+    const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o Termo de Aceite da Entrega (OS ${d.os_uf}/${d.os_numero}/${d.os_ano}) referente ao atendimento em ${d.empresa}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
+    window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
+    mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+function gerarPdfRelatorioAceite(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function opcaoCheckbox(x, yy, marcado, label) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.9);
+    doc.rect(x, yy - 7, 7, 7, 'S');
+    if (marcado) { doc.setFillColor(...PDF_COR.ink); doc.rect(x + 1.2, yy - 5.8, 4.6, 4.6, 'F'); }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(label, x + 11, yy);
+    return x + 11 + doc.getTextWidth(label);
+  }
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Termo de Aceite da Entrega', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t, sub, apertado) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      y += apertado ? 4 : 16;
+    }
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('TERMO DE ACEITE', pageW / 2, 410, { align: 'center' });
+  doc.text('DA ENTREGA', pageW / 2, 438, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do cliente');
+  linhaCampos([{ label: 'Data inicial', valor: r.data_inicial, frac: 0.34 }, { label: 'Data final', valor: r.data_final, frac: 0.33 }, { label: 'O.S. Nº', valor: `${r.os_uf}/${r.os_numero}/${r.os_ano}`, frac: 0.33 }]);
+  linhaCampos([{ label: 'Modelo da máquina', valor: r.modelo_maquina, frac: 0.5 }, { label: 'Nº de série', valor: r.numero_serie, frac: 0.5 }]);
+  linhaCampos([{ label: 'Serviço', valor: r.servico, frac: 0.5 }, { label: 'Técnico', valor: r.tecnico_nome, frac: 0.5 }]);
+  linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 0.7 }, { label: 'Setor', valor: r.setor, frac: 0.3 }]);
+  linhaCampos([{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}`, frac: 1 }]);
+  linhaCampos([{ label: 'Região', valor: UF_REGIAO[r.estado] || '—', frac: 0.3 }, { label: 'Contato', valor: r.contato, frac: 0.7 }]);
+  y += 16;
+
+  tituloCentro('Item / entrega / observação');
+  (r.checklist || []).forEach((c, i) => {
+    if (y + 16 > pageH - margem) novaPagina();
+    const resp = c.resposta === 'sim' ? 'Sim' : c.resposta === 'nao' ? 'Não' : 'N/A';
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`${String(i + 1).padStart(2, '0')}. ${c.item} — ${resp}`), margem, y); y += 12;
+    if (c.observacao) {
+      doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      const linhas = doc.splitTextToSize(limparPdf('Obs: ' + c.observacao), largura - 12);
+      doc.text(linhas, margem + 12, y); y += linhas.length * 11;
+    }
+  });
+  y += 16;
+
+  tituloCentro('Sobre o equipamento');
+  {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const texto = `A máquina está coberta por uma garantia de 1 ano a partir da data de entrega. Esta garantia cobre defeitos de fabricação e mão de obra. WhatsApp: ${empresaWhatsapp()} — Telefone: ${empresaTelefone()} — E-mail: ${empresaEmails().slice(0, 2).join(' / ')}. Estamos confiantes de que o equipamento${r.modelo_maquina ? ` modelo ${r.modelo_maquina}` : ''} atenderá às suas expectativas e necessidades de produção.`;
+    const linhas = doc.splitTextToSize(limparPdf(texto), largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.setFillColor(...PDF_COR.bege);
+    doc.rect(margem, y, largura, altura, 'FD');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  tituloCentro('Observações');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.observacoes) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  tituloCentro('Aceite');
+  {
+    if (y + 20 > pageH - margem) novaPagina();
+    opcaoCheckbox(pageW / 2 - 90, y, r.aceite === 'aceito', 'LI E ACEITO OS TERMOS');
+    opcaoCheckbox(pageW / 2 + 20, y, r.aceite === 'nao_aceito', 'NÃO ACEITO');
+    y += 22;
+  }
+
+  tituloCentro('Avaliação de desempenho');
+  linhaCampos([{ label: 'Avaliação', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.34 }, { label: 'Dúvidas sanadas', valor: r.satisfacao_duvidas === 'sim' ? 'Sim' : 'Não', frac: 0.33 }, { label: 'Apto a operar', valor: r.satisfacao_apto === 'sim' ? 'Sim' : 'Não', frac: 0.33 }]);
+  y += 8;
+
+  if (y > 560) novaPagina();
+  tituloCentro('Assinaturas');
+  {
+    const wImg = 220, hImg = 90;
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
+    doc.text(limparPdf(`Técnico: ${r.assinatura_tecnico_nome}`), margem + largura / 2, y);
+    y += 8;
+    try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
+    try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
+  }
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
+
+  return doc.output('bloburl');
+}
+
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
 // completo (com fotos) na hora que alguma ação realmente precisa delas, e guarda de volta
 // no cache pra não buscar de novo se a pessoa clicar noutra ação do mesmo relatório.
@@ -6408,7 +6980,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
@@ -7428,6 +8000,11 @@ function nomeArquivoRelatorioManutencao(r) {
     const serie = limpar(r.numero_serie);
     const empresaCorr = limpar(r.empresa) || 'termo-corretiva';
     return serie ? `${empresaCorr} - ${serie}` : empresaCorr;
+  }
+  if (r.tipo === 'aceite_entrega') {
+    const serie = limpar(r.numero_serie);
+    const empresaAceite = limpar(r.empresa) || 'termo-aceite';
+    return serie ? `${empresaAceite} - ${serie}` : empresaAceite;
   }
   const empresa = limpar(r.empresa) || 'relatorio';
   const serie = limpar(r.numero_serie);

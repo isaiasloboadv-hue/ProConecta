@@ -403,6 +403,33 @@ function validarRelatorioTecnico(r) {
   return null;
 }
 
+// ---------- Termo de Aceite da Entrega (Relatório > Manual > Termo de Aceite) ----------
+// mesma família do "Relatório Manual", avulso — reaproveita o check-list (CHECKLIST_CORRETIVA),
+// o aceite, a avaliação de desempenho e a assinatura do "Relatório técnico" ligado à O.S., mas
+// como termo independente: identificação com O.S. e modelo de máquina escolhido de uma lista
+// (mesma EQUIPAMENTOS_PREVENTIVA), sem fotos ou peças.
+function validarRelatorioAceite(r) {
+  if (!r || typeof r !== 'object') return 'Dados do termo são obrigatórios.';
+  const camposTexto = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
+    'servico', 'empresa', 'setor', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'contato', 'observacoes'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!Array.isArray(r.checklist) || !r.checklist.length) return 'Adicione ao menos um item no check-list.';
+  for (const item of r.checklist) {
+    if (!item || !String(item.item || '').trim()) return 'Todo item do check-list precisa de um nome.';
+    if (!item || !['sim', 'nao', 'na'].includes(item.resposta)) return 'Todo item do check-list precisa de uma resposta (Sim/Não/N/A).';
+  }
+  if (r.aceite !== 'aceito' && r.aceite !== 'nao_aceito') return 'É preciso registrar o aceite do cliente.';
+  if (!(r.satisfacao_estrelas >= 1 && r.satisfacao_estrelas <= 5)) return 'Avaliação de desempenho (estrelas) é obrigatória.';
+  if (r.satisfacao_duvidas !== 'sim' && r.satisfacao_duvidas !== 'nao') return 'Responda se as dúvidas foram sanadas.';
+  if (r.satisfacao_apto !== 'sim' && r.satisfacao_apto !== 'nao') return 'Responda se o cliente se julga apto a operar o equipamento.';
+  if (!r.assinatura_cliente_nome || !r.assinatura_cliente_img) return 'Assinatura do cliente é obrigatória.';
+  if (!r.assinatura_tecnico_nome || !r.assinatura_tecnico_img) return 'Assinatura do técnico é obrigatória.';
+  if (!Array.isArray(r.emails_copia) || r.emails_copia.length === 0) return 'Informe ao menos um e-mail para envio do termo.';
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -1933,7 +1960,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
@@ -1956,6 +1983,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'relatorio_tecnico') {
     const erroTecnico = validarRelatorioTecnico(body);
     if (erroTecnico) return enviarJSON(res, 400, { erro: erroTecnico });
+  } else if (tipo === 'aceite_entrega') {
+    const erroAceite = validarRelatorioAceite(body);
+    if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2027,6 +2057,23 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     ...(tipo === 'relatorio_tecnico' ? {
       tipo_servico: Array.isArray(body.tipo_servico) ? body.tipo_servico : [],
       observacoes: body.observacoes || '',
+    } : {}),
+    ...(tipo === 'aceite_entrega' ? {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico: body.servico || '',
+      setor: body.setor || '', endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      checklist: Array.isArray(body.checklist) ? body.checklist : [],
+      observacoes: body.observacoes || '',
+      aceite: body.aceite || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_duvidas: body.satisfacao_duvidas || '',
+      satisfacao_apto: body.satisfacao_apto || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
     } : {}),
   };
   data.relatorios_manutencao.push(item);
@@ -2129,6 +2176,27 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       pecas: Array.isArray(body.pecas) ? body.pecas : [],
       observacoes: body.observacoes || '',
       fotos,
+    });
+  } else if (item.tipo === 'aceite_entrega') {
+    const erroAceite = validarRelatorioAceite(body);
+    if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
+    Object.assign(item, {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico: body.servico || '',
+      empresa: body.empresa || '', contato: body.contato || '',
+      setor: body.setor || '', endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      checklist: Array.isArray(body.checklist) ? body.checklist : [],
+      observacoes: body.observacoes || '',
+      aceite: body.aceite || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_duvidas: body.satisfacao_duvidas || '',
+      satisfacao_apto: body.satisfacao_apto || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
     });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
