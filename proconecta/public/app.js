@@ -4169,31 +4169,33 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 
 // ---------- CRIAR RELATÓRIO (manutenção interna, avulso — sem vínculo com O.S./agenda) ----------
 
-// Relatório > Manual é um único item de menu — ao criar um novo relatório, o técnico escolhe
-// primeiro o tipo (Completo, Preventiva, Corretiva, Relatório Técnico ou Termo de Aceite) e cai
-// direto na tela daquele tipo, cada uma com suas próprias funções/validação/PDF já existentes.
+// Relatório > Manual é um único relatório — o "Tipo de formulário" é escolhido dentro do próprio
+// preenchimento (não numa tela separada): cada tipo continua com sua própria tela/função/
+// validação/PDF já existentes (Completo, Preventiva, Corretiva, Relatório Técnico, Termo de
+// Aceite); trocar o seletor só troca qual dessas telas aparece embaixo dele.
 const TIPOS_RELATORIO_MANUAL = [
-  { label: 'Completo', desc: 'Formulário completo de manutenção interna.', fn: 'mostrarFormRelatorioManutencao' },
-  { label: 'Preventiva', desc: 'Termo de Manutenção Preventiva, com check-list por equipamento.', fn: 'mostrarFormRelatorioPreventiva' },
-  { label: 'Corretiva', desc: 'Termo de Manutenção Corretiva, com defeito informado e ações executadas.', fn: 'mostrarFormRelatorioCorretiva' },
-  { label: 'Relatório Técnico', desc: 'Laudo técnico avulso, com tipo de serviço e equipamento selecionáveis.', fn: 'mostrarFormRelatorioTecnico' },
-  { label: 'Termo de Aceite', desc: 'Termo de Aceite da Entrega, com check-list de itens/entrega e avaliação de desempenho.', fn: 'mostrarFormRelatorioAceite' },
+  { tipo: 'completo', label: 'Completo', fn: 'mostrarFormRelatorioManutencao' },
+  { tipo: 'preventiva', label: 'Preventiva', fn: 'mostrarFormRelatorioPreventiva' },
+  { tipo: 'corretiva', label: 'Corretiva', fn: 'mostrarFormRelatorioCorretiva' },
+  { tipo: 'relatorio_tecnico', label: 'Relatório Técnico', fn: 'mostrarFormRelatorioTecnico' },
+  { tipo: 'aceite_entrega', label: 'Termo de Aceite', fn: 'mostrarFormRelatorioAceite' },
 ];
 
-function mostrarSelecaoTipoRelatorioManual() {
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="page-head"><h1>Novo relatório</h1><p>Selecione o tipo de relatório que deseja criar.</p></div>
-    <div class="panel" style="display:flex; flex-direction:column; gap:10px;">
-      ${TIPOS_RELATORIO_MANUAL.map((t) => `
-        <button class="btn-outline-sm" style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:14px; height:auto; white-space:normal; text-align:left;" onclick="${t.fn}()">
-          <span style="font-weight:700; font-size:14px; color:var(--navy);">${t.label}</span>
-          <span style="font-weight:400; text-transform:none; font-size:12.5px; color:var(--ink-soft);">${t.desc}</span>
-        </button>`).join('')}
-    </div>
+function mostrarFormRelatorioManual(tipo) {
+  const def = TIPOS_RELATORIO_MANUAL.find((t) => t.tipo === tipo) || TIPOS_RELATORIO_MANUAL[0];
+  window[def.fn]();
+  const seletorHtml = `
     <div class="panel">
-      <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
+      <label>Tipo de formulário</label>
+      <select onchange="mostrarFormRelatorioManual(this.value)">
+        ${TIPOS_RELATORIO_MANUAL.map((t) => `<option value="${t.tipo}" ${t.tipo === def.tipo ? 'selected' : ''}>${t.label}</option>`).join('')}
+      </select>
+      <p style="color:var(--ink-soft); font-size:12.5px; margin-top:6px;">Ao trocar o tipo, os campos abaixo mudam para os daquele formulário.</p>
     </div>`;
+  const main = document.getElementById('main');
+  const pageHead = main.querySelector('.page-head');
+  if (pageHead) pageHead.insertAdjacentHTML('afterend', seletorHtml);
+  else main.insertAdjacentHTML('afterbegin', seletorHtml);
 }
 
 async function renderRelatorioManutencao() {
@@ -4203,7 +4205,7 @@ async function renderRelatorioManutencao() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Relatório</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S., fica salvo só aqui no seu histórico</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarSelecaoTipoRelatorioManual()">+ Novo relatório</button>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">+ Novo relatório</button>
     </div>
     <div class="panel"><table>
       <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
