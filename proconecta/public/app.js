@@ -4281,6 +4281,7 @@ async function processarFotoEtiqueta(event) {
         <button class="btn btn-primary btn-sm" onclick="gerarPreventivaAutomatico()">Preventiva</button>
         <button class="btn-outline-sm" onclick="gerarCorretivaAutomatico()">Corretiva</button>
         <button class="btn-outline-sm" onclick="gerarTecnicoAutomatico()">Relatório Técnico</button>
+        <button class="btn-outline-sm" onclick="gerarAceiteAutomatico()">Termo de Aceite</button>
         <button class="btn-outline-sm" onclick="gerarFichaAutomatico()">Levantamento de Estoque</button>
       </div>`;
   } catch (e) {
@@ -4466,6 +4467,57 @@ async function gerarTecnicoAutomatico() {
   }
 
   mostrarFormRelatorioTecnico(draft);
+  mostrarToast(cliente ? 'Etiqueta lida — cliente encontrado e dados preenchidos automaticamente.' : 'Etiqueta lida — complete os dados que faltam.');
+}
+
+// mesma lógica de casamento de modelo/cliente das demais — adaptada pro Termo de Aceite: sem
+// fotos e com os campos próprios do cliente (setor/contato, sem telefone).
+async function gerarAceiteAutomatico() {
+  if (!extraidoAutomatico) return;
+  const campoSerie = extraidoAutomatico.campos.find((c) => /s[ée]rie/i.test(c.campo || ''));
+  const numeroSerie = campoSerie ? String(campoSerie.valor || '').trim() : '';
+  const draft = relatorioAceitePadrao();
+  draft.numero_serie = numeroSerie;
+
+  let equipamento = null, cliente = null;
+  if (numeroSerie) {
+    try {
+      const resultado = await api(`/api/equipamentos/buscar-por-serie?numero_serie=${encodeURIComponent(numeroSerie)}`);
+      equipamento = resultado.equipamento;
+      cliente = resultado.cliente;
+    } catch (e) { /* segue sem os dados de cliente/equipamento — técnico preenche na mão */ }
+  }
+
+  const nomesConhecidos = Object.keys(EQUIPAMENTOS_PREVENTIVA);
+  function normalizarNomeEquipamento(s) { return String(s || '').toLowerCase().replace(/[\s\-_.]/g, ''); }
+  function acharNomeConhecido(texto) {
+    const t = normalizarNomeEquipamento(texto);
+    if (!t) return null;
+    return nomesConhecidos.find((nome) => normalizarNomeEquipamento(nome) === t)
+      || nomesConhecidos.find((nome) => t.includes(normalizarNomeEquipamento(nome)));
+  }
+  let nomePreset = null;
+  for (const campo of extraidoAutomatico.campos) {
+    nomePreset = acharNomeConhecido(campo.valor);
+    if (nomePreset) break;
+  }
+  const modeloCandidato = nomePreset || (equipamento && (equipamento.modelo || equipamento.tipo)) || '';
+  if (!nomePreset && modeloCandidato) nomePreset = acharNomeConhecido(modeloCandidato);
+  draft.modelo_maquina = nomePreset || modeloCandidato;
+
+  if (cliente) {
+    draft.empresa = cliente.nome_empresa || '';
+    draft.setor = cliente.setor || '';
+    draft.endereco = cliente.endereco || '';
+    draft.numero = cliente.numero || '';
+    draft.bairro = cliente.bairro || '';
+    draft.estado = cliente.estado || '';
+    draft.cidade = cliente.cidade || '';
+    draft.cep = cliente.cep || '';
+    draft.contato = cliente.contato || '';
+  }
+
+  mostrarFormRelatorioAceite(draft);
   mostrarToast(cliente ? 'Etiqueta lida — cliente encontrado e dados preenchidos automaticamente.' : 'Etiqueta lida — complete os dados que faltam.');
 }
 
