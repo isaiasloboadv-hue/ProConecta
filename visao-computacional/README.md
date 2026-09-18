@@ -21,6 +21,20 @@ O que já funciona:
   enviada. Por enquanto só decodifica e mostra o conteúdo (copiar / abrir
   link) — sem vínculo com cadastro de equipamento ainda; é o próximo passo
   se isso evoluir.
+- **Reconhecimento facial**: detecta rostos na câmera (biblioteca
+  [face-api.js](https://github.com/justadudewhohacks/face-api.js), que roda
+  modelos de detecção/reconhecimento facial via TensorFlow.js), desenha um
+  quadrado em volta de cada rosto e avisa se aquele rosto já tinha
+  aparecido antes nesta câmera/navegador ("Pessoa #N · visto 3x") ou se é
+  novo. Cada rosto novo vira um "descritor facial" (128 números que
+  representam o rosto, não uma foto) guardado no `localStorage` do
+  navegador — só neste dispositivo, nada sai pra nenhum servidor. O botão
+  "Limpar rostos salvos" apaga essa lista. **Atenção**: isso é
+  reconhecimento facial de verdade (dado biométrico) — tudo bem pra testar
+  em você mesmo ou com consentimento de quem aparecer na câmera, mas evite
+  usar em pessoas que não sabem/não concordam com isso, especialmente se
+  esse protótipo evoluir pra algo usado fora de teste pessoal (no Brasil,
+  dado biométrico é dado sensível pela LGPD).
 
 ## Como rodar
 

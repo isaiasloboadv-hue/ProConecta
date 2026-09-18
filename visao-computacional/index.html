@@ -49,6 +49,7 @@
   .qr-label{font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
   .qr-texto{font-family:'Courier New',monospace;font-size:13.5px;color:var(--navy);word-break:break-all;}
   .aviso-camera{background:var(--amber-bg);color:var(--amber);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:14px;}
+  .info-box{background:var(--blue-pale);color:var(--blue);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:14px;line-height:1.5;}
   .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:50;}
   .toast.show{opacity:1;transform:translate(-50%,0);}
   footer{max-width:820px;margin:0 auto;padding:0 16px 40px;color:var(--ink-soft);font-size:12px;text-align:center;}
@@ -58,7 +59,7 @@
 
 <header>
   <h1>Visão Computacional — ferramenta de estudo</h1>
-  <p>Protótipo independente para experimentar contagem de peças, identificação de cor e leitura de QR Code direto no navegador. Nada é enviado para nenhum servidor — todo o processamento acontece no seu dispositivo.</p>
+  <p>Protótipo independente para experimentar contagem de peças, identificação de cor, leitura de QR Code e reconhecimento facial direto no navegador. Nada é enviado para nenhum servidor — todo o processamento acontece no seu dispositivo.</p>
 </header>
 
 <main>
@@ -66,16 +67,18 @@
     <div class="tabs">
       <button class="tab active" id="tab-pecas" onclick="trocarModo('pecas')">Contar peças e cores</button>
       <button class="tab" id="tab-qr" onclick="trocarModo('qr')">Ler QR Code</button>
+      <button class="tab" id="tab-rostos" onclick="trocarModo('rostos')">Reconhecer rostos</button>
     </div>
     <div id="painel"></div>
   </div>
 </main>
 
-<footer>Ferramenta experimental de estudo — processamento de imagem por limiar de Otsu + rotulagem de componentes conexos (contagem/cor) e pela biblioteca jsQR (QR Code), tudo executado localmente no navegador.</footer>
+<footer>Ferramenta experimental de estudo — processamento de imagem por limiar de Otsu + rotulagem de componentes conexos (contagem/cor), biblioteca jsQR (QR Code) e face-api.js (reconhecimento facial), tudo executado localmente no navegador.</footer>
 
 <div class="toast" id="toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script>
 // ---------- utilidades ----------
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -99,6 +102,7 @@ function trocarModo(modo) {
   modoAtual = modo;
   document.getElementById('tab-pecas').classList.toggle('active', modo === 'pecas');
   document.getElementById('tab-qr').classList.toggle('active', modo === 'qr');
+  document.getElementById('tab-rostos').classList.toggle('active', modo === 'rostos');
   renderPainel();
 }
 
@@ -126,7 +130,7 @@ function renderPainel() {
       </div>
       <div id="resultado"></div>
     `;
-  } else {
+  } else if (modoAtual === 'qr') {
     painel.innerHTML = `
       <h2>Ler QR Code</h2>
       <p class="desc">Aponte a câmera para o QR Code — a leitura acontece automaticamente assim que ele for reconhecido. Também é possível enviar uma imagem com o código.</p>
@@ -144,6 +148,27 @@ function renderPainel() {
       </div>
       <div id="resultado"></div>
     `;
+  } else {
+    painel.innerHTML = `
+      <h2>Reconhecer rostos</h2>
+      <p class="desc">Aponte a câmera para o rosto de uma pessoa — a ferramenta marca com um quadrado e avisa se esse rosto já apareceu antes nesta câmera. Funciona melhor com boa iluminação e o rosto de frente.</p>
+      ${avisoCamera}
+      <div class="info-box">O reconhecimento roda 100% no navegador: cada rosto novo vira um número guardado só neste dispositivo (armazenamento local do navegador), pra comparar com os próximos. Nada é enviado a servidores. Use "Limpar rostos salvos" pra apagar essa lista.</div>
+      <div class="cam-area">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas" class="hidden"></canvas>
+        <div class="scan-hint hidden" id="rostos-status">Carregando modelo de reconhecimento facial...</div>
+      </div>
+      <div class="controls">
+        <button class="btn-primary" id="btn-camera" onclick="ligarCameraRostos()">Ligar câmera</button>
+        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Virar câmera</button>
+        <select id="seletor-camera" class="hidden" onchange="trocarCameraPorId(this.value)"></select>
+        <label class="btn-file">Enviar foto<input type="file" accept="image/*" onchange="arquivoSelecionadoRostos(event)"></label>
+        <button class="btn-outline" onclick="limparRostosSalvos()">Limpar rostos salvos</button>
+      </div>
+      <div id="resultado"></div>
+    `;
+    atualizarResumoRostos([]);
   }
 }
 
@@ -171,6 +196,7 @@ async function iniciarCamera(videoElId) {
 
 function pararCamera() {
   if (qrLoopId) { clearInterval(qrLoopId); qrLoopId = null; }
+  if (rostosLoopId) { clearInterval(rostosLoopId); rostosLoopId = null; }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
 }
 
@@ -180,6 +206,7 @@ async function trocarCamera() {
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   const ok = await iniciarCamera('video');
   if (ok && modoAtual === 'qr') iniciarLoopQr();
+  if (ok && modoAtual === 'rostos') iniciarLoopRostos();
 }
 
 // troca pra uma câmera específica escolhida no seletor (útil no notebook com webcam + câmera USB externa)
@@ -187,6 +214,7 @@ async function trocarCameraPorId(deviceId) {
   dispositivoEscolhidoId = deviceId || null;
   const ok = await iniciarCamera('video');
   if (ok && modoAtual === 'qr') iniciarLoopQr();
+  if (ok && modoAtual === 'rostos') iniciarLoopRostos();
 }
 
 // os rótulos das câmeras só ficam disponíveis depois que a permissão é concedida —
@@ -498,6 +526,175 @@ function arquivoSelecionadoQr(evento) {
       const codigo = window.jsQR ? jsQR(dados.data, canvas.width, canvas.height) : null;
       if (codigo && codigo.data) qrEncontrado(codigo.data, canvas, codigo.location);
       else mostrarToast('Nenhum QR Code encontrado nessa imagem.');
+    };
+    img.src = leitor.result;
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
+// ---------- modo reconhecimento facial ----------
+let rostosLoopId = null;
+let modelosFaceCarregados = false;
+let carregandoModelosFace = false;
+const MODEL_URL_FACE = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+const LIMIAR_RECONHECIMENTO_FACIAL = 0.55;
+
+let rostosConhecidos = [];
+try { rostosConhecidos = JSON.parse(localStorage.getItem('vc_rostos_conhecidos') || '[]'); } catch (e) { rostosConhecidos = []; }
+let proximoIdRosto = rostosConhecidos.reduce((max, r) => Math.max(max, r.id), 0) + 1;
+
+function salvarRostosConhecidos() {
+  try { localStorage.setItem('vc_rostos_conhecidos', JSON.stringify(rostosConhecidos)); } catch (e) { /* armazenamento local indisponível — segue só na memória desta sessão */ }
+}
+
+function limparRostosSalvos() {
+  rostosConhecidos = [];
+  proximoIdRosto = 1;
+  try { localStorage.removeItem('vc_rostos_conhecidos'); } catch (e) {}
+  mostrarToast('Rostos salvos apagados.');
+  if (modoAtual === 'rostos') atualizarResumoRostos([]);
+}
+
+async function garantirModelosFace() {
+  if (modelosFaceCarregados) return true;
+  if (!window.faceapi) { mostrarToast('A biblioteca de reconhecimento facial não carregou — verifique sua internet.'); return false; }
+  if (carregandoModelosFace) return false;
+  carregandoModelosFace = true;
+  const status = document.getElementById('rostos-status');
+  if (status) { status.textContent = 'Carregando modelo de reconhecimento facial (só na primeira vez)...'; status.classList.remove('hidden'); }
+  try {
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL_FACE),
+      faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL_FACE),
+      faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL_FACE),
+    ]);
+    modelosFaceCarregados = true;
+    if (status) status.classList.add('hidden');
+    return true;
+  } catch (e) {
+    mostrarToast('Não foi possível carregar o modelo de reconhecimento facial: ' + e.message);
+    if (status) status.textContent = 'Falha ao carregar o modelo — verifique sua internet e recarregue a página.';
+    return false;
+  } finally {
+    carregandoModelosFace = false;
+  }
+}
+
+async function ligarCameraRostos() {
+  const pronto = await garantirModelosFace();
+  if (!pronto) return;
+  const ok = await iniciarCamera('video');
+  if (!ok) return;
+  document.getElementById('btn-camera').classList.add('hidden');
+  document.getElementById('btn-trocar').classList.remove('hidden');
+  document.getElementById('canvas').classList.remove('hidden');
+  document.getElementById('video').classList.add('hidden');
+  iniciarLoopRostos();
+}
+
+function iniciarLoopRostos() {
+  if (rostosLoopId) clearInterval(rostosLoopId);
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  rostosLoopId = setInterval(async () => {
+    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA || !modelosFaceCarregados) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    let deteccoes;
+    try {
+      deteccoes = await faceapi
+        .detectAllFaces(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+    } catch (e) { return; }
+    processarRostosDetectados(deteccoes, ctx, canvas);
+  }, 500);
+}
+
+// compara cada rosto detectado com os já conhecidos (distância euclidiana entre descritores faciais);
+// abaixo do limiar = mesma pessoa, acima = rosto novo, que passa a fazer parte da lista conhecida
+function processarRostosDetectados(deteccoes, ctx, canvas) {
+  const presentesAgora = [];
+  deteccoes.forEach((d) => {
+    const box = d.detection.box;
+    const descritor = Array.from(d.descriptor);
+    let melhor = null, menorDist = Infinity;
+    rostosConhecidos.forEach((r) => {
+      const dist = faceapi.euclideanDistance(descritor, r.descriptor);
+      if (dist < menorDist) { menorDist = dist; melhor = r; }
+    });
+    let rosto, novo = false;
+    if (melhor && menorDist < LIMIAR_RECONHECIMENTO_FACIAL) {
+      rosto = melhor;
+      rosto.vezes = (rosto.vezes || 1) + 1;
+      rosto.ultimaVez = new Date().toISOString();
+    } else {
+      rosto = { id: proximoIdRosto++, descriptor: descritor, vezes: 1, primeiraVez: new Date().toISOString(), ultimaVez: new Date().toISOString() };
+      rostosConhecidos.push(rosto);
+      novo = true;
+    }
+    presentesAgora.push({ id: rosto.id, vezes: rosto.vezes, novo });
+
+    const cor = novo ? '#C7860A' : '#177245';
+    ctx.strokeStyle = cor;
+    ctx.lineWidth = Math.max(2, canvas.width / 300);
+    ctx.strokeRect(box.x, box.y, box.width, box.height);
+    const rotulo = novo ? 'Novo rosto' : `Pessoa #${rosto.id} · ${rosto.vezes}x`;
+    ctx.font = `${Math.max(14, canvas.width / 55)}px sans-serif`;
+    const tw = ctx.measureText(rotulo).width + 10;
+    ctx.fillStyle = cor;
+    ctx.fillRect(box.x, Math.max(0, box.y - 22), tw, 22);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(rotulo, box.x + 5, Math.max(15, box.y - 6));
+  });
+  salvarRostosConhecidos();
+  if (modoAtual === 'rostos') atualizarResumoRostos(presentesAgora);
+}
+
+function atualizarResumoRostos(presentes) {
+  const el = document.getElementById('resultado');
+  if (!el) return;
+  const linhas = presentes.length
+    ? presentes.map((p) => `<div class="cor-linha">${p.novo ? 'Novo rosto' : `Pessoa #${p.id} — visto ${p.vezes}x`}</div>`).join('')
+    : '<span class="cor-vazio">Nenhum rosto detectado no momento.</span>';
+  el.innerHTML = `
+    <div class="resumo">
+      <div class="resumo-total">
+        <div class="resumo-num">${rostosConhecidos.length}</div>
+        <div class="resumo-label">rosto(s) conhecido(s) nesta câmera</div>
+      </div>
+      <div class="cor-lista">${linhas}</div>
+    </div>
+    <p class="aviso">Reconhecimento experimental, 100% local: compara o rosto detectado com os rostos já vistos antes neste navegador. Iluminação ruim ou ângulo muito de lado reduzem a precisão.</p>
+  `;
+}
+
+async function arquivoSelecionadoRostos(evento) {
+  const arquivo = evento.target.files[0];
+  if (!arquivo) return;
+  pararCamera();
+  const pronto = await garantirModelosFace();
+  if (!pronto) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    const img = new Image();
+    img.onload = async () => {
+      const canvas = document.getElementById('canvas');
+      desenharImagemRedimensionada(img, canvas, 1000);
+      canvas.classList.remove('hidden');
+      document.getElementById('video')?.classList.add('hidden');
+      const ctx = canvas.getContext('2d');
+      let deteccoes;
+      try {
+        deteccoes = await faceapi
+          .detectAllFaces(canvas, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+      } catch (e) { mostrarToast('Não foi possível analisar essa imagem: ' + e.message); return; }
+      if (!deteccoes.length) mostrarToast('Nenhum rosto encontrado nessa imagem.');
+      processarRostosDetectados(deteccoes, ctx, canvas);
     };
     img.src = leitor.result;
   };
