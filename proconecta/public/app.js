@@ -4076,13 +4076,15 @@ async function gerarPreventivaAutomatico() {
 
   // identifica o modelo direto pelo que a própria etiqueta já diz (marca/modelo impressos nela,
   // lidos pela IA) — só recorre ao equipamento cadastrado (achado pelo nº de série) se a
-  // etiqueta não deixar isso claro
+  // etiqueta não deixar isso claro. Normaliza tirando espaço/hífen/ponto/underline antes de
+  // comparar, pra "MP-5", "MP 5" e "MP5" darem o mesmo resultado.
   const nomesConhecidos = Object.keys(EQUIPAMENTOS_PREVENTIVA);
+  function normalizarNomeEquipamento(s) { return String(s || '').toLowerCase().replace(/[\s\-_.]/g, ''); }
   function acharNomeConhecido(texto) {
-    const t = String(texto || '').trim().toLowerCase();
+    const t = normalizarNomeEquipamento(texto);
     if (!t) return null;
-    return nomesConhecidos.find((nome) => nome.toLowerCase() === t)
-      || nomesConhecidos.find((nome) => t.includes(nome.toLowerCase()));
+    return nomesConhecidos.find((nome) => normalizarNomeEquipamento(nome) === t)
+      || nomesConhecidos.find((nome) => t.includes(normalizarNomeEquipamento(nome)));
   }
   let nomePreset = null;
   for (const campo of extraidoAutomatico.campos) {
