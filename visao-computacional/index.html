@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visão Computacional — Ferramenta de estudo</title>
+<style>
+  :root{
+    --navy:#0A2647; --navy-deep:#071A33; --blue:#1467D6; --blue-bright:#2E86FF;
+    --blue-pale:#EAF2FC; --blue-pale-2:#F5F9FE; --ink:#101826; --ink-soft:#4A5568;
+    --line:#DCE4EF; --amber:#C7860A; --amber-bg:#FCF1DA; --green:#177245; --green-bg:#E1F3E9;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,'Segoe UI',Roboto,Inter,Arial,sans-serif;background:var(--blue-pale-2);color:var(--ink);}
+  header{background:linear-gradient(180deg,var(--navy) 0%,var(--navy-deep) 100%);color:#fff;padding:22px 20px;}
+  header h1{margin:0 0 4px;font-size:20px;}
+  header p{margin:0;color:#C7D6EA;font-size:13.5px;max-width:640px;}
+  main{max-width:820px;margin:0 auto;padding:20px 16px 60px;}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px;}
+  .panel h2{font-size:15.5px;margin:0 0 6px;color:var(--navy);}
+  .desc{color:var(--ink-soft);font-size:13.5px;margin:0 0 16px;}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;}
+  .tab{background:var(--blue-pale-2);border:1.5px solid var(--line);color:var(--ink-soft);font-family:inherit;font-weight:700;font-size:13.5px;padding:9px 16px;border-radius:9px;cursor:pointer;}
+  .tab.active{background:var(--blue);color:#fff;border-color:var(--blue);}
+  .cam-area{position:relative;background:#0A2647;border-radius:12px;overflow:hidden;min-height:220px;display:flex;align-items:center;justify-content:center;}
+  video, canvas{width:100%;max-height:480px;display:block;object-fit:contain;background:#0A2647;}
+  .hidden{display:none !important;}
+  .scan-hint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:rgba(10,38,71,.75);color:#fff;font-size:12.5px;font-weight:600;padding:6px 14px;border-radius:20px;}
+  .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center;}
+  button, .btn-file{border:none;border-radius:9px;padding:10px 16px;font-family:inherit;font-weight:700;font-size:13.5px;cursor:pointer;}
+  .btn-primary{background:var(--blue);color:#fff;}
+  .btn-primary:hover{background:var(--blue-bright);}
+  .btn-outline{background:#fff;color:var(--ink-soft);border:1.5px solid var(--line);}
+  .btn-outline:hover{border-color:var(--blue);color:var(--blue);}
+  .btn-file{background:#fff;color:var(--ink-soft);border:1.5px solid var(--line);display:inline-flex;align-items:center;cursor:pointer;}
+  .btn-file:hover{border-color:var(--blue);color:var(--blue);}
+  .btn-file input{display:none;}
+  .resumo{display:flex;gap:22px;align-items:center;margin-top:20px;padding:18px;background:var(--blue-pale-2);border-radius:12px;flex-wrap:wrap;}
+  .resumo-total{text-align:center;flex-shrink:0;}
+  .resumo-num{font-size:34px;font-weight:800;color:var(--navy);line-height:1;}
+  .resumo-label{font-size:12px;color:var(--ink-soft);margin-top:4px;}
+  .cor-lista{display:flex;gap:16px;flex-wrap:wrap;flex:1;}
+  .cor-linha{display:flex;align-items:center;gap:7px;font-size:13.5px;}
+  .cor-dot{width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.15);flex-shrink:0;}
+  .cor-vazio{color:var(--ink-soft);font-size:13.5px;}
+  .aviso{color:var(--ink-soft);font-size:12.5px;margin:14px 0 0;}
+  .qr-resultado{margin-top:16px;padding:16px;background:var(--blue-pale-2);border-radius:12px;}
+  .qr-label{font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  .qr-texto{font-family:'Courier New',monospace;font-size:13.5px;color:var(--navy);word-break:break-all;}
+  .aviso-camera{background:var(--amber-bg);color:var(--amber);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:14px;}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:50;}
+  .toast.show{opacity:1;transform:translate(-50%,0);}
+  footer{max-width:820px;margin:0 auto;padding:0 16px 40px;color:var(--ink-soft);font-size:12px;text-align:center;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Visão Computacional — ferramenta de estudo</h1>
+  <p>Protótipo independente para experimentar contagem de peças, identificação de cor e leitura de QR Code direto no navegador. Nada é enviado para nenhum servidor — todo o processamento acontece no seu dispositivo.</p>
+</header>
+
+<main>
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab active" id="tab-pecas" onclick="trocarModo('pecas')">Contar peças e cores</button>
+      <button class="tab" id="tab-qr" onclick="trocarModo('qr')">Ler QR Code</button>
+    </div>
+    <div id="painel"></div>
+  </div>
+</main>
+
+<footer>Ferramenta experimental de estudo — processamento de imagem por limiar de Otsu + rotulagem de componentes conexos (contagem/cor) e pela biblioteca jsQR (QR Code), tudo executado localmente no navegador.</footer>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"></script>
+<script>
+// ---------- utilidades ----------
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function mostrarToast(texto) {
+  const toast = document.getElementById('toast');
+  toast.textContent = texto;
+  toast.classList.add('show');
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// ---------- estado ----------
+let modoAtual = 'pecas';
+let stream = null;
+let facingMode = 'environment';
+let qrLoopId = null;
+let ultimoTextoQr = '';
+
+function trocarModo(modo) {
+  pararCamera();
+  modoAtual = modo;
+  document.getElementById('tab-pecas').classList.toggle('active', modo === 'pecas');
+  document.getElementById('tab-qr').classList.toggle('active', modo === 'qr');
+  renderPainel();
+}
+
+function renderPainel() {
+  const painel = document.getElementById('painel');
+  const avisoCamera = !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia
+    ? `<div class="aviso-camera">Este navegador não expôs acesso à câmera nesta página (comum ao abrir o arquivo direto, sem servidor local — veja o README). Use "Enviar foto" para testar mesmo assim.</div>`
+    : '';
+  if (modoAtual === 'pecas') {
+    painel.innerHTML = `
+      <h2>Contar peças e identificar cores</h2>
+      <p class="desc">Espalhe as peças sobre uma superfície lisa, com bom contraste e iluminação uniforme, e capture uma foto. Também é possível enviar uma foto já tirada.</p>
+      ${avisoCamera}
+      <div class="cam-area">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas" class="hidden"></canvas>
+      </div>
+      <div class="controls">
+        <button class="btn-primary" id="btn-camera" onclick="ligarCameraPecas()">Ligar câmera</button>
+        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Trocar câmera</button>
+        <button class="btn-primary hidden" id="btn-capturar" onclick="capturarEAnalisar()">Capturar e analisar</button>
+        <label class="btn-file">Enviar foto<input type="file" accept="image/*" onchange="arquivoSelecionadoPecas(event)"></label>
+        <button class="btn-outline hidden" id="btn-nova" onclick="renderPainel()">Nova captura</button>
+      </div>
+      <div id="resultado"></div>
+    `;
+  } else {
+    painel.innerHTML = `
+      <h2>Ler QR Code</h2>
+      <p class="desc">Aponte a câmera para o QR Code — a leitura acontece automaticamente assim que ele for reconhecido. Também é possível enviar uma imagem com o código.</p>
+      ${avisoCamera}
+      <div class="cam-area">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="canvas" class="hidden"></canvas>
+        <div class="scan-hint hidden" id="scan-hint">Procurando QR Code...</div>
+      </div>
+      <div class="controls">
+        <button class="btn-primary" id="btn-camera" onclick="ligarCameraQr()">Ligar câmera</button>
+        <button class="btn-outline hidden" id="btn-trocar" onclick="trocarCamera()">Trocar câmera</button>
+        <label class="btn-file">Enviar imagem<input type="file" accept="image/*" onchange="arquivoSelecionadoQr(event)"></label>
+      </div>
+      <div id="resultado"></div>
+    `;
+  }
+}
+
+// ---------- câmera ----------
+async function iniciarCamera(videoElId) {
+  pararCamera();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    const video = document.getElementById(videoElId);
+    if (!video) { pararCamera(); return false; }
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    return true;
+  } catch (e) {
+    mostrarToast('Não foi possível acessar a câmera: ' + e.message);
+    return false;
+  }
+}
+
+function pararCamera() {
+  if (qrLoopId) { clearInterval(qrLoopId); qrLoopId = null; }
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+
+async function trocarCamera() {
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  const ok = await iniciarCamera('video');
+  if (ok && modoAtual === 'qr') iniciarLoopQr();
+}
+
+window.addEventListener('beforeunload', pararCamera);
+
+// ---------- modo peças ----------
+async function ligarCameraPecas() {
+  const ok = await iniciarCamera('video');
+  if (!ok) return;
+  document.getElementById('btn-camera').classList.add('hidden');
+  document.getElementById('btn-trocar').classList.remove('hidden');
+  document.getElementById('btn-capturar').classList.remove('hidden');
+}
+
+function desenharImagemRedimensionada(img, canvas, maxDim) {
+  let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  if (w > maxDim || h > maxDim) {
+    const escala = maxDim / Math.max(w, h);
+    w = Math.round(w * escala); h = Math.round(h * escala);
+  }
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+}
+
+function exibirCanvasEEsconderVideo() {
+  document.getElementById('canvas').classList.remove('hidden');
+  document.getElementById('video')?.classList.add('hidden');
+  document.getElementById('btn-camera')?.classList.add('hidden');
+  document.getElementById('btn-trocar')?.classList.add('hidden');
+  document.getElementById('btn-capturar')?.classList.add('hidden');
+  document.getElementById('btn-nova')?.classList.remove('hidden');
+}
+
+function capturarEAnalisar() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  if (!video || !video.videoWidth) { mostrarToast('Câmera ainda não está pronta.'); return; }
+  let w = video.videoWidth, h = video.videoHeight;
+  const maxDim = 1000;
+  if (w > maxDim || h > maxDim) { const escala = maxDim / Math.max(w, h); w = Math.round(w * escala); h = Math.round(h * escala); }
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+  pararCamera();
+  exibirCanvasEEsconderVideo();
+  rodarAnalisePecas(canvas);
+}
+
+function arquivoSelecionadoPecas(evento) {
+  const arquivo = evento.target.files[0];
+  if (!arquivo) return;
+  pararCamera();
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('canvas');
+      desenharImagemRedimensionada(img, canvas, 1000);
+      exibirCanvasEEsconderVideo();
+      rodarAnalisePecas(canvas);
+    };
+    img.src = leitor.result;
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
+function rodarAnalisePecas(canvas) {
+  const resultado = analisarImagem(canvas);
+  desenharResultado(canvas, resultado);
+  exibirResumoPecas(resultado);
+}
+
+// ---------- processamento de imagem: limiar de Otsu + componentes conexos ----------
+function limiarOtsu(hist, total) {
+  let somaTotal = 0;
+  for (let i = 0; i < 256; i++) somaTotal += i * hist[i];
+  let somaFundo = 0, pesoFundo = 0, melhorVar = 0, limiar = 127;
+  for (let t = 0; t < 256; t++) {
+    pesoFundo += hist[t];
+    if (pesoFundo === 0) continue;
+    const pesoObjeto = total - pesoFundo;
+    if (pesoObjeto === 0) break;
+    somaFundo += t * hist[t];
+    const mediaFundo = somaFundo / pesoFundo;
+    const mediaObjeto = (somaTotal - somaFundo) / pesoObjeto;
+    const varEntre = pesoFundo * pesoObjeto * (mediaFundo - mediaObjeto) ** 2;
+    if (varEntre > melhorVar) { melhorVar = varEntre; limiar = t; }
+  }
+  return limiar;
+}
+
+function analisarImagem(canvas) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0, 0, w, h);
+  const px = img.data;
+  const n = w * h;
+
+  const gray = new Uint8ClampedArray(n);
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    const g = Math.round(0.299 * px[o] + 0.587 * px[o + 1] + 0.114 * px[o + 2]);
+    gray[i] = g;
+    hist[g]++;
+  }
+  const limiar = limiarOtsu(hist, n);
+
+  // decide qual lado do limiar é o fundo olhando a borda da imagem
+  let somaBorda = 0, contBorda = 0;
+  for (let x = 0; x < w; x++) { somaBorda += gray[x] + gray[(h - 1) * w + x]; contBorda += 2; }
+  for (let y = 0; y < h; y++) { somaBorda += gray[y * w] + gray[y * w + w - 1]; contBorda += 2; }
+  const fundoClaro = (somaBorda / contBorda) >= limiar;
+
+  const mask = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const ehClaro = gray[i] >= limiar;
+    mask[i] = (fundoClaro ? !ehClaro : ehClaro) ? 1 : 0;
+  }
+
+  // rotulagem de componentes conexos (4-vizinhos), com pilha iterativa
+  const labels = new Int32Array(n);
+  const pilha = new Int32Array(n);
+  const blobs = [];
+  for (let start = 0; start < n; start++) {
+    if (mask[start] !== 1 || labels[start] !== 0) continue;
+    const rotulo = blobs.length + 1;
+    let topo = 0;
+    pilha[topo++] = start;
+    labels[start] = rotulo;
+    let area = 0, minX = w, maxX = 0, minY = h, maxY = 0, somaR = 0, somaG = 0, somaB = 0;
+    while (topo > 0) {
+      const idx = pilha[--topo];
+      const x = idx % w, y = (idx / w) | 0;
+      area++;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      const o = idx * 4;
+      somaR += px[o]; somaG += px[o + 1]; somaB += px[o + 2];
+      if (x > 0 && mask[idx - 1] === 1 && labels[idx - 1] === 0) { labels[idx - 1] = rotulo; pilha[topo++] = idx - 1; }
+      if (x < w - 1 && mask[idx + 1] === 1 && labels[idx + 1] === 0) { labels[idx + 1] = rotulo; pilha[topo++] = idx + 1; }
+      if (y > 0 && mask[idx - w] === 1 && labels[idx - w] === 0) { labels[idx - w] = rotulo; pilha[topo++] = idx - w; }
+      if (y < h - 1 && mask[idx + w] === 1 && labels[idx + w] === 0) { labels[idx + w] = rotulo; pilha[topo++] = idx + w; }
+    }
+    blobs.push({ area, minX, maxX, minY, maxY, cor: [Math.round(somaR / area), Math.round(somaG / area), Math.round(somaB / area)] });
+  }
+
+  // descarta ruído (manchas minúsculas) e o próprio fundo, caso tenha entrado na máscara por engano
+  const pecas = blobs
+    .filter((b) => b.area >= Math.max(30, n * 0.00015) && b.area <= n * 0.6)
+    .map((b) => ({ ...b, corNome: corMaisProxima(...b.cor) }));
+
+  return { limiar, fundoClaro, pecas, largura: w, altura: h };
+}
+
+const CORES_NOMEADAS = [
+  { nome: 'Vermelho', rgb: [200, 40, 40] },
+  { nome: 'Laranja', rgb: [230, 126, 34] },
+  { nome: 'Amarelo', rgb: [235, 210, 50] },
+  { nome: 'Verde', rgb: [40, 160, 70] },
+  { nome: 'Azul', rgb: [40, 90, 200] },
+  { nome: 'Roxo', rgb: [120, 60, 170] },
+  { nome: 'Rosa', rgb: [220, 120, 170] },
+  { nome: 'Marrom', rgb: [110, 70, 40] },
+  { nome: 'Preto', rgb: [20, 20, 20] },
+  { nome: 'Cinza', rgb: [130, 130, 130] },
+  { nome: 'Branco', rgb: [235, 235, 235] },
+];
+
+function corMaisProxima(r, g, b) {
+  let melhor = null, melhorDist = Infinity;
+  for (const c of CORES_NOMEADAS) {
+    const d = (r - c.rgb[0]) ** 2 + (g - c.rgb[1]) ** 2 + (b - c.rgb[2]) ** 2;
+    if (d < melhorDist) { melhorDist = d; melhor = c.nome; }
+  }
+  return melhor;
+}
+
+function corHex(nome) {
+  const c = CORES_NOMEADAS.find((x) => x.nome === nome);
+  return c ? `rgb(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]})` : '#999';
+}
+
+function desenharResultado(canvas, resultado) {
+  const ctx = canvas.getContext('2d');
+  resultado.pecas.forEach((p, i) => {
+    ctx.strokeStyle = '#2FA8DE';
+    ctx.lineWidth = Math.max(2, canvas.width / 400);
+    ctx.strokeRect(p.minX, p.minY, p.maxX - p.minX, p.maxY - p.minY);
+    ctx.font = `${Math.max(14, canvas.width / 60)}px sans-serif`;
+    const texto = String(i + 1);
+    const tw = ctx.measureText(texto).width + 8;
+    ctx.fillStyle = '#0A2647';
+    ctx.fillRect(p.minX, Math.max(0, p.minY - 20), tw, 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(texto, p.minX + 4, Math.max(14, p.minY - 5));
+  });
+}
+
+function exibirResumoPecas(resultado) {
+  const porCor = new Map();
+  resultado.pecas.forEach((p) => porCor.set(p.corNome, (porCor.get(p.corNome) || 0) + 1));
+  const linhasCor = [...porCor.entries()].sort((a, b) => b[1] - a[1])
+    .map(([cor, qtd]) => `<div class="cor-linha"><span class="cor-dot" style="background:${corHex(cor)}"></span>${esc(cor)} <b>${qtd}</b></div>`).join('');
+  document.getElementById('resultado').innerHTML = `
+    <div class="resumo">
+      <div class="resumo-total">
+        <div class="resumo-num">${resultado.pecas.length}</div>
+        <div class="resumo-label">peça(s) detectada(s)</div>
+      </div>
+      <div class="cor-lista">${linhasCor || '<span class="cor-vazio">Nenhuma peça identificada — tente melhorar o contraste com o fundo ou a iluminação.</span>'}</div>
+    </div>
+    <p class="aviso">Contagem experimental por processamento de imagem local (nenhuma foto sai do seu dispositivo): funciona melhor com peças bem separadas, sobre uma superfície lisa e de cor contrastante.</p>
+  `;
+}
+
+// ---------- modo QR ----------
+async function ligarCameraQr() {
+  const ok = await iniciarCamera('video');
+  if (!ok) return;
+  document.getElementById('btn-camera').classList.add('hidden');
+  document.getElementById('btn-trocar').classList.remove('hidden');
+  document.getElementById('scan-hint').classList.remove('hidden');
+  iniciarLoopQr();
+}
+
+function iniciarLoopQr() {
+  if (qrLoopId) clearInterval(qrLoopId);
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  qrLoopId = setInterval(() => {
+    if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dados = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const codigo = window.jsQR ? jsQR(dados.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' }) : null;
+    if (codigo && codigo.data) qrEncontrado(codigo.data, canvas, codigo.location);
+  }, 300);
+}
+
+function qrEncontrado(texto, canvas, location) {
+  if (qrLoopId) { clearInterval(qrLoopId); qrLoopId = null; }
+  pararCamera();
+  document.getElementById('scan-hint')?.classList.add('hidden');
+  canvas.classList.remove('hidden');
+  document.getElementById('video')?.classList.add('hidden');
+  if (location) {
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = '#2FA8DE'; ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(location.topLeftCorner.x, location.topLeftCorner.y);
+    ctx.lineTo(location.topRightCorner.x, location.topRightCorner.y);
+    ctx.lineTo(location.bottomRightCorner.x, location.bottomRightCorner.y);
+    ctx.lineTo(location.bottomLeftCorner.x, location.bottomLeftCorner.y);
+    ctx.closePath(); ctx.stroke();
+  }
+  mostrarResultadoQr(texto);
+}
+
+function mostrarResultadoQr(texto) {
+  ultimoTextoQr = texto;
+  const ehUrl = /^https?:\/\//i.test(texto.trim());
+  document.getElementById('resultado').innerHTML = `
+    <div class="qr-resultado">
+      <div class="qr-label">Código lido</div>
+      <div class="qr-texto">${esc(texto)}</div>
+      <div class="controls" style="margin-top:12px;">
+        <button class="btn-outline" onclick="copiarTextoQr()">Copiar</button>
+        ${ehUrl ? `<a class="btn-outline" style="text-decoration:none;display:inline-flex;align-items:center;" href="${esc(texto)}" target="_blank" rel="noopener">Abrir link</a>` : ''}
+        <button class="btn-primary" onclick="ligarCameraQr()">Ler outro</button>
+      </div>
+    </div>`;
+}
+
+function copiarTextoQr() {
+  if (!ultimoTextoQr) return;
+  navigator.clipboard?.writeText(ultimoTextoQr).then(() => mostrarToast('Copiado.')).catch(() => mostrarToast('Não foi possível copiar.'));
+}
+
+function arquivoSelecionadoQr(evento) {
+  const arquivo = evento.target.files[0];
+  if (!arquivo) return;
+  pararCamera();
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById('canvas');
+      desenharImagemRedimensionada(img, canvas, 1400);
+      canvas.classList.remove('hidden');
+      document.getElementById('video')?.classList.add('hidden');
+      const ctx = canvas.getContext('2d');
+      const dados = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const codigo = window.jsQR ? jsQR(dados.data, canvas.width, canvas.height) : null;
+      if (codigo && codigo.data) qrEncontrado(codigo.data, canvas, codigo.location);
+      else mostrarToast('Nenhum QR Code encontrado nessa imagem.');
+    };
+    img.src = leitor.result;
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
+renderPainel();
+</script>
+</body>
+</html>
