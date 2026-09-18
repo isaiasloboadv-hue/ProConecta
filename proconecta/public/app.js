@@ -491,7 +491,7 @@ const NAV = {
         { key: 'relatorio-manual-completo', label: 'Completo', page: 'relatorio-manutencao' },
         { key: 'relatorio-manual-preventiva', label: 'Preventiva', page: 'relatorio-preventiva' },
       ]},
-      { key: 'relatorio-automatico', label: 'Lev. Estoque Etiqueta', page: 'relatorio-automatico' },
+      { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
       { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
     ]},
     { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
@@ -3997,14 +3997,16 @@ function descricaoRelatorioManutencao(r) {
   return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
 }
 
-// tela "Gerar relatório automático": tira foto da etiqueta/placa do equipamento, manda pra IA ler
-// e abre a Ficha do equipamento (mostrarFormFicha) já com os campos que a etiqueta tiver — é a
-// própria etiqueta que decide quais campos existem (marca, nº de série, potência, tensão...), não
-// é uma lista fixa. O técnico revisa/ajusta e salva; a foto tirada aqui já entra na ficha.
+// tela "Automático" (Relatório > Automático): tira foto da etiqueta/placa do equipamento, manda
+// pra IA ler os dados (mesmo se a etiqueta estiver em inglês, vem traduzido) e, com base neles,
+// deixa escolher que tipo de relatório gerar: Levantamento de Estoque (Ficha do equipamento, como
+// já era) ou Preventiva (Termo de Manutenção Preventiva, tentando já casar o modelo lido com um
+// dos equipamentos cadastrados e — se o nº de série já estiver atrelado a um cliente — preenchendo
+// os dados do cliente também).
 function renderRelatorioAutomatico() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Lev. Estoque Etiqueta</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados (mesmo se a etiqueta estiver em inglês, vem traduzido) e já deixa a ficha pronta pra você revisar antes de salvar.</p></div>
+    <div class="page-head"><h1>Automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados e você escolhe que tipo de relatório gerar com eles.</p></div>
     <div class="panel" style="text-align:center;">
       <div id="ra-preview" style="margin-bottom:14px;"></div>
       <label class="photo-add" style="display:inline-flex;">
@@ -4012,27 +4014,93 @@ function renderRelatorioAutomatico() {
         <input type="file" accept="image/*" capture="environment" style="display:none" onchange="processarFotoEtiqueta(event)">
       </label>
       <div id="ra-status" style="margin-top:12px; color:var(--ink-soft); font-size:13px;"></div>
+      <div id="ra-escolha" style="margin-top:16px;"></div>
     </div>`;
 }
 
+// guarda o resultado da última leitura de etiqueta nesta tela, pra alimentar qualquer um dos
+// dois relatórios que o técnico escolher a seguir
+let extraidoAutomatico = null;
 async function processarFotoEtiqueta(event) {
   const arquivos = event.target.files;
   if (!arquivos || !arquivos.length) return;
   const [dataUrl] = await lerFotosComoDataUrl(arquivos);
   const preview = document.getElementById('ra-preview');
   const status = document.getElementById('ra-status');
+  const escolha = document.getElementById('ra-escolha');
   if (preview) preview.innerHTML = `<img src="${dataUrl}" style="max-width:260px; border-radius:10px; border:1px solid var(--line);">`;
   if (status) status.textContent = 'Lendo a etiqueta...';
+  if (escolha) escolha.innerHTML = '';
   try {
     const { extraido } = await api('/api/relatorios-manutencao/ler-etiqueta', { method: 'POST', body: { foto: dataUrl } });
-    const draft = fichaEquipamentoPadrao();
-    draft.campos = Array.isArray(extraido.campos) ? extraido.campos : [];
-    draft.fotos = [dataUrl];
-    mostrarFormFicha(draft);
-    mostrarToast('Etiqueta lida — revise os dados antes de salvar.');
+    extraidoAutomatico = { campos: Array.isArray(extraido.campos) ? extraido.campos : [], foto: dataUrl };
+    if (status) status.textContent = 'Etiqueta lida — escolha que relatório gerar com esses dados.';
+    if (escolha) escolha.innerHTML = `
+      <p style="font-weight:700; margin-bottom:10px;">Gerar relatório de:</p>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="gerarPreventivaAutomatico()">Preventiva</button>
+        <button class="btn-outline-sm" onclick="gerarFichaAutomatico()">Levantamento de Estoque</button>
+      </div>`;
   } catch (e) {
     if (status) status.textContent = 'Erro: ' + e.message;
   }
+}
+
+function gerarFichaAutomatico() {
+  if (!extraidoAutomatico) return;
+  const draft = fichaEquipamentoPadrao();
+  draft.campos = extraidoAutomatico.campos;
+  draft.fotos = [extraidoAutomatico.foto];
+  mostrarFormFicha(draft);
+  mostrarToast('Etiqueta lida — revise os dados antes de salvar.');
+}
+
+// tenta casar o campo de nº de série lido na etiqueta com um equipamento já atrelado a um
+// cliente — se achar, pré-preenche o modelo (e o check-list/fotos certos, se for um dos modelos
+// cadastrados) e os dados do cliente; se não achar, deixa tudo desbloqueado pro técnico preencher.
+async function gerarPreventivaAutomatico() {
+  if (!extraidoAutomatico) return;
+  const campoSerie = extraidoAutomatico.campos.find((c) => /s[ée]rie/i.test(c.campo || ''));
+  const numeroSerie = campoSerie ? String(campoSerie.valor || '').trim() : '';
+  const draft = relatorioPreventivaPadrao();
+  draft.numero_serie = numeroSerie;
+
+  let equipamento = null, cliente = null;
+  if (numeroSerie) {
+    try {
+      const resultado = await api(`/api/equipamentos/buscar-por-serie?numero_serie=${encodeURIComponent(numeroSerie)}`);
+      equipamento = resultado.equipamento;
+      cliente = resultado.cliente;
+    } catch (e) { /* segue sem os dados de cliente/equipamento — técnico preenche na mão */ }
+  }
+
+  const modeloCandidato = equipamento && (equipamento.modelo || equipamento.tipo) || '';
+  const nomePreset = Object.keys(EQUIPAMENTOS_PREVENTIVA).find((nome) => nome.toLowerCase() === modeloCandidato.toLowerCase());
+  if (nomePreset) {
+    const preset = EQUIPAMENTOS_PREVENTIVA[nomePreset];
+    draft.modelo_maquina = nomePreset;
+    draft.checklist = preset.checklist.map((item) => ({ item, resposta: '', observacao: '' }));
+    draft.fotos = preset.fotos.map((label) => ({ comentario: label, fotos: [] }));
+  } else {
+    draft.modelo_maquina = modeloCandidato;
+    draft.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
+  }
+  // a própria foto da etiqueta já cobre o primeiro grupo ("Etiqueta de NS do equipamento")
+  if (draft.fotos[0]) draft.fotos[0].fotos.push(extraidoAutomatico.foto);
+
+  if (cliente) {
+    draft.empresa = cliente.nome_empresa || '';
+    draft.endereco = cliente.endereco || '';
+    draft.numero = cliente.numero || '';
+    draft.bairro = cliente.bairro || '';
+    draft.cidade = cliente.cidade || '';
+    draft.estado = cliente.estado || '';
+    draft.cep = cliente.cep || '';
+    draft.setor_maquina = cliente.setor || '';
+  }
+
+  mostrarFormRelatorioPreventiva(draft);
+  mostrarToast(cliente ? 'Etiqueta lida — cliente encontrado e dados preenchidos automaticamente.' : 'Etiqueta lida — complete os dados que faltam.');
 }
 
 // ---------- Ficha do equipamento (relatório enxuto: só o que a etiqueta tem + condição + fotos) ----------

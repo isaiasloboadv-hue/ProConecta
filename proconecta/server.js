@@ -2136,6 +2136,29 @@ rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   enviarJSON(res, 200, { equipamentos: lista });
 });
 
+// GET /api/equipamentos/buscar-por-serie?numero_serie=XXX — usado pelo Relatório > Automático:
+// a partir do nº de série lido na etiqueta, descobre se o equipamento já está atrelado a um
+// cliente cadastrado, pra pré-preencher os dados no Termo de Manutenção Preventiva. Não expõe a
+// lista de clientes inteira pro técnico — só os dados básicos do cliente deste equipamento.
+rota('GET', /^\/api\/equipamentos\/buscar-por-serie$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const serie = String(query.numero_serie || '').trim().toLowerCase();
+  if (!serie) return enviarJSON(res, 400, { erro: 'Informe o número de série.' });
+  const data = db.load();
+  const equipamento = data.equipamentos.find((e) => e.numero_serie && e.numero_serie.trim().toLowerCase() === serie);
+  if (!equipamento) return enviarJSON(res, 200, { equipamento: null, cliente: null });
+  const cliente = equipamento.cliente_id ? data.clientes.find((c) => c.id === equipamento.cliente_id) : null;
+  enviarJSON(res, 200, {
+    equipamento: { id: equipamento.id, tipo: equipamento.tipo, modelo: equipamento.modelo, numero_serie: equipamento.numero_serie, data_fabricacao: equipamento.data_fabricacao },
+    cliente: cliente ? {
+      nome_empresa: cliente.nome_empresa, endereco: cliente.endereco, numero: cliente.numero,
+      bairro: cliente.bairro, cidade: cliente.cidade, estado: cliente.estado, cep: cliente.cep, setor: cliente.setor,
+    } : null,
+  });
+});
+
 // POST /api/equipamentos — cadastra um tipo/modelo no catálogo (ainda sem cliente nem nº de série)
 rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
