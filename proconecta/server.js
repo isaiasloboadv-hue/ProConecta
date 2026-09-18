@@ -325,10 +325,6 @@ function validarRelatorio(r) {
 // fixa de itens nem um tamanho fixo — o front já vem com um modelo pronto (equipamento a laser),
 // mas o técnico pode adicionar, renomear ou remover itens; aqui só valida que cada item tenha
 // nome e resposta.
-// índices do array body.fotos (blocos {comentario, fotos}) que são obrigatórios — os 5
-// primeiros grupos do termo; "Fotos adicionais" (índice 5) é opcional
-const GRUPOS_FOTOS_PREVENTIVA_OBRIGATORIOS = [0, 1, 2, 3, 4];
-
 function validarRelatorioPreventiva(r) {
   if (!r || typeof r !== 'object') return 'Dados do termo são obrigatórios.';
   const camposTexto = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
@@ -344,8 +340,11 @@ function validarRelatorioPreventiva(r) {
     if (!item || !String(item.item || '').trim()) return 'Todo item do check-list precisa de um nome.';
     if (!item || !['sim', 'nao', 'na'].includes(item.resposta)) return 'Todo item do check-list precisa de uma resposta (Sim/Não/N/A).';
   }
+  // o conjunto de fotos varia por modelo de máquina (ver EQUIPAMENTOS_PREVENTIVA no front) —
+  // em todo modelo o último grupo ("Fotos adicionais") é opcional, os anteriores são obrigatórios
   const fotos = Array.isArray(r.fotos) ? r.fotos : [];
-  for (const idx of GRUPOS_FOTOS_PREVENTIVA_OBRIGATORIOS) {
+  if (!fotos.length) return 'Selecione o modelo da máquina pra liberar os grupos de fotos.';
+  for (let idx = 0; idx < fotos.length - 1; idx++) {
     const bloco = fotos[idx];
     if (!bloco || !Array.isArray(bloco.fotos) || !bloco.fotos.length) return 'Anexe as fotos obrigatórias do termo.';
   }

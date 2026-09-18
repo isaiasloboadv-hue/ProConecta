@@ -42,10 +42,10 @@ const CHECKLIST_CORRETIVA = [
   'I/O da máquina', 'Sistema de refrigeração', 'Acompanhamento da linha',
   'Treinamento operacional', 'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
 ];
-// check-list padrão do Termo de Manutenção Preventiva (Relatório > Manual > Preventiva) — o
-// equipamento pode ser variado (não só laser), então isso é só um ponto de partida: o técnico
-// pode adicionar, renomear ou remover itens antes de enviar, pra adequar ao equipamento atendido.
-const CHECKLIST_PREVENTIVA_PADRAO = [
+// check-lists do Termo de Manutenção Preventiva (Relatório > Manual > Preventiva), um por
+// família de equipamento — o técnico ainda pode adicionar, renomear ou remover itens antes de
+// enviar, pra ajustar a algum caso fora do padrão; isso aqui é só o ponto de partida de cada um.
+const CHECKLIST_PREVENTIVA_LASER = [
   'Fonte', 'CPA-D', 'CLP', 'Contator', 'Relé', 'Fonte tripla', 'Filtro de linha',
   'Placa de controle', 'Pré-filtro', 'Filtro cooler', 'Filtro intermediário', 'Filtro principal',
   'Lente para refração', 'Lente de sacrifício', 'Calibração', 'Projeção', 'Ressonador',
@@ -53,17 +53,53 @@ const CHECKLIST_PREVENTIVA_PADRAO = [
   'Chiller', 'Computador', 'Válvula', 'Regulador de pressão', 'Sistema de segurança',
   'Comando Pneumático', 'Comando Elétrico',
 ];
-// grupos de fotos obrigatórias do Termo de Manutenção Preventiva — cada grupo vira um
-// bloco {comentario, fotos} igual ao relatório completo, com o rótulo já preenchido no
-// comentário (esse aqui não é editável pelo técnico, é só o título do grupo)
-const GRUPOS_FOTOS_PREVENTIVA = [
-  { label: 'Painel elétrico do equipamento', obrigatorio: true },
-  { label: 'Equipamento', obrigatorio: true },
-  { label: 'Tensões de entrada e saída da fonte tripla', obrigatorio: true },
-  { label: 'Potência antes de executar o serviço', obrigatorio: true },
-  { label: 'Potência após executar o serviço', obrigatorio: true },
-  { label: 'Fotos adicionais', obrigatorio: false },
+const CHECKLIST_PREVENTIVA_PLACA = [
+  'Limpeza da placa principal', 'Limpeza da placa do eletroimã', 'Limpeza da placa do driver',
+  'Limpeza da placa de frequência', 'Limpeza da placa do touch', 'Medição da fonte de tensão',
+  'Calibração do touch', 'Verificação do fusível de entrada', 'Troca dos filtros',
+  'Continuidade cabo de comunicação', 'Limpeza do fuso e castanha', 'Limpeza das guias',
+  'Limpeza do porta punção', 'Lubrificação do porta punção', 'Limpeza do motor de passo',
+  'Teste de movimentação eixo X e Y', 'Teste de marcação', 'Teste do fim de curso', 'Limpeza externa',
 ];
+const CHECKLIST_PREVENTIVA_FLYMARKER = [
+  'Limpeza da placa principal', 'Limpeza da placa de marcação', 'Verificação componentes eletrônicos',
+  'Limpeza das guias e castanhas', 'Teste de continuidade do Eletroimã', 'Atualização do software',
+  'Tensão de saída da bateria', 'Tensão de saída do carregador', 'Teste do sensor de fim de curso',
+  'Teste de movimentação do eixo X e Y', 'Teste de marcação', 'Verificação do punção',
+  'Limpeza e descontaminação externa',
+];
+const CHECKLIST_PREVENTIVA_INSTALACAO = [
+  'Instalação mecânica', 'Instalação elétrica', 'Instalação pneumática', 'Instalação software',
+  'Sistema de segurança', 'Tryout', 'Acompanhamento da linha', 'Treinamento operacional',
+  'Treinamento configuração', 'Treinamento manutenção', 'Entrega de documentação',
+];
+// grupos de fotos do Termo de Manutenção Preventiva — cada grupo vira um bloco {comentario,
+// fotos} igual ao relatório completo, com o rótulo já preenchido no comentário (esse aqui não é
+// editável pelo técnico, é só o título do grupo). Em todo equipamento o último grupo ("Fotos
+// adicionais") é opcional — todos os anteriores são obrigatórios.
+const FOTOS_PREVENTIVA_LASER = [
+  'Etiqueta de NS do equipamento', 'Painel elétrico do equipamento', 'Equipamento',
+  'Tensões de entrada e saída da fonte tripla', 'Potência antes de executar o serviço',
+  'Potência após executar o serviço', 'Fotos adicionais',
+];
+const FOTOS_PREVENTIVA_GENERICO = [
+  'Etiqueta de NS do equipamento', 'Equipamento', 'Equipamento antes de executar o serviço',
+  'Equipamento após de executar o serviço', 'Fotos adicionais',
+];
+// cada modelo de máquina indica qual check-list e qual conjunto de fotos usar — "Outro" (fora
+// desta lista) começa com o check-list em branco e o conjunto de fotos genérico.
+const EQUIPAMENTOS_PREVENTIVA = {
+  'Smartbox': { checklist: CHECKLIST_PREVENTIVA_LASER, fotos: FOTOS_PREVENTIVA_LASER },
+  'OEM': { checklist: CHECKLIST_PREVENTIVA_LASER, fotos: FOTOS_PREVENTIVA_LASER },
+  'Custom': { checklist: CHECKLIST_PREVENTIVA_LASER, fotos: FOTOS_PREVENTIVA_LASER },
+  'Easybox': { checklist: CHECKLIST_PREVENTIVA_LASER, fotos: FOTOS_PREVENTIVA_LASER },
+  'UV': { checklist: CHECKLIST_PREVENTIVA_LASER, fotos: FOTOS_PREVENTIVA_LASER },
+  'KT': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'MP5': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'FlyMarker': { checklist: CHECKLIST_PREVENTIVA_FLYMARKER, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'Limpeza a laser': { checklist: CHECKLIST_PREVENTIVA_INSTALACAO, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'Solda a Laser': { checklist: CHECKLIST_PREVENTIVA_INSTALACAO, fotos: FOTOS_PREVENTIVA_GENERICO },
+};
 const UF_REGIAO = {
   AC: 'Norte', AP: 'Norte', AM: 'Norte', PA: 'Norte', RO: 'Norte', RR: 'Norte', TO: 'Norte',
   AL: 'Nordeste', BA: 'Nordeste', CE: 'Nordeste', MA: 'Nordeste', PB: 'Nordeste', PE: 'Nordeste', PI: 'Nordeste', RN: 'Nordeste', SE: 'Nordeste',
@@ -4596,11 +4632,13 @@ function relatorioPreventivaPadrao() {
     servico_realizado: 'Preventiva',
     empresa: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '',
     setor_maquina: '',
-    checklist: CHECKLIST_PREVENTIVA_PADRAO.map((item) => ({ item, resposta: '', observacao: '' })),
+    // vazio até o técnico escolher o modelo da máquina — cada modelo carrega seu próprio
+    // check-list e conjunto de fotos (ver EQUIPAMENTOS_PREVENTIVA)
+    checklist: [],
     observacoes_checklist: '',
     servico_feito: '',
     pecas: [],
-    fotos: GRUPOS_FOTOS_PREVENTIVA.map((g) => ({ comentario: g.label, fotos: [] })),
+    fotos: [],
     observacoes_servico: '',
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
@@ -4634,7 +4672,18 @@ function mostrarFormRelatorioPreventiva(existente) {
       <div class="form-grid">
         <div><label>Data inicial*</label><input id="rp-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
         <div><label>Data final*</label><input id="rp-data_final" type="date" value="${esc(d.data_final)}"></div>
-        <div><label>Modelo da máquina*</label><input id="rp-modelo_maquina" value="${esc(d.modelo_maquina)}"></div>
+        <div>
+          <label>Modelo da máquina*</label>
+          <select id="rp-modelo_maquina" onchange="selecionarModeloPreventiva(this.value)">
+            <option value="" ${!d.modelo_maquina || !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'selected' : ''} disabled>Selecione...</option>
+            ${Object.keys(EQUIPAMENTOS_PREVENTIVA).map((nome) => `<option value="${esc(nome)}" ${d.modelo_maquina === nome ? 'selected' : ''}>${esc(nome)}</option>`).join('')}
+            <option value="Outro" ${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'selected' : ''}>Outro</option>
+          </select>
+        </div>
+        <div id="rp-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
+          <label>Especifique o modelo*</label>
+          <input id="rp-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}">
+        </div>
         <div><label>Número de série*</label><input id="rp-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Serviço realizado*</label><input id="rp-servico_realizado" value="${esc(d.servico_realizado)}"></div>
         <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
@@ -4673,16 +4722,8 @@ function mostrarFormRelatorioPreventiva(existente) {
 
     <div class="panel">
       <h2>Fotos</h2>
-      ${GRUPOS_FOTOS_PREVENTIVA.map((g, idx) => `
-        <div style="margin-bottom:18px;">
-          <label>${esc(g.label)}${g.obrigatorio ? '*' : ''}</label>
-          ${!g.obrigatorio ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Caso tenha mais algum registro importante</p>` : ''}
-          <div class="step-photos" id="rp-fotos-${idx}"></div>
-          <label class="photo-add">
-            <span class="plus">+</span>Anexar fotos
-            <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosPreventiva(${idx}, event)">
-          </label>
-        </div>`).join('')}
+      <p id="rp-fotos-vazio" style="color:var(--ink-soft); font-size:13px; ${d.fotos.length ? 'display:none;' : ''}">Selecione o modelo da máquina acima pra liberar os grupos de fotos deste equipamento.</p>
+      <div id="rp-fotos-wrap"></div>
     </div>
 
     <div class="panel">
@@ -4727,7 +4768,7 @@ function mostrarFormRelatorioPreventiva(existente) {
     </div>`;
   renderChecklistPreventiva();
   renderPecasPreventiva();
-  GRUPOS_FOTOS_PREVENTIVA.forEach((g, idx) => renderFotosGrupoPreventiva(idx));
+  renderFotosPreventiva();
   renderEstrelasPreventiva();
   renderEmailsPreventiva();
   montarAssinaturaPreventiva('cliente');
@@ -4791,11 +4832,58 @@ function renderPecasPreventiva() {
 function adicionarPecaPreventiva() { relatorioPreventivaDraft.pecas.push({ descricao: '', codigo_pmk: '' }); renderPecasPreventiva(); }
 function removerPecaPreventiva(i) { relatorioPreventivaDraft.pecas.splice(i, 1); renderPecasPreventiva(); }
 
+// o modelo da máquina escolhido decide o check-list e o conjunto de fotos deste termo (ver
+// EQUIPAMENTOS_PREVENTIVA) — "Outro" libera um campo de texto e começa com o check-list em
+// branco e o conjunto de fotos genérico, pra equipamentos fora da lista.
+function selecionarModeloPreventiva(nome) {
+  const d = relatorioPreventivaDraft;
+  const jaTemDados = d.checklist.some((c) => c.item || c.resposta) || d.fotos.some((b) => b.fotos.length);
+  if (jaTemDados && !confirm('Trocar o modelo da máquina vai substituir o check-list e as fotos atuais. Continuar?')) {
+    document.getElementById('rp-modelo_maquina').value = d.modelo_maquina || '';
+    return;
+  }
+  d.modelo_maquina = nome;
+  const outroWrap = document.getElementById('rp-modelo_maquina-outro-wrap');
+  const preset = EQUIPAMENTOS_PREVENTIVA[nome];
+  if (preset) {
+    outroWrap.style.display = 'none';
+    d.checklist = preset.checklist.map((item) => ({ item, resposta: '', observacao: '' }));
+    d.fotos = preset.fotos.map((label) => ({ comentario: label, fotos: [] }));
+  } else {
+    outroWrap.style.display = 'block';
+    document.getElementById('rp-modelo_maquina_outro').value = '';
+    d.checklist = [];
+    d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
+  }
+  renderChecklistPreventiva();
+  renderFotosPreventiva();
+}
+
+function renderFotosPreventiva() {
+  const vazio = document.getElementById('rp-fotos-vazio');
+  if (vazio) vazio.style.display = relatorioPreventivaDraft.fotos.length ? 'none' : 'block';
+  document.getElementById('rp-fotos-wrap').innerHTML = relatorioPreventivaDraft.fotos.map((bloco, idx) => {
+    const obrigatorio = idx < relatorioPreventivaDraft.fotos.length - 1;
+    return `
+    <div style="margin-bottom:18px;">
+      <label>${esc(bloco.comentario)}${obrigatorio ? '*' : ''}</label>
+      ${!obrigatorio ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Caso tenha mais algum registro importante</p>` : ''}
+      <div class="step-photos" id="rp-fotos-${idx}"></div>
+      <label class="photo-add">
+        <span class="plus">+</span>Anexar fotos
+        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosPreventiva(${idx}, event)">
+      </label>
+    </div>`;
+  }).join('');
+  relatorioPreventivaDraft.fotos.forEach((bloco, idx) => renderFotosGrupoPreventiva(idx));
+}
+
 function renderFotosGrupoPreventiva(idx) {
   const el = document.getElementById('rp-fotos-' + idx);
   if (!el) return;
-  el.innerHTML = relatorioPreventivaDraft.fotos[idx].fotos.map((f, j) => `
-    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="${esc(GRUPOS_FOTOS_PREVENTIVA[idx].label)}">
+  const bloco = relatorioPreventivaDraft.fotos[idx];
+  el.innerHTML = bloco.fotos.map((f, j) => `
+    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="${esc(bloco.comentario)}">
       <button class="photo-rm" onclick="removerFotoPreventiva(${idx}, ${j})">×</button>
     </div>`).join('') || '<p style="color:var(--ink-soft); font-size:12.5px;">Nenhuma foto anexada ainda.</p>';
 }
@@ -4925,7 +5013,8 @@ async function concluirRelatorioPreventiva() {
   d.os_ano = document.getElementById('rp-os_ano').value;
   d.data_inicial = document.getElementById('rp-data_inicial').value;
   d.data_final = document.getElementById('rp-data_final').value;
-  d.modelo_maquina = document.getElementById('rp-modelo_maquina').value;
+  const modeloSelecionado = document.getElementById('rp-modelo_maquina').value;
+  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rp-modelo_maquina_outro').value : modeloSelecionado;
   d.numero_serie = document.getElementById('rp-numero_serie').value;
   d.servico_realizado = document.getElementById('rp-servico_realizado').value;
   d.empresa = document.getElementById('rp-empresa').value;
@@ -4954,9 +5043,9 @@ async function concluirRelatorioPreventiva() {
   if (!d.checklist.length) return alert('Adicione ao menos um item no check-list.');
   if (d.checklist.some((c) => !String(c.item || '').trim())) return alert('Dê um nome a todos os itens do check-list, ou remova os que estiverem em branco.');
   if (d.checklist.some((c) => !c.resposta)) return alert('Responda todos os itens do check-list (Sim/Não/N/A).');
-  for (const g of GRUPOS_FOTOS_PREVENTIVA) {
-    const idx = GRUPOS_FOTOS_PREVENTIVA.indexOf(g);
-    if (g.obrigatorio && !d.fotos[idx].fotos.length) return alert(`Anexe ao menos uma foto em "${g.label}".`);
+  if (!d.fotos.length) return alert('Selecione o modelo da máquina pra liberar os grupos de fotos.');
+  for (let idx = 0; idx < d.fotos.length - 1; idx++) {
+    if (!d.fotos[idx].fotos.length) return alert(`Anexe ao menos uma foto em "${d.fotos[idx].comentario}".`);
   }
   if (!d.satisfacao_estrelas) return alert('Selecione a avaliação por estrelas da pesquisa de satisfação.');
   if (!d.satisfacao_autoriza) return alert('Responda se autoriza o uso do feedback.');
