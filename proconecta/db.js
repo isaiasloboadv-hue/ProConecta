@@ -26,62 +26,159 @@ function gerarTokenConvite() {
   return crypto.randomBytes(24).toString('hex');
 }
 
+// banco novo começa vazio — o primeiro acesso vem do bootstrap de admin master
+// (ADMIN_EMAIL/ADMIN_SENHA) ou de um convite criado manualmente por quem tiver acesso ao banco.
 function seed() {
-  const senhaPadrao = hashSenha('123456');
   return {
-    usuarios: [
-      { id: 1, nome: 'Marcos Andrade', email: 'admin@proconecta.com.br', papel: 'administrador', cargo: 'Gerente de Operações', setor: 'Administração', celular: '(12) 99999-0001', cliente_id: null, status: 'ativo', convite_token: null, ...senhaPadrao },
-      { id: 2, nome: 'Isaías Lobo', email: 'isaias@proconecta.com.br', papel: 'tecnico', cargo: 'Técnico de Campo', setor: 'Manutenção', celular: '(12) 99999-0002', cliente_id: null, status: 'ativo', convite_token: null, ...senhaPadrao },
-      { id: 3, nome: 'Renata Alves', email: 'renata@proconecta.com.br', papel: 'tecnico', cargo: 'Técnica de Campo', setor: 'Manutenção', celular: '(12) 99999-0003', cliente_id: null, status: 'ativo', convite_token: null, ...senhaPadrao },
-      { id: 4, nome: 'Cliente ABC', email: 'cliente@abc.com.br', papel: 'cliente', cargo: 'Responsável pela manutenção', setor: 'Facilities', celular: '(12) 99999-0004', cliente_id: 1, status: 'ativo', convite_token: null, ...senhaPadrao },
-    ],
-    clientes: [
-      {
-        id: 1, nome_empresa: 'Cliente ABC Ltda', contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', nivel_acesso: 'completo',
-        setor: 'Produção', endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial',
-        cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
-      },
-    ],
-    // equipamentos com cliente_id null são o "catálogo" (tipo/modelo genérico, sem cliente ainda);
-    // com cliente_id preenchido são a unidade física de fato instalada num cliente (nº de série próprio)
-    equipamentos: [
-      { id: 1, cliente_id: 1, tipo: 'Máquina de Gelo', modelo: 'Promarking MP5-80P', numero_serie: '2301013587', data_fabricacao: '11/2022', localizacao: 'Cozinha' },
-      { id: 2, cliente_id: 1, tipo: 'Torre de Bebidas', modelo: 'TB-200', numero_serie: 'TB200-887', data_fabricacao: '02/2023', localizacao: 'Salão' },
-      { id: 3, cliente_id: null, tipo: 'Máquina de Marcação a Laser', modelo: 'PM-Laser 3000', numero_serie: '', data_fabricacao: '', localizacao: '' },
-    ],
-    agenda: [
-      {
-        id: 1, tecnico_id: 2, cliente_id: 1, equipamento_id: 1,
-        data_hora_inicio: '2026-09-12T08:00:00', data_hora_fim: '2026-09-12T11:00:00',
-        tipo: 'corretiva', categoria: 'inloco', problema: 'Perda de referência do eixo Y',
-        contato: 'Marcos (manutenção)', telefone: '(12) 3921-0000', email: 'marcos@clienteabc.com.br', setor_cliente: 'Produção',
-        endereco: 'Av. das Indústrias', numero: '850', bairro: 'Distrito Industrial', cep: '12345-000', cidade: 'Jacareí', estado: 'SP',
-        garantia: 'nao', garantia_obs: '',
-        status: 'pendente', valor_servico: null, retrabalho: false, criado_em: '2026-09-05T09:00:00.000Z',
-        lida_tecnico: false,
-      },
-    ],
+    usuarios: [],
+    clientes: [],
+    equipamentos: [],
+    agenda: [],
     visitas: [],
-    // biblioteca técnica: registros de Defeitos/Falhas e Manual de Procedimentos,
-    // com fluxo de aprovação (em_analise -> aprovado | alteracao_sugerida -> em_analise ...)
     registros: [],
     chamados: [],
-    _seq: { usuarios: 5, clientes: 2, equipamentos: 4, agenda: 2, visitas: 1, registros: 1, chamados: 1 },
+    chamados_rr_index: 0,
+    relatorios_manutencao: [],
+    push_subscriptions: [],
+    vapid: null,
+    empresas: [],
+    mensagens_internas: [],
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1 },
   };
+}
+
+// dados da empresa "dona" da instalação — hoje só existe a de id 1, mas já mora numa lista própria
+// (com empresa_id nos demais registros) pra um dia dar pra ter mais de uma empresa usando o mesmo
+// sistema sem redesenhar o banco. Configurável por variável de ambiente: uma instalação nova (outra
+// empresa comprando o sistema) só precisa trocar as variáveis no hospedeiro, sem mexer em código.
+// Roda a cada carregamento, então mudar a variável de ambiente reflete sem precisar apagar o banco.
+function sincronizarEmpresaPadrao(data) {
+  if (!data.empresas) data.empresas = [];
+  let empresa = data.empresas.find((e) => e.id === 1);
+  if (!empresa) {
+    empresa = {
+      id: 1,
+      nome: 'PRO Marking',
+      site: 'promarking.com.br',
+      whatsapp: '12 99718-7506',
+      telefone: '12 3902-3453',
+      emails: ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'],
+      cor_primaria: '#0A2647',
+      cor_secundaria: '#0E7C86',
+    };
+    data.empresas.push(empresa);
+  }
+  if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
+  if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
+  if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;
+  if (process.env.EMPRESA_TELEFONE) empresa.telefone = process.env.EMPRESA_TELEFONE;
+  if (process.env.EMPRESA_EMAILS) empresa.emails = process.env.EMPRESA_EMAILS.split(',').map((e) => e.trim()).filter(Boolean);
+  if (process.env.EMPRESA_COR_PRIMARIA) empresa.cor_primaria = process.env.EMPRESA_COR_PRIMARIA;
+  if (process.env.EMPRESA_COR_SECUNDARIA) empresa.cor_secundaria = process.env.EMPRESA_COR_SECUNDARIA;
+}
+
+// se as variáveis de ambiente ADMIN_EMAIL/ADMIN_SENHA estiverem definidas e ainda não existir
+// usuário com esse e-mail, cria um administrador ativo — assim a senha nunca precisa ficar
+// escrita em código/commit, só no painel de variáveis de ambiente do hospedeiro (Render etc.).
+// Roda a cada carregamento (idempotente: só cria uma vez). Devolve true se criou alguém.
+function bootstrapAdminMaster(data) {
+  const email = process.env.ADMIN_EMAIL;
+  const senha = process.env.ADMIN_SENHA;
+  if (!email || !senha) return false;
+  if (data.usuarios.some((u) => u.email === email)) return false;
+  const { salt, hash } = hashSenha(senha);
+  data.usuarios.push({
+    id: nextId(data, 'usuarios'),
+    nome: 'Desenvolvedor', email, papel: 'administrador',
+    cargo: '', setor: '', celular: '', cliente_id: null,
+    status: 'ativo', convite_token: null, salt, hash,
+    protegido: true,
+  });
+  console.log(`[db] Conta master criada automaticamente: ${email}`);
+  return true;
+}
+
+// garante que a conta master (e-mail em ADMIN_EMAIL) fique sempre marcada como protegida —
+// cobre também quem já existia antes dessa flag existir, ou foi criado numa corrida em que
+// bootstrapAdminMaster ainda não tinha essa marca. Roda a cada carregamento (idempotente).
+function protegerAdminMaster(data) {
+  const email = process.env.ADMIN_EMAIL;
+  if (!email) return;
+  const master = data.usuarios.find((u) => u.email === email);
+  if (!master) return;
+  if (master.nome === 'Administrador') master.nome = 'Desenvolvedor';
+  master.protegido = true;
 }
 
 // migração leve: bancos criados antes destes campos existirem ganham valores padrão.
 // Roda uma vez ao carregar (seja do arquivo ou do Postgres) — mutila e devolve o mesmo objeto.
 function migrar(data) {
   if (!data.registros) data.registros = [];
+  if (!data.push_subscriptions) data.push_subscriptions = [];
+  // gera o par de chaves VAPID (push notification) uma única vez e guarda no próprio banco,
+  // assim não depende de configurar variável de ambiente manualmente no hospedeiro
+  if (!data.vapid) {
+    const { publicKey, privateKey } = require('web-push').generateVAPIDKeys();
+    data.vapid = { publicKey, privateKey };
+  }
   if (!data.chamados) data.chamados = [];
+  if (data.chamados_rr_index === undefined) data.chamados_rr_index = 0;
+  if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
+  if (!data.mensagens_internas) data.mensagens_internas = [];
+  sincronizarEmpresaPadrao(data);
+  // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
+  // existe essa empresa mesmo, então todo registro já criado pertence a ela.
+  for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao]) {
+    for (const item of lista) {
+      if (item.empresa_id === undefined) item.empresa_id = 1;
+    }
+  }
+  // "chamados" virou o atendimento por chat (IA -> técnico), unificando o que antes era
+  // conversas_whatsapp (histórico solto por telefone) com o antigo chamado (só criado quando a
+  // IA escalava). Bancos antigos que ainda tenham chamados no formato de antes do chat ganham os
+  // campos novos com valor neutro, pra não quebrar a leitura.
+  for (const c of data.chamados) {
+    if (!Array.isArray(c.mensagens)) c.mensagens = [];
+    if (c.status === undefined) c.status = 'aguardando_tecnico';
+    if (c.telefone_whatsapp === undefined) c.telefone_whatsapp = null;
+    if (c.origem === undefined) c.origem = 'app';
+    if (c.tecnico_id === undefined) c.tecnico_id = null;
+    if (c.os_id === undefined) c.os_id = null;
+    if (c.prioridade === undefined) c.prioridade = 'normal';
+    if (c.resolvido_por === undefined) c.resolvido_por = null;
+    if (c.resolvido_em === undefined) c.resolvido_em = null;
+    if (c.assumido_em === undefined) c.assumido_em = null;
+    if (c.lida_tecnico === undefined) c.lida_tecnico = true;
+    if (c.lida_cliente === undefined) c.lida_cliente = true;
+  }
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
+  if (!data._seq.relatorios_manutencao) data._seq.relatorios_manutencao = 1;
+  if (!data._seq.mensagens_internas) data._seq.mensagens_internas = 1;
   for (const u of data.usuarios) {
     if (!u.status) u.status = 'ativo';
     if (u.convite_token === undefined) u.convite_token = null;
     if (u.cargo === undefined) u.cargo = '';
     if (u.setor === undefined) u.setor = '';
+    // presença do técnico pra fila de atendimento (round-robin) — online_desde marca quando
+    // ele ficou online pela última vez, e decide a ordem da fila entre quem está online agora
+    if (u.online === undefined) u.online = false;
+    if (u.online_desde === undefined) u.online_desde = null;
+    // unificação dos papéis "Técnico" (campo) e "Setor Reparo" (interno) num único papel
+    // "suporte" — o que cada um pode acessar agora é decidido por acesso_total/menus, não mais
+    // por papéis separados. acesso_total=true preserva o acesso completo que já tinham antes
+    // dessa mudança, pro admin restringir depois se quiser.
+    if (u.papel === 'tecnico' || u.papel === 'reparo') u.papel = 'suporte';
+    if (u.acesso_total === undefined) u.acesso_total = true;
+    if (!Array.isArray(u.menus)) u.menus = [];
+    // departamento de um administrador (Suporte/Pós-venda) — vazio (null) é o administrador geral,
+    // que continua vendo e cadastrando todo mundo (é sempre o caso de quem já existia antes dessa
+    // separação por departamento existir).
+    if (u.departamento === undefined) u.departamento = null;
+    // Estoque deixou de ser um departamento de administrador (só sobrou como tipo de acesso comum,
+    // sem administrador dedicado) — quem já tinha esse departamento vira administrador geral,
+    // preservando o acesso completo que já tinha (o admin geral reatribui/restringe se quiser).
+    if (u.papel === 'administrador' && u.departamento === 'estoque') u.departamento = null;
   }
   for (const c of data.clientes) {
     for (const campo of ['setor', 'endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado', 'email']) {
@@ -95,6 +192,69 @@ function migrar(data) {
       if (a[campo] === undefined) a[campo] = '';
     }
     if (a.lida_tecnico === undefined) a.lida_tecnico = false;
+    if (a.deslocamento_iniciado_em === undefined) a.deslocamento_iniciado_em = null;
+    if (a.chegada_confirmada_em === undefined) {
+      // mesma lógica do confirmado_cliente_em: O.S. que já tinham relatório enviado (ou já
+      // finalizadas) antes desse controle existir já passaram desse ponto na prática — só as
+      // que ainda estão a caminho, sem relatório, passam a exigir o registro da chegada.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      const jaAvancou = a.finalizada || visitaDoItem;
+      a.chegada_confirmada_em = jaAvancou ? (a.deslocamento_iniciado_em || a.criado_em || new Date().toISOString()) : null;
+    }
+    if (a.lembrete_deslocamento_enviado === undefined) a.lembrete_deslocamento_enviado = false;
+    if (a.confirmado_cliente_em === undefined) {
+      // O.S. que já tinham avançado (deslocamento, relatório ou já finalizadas) antes desse
+      // controle existir claramente já passaram do aceite do cliente na prática — não faz
+      // sentido bloquear elas retroativamente; só as que ainda nem começaram esperam a
+      // confirmação a partir de agora.
+      const jaAvancou = a.finalizada || a.deslocamento_iniciado_em || data.visitas.some((v) => v.agenda_id === a.id);
+      a.confirmado_cliente_em = jaAvancou ? (a.criado_em || new Date().toISOString()) : null;
+    }
+    if (a.feedback_cliente_em === undefined) {
+      // mesma lógica: O.S. que já estavam aprovadas (ou finalizadas) antes desse controle
+      // existir já passaram desse ponto na prática — só as aprovações novas, a partir de
+      // agora, exigem o registro explícito do feedback antes de finalizar.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
+      a.feedback_cliente_em = jaAprovado ? (a.finalizado_em || (visitaDoItem && visitaDoItem.data_aprovacao) || new Date().toISOString()) : null;
+    }
+    if (a.retrabalho === undefined) a.retrabalho = false;
+    if (a.retorno_pendente_tecnico === undefined) a.retorno_pendente_tecnico = false;
+    if (a.retorno_confirmado_cliente_em === undefined) a.retorno_confirmado_cliente_em = null;
+    if (a.retorno_deslocamento_iniciado_em === undefined) a.retorno_deslocamento_iniciado_em = null;
+    if (a.retorno_chegada_confirmada_em === undefined) a.retorno_chegada_confirmada_em = null;
+    if (a.orcamento_aprovado_em === undefined) {
+      // se o relatório já aprovado tinha peças fornecidas, mas esse controle de orçamento
+      // ainda não existia, considera que o orçamento já foi tratado por fora do sistema —
+      // não bloqueia O.S. antigas que já passaram desse ponto na prática.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      const temPecas = visitaDoItem && visitaDoItem.laudo && Array.isArray(visitaDoItem.laudo.pecas) && visitaDoItem.laudo.pecas.length > 0;
+      const jaAprovado = a.finalizada || (visitaDoItem && visitaDoItem.status_aprovacao === 'aprovado');
+      a.orcamento_aprovado_em = (temPecas && jaAprovado) ? (a.feedback_cliente_em || a.criado_em || new Date().toISOString()) : null;
+    }
+    if (a.orcamento_reprovado_em === undefined) a.orcamento_reprovado_em = null;
+    // fluxo de pós-venda/reparo (só usado em O.S. tipo "atendimento", nascidas de um chamado do
+    // chat) — ver server.js, seção "pós-venda / setor reparo"
+    if (a.fase_atendimento === undefined) a.fase_atendimento = null;
+    if (a.motivo_pos_venda === undefined) a.motivo_pos_venda = null;
+    if (a.encaminhado_pos_venda_em === undefined) a.encaminhado_pos_venda_em = null;
+    if (a.equipamento_recebido_em === undefined) a.equipamento_recebido_em = null;
+    if (a.pos_venda_orcamento_enviado_em === undefined) a.pos_venda_orcamento_enviado_em = null;
+    if (a.pos_venda_decisao === undefined) a.pos_venda_decisao = null;
+    if (a.pos_venda_decisao_em === undefined) a.pos_venda_decisao_em = null;
+    if (a.tecnico_chat_id === undefined) a.tecnico_chat_id = null;
+    // estoque (chegada/saída) e handoff pra O.S. de visita técnica — ver server.js
+    if (a.estoque_recebido_em === undefined) a.estoque_recebido_em = null;
+    if (a.equipamento_liberado_reparo_em === undefined) a.equipamento_liberado_reparo_em = null;
+    if (a.estoque_saida_em === undefined) a.estoque_saida_em = null;
+    if (a.os_criada_id === undefined) a.os_criada_id = null;
+    // O.S. de atendimento criadas antes desse fluxo existir (fase_atendimento nunca foi
+    // preenchida) entram agora em "em_atendimento" — do jeito que já estavam, só passam a
+    // seguir a linha do tempo nova a partir daqui em vez da antiga (deslocamento/orçamento)
+    if (a.tipo === 'atendimento' && !a.finalizada && !a.fase_atendimento) {
+      a.fase_atendimento = 'em_atendimento';
+      if (!a.tecnico_chat_id) a.tecnico_chat_id = a.tecnico_id;
+    }
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
@@ -102,7 +262,27 @@ function migrar(data) {
   }
   for (const v of data.visitas) {
     if (v.lida_tecnico === undefined) v.lida_tecnico = false;
+    if (v.rodada === undefined) v.rodada = 1;
   }
+  // relatórios de manutenção criados antes do e-mail do técnico ser buscado corretamente
+  // ficaram com esse campo em branco — preenche retroativamente a partir do cadastro atual
+  for (const r of data.relatorios_manutencao) {
+    if (!r.tecnico_email) {
+      const autor = data.usuarios.find((u) => u.id === r.autor_id);
+      if (autor && autor.email) r.tecnico_email = autor.email;
+    }
+    // relatórios criados antes da "ficha de equipamento" (leitura automática de etiqueta) existir
+    // são todos do tipo "completo" (o formulário manual de sempre).
+    if (!r.tipo) r.tipo = 'completo';
+    if (!Array.isArray(r.campos)) r.campos = [];
+    if (r.mtbf_encontrado === undefined) r.mtbf_encontrado = '';
+    if (r.resultado_ensaio === undefined) r.resultado_ensaio = '';
+    if (!Array.isArray(r.ciclos)) r.ciclos = [];
+    if (r.conclusao_ensaio === undefined) r.conclusao_ensaio = '';
+    if (r.tecnico_cargo === undefined) r.tecnico_cargo = '';
+    if (r.tecnico_setor === undefined) r.tecnico_setor = '';
+  }
+  protegerAdminMaster(data);
   return data;
 }
 
@@ -111,10 +291,14 @@ function migrar(data) {
 function carregarDoArquivo() {
   if (!fs.existsSync(DB_PATH)) {
     const data = seed();
+    bootstrapAdminMaster(data);
+    sincronizarEmpresaPadrao(data);
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
     return data;
   }
-  return migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
+  const data = migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
+  if (bootstrapAdminMaster(data)) salvarNoArquivo(data);
+  return data;
 }
 
 function salvarNoArquivo(data) {
@@ -139,13 +323,20 @@ let cache = null;
 async function inicializarPostgres() {
   const p = obterPool();
   await p.query('CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)');
+  await p.query('CREATE TABLE IF NOT EXISTS fotos (id TEXT PRIMARY KEY, dados TEXT NOT NULL, criado_em TIMESTAMPTZ DEFAULT now())');
   const r = await p.query('SELECT data FROM app_state WHERE id = 1');
   if (r.rows.length === 0) {
     const data = seed();
+    bootstrapAdminMaster(data);
+    sincronizarEmpresaPadrao(data);
     await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
     cache = data;
   } else {
-    cache = migrar(r.rows[0].data);
+    const data = migrar(r.rows[0].data);
+    if (bootstrapAdminMaster(data)) {
+      await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);
+    }
+    cache = data;
   }
   console.log('Conectado ao Postgres — os dados persistem entre reinícios.');
 }
@@ -184,4 +375,32 @@ function estaUsandoPostgres() {
   return usaPostgres && !!cache;
 }
 
-module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres };
+// ---------- fotos (guardadas à parte do bloco principal — antes ficavam dentro do mesmo JSON
+// que fica sempre carregado na memória, e isso foi o que estourou o limite de RAM do plano
+// gratuito do Render conforme foram se acumulando; agora só uma referência pequena fica no bloco
+// principal, e a foto de verdade só é buscada quando alguém realmente precisa dela) ----------
+
+const FOTOS_DIR = path.join(__dirname, 'fotos');
+
+async function salvarFoto(dadosBase64) {
+  const id = crypto.randomBytes(12).toString('hex');
+  if (estaUsandoPostgres()) {
+    await obterPool().query('INSERT INTO fotos (id, dados) VALUES ($1, $2)', [id, dadosBase64]);
+  } else {
+    if (!fs.existsSync(FOTOS_DIR)) fs.mkdirSync(FOTOS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(FOTOS_DIR, id), dadosBase64);
+  }
+  return id;
+}
+
+async function carregarFoto(id) {
+  if (!id) return null;
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query('SELECT dados FROM fotos WHERE id = $1', [id]);
+    return r.rows.length ? r.rows[0].dados : null;
+  }
+  const caminho = path.join(FOTOS_DIR, String(id));
+  return fs.existsSync(caminho) ? fs.readFileSync(caminho, 'utf8') : null;
+}
+
+module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto };
