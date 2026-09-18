@@ -487,13 +487,7 @@ const NAV = {
     { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
     { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
     { key: 'relatorio-manutencao', label: 'Relatório', children: [
-      { key: 'relatorio-manual', label: 'Manual', children: [
-        { key: 'relatorio-manual-completo', label: 'Completo', page: 'relatorio-manutencao' },
-        { key: 'relatorio-manual-preventiva', label: 'Preventiva', page: 'relatorio-preventiva' },
-        { key: 'relatorio-manual-corretiva', label: 'Corretiva', page: 'relatorio-corretiva' },
-        { key: 'relatorio-manual-tecnico', label: 'Relatório Técnico', page: 'relatorio-tecnico' },
-        { key: 'relatorio-manual-aceite', label: 'Termo de Aceite', page: 'relatorio-aceite' },
-      ]},
+      { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
       { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
       { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
     ]},
@@ -654,10 +648,6 @@ async function ir(pagina) {
   try {
     if (pagina === 'agenda') return renderAgenda();
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
-    if (pagina === 'relatorio-preventiva') return mostrarFormRelatorioPreventiva();
-    if (pagina === 'relatorio-corretiva') return mostrarFormRelatorioCorretiva();
-    if (pagina === 'relatorio-tecnico') return mostrarFormRelatorioTecnico();
-    if (pagina === 'relatorio-aceite') return mostrarFormRelatorioAceite();
     if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
     if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
@@ -4179,6 +4169,33 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 
 // ---------- CRIAR RELATÓRIO (manutenção interna, avulso — sem vínculo com O.S./agenda) ----------
 
+// Relatório > Manual é um único item de menu — ao criar um novo relatório, o técnico escolhe
+// primeiro o tipo (Completo, Preventiva, Corretiva, Relatório Técnico ou Termo de Aceite) e cai
+// direto na tela daquele tipo, cada uma com suas próprias funções/validação/PDF já existentes.
+const TIPOS_RELATORIO_MANUAL = [
+  { label: 'Completo', desc: 'Formulário completo de manutenção interna.', fn: 'mostrarFormRelatorioManutencao' },
+  { label: 'Preventiva', desc: 'Termo de Manutenção Preventiva, com check-list por equipamento.', fn: 'mostrarFormRelatorioPreventiva' },
+  { label: 'Corretiva', desc: 'Termo de Manutenção Corretiva, com defeito informado e ações executadas.', fn: 'mostrarFormRelatorioCorretiva' },
+  { label: 'Relatório Técnico', desc: 'Laudo técnico avulso, com tipo de serviço e equipamento selecionáveis.', fn: 'mostrarFormRelatorioTecnico' },
+  { label: 'Termo de Aceite', desc: 'Termo de Aceite da Entrega, com check-list de itens/entrega e avaliação de desempenho.', fn: 'mostrarFormRelatorioAceite' },
+];
+
+function mostrarSelecaoTipoRelatorioManual() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Novo relatório</h1><p>Selecione o tipo de relatório que deseja criar.</p></div>
+    <div class="panel" style="display:flex; flex-direction:column; gap:10px;">
+      ${TIPOS_RELATORIO_MANUAL.map((t) => `
+        <button class="btn-outline-sm" style="display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:14px; height:auto; white-space:normal; text-align:left;" onclick="${t.fn}()">
+          <span style="font-weight:700; font-size:14px; color:var(--navy);">${t.label}</span>
+          <span style="font-weight:400; text-transform:none; font-size:12.5px; color:var(--ink-soft);">${t.desc}</span>
+        </button>`).join('')}
+    </div>
+    <div class="panel">
+      <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">‹ Voltar</button>
+    </div>`;
+}
+
 async function renderRelatorioManutencao() {
   const { relatorios } = await api('/api/relatorios-manutencao/meus');
   window._relatoriosManutCache = relatorios;
@@ -4186,7 +4203,7 @@ async function renderRelatorioManutencao() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Relatório</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S., fica salvo só aqui no seu histórico</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManutencao()">+ Novo relatório</button>
+      <button class="btn btn-primary btn-sm" onclick="mostrarSelecaoTipoRelatorioManual()">+ Novo relatório</button>
     </div>
     <div class="panel"><table>
       <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
