@@ -4074,8 +4074,23 @@ async function gerarPreventivaAutomatico() {
     } catch (e) { /* segue sem os dados de cliente/equipamento — técnico preenche na mão */ }
   }
 
-  const modeloCandidato = equipamento && (equipamento.modelo || equipamento.tipo) || '';
-  const nomePreset = Object.keys(EQUIPAMENTOS_PREVENTIVA).find((nome) => nome.toLowerCase() === modeloCandidato.toLowerCase());
+  // identifica o modelo direto pelo que a própria etiqueta já diz (marca/modelo impressos nela,
+  // lidos pela IA) — só recorre ao equipamento cadastrado (achado pelo nº de série) se a
+  // etiqueta não deixar isso claro
+  const nomesConhecidos = Object.keys(EQUIPAMENTOS_PREVENTIVA);
+  function acharNomeConhecido(texto) {
+    const t = String(texto || '').trim().toLowerCase();
+    if (!t) return null;
+    return nomesConhecidos.find((nome) => nome.toLowerCase() === t)
+      || nomesConhecidos.find((nome) => t.includes(nome.toLowerCase()));
+  }
+  let nomePreset = null;
+  for (const campo of extraidoAutomatico.campos) {
+    nomePreset = acharNomeConhecido(campo.valor);
+    if (nomePreset) break;
+  }
+  const modeloCandidato = nomePreset || (equipamento && (equipamento.modelo || equipamento.tipo)) || '';
+  if (!nomePreset && modeloCandidato) nomePreset = acharNomeConhecido(modeloCandidato);
   if (nomePreset) {
     const preset = EQUIPAMENTOS_PREVENTIVA[nomePreset];
     draft.modelo_maquina = nomePreset;
