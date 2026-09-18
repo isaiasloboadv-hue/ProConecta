@@ -491,6 +491,7 @@ const NAV = {
         { key: 'relatorio-manual-completo', label: 'Completo', page: 'relatorio-manutencao' },
         { key: 'relatorio-manual-preventiva', label: 'Preventiva', page: 'relatorio-preventiva' },
         { key: 'relatorio-manual-corretiva', label: 'Corretiva', page: 'relatorio-corretiva' },
+        { key: 'relatorio-manual-tecnico', label: 'Relatório Técnico', page: 'relatorio-tecnico' },
       ]},
       { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
       { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
@@ -654,6 +655,7 @@ async function ir(pagina) {
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
     if (pagina === 'relatorio-preventiva') return mostrarFormRelatorioPreventiva();
     if (pagina === 'relatorio-corretiva') return mostrarFormRelatorioCorretiva();
+    if (pagina === 'relatorio-tecnico') return mostrarFormRelatorioTecnico();
     if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
     if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
@@ -4190,11 +4192,11 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             ${r.tipo !== 'ciclagem' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
@@ -4259,6 +4261,7 @@ async function processarFotoEtiqueta(event) {
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="gerarPreventivaAutomatico()">Preventiva</button>
         <button class="btn-outline-sm" onclick="gerarCorretivaAutomatico()">Corretiva</button>
+        <button class="btn-outline-sm" onclick="gerarTecnicoAutomatico()">Relatório Técnico</button>
         <button class="btn-outline-sm" onclick="gerarFichaAutomatico()">Levantamento de Estoque</button>
       </div>`;
   } catch (e) {
@@ -4394,6 +4397,56 @@ async function gerarCorretivaAutomatico() {
   }
 
   mostrarFormRelatorioCorretiva(draft);
+  mostrarToast(cliente ? 'Etiqueta lida — cliente encontrado e dados preenchidos automaticamente.' : 'Etiqueta lida — complete os dados que faltam.');
+}
+
+// mesma lógica de casamento de modelo/cliente da Preventiva/Corretiva, adaptada pro Relatório
+// Técnico: sem checklist e sem grupos de fotos — a foto da etiqueta já entra como a primeira foto
+// do relatório fotográfico único, e "Marca" é preenchida se a própria etiqueta tiver esse campo.
+async function gerarTecnicoAutomatico() {
+  if (!extraidoAutomatico) return;
+  const campoSerie = extraidoAutomatico.campos.find((c) => /s[ée]rie/i.test(c.campo || ''));
+  const numeroSerie = campoSerie ? String(campoSerie.valor || '').trim() : '';
+  const campoMarca = extraidoAutomatico.campos.find((c) => /marca/i.test(c.campo || ''));
+  const draft = relatorioTecnicoPadrao();
+  draft.numero_serie = numeroSerie;
+  if (campoMarca) draft.marca = String(campoMarca.valor || '').trim();
+
+  let equipamento = null, cliente = null;
+  if (numeroSerie) {
+    try {
+      const resultado = await api(`/api/equipamentos/buscar-por-serie?numero_serie=${encodeURIComponent(numeroSerie)}`);
+      equipamento = resultado.equipamento;
+      cliente = resultado.cliente;
+    } catch (e) { /* segue sem os dados de cliente/equipamento — técnico preenche na mão */ }
+  }
+
+  const nomesConhecidos = Object.keys(EQUIPAMENTOS_PREVENTIVA);
+  function normalizarNomeEquipamento(s) { return String(s || '').toLowerCase().replace(/[\s\-_.]/g, ''); }
+  function acharNomeConhecido(texto) {
+    const t = normalizarNomeEquipamento(texto);
+    if (!t) return null;
+    return nomesConhecidos.find((nome) => normalizarNomeEquipamento(nome) === t)
+      || nomesConhecidos.find((nome) => t.includes(normalizarNomeEquipamento(nome)));
+  }
+  let nomePreset = null;
+  for (const campo of extraidoAutomatico.campos) {
+    nomePreset = acharNomeConhecido(campo.valor);
+    if (nomePreset) break;
+  }
+  const modeloCandidato = nomePreset || (equipamento && (equipamento.modelo || equipamento.tipo)) || '';
+  if (!nomePreset && modeloCandidato) nomePreset = acharNomeConhecido(modeloCandidato);
+  draft.equipamento = nomePreset || modeloCandidato;
+  draft.data_fabricacao = (equipamento && equipamento.data_fabricacao) || '';
+  draft.fotos.push(extraidoAutomatico.foto);
+
+  if (cliente) {
+    draft.empresa = cliente.nome_empresa || '';
+    draft.contato = cliente.contato || '';
+    draft.telefone = cliente.telefone || '';
+  }
+
+  mostrarFormRelatorioTecnico(draft);
   mostrarToast(cliente ? 'Etiqueta lida — cliente encontrado e dados preenchidos automaticamente.' : 'Etiqueta lida — complete os dados que faltam.');
 }
 
@@ -4978,6 +5031,7 @@ async function editarRelatorioManutencao(i) {
   else if (r.tipo === 'ciclagem') mostrarFormCiclagem(r);
   else if (r.tipo === 'preventiva') mostrarFormRelatorioPreventiva(r);
   else if (r.tipo === 'corretiva') mostrarFormRelatorioCorretiva(r);
+  else if (r.tipo === 'relatorio_tecnico') mostrarFormRelatorioTecnico(r);
   else mostrarFormRelatorioManutencao(r);
 }
 
@@ -5842,6 +5896,501 @@ async function concluirRelatorioCorretiva() {
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
+// ---------- Relatório > Manual > Relatório Técnico ----------
+// mesma família do Relatório Manual, no molde do "Completo" (Dados do cliente, Tipo de serviço,
+// Dados do equipamento, Técnico responsável, Laudo técnico, Serviços realizados, Peças, Fotos,
+// Observações), mas com o tipo de serviço podendo marcar mais de uma opção, o equipamento
+// escolhido de uma lista (mesma EQUIPAMENTOS_PREVENTIVA do front, em vez de texto livre), período
+// de reparo calculado automaticamente e um relatório fotográfico único (sem grupos por modelo).
+// Sem pesquisa de satisfação, assinatura ou envio por e-mail — só preencher e gerar o PDF.
+let relatorioTecnicoDraft = null;
+function relatorioTecnicoPadrao() {
+  return {
+    tipo: 'relatorio_tecnico',
+    empresa: '', contato: '', telefone: '',
+    tipo_servico: [], tipo_servico_outros: '',
+    marca: '', equipamento: '', numero_serie: '', data_fabricacao: '',
+    garantia: '', garantia_obs: '',
+    acessorios: '', defeito_informado: '',
+    data_entrada: '', data_conclusao: '',
+    laudo_tecnico: '', servico_realizado: '',
+    pecas: [],
+    fotos: [],
+    observacoes: '',
+  };
+}
+
+function mostrarFormRelatorioTecnico(existente) {
+  relatorioTecnicoDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioTecnicoPadrao();
+  const d = relatorioTecnicoDraft;
+  const editando = !!d.id;
+  const tiposServico = [['amostra', 'Amostra'], ['analise', 'Análise'], ['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['outros', 'Outros']];
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Relatório Técnico</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Dados do cliente</h2>
+      <div class="form-grid">
+        <div class="full"><label>Empresa*</label><input id="rt-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Contato*</label><input id="rt-contato" value="${esc(d.contato)}"></div>
+        <div><label>Telefone*</label><input id="rt-telefone" placeholder="(XX) XXXXX-XXXX" value="${esc(d.telefone)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Tipo de serviço*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Selecione um ou mais tipos aplicáveis a este atendimento.</p>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        ${tiposServico.map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="checkbox" class="rt-tipo-servico" value="${v}" style="width:auto;" ${d.tipo_servico.includes(v) ? 'checked' : ''} onchange="document.getElementById('rt-tipo-outros-wrap').style.display = document.querySelector('.rt-tipo-servico[value=\\'outros\\']').checked ? 'block' : 'none';"> ${l}</label>`).join('')}
+      </div>
+      <div id="rt-tipo-outros-wrap" style="display:${d.tipo_servico.includes('outros') ? 'block' : 'none'};"><label>Especifique</label><input id="rt-tipo-servico-outros" value="${esc(d.tipo_servico_outros)}"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados do equipamento</h2>
+      <div class="form-grid">
+        <div><label>Marca*</label><input id="rt-marca" value="${esc(d.marca)}"></div>
+        <div>
+          <label>Equipamento*</label>
+          <select id="rt-equipamento" onchange="document.getElementById('rt-equipamento-outro-wrap').style.display = this.value === 'Outro' ? 'block' : 'none';">
+            <option value="" ${!d.equipamento || !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? 'selected' : ''} disabled>Selecione...</option>
+            ${Object.keys(EQUIPAMENTOS_PREVENTIVA).map((nome) => `<option value="${esc(nome)}" ${d.equipamento === nome ? 'selected' : ''}>${esc(nome)}</option>`).join('')}
+            <option value="Outro" ${d.equipamento && !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? 'selected' : ''}>Outro</option>
+          </select>
+        </div>
+        <div id="rt-equipamento-outro-wrap" class="full" style="display:${d.equipamento && !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? 'block' : 'none'};">
+          <label>Especifique o equipamento*</label>
+          <input id="rt-equipamento_outro" value="${esc(d.equipamento && !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? d.equipamento : '')}">
+        </div>
+        <div><label>Nº de série*</label><input id="rt-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
+        <div><label>Data de fabricação (MM/AAAA)</label><input id="rt-data_fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(d.data_fabricacao)}"></div>
+      </div>
+      <label>Garantia*</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        ${[['sim', 'Sim'], ['nao', 'Não'], ['outros', 'Outros']].map(([v, l]) => `
+          <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rt-garantia" value="${v}" style="width:auto;" ${d.garantia === v ? 'checked' : ''} onchange="document.getElementById('rt-garantia-outros-wrap').style.display = this.value === 'outros' ? 'block' : 'none';"> ${l}</label>`).join('')}
+      </div>
+      <div id="rt-garantia-outros-wrap" style="display:${d.garantia === 'outros' ? 'block' : 'none'};"><label>Especifique*</label><input id="rt-garantia_obs" value="${esc(d.garantia_obs)}"></div>
+      <div class="form-grid">
+        <div class="full"><label>Acessórios recebidos</label><input id="rt-acessorios" placeholder="ex: cabo de força, fonte..." value="${esc(d.acessorios)}"></div>
+      </div>
+      <label>Defeito informado*</label>
+      <textarea id="rt-defeito_informado" placeholder="Defeito relatado pelo cliente ao solicitar o serviço...">${esc(d.defeito_informado)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Técnico responsável</h2>
+      <div class="form-grid">
+        <div><label>Nome</label><input value="${esc(USER.nome)}" disabled></div>
+        <div><label>E-mail</label><input value="${esc(USER.email || '')}" disabled></div>
+        <div><label>Data de entrada</label><input id="rt-data_entrada" type="date" value="${esc(d.data_entrada)}" onchange="atualizarPeriodoTecnico()"></div>
+        <div><label>Data de conclusão</label><input id="rt-data_conclusao" type="date" value="${esc(d.data_conclusao)}" onchange="atualizarPeriodoTecnico()"></div>
+        <div><label>Período de reparo</label><input id="rt-periodo" value="${esc(periodoReparo(d))}" disabled></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Laudo técnico*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Defeito encontrado e análise do estado do equipamento</p>
+      <textarea id="rt-laudo_tecnico" placeholder="Descreva o diagnóstico...">${esc(d.laudo_tecnico)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Serviços realizados*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Manutenção realizada / resultados de amostra</p>
+      <textarea id="rt-servico_realizado" placeholder="Descreva o que foi feito...">${esc(d.servico_realizado)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Peças fornecidas</h2>
+      <div class="steps-list" id="rt-pecas"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarPecaTecnico()">+ Adicionar peça</button>
+    </div>
+
+    <div class="panel">
+      <h2>Relatório fotográfico*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Anexe ao menos uma foto do equipamento/serviço realizado.</p>
+      <div class="step-photos" id="rt-fotos"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">📷</span>Câmera
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="adicionarFotosTecnico(event)">
+        </label>
+        <label class="photo-add" style="margin-top:0;">
+          <span class="plus">+</span>Galeria
+          <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosTecnico(event)">
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Observações do serviço</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Opcional</p>
+      <textarea id="rt-observacoes" placeholder="Observações adicionais do técnico, se houver...">${esc(d.observacoes)}</textarea>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do relatório é gerado automaticamente para download.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioTecnico()">Concluir e gerar PDF</button>
+      </div>
+    </div>`;
+  renderPecasTecnico();
+  renderFotosTecnico();
+}
+
+function renderPecasTecnico() {
+  document.getElementById('rt-pecas').innerHTML = relatorioTecnicoDraft.pecas.map((p, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioTecnicoDraft.pecas[${i}].descricao=this.value;">
+        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioTecnicoDraft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="Qtd" value="${esc(p.quantidade || '')}" style="flex:0 0 60px;" oninput="relatorioTecnicoDraft.pecas[${i}].quantidade=this.value;">
+        <button class="step-rm" onclick="removerPecaTecnico(${i})">×</button>
+      </div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
+}
+function adicionarPecaTecnico() { relatorioTecnicoDraft.pecas.push({ descricao: '', codigo_pmk: '', quantidade: '' }); renderPecasTecnico(); }
+function removerPecaTecnico(i) { relatorioTecnicoDraft.pecas.splice(i, 1); renderPecasTecnico(); }
+
+// relatório fotográfico único (sem grupos por modelo) — mesmo mecanismo do Laudo Técnico da O.S.
+function renderFotosTecnico() {
+  document.getElementById('rt-fotos').innerHTML = relatorioTecnicoDraft.fotos.map((f, j) => `
+    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto do relatório">
+      <button class="photo-rm" onclick="removerFotoTecnico(${j})">×</button>
+    </div>`).join('');
+}
+function adicionarFotosTecnico(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    relatorioTecnicoDraft.fotos.push(...dataUrls);
+    renderFotosTecnico();
+  });
+}
+function removerFotoTecnico(j) { relatorioTecnicoDraft.fotos.splice(j, 1); renderFotosTecnico(); }
+
+function atualizarPeriodoTecnico() {
+  const data_entrada = document.getElementById('rt-data_entrada').value;
+  const data_conclusao = document.getElementById('rt-data_conclusao').value;
+  document.getElementById('rt-periodo').value = periodoReparo({ data_entrada, data_conclusao });
+}
+
+async function concluirRelatorioTecnico() {
+  const d = relatorioTecnicoDraft;
+  d.empresa = document.getElementById('rt-empresa').value;
+  d.contato = document.getElementById('rt-contato').value;
+  d.telefone = document.getElementById('rt-telefone').value;
+  d.tipo_servico = Array.from(document.querySelectorAll('.rt-tipo-servico:checked')).map((el) => el.value);
+  d.tipo_servico_outros = document.getElementById('rt-tipo-servico-outros').value;
+  d.marca = document.getElementById('rt-marca').value;
+  const equipamentoSelecionado = document.getElementById('rt-equipamento').value;
+  d.equipamento = equipamentoSelecionado === 'Outro' ? document.getElementById('rt-equipamento_outro').value : equipamentoSelecionado;
+  d.numero_serie = document.getElementById('rt-numero_serie').value;
+  d.data_fabricacao = document.getElementById('rt-data_fabricacao').value;
+  const garantia = document.querySelector('input[name="rt-garantia"]:checked');
+  d.garantia = garantia ? garantia.value : '';
+  d.garantia_obs = document.getElementById('rt-garantia_obs').value;
+  d.acessorios = document.getElementById('rt-acessorios').value;
+  d.defeito_informado = document.getElementById('rt-defeito_informado').value;
+  d.data_entrada = document.getElementById('rt-data_entrada').value;
+  d.data_conclusao = document.getElementById('rt-data_conclusao').value;
+  d.laudo_tecnico = document.getElementById('rt-laudo_tecnico').value;
+  d.servico_realizado = document.getElementById('rt-servico_realizado').value;
+  d.observacoes = document.getElementById('rt-observacoes').value;
+
+  if (!d.empresa.trim() || !d.contato.trim() || !d.telefone.trim()) return alert('Preencha os dados do cliente (Empresa, Contato e Telefone).');
+  if (!d.tipo_servico.length) return alert('Selecione ao menos um tipo de serviço.');
+  if (!d.marca.trim() || !d.equipamento.trim() || !d.numero_serie.trim()) return alert('Preencha os dados do equipamento (Marca, Equipamento e Nº de série).');
+  if (!d.garantia) return alert('Responda se o equipamento está na garantia.');
+  if (d.garantia === 'outros' && !d.garantia_obs.trim()) return alert('Especifique a garantia.');
+  if (!d.defeito_informado.trim()) return alert('Descreva o defeito informado.');
+  if (!d.laudo_tecnico.trim()) return alert('Preencha o laudo técnico.');
+  if (!d.servico_realizado.trim()) return alert('Descreva o serviço realizado.');
+  if (!d.fotos.length) return alert('Anexe ao menos uma foto no relatório fotográfico.');
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioTecnico(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+function gerarPdfRelatorioTecnico(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function opcaoCheckbox(x, yy, marcado, label) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.9);
+    doc.rect(x, yy - 7, 7, 7, 'S');
+    if (marcado) { doc.setFillColor(...PDF_COR.ink); doc.rect(x + 1.2, yy - 5.8, 4.6, 4.6, 'F'); }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(label, x + 11, yy);
+    return x + 11 + doc.getTextWidth(label);
+  }
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t, sub, apertado) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      y += apertado ? 4 : 16;
+    }
+  }
+
+  function tituloEsquerda(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem, y); y += 14;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('RELATÓRIO TÉCNICO', pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do cliente');
+  linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Contato', valor: r.contato, frac: 1 }]);
+  linhaCampos([{ label: 'Telefone', valor: r.telefone, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Tipo de serviço');
+  {
+    const tipos = Array.isArray(r.tipo_servico) ? r.tipo_servico : [];
+    const opcoes = [['amostra', 'AMOSTRA'], ['analise', 'ANÁLISE'], ['preventiva', 'PREVENTIVA'], ['corretiva', 'CORRETIVA'], ['outros', 'OUTROS']];
+    doc.setFont(undefined, 'bold'); doc.setFontSize(8.5);
+    const larguras = opcoes.map(([, l]) => 11 + doc.getTextWidth(l));
+    const gap = 14;
+    const total = larguras.reduce((a, b) => a + b, 0) + gap * (larguras.length - 1);
+    let cx = pageW / 2 - total / 2;
+    opcoes.forEach(([v, l], idx) => { opcaoCheckbox(cx, y, tipos.includes(v), l); cx += larguras[idx] + gap; });
+    y += 20;
+    if (tipos.includes('outros') && r.tipo_servico_outros) {
+      doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(limparPdf(`Outros: ${r.tipo_servico_outros}`), pageW / 2, y, { align: 'center' });
+      y += 12;
+    }
+    y += 8;
+  }
+
+  tituloCentro('Dados do equipamento');
+  linhaCampos([{ label: 'Marca', valor: r.marca, frac: 0.34 }, { label: 'Equipamento', valor: r.equipamento, frac: 0.4 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.26 }]);
+  {
+    const wGarantia = largura * 0.62, wData = largura - wGarantia, altura = 20;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, wGarantia, altura, 'S');
+    doc.rect(margem + wGarantia, y, wData, altura, 'S');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('GARANTIA:', margem + 7, y + 13);
+    let cx = margem + 7 + doc.getTextWidth('GARANTIA: ') + 4;
+    [['sim', 'SIM'], ['nao', 'NÃO'], ['outros', 'OUTROS']].forEach(([v, l]) => { cx = opcaoCheckbox(cx, y + 13, r.garantia === v, l) + 10; });
+    doc.setFont(undefined, 'bold'); doc.text('DATA DE FABRICAÇÃO: ', margem + wGarantia + 7, y + 13);
+    const wLblFab = doc.getTextWidth('DATA DE FABRICAÇÃO: ');
+    doc.setFont(undefined, 'normal'); doc.text(limparPdf(r.data_fabricacao) || '—', margem + wGarantia + 7 + wLblFab, y + 13);
+    y += altura;
+  }
+  if (r.garantia === 'outros' && r.garantia_obs) linhaCampos([{ label: 'Especificação da garantia', valor: r.garantia_obs, frac: 1 }]);
+  linhaCampos([{ label: 'Acessórios', valor: r.acessorios, frac: 1 }]);
+  linhaCampos([{ label: 'Defeito informado', valor: r.defeito_informado, frac: 1 }]);
+  y += 16;
+
+  tituloCentro('Técnico responsável');
+  linhaCampos([{ label: 'Nome', valor: r.tecnico_nome, frac: 0.5 }, { label: 'E-mail', valor: r.tecnico_email, frac: 0.5 }]);
+  linhaCampos([{ label: 'Entrada', valor: fmtData(r.data_entrada), frac: 0.33 }, { label: 'Conclusão', valor: fmtData(r.data_conclusao), frac: 0.33 }, { label: 'Período', valor: periodoReparo(r), frac: 0.34 }]);
+  y += 16;
+
+  tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.laudo_tecnico) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  tituloCentro('Serviços realizados', 'Manutenção realizada / resultados de amostra', true);
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.servico_realizado) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  tituloEsquerda('Peças fornecidas');
+  {
+    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.52 }, { t: 'Código PMK', frac: 0.24 }, { t: 'Qtd.', frac: 0.14 }];
+    const larguras = cols.map((c) => largura * c.frac);
+    if (y + 20 > pageH - margem) novaPagina();
+    let cx = margem;
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
+    y += 18;
+    const pecas = r.pecas || [];
+    if (!pecas.length) {
+      if (y + 18 > pageH - margem) novaPagina();
+      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem + 6, y + 12);
+      y += 18;
+    } else {
+      pecas.forEach((p, i) => {
+        if (y + 18 > pageH - margem) novaPagina();
+        cx = margem;
+        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—', limparPdf(p.quantidade) || '—'];
+        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
+        y += 18;
+      });
+    }
+    y += 16;
+  }
+
+  if (r.observacoes) {
+    tituloCentro('Observações do serviço');
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.observacoes), largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 14;
+  }
+
+  const fotos = r.fotos || [];
+  if (fotos.length) {
+    const gapCheck = 12, wImgCheck = (largura - gapCheck) / 2, hImgCheck = wImgCheck * 0.68;
+    if (y + 34 + hImgCheck > pageH - margem) novaPagina();
+  }
+  tituloCentro('Relatório fotográfico', null, true);
+  if (fotos.length) {
+    const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+    for (let i = 0; i < fotos.length; i += 2) {
+      if (y + hImg > pageH - margem) novaPagina();
+      [fotos[i], fotos[i + 1]].forEach((f, j) => {
+        if (!f) return;
+        const cx = margem + j * (wImg + gap);
+        try {
+          const m = /^data:image\/(\w+);/.exec(f);
+          const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+          doc.setDrawColor(...PDF_COR.line);
+          doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+          doc.addImage(f, formato, cx, y, wImg, hImg);
+        } catch (e) {}
+      });
+      y += hImg + gap;
+    }
+  } else {
+    doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Nenhuma foto anexada.', margem, y); y += 16;
+  }
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
+
+  return doc.output('bloburl');
+}
+
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
 // completo (com fotos) na hora que alguma ação realmente precisa delas, e guarda de volta
 // no cache pra não buscar de novo se a pessoa clicar noutra ação do mesmo relatório.
@@ -5859,7 +6408,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }

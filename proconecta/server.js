@@ -383,6 +383,26 @@ function validarRelatorioCorretiva(r) {
   return null;
 }
 
+// ---------- Relatório Técnico (Relatório > Manual > Relatório Técnico) ----------
+// mesma família do "Relatório Manual" (relatorios_manutencao) — igual ao "Completo", mas com o
+// tipo de serviço podendo marcar mais de uma opção, o equipamento escolhido de uma lista (mesma
+// EQUIPAMENTOS_PREVENTIVA do front) em vez de texto livre, período de reparo calculado
+// automaticamente e um relatório fotográfico único (sem grupos), sem pesquisa de satisfação,
+// assinatura ou envio por e-mail.
+function validarRelatorioTecnico(r) {
+  if (!r || typeof r !== 'object') return 'Dados do relatório são obrigatórios.';
+  const camposTexto = ['empresa', 'contato', 'telefone', 'marca', 'equipamento', 'numero_serie',
+    'defeito_informado', 'laudo_tecnico', 'servico_realizado'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!Array.isArray(r.tipo_servico) || r.tipo_servico.length === 0) return 'Selecione ao menos um tipo de serviço.';
+  if (r.garantia !== 'sim' && r.garantia !== 'nao' && r.garantia !== 'outros') return 'Responda se o equipamento está na garantia.';
+  if (r.garantia === 'outros' && !String(r.garantia_obs || '').trim()) return 'Especifique a garantia.';
+  if (!Array.isArray(r.fotos) || !r.fotos.length) return 'Anexe ao menos uma foto no relatório fotográfico.';
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -1913,7 +1933,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
@@ -1933,6 +1953,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'corretiva') {
     const erroCorretiva = validarRelatorioCorretiva(body);
     if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
+  } else if (tipo === 'relatorio_tecnico') {
+    const erroTecnico = validarRelatorioTecnico(body);
+    if (erroTecnico) return enviarJSON(res, 400, { erro: erroTecnico });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2000,6 +2023,10 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+    } : {}),
+    ...(tipo === 'relatorio_tecnico' ? {
+      tipo_servico: Array.isArray(body.tipo_servico) ? body.tipo_servico : [],
+      observacoes: body.observacoes || '',
     } : {}),
   };
   data.relatorios_manutencao.push(item);
@@ -2085,6 +2112,22 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      fotos,
+    });
+  } else if (item.tipo === 'relatorio_tecnico') {
+    const erroTecnico = validarRelatorioTecnico(body);
+    if (erroTecnico) return enviarJSON(res, 400, { erro: erroTecnico });
+    Object.assign(item, {
+      empresa: body.empresa || '', contato: body.contato || '', telefone: body.telefone || '',
+      tipo_servico: Array.isArray(body.tipo_servico) ? body.tipo_servico : [], tipo_servico_outros: body.tipo_servico_outros || '',
+      marca: body.marca || '', equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+      garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
+      data_fabricacao: body.data_fabricacao || '',
+      acessorios: body.acessorios || '', defeito_informado: body.defeito_informado || '',
+      data_entrada: body.data_entrada || '', data_conclusao: body.data_conclusao || '',
+      laudo_tecnico: body.laudo_tecnico || '', servico_realizado: body.servico_realizado || '',
+      pecas: Array.isArray(body.pecas) ? body.pecas : [],
+      observacoes: body.observacoes || '',
       fotos,
     });
   } else {
@@ -2225,6 +2268,7 @@ rota('GET', /^\/api\/equipamentos\/buscar-por-serie$/, async (req, res) => {
     cliente: cliente ? {
       nome_empresa: cliente.nome_empresa, endereco: cliente.endereco, numero: cliente.numero,
       bairro: cliente.bairro, cidade: cliente.cidade, estado: cliente.estado, cep: cliente.cep, setor: cliente.setor,
+      contato: cliente.contato, telefone: cliente.telefone,
     } : null,
   });
 });
