@@ -1,0 +1,19 @@
+# Configuração do sistema de detecção de sonolência do motorista.
+# Todos os limiares e durações usados pelo detector vêm deste arquivo —
+# não deve haver valores mágicos no código.
+
+calibration_seconds: 15
+ear_default_threshold: 0.20
+ear_closed_ratio: 0.75
+mar_yawn: 0.6
+perclos_window_s: 30
+perclos_drowsy: 0.20
+microsleep_s: 0.8
+yawn_s: 1.2
+pitch_delta_deg: 20
+pitch_s: 1.5
+yaw_delta_deg: 35
+yaw_s: 2.0
+face_lost_s: 2.0
+hysteresis_s: 1.0
+alert_cooldown_s: 3.0
