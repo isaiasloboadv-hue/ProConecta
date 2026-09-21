@@ -9486,7 +9486,7 @@ function mostrarAvisoFilaCliente(chamado) {
   const alvo = document.getElementById('at-mensagens');
   if (!alvo) return;
   if (chamado && chamado.status === 'aguardando_tecnico') {
-    alvo.insertAdjacentHTML('beforeend', `<div class="chat-sistema">⏳ Seu atendimento está na fila aguardando um técnico assumir — pode continuar mandando mensagens, elas ficam salvas e ele vê tudo assim que entrar.</div>`);
+    alvo.insertAdjacentHTML('beforeend', `<div class="chat-sistema">⏳ Seu atendimento está na fila aguardando um técnico assumir.</div>`);
     alvo.scrollTop = alvo.scrollHeight;
   }
 }
