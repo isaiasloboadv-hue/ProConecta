@@ -10,7 +10,6 @@ const db = require('./db');
 const email = require('./email');
 const ia = require('./ia');
 const whatsapp = require('./whatsapp');
-const presenca = require('./presenca');
 const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
@@ -2598,17 +2597,12 @@ async function enviarPushTecnicos(data, payload) {
   await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, payload).catch(() => {})));
 }
 
-// atribuirTecnico — quando um chamado cai na fila, distribui pro próximo técnico online
-// (round-robin, ver presenca.js) e já notifica ele direto. Se ninguém estiver online, devolve
-// null e o chamado fica no pool esperando alguém assumir manualmente.
-function atribuirTecnico(data, chamado) {
-  const tecnico = presenca.proximoTecnicoOnline(data);
-  if (!tecnico) return null;
-  chamado.tecnico_id = tecnico.id;
-  chamado.lida_tecnico = false;
+// notificarNovoAtendimento — quando um chamado cai na fila, avisa por push todos os técnicos
+// (não atribui a ninguém): o chamado fica no pool "Aguardando técnico", visível pra qualquer
+// técnico, até alguém entrar e assumir manualmente — nunca vai direto pra um técnico específico.
+function notificarNovoAtendimento(data, chamado) {
   const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
-  enviarPush(data, tecnico.id, { titulo: 'Novo atendimento pra você', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
-  return tecnico;
+  enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
 }
 
 // POST /api/chamados — o cliente (logado no ProConecta) inicia um atendimento com a primeira
@@ -2653,11 +2647,7 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
     chamado.mensagens.push({ autor: 'sistema', texto: 'Assistente automático indisponível no momento — um técnico vai te atender em breve.', criado_em: new Date().toISOString() });
   }
   if (chamado.status === 'aguardando_tecnico') {
-    const tecnico = atribuirTecnico(data, chamado);
-    if (!tecnico) {
-      const cliente = data.clientes.find((c) => c.id === user.cliente_id);
-      enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
-    }
+    notificarNovoAtendimento(data, chamado);
   }
   db.save(data);
   enviarJSON(res, 201, { chamado: chamadoComDetalhes(data, chamado) });
@@ -2765,11 +2755,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
       chamado.mensagens.push({ autor: 'sistema', texto: 'Assistente automático indisponível no momento — um técnico vai te atender em breve.', criado_em: new Date().toISOString() });
     }
     if (chamado.status === 'aguardando_tecnico') {
-      const tecnico = atribuirTecnico(data, chamado);
-      if (!tecnico) {
-        const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
-        enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
-      }
+      notificarNovoAtendimento(data, chamado);
     }
   } else if (autor === 'cliente') {
     chamado.lida_tecnico = false;

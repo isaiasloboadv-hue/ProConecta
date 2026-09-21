@@ -7,7 +7,6 @@
 // (ativo() = false).
 
 const ia = require('./ia');
-const presenca = require('./presenca');
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
@@ -132,17 +131,12 @@ async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
 
   if (chamado.status === 'ia') {
     const resposta = await ia.processarTurno(data, chamado);
-    if (chamado.status === 'aguardando_tecnico') {
-      const tecnico = presenca.proximoTecnicoOnline(data);
+    // não atribui a nenhum técnico específico — fica no pool "Aguardando técnico", visível pra
+    // qualquer um, até alguém entrar e assumir manualmente (mesmo comportamento do chat do app)
+    if (chamado.status === 'aguardando_tecnico' && enviarPush) {
       const cliente = encontrarClientePorTelefone(data, telefone);
-      if (tecnico) {
-        chamado.tecnico_id = tecnico.id;
-        chamado.lida_tecnico = false;
-        if (enviarPush) enviarPush(data, tecnico.id, { titulo: 'Novo atendimento pra você', corpo: cliente ? cliente.nome_empresa : 'Um cliente do WhatsApp precisa de ajuda.', url: '/' }).catch(() => {});
-      } else if (enviarPush) {
-        const tecnicos = data.usuarios.filter((u) => u.papel === 'tecnico');
-        await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente do WhatsApp precisa de ajuda.', url: '/' }).catch(() => {})));
-      }
+      const tecnicos = data.usuarios.filter((u) => u.papel === 'suporte');
+      await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente do WhatsApp precisa de ajuda.', url: '/' }).catch(() => {})));
     }
     db.save(data);
     await enviarMensagemWhatsApp(telefone, resposta);
