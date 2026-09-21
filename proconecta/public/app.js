@@ -9851,8 +9851,27 @@ async function posVendaOrcamentoEnviado(id) {
 }
 
 async function posVendaDecisao(id, aprovado) {
-  if (!confirm(aprovado ? 'Confirma que o cliente aprovou o orçamento? A O.S. vai pro setor de reparo executar o serviço.' : 'Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada.')) return;
-  try { await api(`/api/agenda/${id}/pos-venda/decisao`, { method: 'POST', body: { aprovado } }); mostrarToast(aprovado ? 'Aprovado — encaminhado pro reparo.' : 'O.S. finalizada.'); renderFilaPosVenda(); }
+  // a mensagem muda conforme o motivo do encaminhamento — só "cliente envia equipamento" vai
+  // pro setor de reparo; "peça enviada" vai pro estoque; "técnico visita" avisa o administrador
+  // pra criar a O.S. de visita técnica de verdade (ver rota pos-venda/decisao em server.js)
+  const item = (window._agendaCache || []).find((a) => a.id === id);
+  const motivo = item ? item.motivo_pos_venda : null;
+  let msgConfirm, msgToast;
+  if (!aprovado) {
+    msgConfirm = 'Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada.';
+    msgToast = 'O.S. finalizada.';
+  } else if (motivo === 'cliente_envia_equipamento') {
+    msgConfirm = 'Confirma que o cliente aprovou o orçamento? A O.S. vai pro setor de reparo executar o serviço.';
+    msgToast = 'Aprovado — encaminhado pro reparo.';
+  } else if (motivo === 'peca_enviada') {
+    msgConfirm = 'Confirma que o cliente aprovou o orçamento? A O.S. vai pro estoque enviar a peça.';
+    msgToast = 'Aprovado — encaminhado pro estoque.';
+  } else {
+    msgConfirm = 'Confirma que o cliente aprovou o orçamento? O administrador será avisado pra criar a O.S. de visita técnica.';
+    msgToast = 'Aprovado — administrador avisado pra criar a O.S. de visita técnica.';
+  }
+  if (!confirm(msgConfirm)) return;
+  try { await api(`/api/agenda/${id}/pos-venda/decisao`, { method: 'POST', body: { aprovado } }); mostrarToast(msgToast); renderFilaPosVenda(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
 
