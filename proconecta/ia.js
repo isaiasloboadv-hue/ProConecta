@@ -42,6 +42,41 @@ function listarEquipamentosCliente(data, clienteId) {
   return { equipamentos: lista };
 }
 
+// ---------- SLA (nível de prioridade do atendimento) ----------
+// "Tabela de Prioridade de Atendimento" da empresa: 11 perguntas de sim/não, cada uma valendo
+// pontos diferentes dependendo da resposta (nem sempre "sim" vale mais — depende do que a
+// pergunta está medindo). A soma das 11 respostas dá a pontuação total, que cai numa faixa —
+// cada faixa tem um SLA (prazo) de atendimento remoto, de manutenção e de visita técnica.
+const PERGUNTAS_SLA = [
+  { chave: 'garantia_fabricacao', pergunta: 'A máquina está dentro da garantia de fabricação?', pontos_sim: 7, pontos_nao: 0 },
+  { chave: 'garantia_manutencao', pergunta: 'A máquina está em garantia de manutenção?', pontos_sim: 7, pontos_nao: 0 },
+  { chave: 'linha_parada', pergunta: 'A linha de produção está parada por causa desse problema?', pontos_sim: 4, pontos_nao: 0 },
+  { chave: 'plano_preventiva_ativo', pergunta: 'O cliente tem plano de manutenção preventiva ativo?', pontos_sim: 3, pontos_nao: 1 },
+  { chave: 'possui_maquina_reserva', pergunta: 'O cliente possui mais máquinas para a mesma função (reserva/backup)?', pontos_sim: 1, pontos_nao: 3 },
+  { chave: 'compromete_qualidade', pergunta: 'O problema compromete a qualidade da gravação/marcação?', pontos_sim: 3, pontos_nao: 0 },
+  { chave: 'erro_intermitente', pergunta: 'O erro ocorre de forma intermitente (vai e volta)?', pontos_sim: 1, pontos_nao: 2 },
+  { chave: 'reparo_sem_sucesso', pergunta: 'A máquina já passou por tentativas de reparo sem sucesso?', pontos_sim: 5, pontos_nao: 1 },
+  { chave: 'acesso_remoto', pergunta: 'A máquina permite acesso remoto pra diagnóstico?', pontos_sim: 1, pontos_nao: 3 },
+  { chave: 'duvida_comum_top5', pergunta: 'O erro relatado faz parte das dúvidas mais comuns (Top 5)?', pontos_sim: 1, pontos_nao: 2 },
+  { chave: 'solucao_no_manual', pergunta: 'A informação/solução pra esse problema está no manual do equipamento?', pontos_sim: 1, pontos_nao: 2 },
+];
+
+const NIVEIS_SLA = [
+  { max: 7, nivel: 'baixo', label: 'Baixo', horas_atendimento: 24, dias_manutencao: 5, dias_visita_tecnica: 15 },
+  { max: 17, nivel: 'medio', label: 'Médio', horas_atendimento: 18, dias_manutencao: 4, dias_visita_tecnica: 7 },
+  { max: 26, nivel: 'alto', label: 'Alto', horas_atendimento: 12, dias_manutencao: 3, dias_visita_tecnica: 4 },
+  { max: Infinity, nivel: 'critico', label: 'Crítico', horas_atendimento: 6, dias_manutencao: 2, dias_visita_tecnica: 2 },
+];
+
+function calcularSla(respostas) {
+  let pontuacao = 0;
+  for (const p of PERGUNTAS_SLA) {
+    pontuacao += respostas[p.chave] === true ? p.pontos_sim : p.pontos_nao;
+  }
+  const { max, ...faixa } = NIVEIS_SLA.find((n) => pontuacao <= n.max);
+  return { pontuacao, ...faixa };
+}
+
 const FERRAMENTAS = [
   {
     name: 'buscar_biblioteca',
@@ -80,6 +115,15 @@ const FERRAMENTAS = [
       properties: { resumo: { type: 'string', description: 'O que resolveu o problema, em uma frase.' } },
     },
   },
+  {
+    name: 'definir_sla',
+    description: 'Calcula o nível de prioridade (SLA) do atendimento a partir de 11 perguntas de sim/não sobre o equipamento e o problema (garantia, impacto na produção, histórico de reparo, etc.). Faça essas 11 perguntas ao cliente de forma natural — pode agrupar em poucas mensagens curtas — assim que tiver entendido o problema, e chame esta ferramenta com as respostas ANTES de escalar pra um técnico ou encerrar o atendimento. Todas as 11 respostas são obrigatórias.',
+    input_schema: {
+      type: 'object',
+      properties: Object.fromEntries(PERGUNTAS_SLA.map((p) => [p.chave, { type: 'boolean', description: p.pergunta }])),
+      required: PERGUNTAS_SLA.map((p) => p.chave),
+    },
+  },
 ];
 
 function montarSystemPrompt(nomeEmpresa) {
@@ -93,9 +137,10 @@ Como conduzir a conversa:
 - Assim que o cliente mencionar (ou você suspeitar) qual equipamento é, use listar_equipamentos_cliente pra ver os equipamentos cadastrados no nome dele. Se o que ele descreveu bater com um da lista, siga normalmente. Se NÃO bater com nenhum — nome/modelo diferente, ou a lista vier vazia — não presuma que está certo: avise o cliente que não encontrou esse equipamento cadastrado no nome da empresa dele e peça pra confirmar o modelo (pode ser um equipamento novo, ainda não cadastrado, ou um engano no nome). Só continue depois dessa confirmação.
 - Busque na biblioteca (buscar_biblioteca) antes de sugerir qualquer coisa.
 - Guie um passo de cada vez, esperando o cliente confirmar se funcionou antes de ir pro próximo passo.
+- Depois de entender o problema (e confirmar o equipamento), faça as 11 perguntas de sim/não da ferramenta definir_sla — pode agrupar em uma ou duas mensagens (ex: uma lista numerada), não precisa ser uma de cada vez. Assim que tiver as 11 respostas, chame definir_sla. Isso é obrigatório pra TODO atendimento, seja resolvido por você ou escalado — chame definir_sla antes de usar escalar_tecnico ou resolver_atendimento. Se o cliente não souber responder alguma pergunta (ex: não sabe se está na garantia), responda "não" pra aquela pergunta (mais conservador) e siga em frente sem travar a conversa.
 - Se o cliente confirmar que resolveu, use resolver_atendimento.
 - Se a biblioteca não tiver nada relevante, ou depois de tentar os passos e não resolver, use escalar_tecnico pra um técnico de verdade continuar — explique isso pro cliente com naturalidade, sem parecer que "desistiu".
-- Nunca escale sem antes tentar ajudar com a biblioteca, a menos que o problema seja claramente grave/urgente (ex: risco de segurança) — nesse caso escale direto com urgente=true.`;
+- Nunca escale sem antes tentar ajudar com a biblioteca, a menos que o problema seja claramente grave/urgente (ex: risco de segurança) — nesse caso escale direto com urgente=true (mas ainda assim chame definir_sla antes).`;
 }
 
 async function chamarClaude(mensagens, nomeEmpresa) {
@@ -219,6 +264,14 @@ async function processarTurno(data, chamado) {
         chamado.resolvido_em = new Date().toISOString();
         chamado.resumo_ia = bloco.input.resumo || chamado.resumo_ia || '';
         resultado = { ok: true };
+      } else if (bloco.name === 'definir_sla') {
+        const sla = calcularSla(bloco.input);
+        chamado.sla_pontuacao = sla.pontuacao;
+        chamado.sla_nivel = sla.nivel;
+        chamado.sla_horas_atendimento = sla.horas_atendimento;
+        chamado.sla_dias_manutencao = sla.dias_manutencao;
+        chamado.sla_dias_visita_tecnica = sla.dias_visita_tecnica;
+        resultado = { ok: true, nivel: sla.label, pontuacao: sla.pontuacao };
       } else {
         resultado = { erro: 'Ferramenta desconhecida.' };
       }

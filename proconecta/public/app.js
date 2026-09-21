@@ -9554,6 +9554,15 @@ function legendaStatusChamado(c) {
   return tag(c.status, 'blue');
 }
 
+// nível de SLA definido pela IA (Tabela de Prioridade de Atendimento) — cores seguem a mesma
+// escala da planilha da empresa: Baixo=verde, Médio=amarelo, Alto=vermelho, Crítico=roxo
+const SLA_TAG_COR = { baixo: 'green', medio: 'amber', alto: 'falha', critico: 'purple' };
+const SLA_TAG_LABEL = { baixo: 'Baixo', medio: 'Médio', alto: 'Alto', critico: 'Crítico' };
+function tagSla(c) {
+  if (!c.sla_nivel) return '';
+  return `<span class="tag tag-${SLA_TAG_COR[c.sla_nivel] || 'blue'}" title="Prazo: ${c.sla_horas_atendimento}h atendimento · ${c.sla_dias_manutencao}d manutenção · ${c.sla_dias_visita_tecnica}d visita técnica">SLA ${SLA_TAG_LABEL[c.sla_nivel] || c.sla_nivel}</span>`;
+}
+
 function cardAtendimentoFila(c) {
   const naoLido = c.tecnico_id && !c.lida_tecnico;
   const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
@@ -9564,6 +9573,7 @@ function cardAtendimentoFila(c) {
       <div class="atendimento-card-topo">
         <span class="atendimento-numero">ATENDIMENTO #${c.id}</span>
         ${c.prioridade === 'alta' ? '<span class="tag tag-falha">ALTA</span>' : ''}
+        ${tagSla(c)}
         ${naoLido ? '<span class="tag tag-blue">Nova mensagem</span>' : ''}
       </div>
       <div class="atendimento-cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</div>
@@ -9583,7 +9593,7 @@ async function abrirChatAtendimentoTecnico(id) {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Atendimento #${chamado.id}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
+      <div><h1>Atendimento #${chamado.id} ${tagSla(chamado)}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${chamado.status === 'aguardando_tecnico' ? `<button class="btn btn-primary btn-sm" onclick="assumirAtendimento(${chamado.id})">Assumir atendimento</button>` : ''}
         ${chamado.os_id ? `<button class="btn-outline-sm" onclick="ir('agenda')">Ver O.S. ${esc(chamado.numero_os || '')}</button>` : ''}
