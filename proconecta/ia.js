@@ -117,7 +117,7 @@ const FERRAMENTAS = [
   },
   {
     name: 'definir_sla',
-    description: 'Calcula o nível de prioridade (SLA) do atendimento a partir de 11 perguntas de sim/não sobre o equipamento e o problema (garantia, impacto na produção, histórico de reparo, etc.). Faça essas 11 perguntas ao cliente de forma natural — pode agrupar em poucas mensagens curtas — assim que tiver entendido o problema, e chame esta ferramenta com as respostas ANTES de escalar pra um técnico ou encerrar o atendimento. Todas as 11 respostas são obrigatórias.',
+    description: 'Calcula o nível de prioridade (SLA) do atendimento a partir de 11 perguntas de sim/não sobre o equipamento e o problema (garantia, impacto na produção, histórico de reparo, etc.). Só se aplica quando o problema NÃO foi resolvido remotamente por você e vai ser escalado pra um técnico: faça essas 11 perguntas ao cliente de forma natural — pode agrupar em poucas mensagens curtas — e chame esta ferramenta com as respostas ANTES de usar escalar_tecnico. Se o cliente resolver o problema com você (resolver_atendimento), não é preciso calcular SLA. Todas as 11 respostas são obrigatórias.',
     input_schema: {
       type: 'object',
       properties: Object.fromEntries(PERGUNTAS_SLA.map((p) => [p.chave, { type: 'boolean', description: p.pergunta }])),
@@ -137,10 +137,9 @@ Como conduzir a conversa:
 - Assim que o cliente mencionar (ou você suspeitar) qual equipamento é, use listar_equipamentos_cliente pra ver os equipamentos cadastrados no nome dele. Se o que ele descreveu bater com um da lista, siga normalmente. Se NÃO bater com nenhum — nome/modelo diferente, ou a lista vier vazia — não presuma que está certo: avise o cliente que não encontrou esse equipamento cadastrado no nome da empresa dele e peça pra confirmar o modelo (pode ser um equipamento novo, ainda não cadastrado, ou um engano no nome). Só continue depois dessa confirmação.
 - Busque na biblioteca (buscar_biblioteca) antes de sugerir qualquer coisa.
 - Guie um passo de cada vez, esperando o cliente confirmar se funcionou antes de ir pro próximo passo.
-- Depois de entender o problema (e confirmar o equipamento), faça as 11 perguntas de sim/não da ferramenta definir_sla — pode agrupar em uma ou duas mensagens (ex: uma lista numerada), não precisa ser uma de cada vez. Assim que tiver as 11 respostas, chame definir_sla. Isso é obrigatório pra TODO atendimento, seja resolvido por você ou escalado — chame definir_sla antes de usar escalar_tecnico ou resolver_atendimento. Se o cliente não souber responder alguma pergunta (ex: não sabe se está na garantia), responda "não" pra aquela pergunta (mais conservador) e siga em frente sem travar a conversa.
-- Se o cliente confirmar que resolveu, use resolver_atendimento.
-- Se a biblioteca não tiver nada relevante, ou depois de tentar os passos e não resolver, use escalar_tecnico pra um técnico de verdade continuar — explique isso pro cliente com naturalidade, sem parecer que "desistiu".
-- Nunca escale sem antes tentar ajudar com a biblioteca, a menos que o problema seja claramente grave/urgente (ex: risco de segurança) — nesse caso escale direto com urgente=true (mas ainda assim chame definir_sla antes).`;
+- Se o cliente confirmar que resolveu com os passos da biblioteca, use resolver_atendimento — nesse caso NÃO é preciso calcular SLA, já que não vai pra um técnico.
+- Se a biblioteca não tiver nada relevante, ou depois de tentar os passos e não resolver, é hora de escalar pra um técnico de verdade continuar. ANTES de chamar escalar_tecnico (e só nesse caso), faça as 11 perguntas de sim/não da ferramenta definir_sla — pode agrupar em uma ou duas mensagens (ex: uma lista numerada), não precisa ser uma de cada vez — e chame definir_sla assim que tiver as 11 respostas. Se o cliente não souber responder alguma pergunta (ex: não sabe se está na garantia), responda "não" pra aquela pergunta (mais conservador) e siga em frente sem travar a conversa. Só depois disso chame escalar_tecnico, explicando pro cliente com naturalidade, sem parecer que "desistiu".
+- Nunca escale sem antes tentar ajudar com a biblioteca, a menos que o problema seja claramente grave/urgente (ex: risco de segurança) — nesse caso escale direto com urgente=true (mas ainda assim chame definir_sla antes de escalar_tecnico).`;
 }
 
 async function chamarClaude(mensagens, nomeEmpresa) {
