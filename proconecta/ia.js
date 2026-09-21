@@ -38,8 +38,19 @@ function buscarBiblioteca(data, { termo, equipamento } = {}) {
 function listarEquipamentosCliente(data, clienteId) {
   const lista = data.equipamentos
     .filter((e) => e.cliente_id === clienteId)
-    .map((e) => ({ id: e.id, tipo: e.tipo, modelo: e.modelo, numero_serie: e.numero_serie }));
+    .map((e) => ({ id: e.id, tipo: e.tipo, modelo: e.modelo, numero_serie: e.numero_serie, data_fabricacao: e.data_fabricacao || '' }));
   return { equipamentos: lista };
+}
+
+// garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA) — mesma regra usada no
+// resto do sistema (ver dentroDaGarantiaDeFabrica em public/app.js), pra a IA poder responder
+// a pergunta de garantia_fabricacao do SLA sozinha, sem precisar perguntar pro cliente.
+function dentroDaGarantiaDeFabrica(dataFabricacao) {
+  const m = /^(\d{2})\/(\d{4})$/.exec(String(dataFabricacao || '').trim());
+  if (!m) return null;
+  const limite = new Date(Number(m[2]), Number(m[1]) - 1, 1);
+  limite.setFullYear(limite.getFullYear() + 1);
+  return new Date() <= limite;
 }
 
 // ---------- SLA (nível de prioridade do atendimento) ----------
@@ -117,11 +128,18 @@ const FERRAMENTAS = [
   },
   {
     name: 'definir_sla',
-    description: 'Calcula o nível de prioridade (SLA) do atendimento a partir de 11 perguntas de sim/não sobre o equipamento e o problema (garantia, impacto na produção, histórico de reparo, etc.). Só se aplica quando o problema NÃO foi resolvido remotamente por você e vai ser escalado pra um técnico: faça essas 11 perguntas ao cliente de forma natural — pode agrupar em poucas mensagens curtas — e chame esta ferramenta com as respostas ANTES de usar escalar_tecnico. Se o cliente resolver o problema com você (resolver_atendimento), não é preciso calcular SLA. Todas as 11 respostas são obrigatórias.',
+    description: `Calcula o nível de prioridade (SLA) do atendimento a partir de 11 perguntas de sim/não sobre o equipamento e o problema. Só se aplica quando o problema NÃO foi resolvido remotamente por você e vai ser escalado pra um técnico — chame ANTES de usar escalar_tecnico (nunca antes de resolver_atendimento).
+
+Antes de perguntar qualquer coisa ao cliente, tente responder o máximo de perguntas sozinho com o que você já sabe da conversa:
+- garantia_fabricacao: NÃO pergunte isso — deixe de fora do "respostas" que esta ferramenta calcula sozinha a partir da data de fabricação do equipamento (que você já tem, via listar_equipamentos_cliente).
+- erro_intermitente: se o cliente descreveu um problema que vai e volta (ex: "desliga sozinha", "trava de vez em quando", "às vezes falha") isso já é sim; se descreveu uma falha fixa/constante (ex: "não liga de jeito nenhum", "não imprime nada") isso já é não — só pergunte se realmente não deu pra saber pelo que ele já contou.
+- reparo_sem_sucesso, duvida_comum_top5, solucao_no_manual: se isso já ficou claro pelo histórico do buscar_biblioteca ou pelo que o cliente já contou (ex: ele mesmo disse que já tentou consertar antes), não pergunte de novo, use o que já sabe.
+
+Pra tudo que sobrar, pergunte ao cliente, mas UMA pergunta por vez (mensagens curtas e separadas), nunca uma lista com várias perguntas de uma vez — é mais rápido do cliente responder assim.`,
     input_schema: {
       type: 'object',
       properties: Object.fromEntries(PERGUNTAS_SLA.map((p) => [p.chave, { type: 'boolean', description: p.pergunta }])),
-      required: PERGUNTAS_SLA.map((p) => p.chave),
+      required: PERGUNTAS_SLA.filter((p) => p.chave !== 'garantia_fabricacao').map((p) => p.chave),
     },
   },
 ];
@@ -138,7 +156,7 @@ Como conduzir a conversa:
 - Busque na biblioteca (buscar_biblioteca) antes de sugerir qualquer coisa.
 - Guie um passo de cada vez, esperando o cliente confirmar se funcionou antes de ir pro próximo passo.
 - Se o cliente confirmar que resolveu com os passos da biblioteca, use resolver_atendimento — nesse caso NÃO é preciso calcular SLA, já que não vai pra um técnico.
-- Se a biblioteca não tiver nada relevante, ou depois de tentar os passos e não resolver, é hora de escalar pra um técnico de verdade continuar. ANTES de chamar escalar_tecnico (e só nesse caso), faça as 11 perguntas de sim/não da ferramenta definir_sla — pode agrupar em uma ou duas mensagens (ex: uma lista numerada), não precisa ser uma de cada vez — e chame definir_sla assim que tiver as 11 respostas. Se o cliente não souber responder alguma pergunta (ex: não sabe se está na garantia), responda "não" pra aquela pergunta (mais conservador) e siga em frente sem travar a conversa. Só depois disso chame escalar_tecnico, explicando pro cliente com naturalidade, sem parecer que "desistiu".
+- Se a biblioteca não tiver nada relevante, ou depois de tentar os passos e não resolver, é hora de escalar pra um técnico de verdade continuar. ANTES de chamar escalar_tecnico (e só nesse caso), você precisa das respostas da ferramenta definir_sla. Primeiro, responda sozinho o que já der pra saber pelo que já foi dito na conversa (a garantia de fabricação nem precisa — a ferramenta calcula sozinha a partir da data de fabricação do equipamento; se o problema descrito já deixa claro que é algo intermitente ou não, você já sabe; se o cliente já contou que tentou reparar antes, ou se a biblioteca já achou uma dúvida comum/solução no manual, você já sabe essas também). Só pergunte ao cliente o que sobrar — e faça isso UMA pergunta de cada vez, em mensagens curtas e separadas (nunca uma lista com várias perguntas juntas — é mais rápido de responder assim). Se o cliente não souber responder alguma (ex: não sabe se tem plano de preventiva), responda "não" pra aquela (mais conservador) e siga em frente sem travar a conversa. Assim que tiver tudo, chame definir_sla, e só depois disso escalar_tecnico, explicando pro cliente com naturalidade, sem parecer que "desistiu".
 - Nunca escale sem antes tentar ajudar com a biblioteca, a menos que o problema seja claramente grave/urgente (ex: risco de segurança) — nesse caso escale direto com urgente=true (mas ainda assim chame definir_sla antes de escalar_tecnico).`;
 }
 
@@ -264,7 +282,13 @@ async function processarTurno(data, chamado) {
         chamado.resumo_ia = bloco.input.resumo || chamado.resumo_ia || '';
         resultado = { ok: true };
       } else if (bloco.name === 'definir_sla') {
-        const sla = calcularSla(bloco.input);
+        const respostas = { ...bloco.input };
+        if (respostas.garantia_fabricacao === undefined) {
+          const equipamento = chamado.equipamento_id ? data.equipamentos.find((e) => e.id === chamado.equipamento_id) : null;
+          const dentroDaGarantia = equipamento ? dentroDaGarantiaDeFabrica(equipamento.data_fabricacao) : null;
+          respostas.garantia_fabricacao = dentroDaGarantia === null ? false : dentroDaGarantia;
+        }
+        const sla = calcularSla(respostas);
         chamado.sla_pontuacao = sla.pontuacao;
         chamado.sla_nivel = sla.nivel;
         chamado.sla_horas_atendimento = sla.horas_atendimento;
@@ -289,4 +313,4 @@ async function processarTurno(data, chamado) {
   return textoFinal;
 }
 
-module.exports = { ativa, processarTurno, lerEtiqueta };
+module.exports = { ativa, processarTurno, lerEtiqueta, calcularSla, PERGUNTAS_SLA };

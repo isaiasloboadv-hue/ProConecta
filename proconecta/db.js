@@ -191,6 +191,11 @@ function migrar(data) {
     for (const campo of ['garantia', 'garantia_obs']) {
       if (a[campo] === undefined) a[campo] = '';
     }
+    // SLA (nível de prioridade) — vem da IA no chat (antes de escalar) ou preenchido manualmente
+    // na abertura da O.S.; fica null até ser definido
+    for (const campo of ['sla_nivel', 'sla_pontuacao', 'sla_horas_atendimento', 'sla_dias_manutencao', 'sla_dias_visita_tecnica']) {
+      if (a[campo] === undefined) a[campo] = null;
+    }
     if (a.lida_tecnico === undefined) a.lida_tecnico = false;
     if (a.deslocamento_iniciado_em === undefined) a.deslocamento_iniciado_em = null;
     if (a.chegada_confirmada_em === undefined) {

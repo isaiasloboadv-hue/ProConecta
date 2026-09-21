@@ -260,6 +260,35 @@ const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva', 'atendimento'];
 // enquanto o modelo de referência específico dele não chega
 const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];
 
+// garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA) — mesma regra do front
+// (dentroDaGarantiaDeFabrica em public/app.js) e da IA (ia.js), usada aqui pra preencher sozinha
+// a pergunta de garantia_fabricacao do SLA quando o admin preenche a O.S. manualmente
+function dentroDaGarantiaDeFabrica(dataFabricacao) {
+  const m = /^(\d{2})\/(\d{4})$/.exec(String(dataFabricacao || '').trim());
+  if (!m) return null;
+  const limite = new Date(Number(m[2]), Number(m[1]) - 1, 1);
+  limite.setFullYear(limite.getFullYear() + 1);
+  return new Date() <= limite;
+}
+
+// calcula o SLA a partir das respostas enviadas na abertura/edição manual da O.S. (mesma
+// pontuação usada pela IA no chat) — retorna null se o admin não preencheu o questionário
+function slaDoBody(body, equipamento) {
+  if (!body.sla_respostas || typeof body.sla_respostas !== 'object') return null;
+  const respostas = { ...body.sla_respostas };
+  if (respostas.garantia_fabricacao === undefined) {
+    respostas.garantia_fabricacao = equipamento ? (dentroDaGarantiaDeFabrica(equipamento.data_fabricacao) || false) : false;
+  }
+  const sla = ia.calcularSla(respostas);
+  return {
+    sla_nivel: sla.nivel,
+    sla_pontuacao: sla.pontuacao,
+    sla_horas_atendimento: sla.horas_atendimento,
+    sla_dias_manutencao: sla.dias_manutencao,
+    sla_dias_visita_tecnica: sla.dias_visita_tecnica,
+  };
+}
+
 // dados do atendimento definidos pelo administrador na abertura da OS — o técnico só visualiza,
 // nunca são aceitos a partir do que o técnico envia (mesmo que ele tente via chamada direta à API)
 function dadosAtendimentoBloqueados(data, agendaItem, user) {
@@ -616,6 +645,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
   }
   const novoId = nextId(data, 'agenda');
+  const sla = slaDoBody(body, equipamentoEscolhido);
   const item = {
     id: novoId,
     empresa_id: 1,
@@ -634,6 +664,12 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     // garantia definida pelo administrador na abertura da OS — o técnico só visualiza no Laudo Técnico
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
+    // SLA — opcional, só é calculado se o admin preencheu o questionário na abertura da O.S.
+    sla_nivel: sla ? sla.sla_nivel : null,
+    sla_pontuacao: sla ? sla.sla_pontuacao : null,
+    sla_horas_atendimento: sla ? sla.sla_horas_atendimento : null,
+    sla_dias_manutencao: sla ? sla.sla_dias_manutencao : null,
+    sla_dias_visita_tecnica: sla ? sla.sla_dias_visita_tecnica : null,
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,
@@ -691,6 +727,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   }
   // se o técnico designado mudou, ele ainda não viu essa atribuição — reabre a notificação
   const trocouTecnico = Number(body.tecnico_id) !== item.tecnico_id;
+  const sla = slaDoBody(body, equipamentoEscolhido);
   Object.assign(item, {
     numero_os: numeroOSDigitado || item.numero_os || `OS-${String(item.id).padStart(6, '0')}`,
     tecnico_id: Number(body.tecnico_id),
@@ -704,6 +741,9 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
+    // só sobrescreve o SLA se o admin reenviou o questionário — sem ele, mantém o que já tinha
+    // (calculado antes pela IA no chat ou numa edição anterior)
+    ...(sla || {}),
   });
   if (trocouTecnico) item.lida_tecnico = false;
   db.save(data);
@@ -2814,6 +2854,13 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     endereco: (cliente && cliente.endereco) || '', numero: (cliente && cliente.numero) || '', bairro: (cliente && cliente.bairro) || '',
     cep: (cliente && cliente.cep) || '', cidade: (cliente && cliente.cidade) || '', estado: (cliente && cliente.estado) || '',
     garantia: '', garantia_obs: '',
+    // SLA calculado pela IA no chat antes de escalar (quando o atendimento não foi resolvido
+    // remotamente) — segue com a O.S. pra qualquer lugar que ela vá (inclusive pós-venda)
+    sla_nivel: chamado.sla_nivel || null,
+    sla_pontuacao: chamado.sla_pontuacao != null ? chamado.sla_pontuacao : null,
+    sla_horas_atendimento: chamado.sla_horas_atendimento || null,
+    sla_dias_manutencao: chamado.sla_dias_manutencao || null,
+    sla_dias_visita_tecnica: chamado.sla_dias_visita_tecnica || null,
     status: 'pendente',
     valor_servico: null,
     retrabalho: false,

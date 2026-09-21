@@ -1098,6 +1098,7 @@ function osCardCorpo(a) {
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
         <span class="tag tag-${TIPO_OS_COR[a.tipo] || 'blue'} os-tag-tipo" title="${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}">${esc(TIPO_OS_LABEL_CURTO[a.tipo] || TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
+        ${tagSla(a)}
         <span class="tag os-tag-tecnico" title="${esc(a.tecnico_nome || '—')}">${esc(a.tecnico_nome || '—')}</span>
       </div>
       <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
@@ -1186,6 +1187,25 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
         <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
       </div>
 
+      <h2 id="na-sla-titulo" class="${agendaItem && !TIPOS_LAUDO_TECNICO.includes(agendaItem.tipo) ? 'hidden' : ''}">SLA (opcional)</h2>
+      <div id="na-sla-wrap" class="${agendaItem && !TIPOS_LAUDO_TECNICO.includes(agendaItem.tipo) ? 'hidden' : ''}">
+        <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none; margin-bottom:10px;">
+          <input type="checkbox" id="na-sla-ativar" onchange="atualizarSlaNovaAtividade()" style="width:auto;">
+          Definir o SLA deste atendimento agora
+        </label>
+        ${agendaItem && agendaItem.sla_nivel ? `<p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">SLA atual: <b>${SLA_TAG_LABEL[agendaItem.sla_nivel] || esc(agendaItem.sla_nivel)}</b>. Marque a caixa acima pra refazer o questionário e recalcular.</p>` : ''}
+        <div id="na-sla-perguntas" class="form-grid hidden">
+          ${PERGUNTAS_SLA.map((p) => `
+            <div class="full">
+              <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
+              <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
+                <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="sim" style="width:auto;"> Sim</label>
+                <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="nao" style="width:auto;"> Não</label>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+
       <h2>Data e horário</h2>
       <div class="form-grid">
         <div><label>Início</label><input type="datetime-local" id="na-inicio" value="${agendaItem ? (agendaItem.data_hora_inicio || '').slice(0, 16) : ''}"></div>
@@ -1251,11 +1271,18 @@ function atualizarTipoNovaAtividade() {
   const tipo = document.getElementById('na-tipo').value;
   document.getElementById('na-endereco-wrap').classList.toggle('hidden', tipo === 'treinamento_online');
   document.getElementById('na-laudo-equip-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
+  document.getElementById('na-sla-titulo').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
+  document.getElementById('na-sla-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
 }
 
 function atualizarGarantiaNovaAtividade() {
   const garantia = document.querySelector('input[name="na-garantia"]:checked');
   document.getElementById('na-garantia-obs-wrap').classList.toggle('hidden', !garantia || garantia.value !== 'na');
+}
+
+function atualizarSlaNovaAtividade() {
+  const ativo = document.getElementById('na-sla-ativar').checked;
+  document.getElementById('na-sla-perguntas').classList.toggle('hidden', !ativo);
 }
 
 function preencherNumeroSerieNovaAtividade() {
@@ -1334,6 +1361,15 @@ async function salvarNovaAtividade() {
     const equip = (window._equipamentosCache || []).find((e) => e.id === Number(equipId));
     if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
   }
+  let sla_respostas = null;
+  if (document.getElementById('na-sla-ativar') && document.getElementById('na-sla-ativar').checked) {
+    sla_respostas = {};
+    for (const p of PERGUNTAS_SLA) {
+      const marcado = document.querySelector(`input[name="na-sla-${p.chave}"]:checked`);
+      if (!marcado) return alert(`Responda a pergunta "${p.pergunta}", ou desmarque "Definir o SLA deste atendimento agora".`);
+      sla_respostas[p.chave] = marcado.value === 'sim';
+    }
+  }
   const body = {
     numero_os: document.getElementById('na-numero-os').value,
     tecnico_id: document.getElementById('na-tecnico').value,
@@ -1356,6 +1392,7 @@ async function salvarNovaAtividade() {
     garantia: (document.querySelector('input[name="na-garantia"]:checked') || {}).value || '',
     garantia_obs: document.getElementById('na-garantia-obs').value,
   };
+  if (sla_respostas) body.sla_respostas = sla_respostas;
   try {
     if (agendaEmEdicaoId) {
       await api(`/api/agenda/${agendaEmEdicaoId}`, { method: 'PUT', body });
@@ -9563,6 +9600,22 @@ function tagSla(c) {
   return `<span class="tag tag-${SLA_TAG_COR[c.sla_nivel] || 'blue'}" title="Prazo: ${c.sla_horas_atendimento}h atendimento · ${c.sla_dias_manutencao}d manutenção · ${c.sla_dias_visita_tecnica}d visita técnica">SLA ${SLA_TAG_LABEL[c.sla_nivel] || c.sla_nivel}</span>`;
 }
 
+// mesmas 11 perguntas da Tabela de Prioridade de Atendimento usadas pela IA (ver ia.js) — sem
+// garantia_fabricacao, que o servidor calcula sozinho a partir da data de fabricação do
+// equipamento (mesma regra de dentroDaGarantiaDeFabrica), pra o admin não precisar responder.
+const PERGUNTAS_SLA = [
+  { chave: 'garantia_manutencao', pergunta: 'A máquina está em garantia de manutenção?' },
+  { chave: 'linha_parada', pergunta: 'A linha de produção está parada por causa desse problema?' },
+  { chave: 'plano_preventiva_ativo', pergunta: 'O cliente tem plano de manutenção preventiva ativo?' },
+  { chave: 'possui_maquina_reserva', pergunta: 'O cliente possui mais máquinas para a mesma função (reserva/backup)?' },
+  { chave: 'compromete_qualidade', pergunta: 'O problema compromete a qualidade da gravação/marcação?' },
+  { chave: 'erro_intermitente', pergunta: 'O erro ocorre de forma intermitente (vai e volta)?' },
+  { chave: 'reparo_sem_sucesso', pergunta: 'A máquina já passou por tentativas de reparo sem sucesso?' },
+  { chave: 'acesso_remoto', pergunta: 'A máquina permite acesso remoto pra diagnóstico?' },
+  { chave: 'duvida_comum_top5', pergunta: 'O erro relatado faz parte das dúvidas mais comuns (Top 5)?' },
+  { chave: 'solucao_no_manual', pergunta: 'A informação/solução pra esse problema está no manual do equipamento?' },
+];
+
 function cardAtendimentoFila(c) {
   const naoLido = c.tecnico_id && !c.lida_tecnico;
   const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
@@ -9708,6 +9761,7 @@ function cardPosVenda(a) {
     <div class="atendimento-card">
       <div class="atendimento-card-topo">
         <span class="atendimento-numero">${esc(numeroOS(a))}</span>
+        ${tagSla(a)}
       </div>
       <div class="atendimento-cliente">${esc(a.cliente_nome || 'Cliente não identificado')}</div>
       ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
