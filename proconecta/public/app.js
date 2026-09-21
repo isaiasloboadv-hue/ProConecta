@@ -9524,7 +9524,8 @@ async function carregarHistoricoAtendimentoCliente() {
 function renderMensagensChat(containerId, mensagens, visao) {
   const alvo = document.getElementById(containerId);
   if (!alvo) return;
-  const proprioAutor = visao === 'cliente' ? 'cliente' : visao === 'pos_venda' ? 'pos_venda' : 'tecnico';
+  // visao 'admin' é só leitura (histórico) — não marca nenhuma mensagem como "Você"
+  const proprioAutor = visao === 'cliente' ? 'cliente' : visao === 'pos_venda' ? 'pos_venda' : visao === 'admin' ? null : 'tecnico';
   alvo.innerHTML = (mensagens || []).length ? (mensagens || []).map((m) => {
     if (m.autor === 'sistema') return `<div class="chat-sistema">${esc(m.texto)}</div>`;
     const proprio = m.autor === proprioAutor;
@@ -10254,7 +10255,10 @@ function cardSolicitacaoAtendimento(a) {
       ${a.equipamento_tipo ? `<div class="atendimento-equip">${esc(a.equipamento_tipo)}${a.equipamento_modelo ? ' — ' + esc(a.equipamento_modelo) : ''}</div>` : ''}
       ${a.problema ? `<div class="atendimento-resumo">${esc(a.problema.slice(0, 140))}</div>` : ''}
       <div class="atendimento-status">${tag('Orçamento aprovado — aguardando O.S.', 'orange')}</div>
-      <div style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        ${a.origem_chamado_id ? `<button class="btn-outline-sm" onclick="abrirHistoricoAtendimentoAdmin(${a.origem_chamado_id})">💬 Ver atendimento</button>` : ''}
+        <button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button>
+      </div>
     </div>`;
 }
 
@@ -10263,6 +10267,23 @@ function abrirCriarOSDeSolicitacao(id) {
   if (!item) return;
   mostrarFormNovaAtividade(null, item);
   document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth' });
+}
+
+// histórico do atendimento por chat, só leitura — o administrador confere a conversa antes de
+// criar a O.S. de visita técnica (ver o que já foi discutido com o cliente e o técnico)
+async function abrirHistoricoAtendimentoAdmin(chamadoId) {
+  const { chamado } = await api(`/api/chamados/${chamadoId}`);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atendimento #${chamado.id} ${tagSla(chamado)}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
+      <button class="btn-outline-sm" onclick="ir('fila-solicitacao-atendimento')">‹ Voltar</button>
+    </div>
+    <div class="panel chat-panel">
+      <div class="chat-mensagens" id="at-mensagens"></div>
+      <p class="empty" style="margin-top:10px;">Histórico da conversa — somente leitura.</p>
+    </div>`;
+  renderMensagensChat('at-mensagens', chamado.mensagens, 'admin');
 }
 
 // ---------- toast ----------
