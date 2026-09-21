@@ -3444,7 +3444,7 @@ function abrirEditarProcedimento(i, origem) {
         <div><label>Modelo</label><input id="fp-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
         <div><label>Periodicidade</label>
           <select id="fp-periodicidade">
-            ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${r.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
+            ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual', 'N/A'].map((p) => `<option ${r.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
         <div><label>Foto de destaque (equipamento/peça)</label><div id="fp-foto-destaque" style="display:flex;"></div></div>
@@ -8641,7 +8641,7 @@ function renderFormProcedimento(main, prefill) {
         <div><label>Modelo</label><input id="fp-equip-modelo" value="${esc(prefill ? prefill.equipamento_modelo : '')}" placeholder="ex: TB-200"></div>
         <div><label>Periodicidade</label>
           <select id="fp-periodicidade">
-            ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual'].map((p) => `<option ${prefill && prefill.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
+            ${['Semanal', 'Mensal', 'Trimestral', 'Semestral', 'Anual', 'N/A'].map((p) => `<option ${prefill && prefill.periodicidade === p ? 'selected' : ''}>${p}</option>`).join('')}
           </select>
         </div>
         <div><label>Foto de destaque (equipamento/peça)</label><div id="fp-foto-destaque" style="display:flex;"></div></div>
