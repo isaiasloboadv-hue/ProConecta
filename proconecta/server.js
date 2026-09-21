@@ -782,6 +782,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-reprovado$/, async (req, res, m) 
   item.orcamento_reprovado_em = agora;
   item.finalizada = true;
   item.finalizado_em = agora;
+  encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -870,6 +871,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   }
   item.finalizada = true;
   item.finalizado_em = agora;
+  encerrarChamadoDaOS(data, item);
   db.save(data);
   const clienteFinal = data.clientes.find((c) => c.id === item.cliente_id);
   enviarPush(data, item.tecnico_id, {
