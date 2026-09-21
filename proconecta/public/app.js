@@ -1187,24 +1187,20 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
         <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
       </div>
 
-      <h2 id="na-sla-titulo" class="${agendaItem && !TIPOS_LAUDO_TECNICO.includes(agendaItem.tipo) ? 'hidden' : ''}">SLA (opcional)</h2>
-      <div id="na-sla-wrap" class="${agendaItem && !TIPOS_LAUDO_TECNICO.includes(agendaItem.tipo) ? 'hidden' : ''}">
-        <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none; margin-bottom:10px;">
-          <input type="checkbox" id="na-sla-ativar" onchange="atualizarSlaNovaAtividade()" style="width:auto;">
-          Definir o SLA deste atendimento agora
-        </label>
-        ${agendaItem && agendaItem.sla_nivel ? `<p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">SLA atual: <b>${SLA_TAG_LABEL[agendaItem.sla_nivel] || esc(agendaItem.sla_nivel)}</b>. Marque a caixa acima pra refazer o questionário e recalcular.</p>` : ''}
-        <div id="na-sla-perguntas" class="form-grid hidden">
-          ${PERGUNTAS_SLA.map((p) => `
-            <div class="full">
-              <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
-              <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
-                <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="sim" style="width:auto;"> Sim</label>
-                <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="nao" style="width:auto;"> Não</label>
-              </div>
-            </div>`).join('')}
-        </div>
-      </div>
+      ${(() => {
+        // SLA não é definido aqui — é o técnico (ou o pós-venda) quem responde o questionário
+        // ao encaminhar o atendimento; o administrador só visualiza e se baseia nele. Ao criar a
+        // O.S. de visita técnica a partir de uma Solicitação de Atendimento, o SLA já definido
+        // é aplicado automaticamente na nova O.S. (ver finalizar-solicitacao em server.js).
+        const origemSla = (agendaItem && agendaItem.sla_nivel) ? agendaItem : (origemSolicitacao && origemSolicitacao.sla_nivel ? origemSolicitacao : null);
+        if (!origemSla) return '';
+        return `
+      <h2>SLA</h2>
+      <div class="panel" style="padding:14px 16px;">
+        ${tagSla(origemSla)}
+        <p style="color:var(--ink-soft); font-size:13px; margin:8px 0 0;">Definido pelo técnico/pós-venda ao encaminhar o atendimento${origemSolicitacao ? ' — será aplicado a esta O.S. automaticamente ao salvar.' : '.'}</p>
+      </div>`;
+      })()}
 
       <h2>Data e horário</h2>
       <div class="form-grid">
@@ -1271,18 +1267,11 @@ function atualizarTipoNovaAtividade() {
   const tipo = document.getElementById('na-tipo').value;
   document.getElementById('na-endereco-wrap').classList.toggle('hidden', tipo === 'treinamento_online');
   document.getElementById('na-laudo-equip-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
-  document.getElementById('na-sla-titulo').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
-  document.getElementById('na-sla-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
 }
 
 function atualizarGarantiaNovaAtividade() {
   const garantia = document.querySelector('input[name="na-garantia"]:checked');
   document.getElementById('na-garantia-obs-wrap').classList.toggle('hidden', !garantia || garantia.value !== 'na');
-}
-
-function atualizarSlaNovaAtividade() {
-  const ativo = document.getElementById('na-sla-ativar').checked;
-  document.getElementById('na-sla-perguntas').classList.toggle('hidden', !ativo);
 }
 
 function preencherNumeroSerieNovaAtividade() {
@@ -1361,15 +1350,6 @@ async function salvarNovaAtividade() {
     const equip = (window._equipamentosCache || []).find((e) => e.id === Number(equipId));
     if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
   }
-  let sla_respostas = null;
-  if (document.getElementById('na-sla-ativar') && document.getElementById('na-sla-ativar').checked) {
-    sla_respostas = {};
-    for (const p of PERGUNTAS_SLA) {
-      const marcado = document.querySelector(`input[name="na-sla-${p.chave}"]:checked`);
-      if (!marcado) return alert(`Responda a pergunta "${p.pergunta}", ou desmarque "Definir o SLA deste atendimento agora".`);
-      sla_respostas[p.chave] = marcado.value === 'sim';
-    }
-  }
   const body = {
     numero_os: document.getElementById('na-numero-os').value,
     tecnico_id: document.getElementById('na-tecnico').value,
@@ -1392,7 +1372,6 @@ async function salvarNovaAtividade() {
     garantia: (document.querySelector('input[name="na-garantia"]:checked') || {}).value || '',
     garantia_obs: document.getElementById('na-garantia-obs').value,
   };
-  if (sla_respostas) body.sla_respostas = sla_respostas;
   try {
     if (agendaEmEdicaoId) {
       await api(`/api/agenda/${agendaEmEdicaoId}`, { method: 'PUT', body });

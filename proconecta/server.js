@@ -645,7 +645,6 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
   }
   const novoId = nextId(data, 'agenda');
-  const sla = slaDoBody(body, equipamentoEscolhido);
   const item = {
     id: novoId,
     empresa_id: 1,
@@ -664,12 +663,14 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     // garantia definida pelo administrador na abertura da OS — o técnico só visualiza no Laudo Técnico
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
-    // SLA — opcional, só é calculado se o admin preencheu o questionário na abertura da O.S.
-    sla_nivel: sla ? sla.sla_nivel : null,
-    sla_pontuacao: sla ? sla.sla_pontuacao : null,
-    sla_horas_atendimento: sla ? sla.sla_horas_atendimento : null,
-    sla_dias_manutencao: sla ? sla.sla_dias_manutencao : null,
-    sla_dias_visita_tecnica: sla ? sla.sla_dias_visita_tecnica : null,
+    // SLA não é definido aqui — o administrador não responde o questionário, só o técnico/
+    // pós-venda; se esta O.S. nasce de uma Solicitação de Atendimento, o SLA já definido lá é
+    // copiado automaticamente pra cá em finalizar-solicitacao.
+    sla_nivel: null,
+    sla_pontuacao: null,
+    sla_horas_atendimento: null,
+    sla_dias_manutencao: null,
+    sla_dias_visita_tecnica: null,
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,
@@ -727,7 +728,6 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   }
   // se o técnico designado mudou, ele ainda não viu essa atribuição — reabre a notificação
   const trocouTecnico = Number(body.tecnico_id) !== item.tecnico_id;
-  const sla = slaDoBody(body, equipamentoEscolhido);
   Object.assign(item, {
     numero_os: numeroOSDigitado || item.numero_os || `OS-${String(item.id).padStart(6, '0')}`,
     tecnico_id: Number(body.tecnico_id),
@@ -741,9 +741,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
-    // só sobrescreve o SLA se o admin reenviou o questionário — sem ele, mantém o que já tinha
-    // (calculado antes pela IA no chat ou numa edição anterior)
-    ...(sla || {}),
+    // o SLA não é editado por aqui (só o técnico/pós-venda define) — o que já tinha é preservado
   });
   if (trocouTecnico) item.lida_tecnico = false;
   db.save(data);
@@ -3187,6 +3185,18 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar-solicitacao$/, async (req, res, m
   item.os_criada_id = body.nova_os_id ? Number(body.nova_os_id) : null;
   item.finalizada = true;
   item.finalizado_em = agora;
+  // o SLA já foi definido pelo técnico/pós-venda no atendimento original — passa pra nova O.S.
+  // de visita técnica automaticamente, pro administrador se basear nele (não redefine aqui)
+  if (item.os_criada_id && item.sla_nivel) {
+    const novaOS = data.agenda.find((a) => a.id === item.os_criada_id);
+    if (novaOS) {
+      novaOS.sla_nivel = item.sla_nivel;
+      novaOS.sla_pontuacao = item.sla_pontuacao;
+      novaOS.sla_horas_atendimento = item.sla_horas_atendimento;
+      novaOS.sla_dias_manutencao = item.sla_dias_manutencao;
+      novaOS.sla_dias_visita_tecnica = item.sla_dias_visita_tecnica;
+    }
+  }
   encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
