@@ -216,6 +216,17 @@ async function enviarPush(data, usuarioId, payload) {
   if (mudou) db.save(data);
 }
 
+// data_hora_inicio/fim vêm de um <input type="datetime-local"> sem fuso (ex: "2026-09-21T21:37")
+// — é sempre horário de Brasília, já que é o técnico/admin no Brasil quem escolhe. Sem isso,
+// "new Date(string)" interpreta a string usando o fuso do PROCESSO Node, que no servidor
+// (Render, container, etc.) normalmente é UTC — 3h à frente de Brasília — fazendo qualquer
+// comparação de horário (tipo "já passou da hora?") disparar 3h adiantada.
+function horarioBrasiliaParaData(dataHoraLocal) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(dataHoraLocal || ''));
+  if (!m) return null;
+  return new Date(`${m[1]}T${m[2]}:00-03:00`);
+}
+
 // lembrete do dia do atendimento: pra cada O.S. de hoje que já passou do horário marcado e
 // o técnico ainda não avisou que está a caminho, manda um push uma única vez (lembrete_deslocamento_enviado
 // evita repetir). Não é um cron de verdade — só funciona enquanto o processo do servidor
@@ -224,7 +235,9 @@ async function verificarLembretesDeslocamento() {
   try {
     const data = db.load();
     const agora = new Date();
-    const hojeISO = agora.toISOString().slice(0, 10);
+    // "hoje" também precisa ser o dia em Brasília, não em UTC — perto da meia-noite os dois
+    // calendários divergem (ex: 22h de Brasília já é o dia seguinte em UTC)
+    const hojeISO = new Date(agora.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
     let mudou = false;
     for (const item of data.agenda) {
       if (item.finalizada || item.deslocamento_iniciado_em || item.lembrete_deslocamento_enviado) continue;
@@ -233,7 +246,8 @@ async function verificarLembretesDeslocamento() {
       // uma visita agendada de verdade) — só faz sentido lembrar de ir pra quem é visita presencial
       if (item.categoria !== 'inloco') continue;
       if (!item.data_hora_inicio || !item.data_hora_inicio.startsWith(hojeISO)) continue;
-      if (agora < new Date(item.data_hora_inicio)) continue; // só lembra a partir do horário marcado
+      const horario = horarioBrasiliaParaData(item.data_hora_inicio);
+      if (!horario || agora < horario) continue; // só lembra a partir do horário marcado
       const cliente = data.clientes.find((c) => c.id === item.cliente_id);
       await enviarPush(data, item.tecnico_id, {
         titulo: 'Atendimento hoje',
