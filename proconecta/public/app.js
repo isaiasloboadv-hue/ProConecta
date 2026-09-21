@@ -638,6 +638,14 @@ function fecharMenuMobile() {
 }
 
 async function ir(pagina) {
+  // os pollers dos chats de atendimento (cliente/técnico/pós-venda) só têm sentido enquanto a
+  // tela deles está aberta em #main — como #main é substituído embaixo, sem isso eles ficavam
+  // rodando pra sempre em segundo plano (a cada 4s, pra sempre) mesmo depois de sair da tela,
+  // gastando dado e batendo no servidor à toa. O widget de chat interno flutua por cima de
+  // #main (não é afetado pela troca de página) e continua com o poll dele normalmente.
+  clearInterval(_atClientePoll);
+  clearInterval(_atTecPoll);
+  clearInterval(_atPvPoll);
   paginaAtual = pagina;
   const caminho = buscarCaminho(navDoUsuario(), pagina, []);
   if (caminho) caminho.forEach((k) => navAbertos.add(k));
