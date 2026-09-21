@@ -2961,6 +2961,10 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
   item.fase_atendimento = 'aguardando_pos_venda';
   item.motivo_pos_venda = body.motivo;
   item.encaminhado_pos_venda_em = new Date().toISOString();
+  // o técnico pode responder o questionário de SLA aqui, antes de encaminhar — opcional
+  const equipamentoDoItem = item.equipamento_id ? data.equipamentos.find((e) => e.id === item.equipamento_id) : null;
+  const sla = slaDoBody(body, equipamentoDoItem);
+  if (sla) Object.assign(item, sla);
   const chamadoOrigem = item.origem_chamado_id ? data.chamados.find((c) => c.id === item.origem_chamado_id) : null;
   if (chamadoOrigem) {
     chamadoOrigem.mensagens.push({ autor: 'sistema', texto: 'Atendimento encaminhado pro setor de pós-venda.', criado_em: item.encaminhado_pos_venda_em });

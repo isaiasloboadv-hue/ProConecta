@@ -9698,14 +9698,74 @@ async function encerrarAtendimento(agendaId) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
-// motivo digitado por número, no mesmo estilo simples usado no resto do sistema (ex: reprovarVisita)
-async function encaminharPosVenda(agendaId) {
-  const escolha = prompt('Motivo do encaminhamento pro pós-venda:\n1 - Cliente vai enviar o equipamento\n2 - Técnico vai até o cliente\n3 - Vamos enviar uma peça pro cliente\n\nDigite 1, 2 ou 3:');
-  const motivos = { '1': 'cliente_envia_equipamento', '2': 'tecnico_visita', '3': 'peca_enviada' };
-  const motivo = motivos[(escolha || '').trim()];
-  if (!motivo) return;
+// modal de encaminhamento pro pós-venda: motivo + questionário de SLA opcional (o técnico
+// responde aqui antes de encaminhar — a IA do chat não faz mais essas perguntas)
+function encaminharPosVenda(agendaId) {
+  let modal = document.getElementById('modal-pos-venda');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pos-venda';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:640px; max-height:85vh; overflow-y:auto;">
+      <h3>Encaminhar pro pós-venda</h3>
+      <div class="form-grid">
+        <div class="full">
+          <label>Motivo*</label>
+          <select id="pv-motivo">
+            <option value="">Selecione</option>
+            <option value="cliente_envia_equipamento">Cliente vai enviar o equipamento</option>
+            <option value="tecnico_visita">Técnico vai até o cliente</option>
+            <option value="peca_enviada">Vamos enviar uma peça pro cliente</option>
+          </select>
+        </div>
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none; margin:16px 0 10px;">
+        <input type="checkbox" id="pv-sla-ativar" onchange="atualizarSlaPosVenda()" style="width:auto;">
+        Definir o SLA deste atendimento agora
+      </label>
+      <div id="pv-sla-perguntas" class="form-grid hidden">
+        ${PERGUNTAS_SLA.map((p) => `
+          <div class="full">
+            <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
+            <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="pv-sla-${p.chave}" value="sim" style="width:auto;"> Sim</label>
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="pv-sla-${p.chave}" value="nao" style="width:auto;"> Não</label>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-primary" onclick="confirmarEncaminharPosVenda(${agendaId})">Encaminhar</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pos-venda').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function atualizarSlaPosVenda() {
+  const ativo = document.getElementById('pv-sla-ativar').checked;
+  document.getElementById('pv-sla-perguntas').classList.toggle('hidden', !ativo);
+}
+
+async function confirmarEncaminharPosVenda(agendaId) {
+  const motivo = document.getElementById('pv-motivo').value;
+  if (!motivo) return alert('Escolha o motivo do encaminhamento.');
+  let sla_respostas = null;
+  if (document.getElementById('pv-sla-ativar').checked) {
+    sla_respostas = {};
+    for (const p of PERGUNTAS_SLA) {
+      const marcado = document.querySelector(`input[name="pv-sla-${p.chave}"]:checked`);
+      if (!marcado) return alert(`Responda a pergunta "${p.pergunta}", ou desmarque "Definir o SLA deste atendimento agora".`);
+      sla_respostas[p.chave] = marcado.value === 'sim';
+    }
+  }
+  const body = { motivo };
+  if (sla_respostas) body.sla_respostas = sla_respostas;
   try {
-    await api(`/api/agenda/${agendaId}/encaminhar-pos-venda`, { method: 'POST', body: { motivo } });
+    await api(`/api/agenda/${agendaId}/encaminhar-pos-venda`, { method: 'POST', body });
+    document.getElementById('modal-pos-venda').classList.remove('show');
     mostrarToast('Encaminhado pro pós-venda.');
     ir('fila-atendimento');
   } catch (e) { alert('Erro: ' + e.message); }
