@@ -228,6 +228,10 @@ async function verificarLembretesDeslocamento() {
     let mudou = false;
     for (const item of data.agenda) {
       if (item.finalizada || item.deslocamento_iniciado_em || item.lembrete_deslocamento_enviado) continue;
+      // categoria 'online' não tem deslocamento nenhum (inclusive o "atendimento" criado sozinho
+      // quando o técnico assume o chat, com data_hora_inicio = o instante em que assumiu — não é
+      // uma visita agendada de verdade) — só faz sentido lembrar de ir pra quem é visita presencial
+      if (item.categoria !== 'inloco') continue;
       if (!item.data_hora_inicio || !item.data_hora_inicio.startsWith(hojeISO)) continue;
       if (agora < new Date(item.data_hora_inicio)) continue; // só lembra a partir do horário marcado
       const cliente = data.clientes.find((c) => c.id === item.cliente_id);
