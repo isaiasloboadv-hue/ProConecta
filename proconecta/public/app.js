@@ -9471,10 +9471,24 @@ async function renderChamados() {
     </div>
     <div id="at-historico"></div>`;
   renderMensagensChat('at-mensagens', chamado ? chamado.mensagens : [], 'cliente');
+  mostrarAvisoFilaCliente(chamado);
   if (chamado && chamado.status !== 'encerrado') {
     _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
   }
   carregarHistoricoAtendimentoCliente();
+}
+
+// quando o atendimento já saiu da IA mas ainda não tem um técnico designado (fila de
+// "Aguardando técnico"), não existe nenhuma resposta automática pra cada mensagem nova — sem
+// esse aviso, o cliente manda mensagem atrás de mensagem sem nenhuma reação e parece que o
+// chat travou. Mostra um aviso fixo explicando que é normal, ainda está na fila.
+function mostrarAvisoFilaCliente(chamado) {
+  const alvo = document.getElementById('at-mensagens');
+  if (!alvo) return;
+  if (chamado && chamado.status === 'aguardando_tecnico') {
+    alvo.insertAdjacentHTML('beforeend', `<div class="chat-sistema">⏳ Seu atendimento está na fila aguardando um técnico assumir — pode continuar mandando mensagens, elas ficam salvas e ele vê tudo assim que entrar.</div>`);
+    alvo.scrollTop = alvo.scrollHeight;
+  }
 }
 
 async function atualizarAtendimentoCliente() {
@@ -9483,6 +9497,7 @@ async function atualizarAtendimentoCliente() {
     const { chamado } = await api(`/api/chamados/${_atClienteChamado.id}`);
     _atClienteChamado = chamado;
     renderMensagensChat('at-mensagens', chamado.mensagens, 'cliente');
+    mostrarAvisoFilaCliente(chamado);
     if (chamado.status === 'encerrado') { clearInterval(_atClientePoll); renderChamados(); }
   } catch (e) { /* silencioso — tenta de novo no próximo ciclo */ }
 }
@@ -9502,6 +9517,7 @@ async function enviarMensagemAtendimentoCliente() {
     const { chamado } = await api(`/api/chamados/${_atClienteChamado.id}/mensagens`, { method: 'POST', body: { texto } });
     _atClienteChamado = chamado;
     renderMensagensChat('at-mensagens', chamado.mensagens, 'cliente');
+    mostrarAvisoFilaCliente(chamado);
     if (!_atClientePoll) _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
   } catch (e) { alert('Erro: ' + e.message); }
   finally { campo.disabled = false; campo.focus(); }
