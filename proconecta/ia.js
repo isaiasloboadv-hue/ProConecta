@@ -229,48 +229,69 @@ async function processarTurno(data, chamado) {
 
   let mensagens = historico;
   let textoFinal = '';
-  for (let rodada = 0; rodada < MAX_RODADAS_FERRAMENTA; rodada++) {
-    const resposta = await chamarClaude(mensagens, nomeEmpresa);
-    const blocosTexto = resposta.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-    const blocosFerramenta = resposta.content.filter((b) => b.type === 'tool_use');
+  try {
+    for (let rodada = 0; rodada < MAX_RODADAS_FERRAMENTA; rodada++) {
+      const resposta = await chamarClaude(mensagens, nomeEmpresa);
+      const blocosTexto = resposta.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+      const blocosFerramenta = resposta.content.filter((b) => b.type === 'tool_use');
 
-    if (!blocosFerramenta.length) { textoFinal = blocosTexto; break; }
+      if (!blocosFerramenta.length) { textoFinal = blocosTexto; break; }
 
-    mensagens.push({ role: 'assistant', content: resposta.content });
-    const resultados = blocosFerramenta.map((bloco) => {
-      let resultado;
-      if (bloco.name === 'buscar_biblioteca') {
-        resultado = buscarBiblioteca(data, bloco.input);
-      } else if (bloco.name === 'listar_equipamentos_cliente') {
-        resultado = chamado.cliente_id ? listarEquipamentosCliente(data, chamado.cliente_id) : { erro: 'Cliente não identificado no cadastro.' };
-      } else if (bloco.name === 'escalar_tecnico') {
-        if (!chamado.cliente_id) {
-          resultado = { erro: 'Cliente não identificado — não é possível escalar pra um técnico. Avise o cliente que ele precisa estar cadastrado no sistema.' };
-        } else {
-          chamado.status = 'aguardando_tecnico';
-          chamado.prioridade = bloco.input.urgente ? 'alta' : 'normal';
-          if (bloco.input.equipamento_id) chamado.equipamento_id = Number(bloco.input.equipamento_id);
-          chamado.resumo_ia = bloco.input.resumo || '';
+      mensagens.push({ role: 'assistant', content: resposta.content });
+      const resultados = blocosFerramenta.map((bloco) => {
+        let resultado;
+        if (bloco.name === 'buscar_biblioteca') {
+          resultado = buscarBiblioteca(data, bloco.input);
+        } else if (bloco.name === 'listar_equipamentos_cliente') {
+          resultado = chamado.cliente_id ? listarEquipamentosCliente(data, chamado.cliente_id) : { erro: 'Cliente não identificado no cadastro.' };
+        } else if (bloco.name === 'escalar_tecnico') {
+          if (!chamado.cliente_id) {
+            resultado = { erro: 'Cliente não identificado — não é possível escalar pra um técnico. Avise o cliente que ele precisa estar cadastrado no sistema.' };
+          } else {
+            chamado.status = 'aguardando_tecnico';
+            chamado.prioridade = bloco.input.urgente ? 'alta' : 'normal';
+            if (bloco.input.equipamento_id) chamado.equipamento_id = Number(bloco.input.equipamento_id);
+            chamado.resumo_ia = bloco.input.resumo || '';
+            resultado = { ok: true };
+          }
+        } else if (bloco.name === 'resolver_atendimento') {
+          chamado.status = 'encerrado';
+          chamado.resolvido_por = 'ia';
+          chamado.resolvido_em = new Date().toISOString();
+          chamado.resumo_ia = bloco.input.resumo || chamado.resumo_ia || '';
           resultado = { ok: true };
+        } else {
+          resultado = { erro: 'Ferramenta desconhecida.' };
         }
-      } else if (bloco.name === 'resolver_atendimento') {
-        chamado.status = 'encerrado';
-        chamado.resolvido_por = 'ia';
-        chamado.resolvido_em = new Date().toISOString();
-        chamado.resumo_ia = bloco.input.resumo || chamado.resumo_ia || '';
-        resultado = { ok: true };
-      } else {
-        resultado = { erro: 'Ferramenta desconhecida.' };
-      }
-      return { type: 'tool_result', tool_use_id: bloco.id, content: JSON.stringify(resultado) };
-    });
-    mensagens.push({ role: 'user', content: resultados });
-    if (blocosTexto) textoFinal = blocosTexto;
-    // se a ferramenta já encerrou ou escalou o atendimento, não precisa continuar o loop
-    if (chamado.status !== 'ia') break;
+        return { type: 'tool_result', tool_use_id: bloco.id, content: JSON.stringify(resultado) };
+      });
+      mensagens.push({ role: 'user', content: resultados });
+      if (blocosTexto) textoFinal = blocosTexto;
+      // se a ferramenta já encerrou ou escalou o atendimento, não precisa continuar o loop
+      if (chamado.status !== 'ia') break;
+    }
+  } catch (erro) {
+    // erro de verdade na API (rede, limite, etc.) — cai no mesmo tratamento de baixo, que nunca
+    // deixa o cliente preso conversando com um bot quebrado
+    console.error('Erro no processarTurno da IA:', erro.message);
+    textoFinal = '';
   }
 
-  if (!textoFinal) textoFinal = 'Desculpa, tive um problema pra processar sua mensagem agora — pode tentar de novo em instantes?';
+  if (!textoFinal) {
+    if (chamado.status === 'aguardando_tecnico') {
+      // a ferramenta escalar_tecnico funcionou, só não veio texto de despedida junto
+      textoFinal = 'Certo — encaminhei seu atendimento pra um técnico, ele continua por aqui em breve.';
+    } else if (chamado.status === 'encerrado') {
+      textoFinal = 'Que bom que resolveu! Qualquer coisa, é só chamar de novo.';
+    } else {
+      // não conseguiu concluir (erro na API, ou ficou girando sem decidir dentro do limite de
+      // tentativas) — nunca deixa o cliente preso com um bot quebrado: escala direto pra um
+      // técnico de verdade em vez de só pedir pra tentar de novo
+      chamado.status = 'aguardando_tecnico';
+      chamado.resumo_ia = chamado.resumo_ia || 'A IA não conseguiu concluir o atendimento automaticamente — revisar a conversa com o cliente.';
+      textoFinal = 'Desculpa, tive um problema pra continuar te ajudando agora — já encaminhei seu atendimento pra um técnico, ele te responde por aqui em breve.';
+    }
+  }
 
   chamado.mensagens.push({ autor: 'ia', texto: textoFinal, criado_em: new Date().toISOString() });
   chamado.atualizado_em = new Date().toISOString();
