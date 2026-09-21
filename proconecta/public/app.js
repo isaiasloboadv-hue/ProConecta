@@ -861,6 +861,23 @@ async function carregarAgendaComVisitas() {
   });
 }
 
+// filtro Ativos/Finalizados reaproveitado em toda tela de cards de O.S. — o padrão é sempre
+// "Ativos" (as finalizadas ficam escondidas, disponíveis pelo próprio filtro) pra não acumular
+// card antigo nas telas principais, pra nenhum papel de usuário.
+function botoesFiltroStatusOS(valor, funcaoOnClick) {
+  const ativoStyle = 'background:var(--blue); color:#fff; border-color:var(--blue);';
+  return `
+    <div style="display:flex; gap:6px;">
+      <button class="btn-outline-sm" style="${valor === 'ativos' ? ativoStyle : ''}" onclick="${funcaoOnClick}('ativos')">Ativos</button>
+      <button class="btn-outline-sm" style="${valor === 'finalizados' ? ativoStyle : ''}" onclick="${funcaoOnClick}('finalizados')">Finalizados</button>
+    </div>`;
+}
+function filtrarPorStatusOS(lista, filtro) {
+  return (lista || []).filter((a) => (filtro === 'finalizados') === !!a.finalizada);
+}
+
+let minhaAgendaFiltro = 'ativos';
+
 async function renderAgenda() {
   if (USER.papel === 'administrador') {
     await carregarAgendaComVisitas();
@@ -868,11 +885,23 @@ async function renderAgenda() {
   }
   minhaAgendaDetalheId = null;
   await carregarAgendaComVisitas();
-  const agenda = window._agendaCache;
+  desenharMinhaAgenda();
+}
+
+function alternarFiltroMinhaAgenda(valor) {
+  minhaAgendaFiltro = valor;
+  desenharMinhaAgenda();
+}
+
+function desenharMinhaAgenda() {
+  const agenda = filtrarPorStatusOS(window._agendaCache, minhaAgendaFiltro);
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
-    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a)).join('')}</div>` : `<div class="empty">Nenhuma atividade ainda.</div>`}
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
+      ${botoesFiltroStatusOS(minhaAgendaFiltro, 'alternarFiltroMinhaAgenda')}
+    </div>
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a)).join('')}</div>` : `<div class="empty">Nenhuma atividade ${minhaAgendaFiltro === 'finalizados' ? 'finalizada' : 'ativa'} no momento.</div>`}
     <div id="diario-form"></div>
   `;
 }
@@ -913,6 +942,7 @@ const DOW_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 let calAno = new Date().getFullYear();
 let calMes = new Date().getMonth();
 let calDiaSelecionado = null;
+let calFiltro = 'ativos';
 
 function dataISOLocal(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -933,11 +963,19 @@ function renderAgendaCalendario() {
           <div class="cal-mes-label" id="cal-mes-label"></div>
           <button onclick="mudarMesCalendario(1)">›</button>
         </div>
-        <button class="btn-outline-sm" onclick="irParaHojeCalendario()">Hoje</button>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${botoesFiltroStatusOS(calFiltro, 'alternarFiltroCalendario')}
+          <button class="btn-outline-sm" onclick="irParaHojeCalendario()">Hoje</button>
+        </div>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
     </div>
   `;
+  desenharGradeCalendario();
+}
+
+function alternarFiltroCalendario(valor) {
+  calFiltro = valor;
   desenharGradeCalendario();
 }
 
@@ -961,7 +999,7 @@ function desenharGradeCalendario() {
   if (label) label.textContent = `${MES_LABEL[calMes]} de ${calAno}`;
   const grid = document.getElementById('cal-grid');
   if (!grid) return;
-  const agenda = window._agendaCache || [];
+  const agenda = filtrarPorStatusOS(window._agendaCache, calFiltro);
   const contagemPorDia = {};
   agenda.forEach((a) => {
     const dia = (a.data_hora_inicio || '').slice(0, 10);
@@ -1002,15 +1040,24 @@ function selecionarDiaCalendario(iso) {
 }
 
 // tela separada (substitui o calendário) com só os cards de O.S. do dia escolhido
+function alternarFiltroCalendarioDia(valor, iso) {
+  calFiltro = valor;
+  renderDiaCalendario(iso);
+}
+
 function renderDiaCalendario(iso) {
-  const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
+  const agenda = filtrarPorStatusOS(window._agendaCache, calFiltro)
+    .filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
   const [y, m, d] = iso.split('-');
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
-      <button class="btn-outline-sm" onclick="renderAgendaCalendario()">‹ Voltar ao calendário</button>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        ${botoesFiltroStatusOS(calFiltro, `((valor) => alternarFiltroCalendarioDia(valor, '${iso}'))`)}
+        <button class="btn-outline-sm" onclick="renderAgendaCalendario()">‹ Voltar ao calendário</button>
+      </div>
     </div>
     ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOS(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
   `;
@@ -2554,6 +2601,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
 let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
 let osSomenteHoje = false;
+let osFiltro = 'ativos';
 
 async function renderAprovacoesVisitas() {
   await carregarAgendaComVisitas();
@@ -2576,8 +2624,13 @@ function irParaHojeOS() {
   desenharOrdemServico();
 }
 
+function alternarFiltroOS(valor) {
+  osFiltro = valor;
+  desenharOrdemServico();
+}
+
 function desenharOrdemServico() {
-  const agenda = window._agendaCache || [];
+  const agenda = filtrarPorStatusOS(window._agendaCache, osFiltro);
   const visitasPorAgenda = window._visitasPorAgenda || {};
   const hojeISO = dataISOLocal(new Date());
   let doMes = agenda
@@ -2603,7 +2656,10 @@ function desenharOrdemServico() {
           <div class="cal-mes-label">${MES_LABEL[osMes]} de ${osAno}</div>
           <button onclick="mudarMesOS(1)">›</button>
         </div>
-        <button class="btn-outline-sm ${osSomenteHoje ? 'active' : ''}" style="${osSomenteHoje ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="irParaHojeOS()">${osSomenteHoje ? '✓ Só hoje' : 'Hoje'}</button>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${botoesFiltroStatusOS(osFiltro, 'alternarFiltroOS')}
+          <button class="btn-outline-sm ${osSomenteHoje ? 'active' : ''}" style="${osSomenteHoje ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="irParaHojeOS()">${osSomenteHoje ? '✓ Só hoje' : 'Hoje'}</button>
+        </div>
       </div>
     </div>
 
@@ -8430,6 +8486,8 @@ async function renderCalendarioTecnico() {
   renderAgendaCalendarioTecnico();
 }
 
+let calTecnicoFiltro = 'ativos';
+
 function renderAgendaCalendarioTecnico() {
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -8441,11 +8499,19 @@ function renderAgendaCalendarioTecnico() {
           <div class="cal-mes-label" id="cal-mes-label"></div>
           <button onclick="mudarMesCalendarioTecnico(1)">›</button>
         </div>
-        <button class="btn-outline-sm" onclick="irParaHojeCalendarioTecnico()">Hoje</button>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${botoesFiltroStatusOS(calTecnicoFiltro, 'alternarFiltroCalendarioTecnico')}
+          <button class="btn-outline-sm" onclick="irParaHojeCalendarioTecnico()">Hoje</button>
+        </div>
       </div>
       <div class="cal-grid" id="cal-grid"></div>
     </div>
   `;
+  desenharGradeCalendarioTecnico();
+}
+
+function alternarFiltroCalendarioTecnico(valor) {
+  calTecnicoFiltro = valor;
   desenharGradeCalendarioTecnico();
 }
 
@@ -8469,7 +8535,7 @@ function desenharGradeCalendarioTecnico() {
   if (label) label.textContent = `${MES_LABEL[calMes]} de ${calAno}`;
   const grid = document.getElementById('cal-grid');
   if (!grid) return;
-  const agenda = window._agendaCache || [];
+  const agenda = filtrarPorStatusOS(window._agendaCache, calTecnicoFiltro);
   const contagemPorDia = {};
   agenda.forEach((a) => {
     const dia = (a.data_hora_inicio || '').slice(0, 10);
@@ -8509,15 +8575,24 @@ function selecionarDiaCalendarioTecnico(iso) {
   renderDiaCalendarioTecnico(iso);
 }
 
+function alternarFiltroCalendarioTecnicoDia(valor, iso) {
+  calTecnicoFiltro = valor;
+  renderDiaCalendarioTecnico(iso);
+}
+
 function renderDiaCalendarioTecnico(iso) {
-  const agenda = (window._agendaCache || []).filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
+  const agenda = filtrarPorStatusOS(window._agendaCache, calTecnicoFiltro)
+    .filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
   const [y, m, d] = iso.split('-');
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Ordens de serviço em ${d}/${m}/${y}</h1><p>${agenda.length} O.S. agendada(s) para este dia</p></div>
-      <button class="btn-outline-sm" onclick="renderAgendaCalendarioTecnico()">‹ Voltar ao calendário</button>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        ${botoesFiltroStatusOS(calTecnicoFiltro, `((valor) => alternarFiltroCalendarioTecnicoDia(valor, '${iso}'))`)}
+        <button class="btn-outline-sm" onclick="renderAgendaCalendarioTecnico()">‹ Voltar ao calendário</button>
+      </div>
     </div>
     ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSCalendarioTecnico(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
   `;
