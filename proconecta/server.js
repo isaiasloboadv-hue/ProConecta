@@ -2715,13 +2715,18 @@ rota('GET', /^\/api\/chamados\/meu-ativo$/, async (req, res) => {
   enviarJSON(res, 200, { chamado: chamado ? await chamadoComMensagens(data, chamado) : null });
 });
 
-// GET /api/chamados/meus-encerrados — histórico do cliente
+// GET /api/chamados/meus-encerrados — histórico do cliente. Fica escondido por padrão no chat
+// (só carrega quando o cliente clica pra abrir) e aceita ?de=AAAA-MM-DD&ate=AAAA-MM-DD pra
+// filtrar por período direto no servidor, sem precisar mandar a lista inteira pro navegador.
 rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só clientes usam este atendimento.' });
+  const { query } = url.parse(req.url, true);
   const data = db.load();
-  const lista = data.chamados
-    .filter((c) => c.cliente_id === user.cliente_id && c.status === 'encerrado')
+  let lista = data.chamados.filter((c) => c.cliente_id === user.cliente_id && c.status === 'encerrado');
+  if (query.de) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) >= query.de);
+  if (query.ate) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) <= query.ate);
+  lista = lista
     .sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || ''))
     .map((c) => chamadoResumoLista(data, c));
   enviarJSON(res, 200, { chamados: lista });

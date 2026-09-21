@@ -9558,7 +9558,12 @@ async function renderChamados() {
   if (chamado && chamado.status !== 'encerrado') {
     _atClientePoll = setInterval(atualizarAtendimentoCliente, 4000);
   }
-  carregarHistoricoAtendimentoCliente();
+  // o histórico só carrega quando o cliente pede — abrir o chat não deveria buscar e desenhar a
+  // lista inteira de atendimentos antigos toda vez, é dado e processamento gastos à toa
+  document.getElementById('at-historico').innerHTML = `
+    <div class="panel" style="text-align:center;">
+      <button class="btn-outline-sm" onclick="abrirHistoricoAtendimentoCliente()">Ver atendimentos anteriores</button>
+    </div>`;
 }
 
 // quando o atendimento já saiu da IA mas ainda não tem um técnico designado (fila de
@@ -9606,16 +9611,36 @@ async function enviarMensagemAtendimentoCliente() {
   finally { campo.disabled = false; campo.focus(); }
 }
 
-async function carregarHistoricoAtendimentoCliente() {
-  const { chamados } = await api('/api/chamados/meus-encerrados');
+// abre o painel de histórico (o cliente pediu, clicando no botão) e já monta o filtro por
+// período — a lista em si só é buscada depois, em carregarHistoricoAtendimentoCliente()
+async function abrirHistoricoAtendimentoCliente() {
   const alvo = document.getElementById('at-historico');
-  if (!alvo || !chamados.length) return;
+  if (!alvo) return;
   alvo.innerHTML = `
     <div class="page-head"><h1 style="font-size:16px;">Atendimentos anteriores</h1></div>
+    <div class="panel" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+      <label style="font-size:13px;">De<br><input type="date" id="hist-at-de"></label>
+      <label style="font-size:13px;">Até<br><input type="date" id="hist-at-ate"></label>
+      <button class="btn btn-primary btn-sm" onclick="carregarHistoricoAtendimentoCliente()">Filtrar</button>
+    </div>
+    <div id="hist-at-lista"></div>`;
+  await carregarHistoricoAtendimentoCliente();
+}
+
+async function carregarHistoricoAtendimentoCliente() {
+  const de = document.getElementById('hist-at-de')?.value || '';
+  const ate = document.getElementById('hist-at-ate')?.value || '';
+  const qs = new URLSearchParams();
+  if (de) qs.set('de', de);
+  if (ate) qs.set('ate', ate);
+  const { chamados } = await api(`/api/chamados/meus-encerrados${qs.toString() ? '?' + qs.toString() : ''}`);
+  const alvo = document.getElementById('hist-at-lista');
+  if (!alvo) return;
+  alvo.innerHTML = chamados.length ? `
     <div class="panel"><table>
       <tr><th>Data</th><th>Resolvido por</th></tr>
       ${chamados.map((c) => `<tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Resolvido por">${c.resolvido_por === 'ia' ? 'Assistente' : c.numero_os ? 'Técnico — ' + esc(c.numero_os) : 'Técnico'}</td></tr>`).join('')}
-    </table></div>`;
+    </table></div>` : `<p class="empty">Nenhum atendimento encontrado ${de || ate ? 'nesse período' : 'ainda'}.</p>`;
 }
 
 // mensagens do chat — reaproveitado tanto na tela do cliente quanto na do técnico; "visao"
