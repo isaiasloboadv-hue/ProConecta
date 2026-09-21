@@ -678,7 +678,17 @@ async function ir(pagina) {
 }
 
 function tag(texto, cor) { return `<span class="tag tag-${cor}">${texto}</span>`; }
-function fmtData(iso) { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+// datas "só dia" (ex.: "2026-09-21", vindas de <input type="date">) não têm hora — o construtor
+// Date as interpreta como meia-noite UTC, que o toLocaleString depois converte pro fuso local e
+// pode voltar um dia (ex.: 21/09 meia-noite UTC vira 20/09 21h no horário de Brasília). Formata
+// esse caso direto da string, sem passar por Date, pra nunca errar o dia; datas com hora (com "T",
+// de <input type="datetime-local"> ou timestamps do servidor) seguem pelo caminho de sempre.
+function fmtData(iso) {
+  if (!iso) return '—';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) { const [ano, mes, dia] = iso.split('-'); return `${dia}/${mes}`; }
+  const d = new Date(iso);
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
 function badgeStatus(status) {
   if (status === 'aprovado') return `<span class="badge badge-aprovado">Aprovado</span>`;
   if (status === 'alteracao_sugerida') return `<span class="badge badge-alteracao">Alteração sugerida</span>`;
@@ -6059,8 +6069,8 @@ function mostrarFormRelatorioTecnico(existente) {
       <div class="form-grid">
         <div><label>Nome</label><input value="${esc(USER.nome)}" disabled></div>
         <div><label>E-mail</label><input value="${esc(USER.email || '')}" disabled></div>
-        <div><label>Data de entrada</label><input id="rt-data_entrada" type="date" value="${esc(d.data_entrada)}" onchange="atualizarPeriodoTecnico()"></div>
-        <div><label>Data de conclusão</label><input id="rt-data_conclusao" type="date" value="${esc(d.data_conclusao)}" onchange="atualizarPeriodoTecnico()"></div>
+        <div><label>Data de entrada</label><input id="rt-data_entrada" type="datetime-local" value="${esc(d.data_entrada)}" onchange="atualizarPeriodoTecnico()"></div>
+        <div><label>Data de conclusão</label><input id="rt-data_conclusao" type="datetime-local" value="${esc(d.data_conclusao)}" onchange="atualizarPeriodoTecnico()"></div>
         <div><label>Período de reparo</label><input id="rt-periodo" value="${esc(periodoReparo(d))}" disabled></div>
       </div>
     </div>
