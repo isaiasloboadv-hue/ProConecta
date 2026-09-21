@@ -162,7 +162,7 @@ function chamadoEstaComPosVenda(data, chamado) {
   return !!(os && os.tipo === 'atendimento' && os.fase_atendimento && os.fase_atendimento !== 'em_atendimento');
 }
 
-function encerrarChamadoDaOS(data, agendaItem) {
+async function encerrarChamadoDaOS(data, agendaItem) {
   if (!agendaItem.origem_chamado_id) return;
   const chamado = data.chamados.find((c) => c.id === agendaItem.origem_chamado_id);
   if (!chamado || chamado.status === 'encerrado') return;
@@ -170,7 +170,7 @@ function encerrarChamadoDaOS(data, agendaItem) {
   chamado.status = 'encerrado';
   chamado.resolvido_em = agora;
   chamado.atualizado_em = agora;
-  chamado.mensagens.push({ autor: 'sistema', texto: 'Atendimento encerrado.', criado_em: agora });
+  await db.salvarMensagemChamado(chamado.id, { autor: 'sistema', texto: 'Atendimento encerrado.', criado_em: agora });
 }
 
 // "2026-09-20T14:00" -> "20/09 às 14:00", pro texto das notificações push
@@ -837,7 +837,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-reprovado$/, async (req, res, m) 
   item.orcamento_reprovado_em = agora;
   item.finalizada = true;
   item.finalizado_em = agora;
-  encerrarChamadoDaOS(data, item);
+  await encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -926,7 +926,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   }
   item.finalizada = true;
   item.finalizado_em = agora;
-  encerrarChamadoDaOS(data, item);
+  await encerrarChamadoDaOS(data, item);
   db.save(data);
   const clienteFinal = data.clientes.find((c) => c.id === item.cliente_id);
   enviarPush(data, item.tecnico_id, {
@@ -1866,22 +1866,12 @@ rota('GET', /^\/api\/chat-interno\/contatos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, PAPEIS_CHAT_INTERNO)) return enviarJSON(res, 403, { erro: 'Só a equipe interna usa o chat interno.' });
   const data = db.load();
-  const contatos = data.usuarios
-    .filter((u) => u.papel !== 'cliente' && u.id !== user.id)
-    .map((u) => {
-      const conversa = data.mensagens_internas.filter((m) =>
-        (m.remetente_id === user.id && m.destinatario_id === u.id) || (m.remetente_id === u.id && m.destinatario_id === user.id));
-      const ultima = conversa.reduce((max, m) => (!max || m.criado_em > max.criado_em ? m : max), null);
-      const nao_lidas = conversa.filter((m) => m.destinatario_id === user.id && m.remetente_id === u.id && !m.lida).length;
-      return {
-        id: u.id, nome: u.nome, papel: u.papel, departamento: u.departamento || null,
-        ultima_mensagem_texto: ultima ? ultima.texto : null,
-        ultima_mensagem_em: ultima ? ultima.criado_em : null,
-        ultima_mensagem_propria: ultima ? ultima.remetente_id === user.id : false,
-        nao_lidas,
-      };
-    })
-    .sort((a, b) => (b.ultima_mensagem_em || '').localeCompare(a.ultima_mensagem_em || '') || a.nome.localeCompare(b.nome));
+  const outros = data.usuarios.filter((u) => u.papel !== 'cliente' && u.id !== user.id);
+  const contatos = await Promise.all(outros.map(async (u) => {
+    const resumo = await db.resumoContatoInterno(user.id, u.id);
+    return { id: u.id, nome: u.nome, papel: u.papel, departamento: u.departamento || null, ...resumo };
+  }));
+  contatos.sort((a, b) => (b.ultima_mensagem_em || '').localeCompare(a.ultima_mensagem_em || '') || a.nome.localeCompare(b.nome));
   enviarJSON(res, 200, { contatos });
 });
 
@@ -1894,14 +1884,8 @@ rota('GET', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
   const data = db.load();
   const outro = data.usuarios.find((u) => u.id === outroId);
   if (!outro || outro.papel === 'cliente') return enviarJSON(res, 404, { erro: 'Contato não encontrado.' });
-  const mensagens = data.mensagens_internas
-    .filter((msg) => (msg.remetente_id === user.id && msg.destinatario_id === outroId) || (msg.remetente_id === outroId && msg.destinatario_id === user.id))
-    .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
-  let mudou = false;
-  for (const msg of mensagens) {
-    if (msg.destinatario_id === user.id && msg.remetente_id === outroId && !msg.lida) { msg.lida = true; mudou = true; }
-  }
-  if (mudou) db.save(data);
+  const mensagens = await db.carregarMensagensInternas(user.id, outroId);
+  await db.marcarMensagensInternasLidas(user.id, outroId);
   enviarJSON(res, 200, { mensagens, contato: { id: outro.id, nome: outro.nome, papel: outro.papel } });
 });
 
@@ -1918,13 +1902,7 @@ rota('POST', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
   const outro = data.usuarios.find((u) => u.id === outroId);
   if (!outro || outro.papel === 'cliente') return enviarJSON(res, 404, { erro: 'Contato não encontrado.' });
   const remetente = data.usuarios.find((u) => u.id === user.id);
-  const mensagem = {
-    id: nextId(data, 'mensagens_internas'),
-    remetente_id: user.id, destinatario_id: outroId, texto,
-    criado_em: new Date().toISOString(), lida: false,
-  };
-  data.mensagens_internas.push(mensagem);
-  db.save(data);
+  const mensagem = await db.salvarMensagemInterna({ remetente_id: user.id, destinatario_id: outroId, texto });
   await enviarPush(data, outroId, {
     titulo: `Mensagem de ${remetente ? remetente.nome : 'alguém'}`,
     corpo: texto.length > 120 ? texto.slice(0, 117) + '...' : texto,
@@ -2631,7 +2609,9 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
 // ProConecta quanto quando manda mensagem pelo WhatsApp (ver whatsapp.js) — o técnico responde
 // num lugar só, e se a conversa veio do WhatsApp a resposta dele volta pro WhatsApp do cliente.
 
-function chamadoComDetalhes(data, c) {
+// versão pra LISTA (fila, histórico) — sem buscar o histórico de mensagens (mora numa tabela à
+// parte agora); usa o resumo já salvo no próprio chamado (primeira_mensagem_cliente) igual antes.
+function chamadoResumoLista(data, c) {
   const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
   const tecnico = data.usuarios.find((u) => u.id === c.tecnico_id);
   const equipamento = data.equipamentos.find((e) => e.id === c.equipamento_id);
@@ -2646,6 +2626,12 @@ function chamadoComDetalhes(data, c) {
     os_fase_atendimento: os ? os.fase_atendimento : null,
     os_finalizada: os ? !!os.finalizada : false,
   };
+}
+
+// versão pra ITEM ÚNICO (abrir o chat) — busca o histórico de mensagens de verdade
+async function chamadoComMensagens(data, c) {
+  const mensagens = await db.carregarMensagensChamado(c.id);
+  return { ...chamadoResumoLista(data, c), mensagens };
 }
 
 async function enviarPushTecnicos(data, payload) {
@@ -2673,6 +2659,7 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
   const data = db.load();
 
   const agora = new Date().toISOString();
+  const textoInicial = String(body.mensagem).trim();
   const chamado = {
     id: nextId(data, 'chamados'),
     empresa_id: 1,
@@ -2686,7 +2673,10 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
     os_id: null,
     resumo_ia: '',
     resolvido_por: null,
-    mensagens: [{ autor: 'cliente', texto: String(body.mensagem).trim(), criado_em: agora }],
+    primeira_mensagem_cliente: textoInicial,
+    // mensagens fica só na memória durante esta requisição (histórico mora numa tabela à parte —
+    // ver salvarMensagemChamado/chamadoComMensagens); nunca é isso que vai pro banco no blob.
+    mensagens: [{ autor: 'cliente', texto: textoInicial, criado_em: agora }],
     lida_tecnico: true,
     lida_cliente: true,
     criado_em: agora,
@@ -2705,8 +2695,11 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
   if (chamado.status === 'aguardando_tecnico') {
     notificarNovoAtendimento(data, chamado);
   }
+  const mensagensCompletas = chamado.mensagens;
+  for (const msg of mensagensCompletas) await db.salvarMensagemChamado(chamado.id, msg);
+  chamado.mensagens = [];
   db.save(data);
-  enviarJSON(res, 201, { chamado: chamadoComDetalhes(data, chamado) });
+  enviarJSON(res, 201, { chamado: { ...chamadoResumoLista(data, chamado), mensagens: mensagensCompletas } });
 });
 
 // GET /api/chamados/meu-ativo — o cliente pede o atendimento em andamento dele (se tiver), pra
@@ -2719,7 +2712,7 @@ rota('GET', /^\/api\/chamados\/meu-ativo$/, async (req, res) => {
     .filter((c) => c.cliente_id === user.cliente_id && c.status !== 'encerrado')
     .sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || ''))[0];
   if (chamado && !chamado.lida_cliente) { chamado.lida_cliente = true; db.save(data); }
-  enviarJSON(res, 200, { chamado: chamado ? chamadoComDetalhes(data, chamado) : null });
+  enviarJSON(res, 200, { chamado: chamado ? await chamadoComMensagens(data, chamado) : null });
 });
 
 // GET /api/chamados/meus-encerrados — histórico do cliente
@@ -2730,7 +2723,7 @@ rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
   const lista = data.chamados
     .filter((c) => c.cliente_id === user.cliente_id && c.status === 'encerrado')
     .sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || ''))
-    .map((c) => chamadoComDetalhes(data, c));
+    .map((c) => chamadoResumoLista(data, c));
   enviarJSON(res, 200, { chamados: lista });
 });
 
@@ -2752,7 +2745,7 @@ rota('GET', /^\/api\/chamados$/, async (req, res) => {
     // mostra pro técnico que aquele atendimento já foi concluído, em vez de simplesmente sumir
     lista = data.chamados.filter((c) => c.tecnico_id === user.id);
   }
-  lista = lista.sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || '')).map((c) => chamadoComDetalhes(data, c));
+  lista = lista.sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || '')).map((c) => chamadoResumoLista(data, c));
   enviarJSON(res, 200, { chamados: lista });
 });
 
@@ -2768,7 +2761,7 @@ rota('GET', /^\/api\/chamados\/(\d+)$/, async (req, res, m) => {
   if (user.papel === 'pos_venda' && !chamadoEstaComPosVenda(data, chamado)) return enviarJSON(res, 403, { erro: 'Este atendimento ainda não está com o pós-venda.' });
   if (user.papel === 'cliente') { chamado.lida_cliente = true; db.save(data); }
   else if (user.papel === 'suporte' && chamado.tecnico_id === user.id) { chamado.lida_tecnico = true; db.save(data); }
-  enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado) });
+  enviarJSON(res, 200, { chamado: await chamadoComMensagens(data, chamado) });
 });
 
 // POST /api/chamados/:id/mensagens — cliente ou técnico manda mensagem no atendimento
@@ -2799,6 +2792,12 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
     return enviarJSON(res, 403, { erro: 'Sem acesso a este atendimento.' });
   }
 
+  // carrega o histórico de verdade pra dentro do objeto em memória só pra esta requisição — é
+  // assim que a IA (ia.js) continua enxergando/alimentando chamado.mensagens sem precisar mudar
+  // a lógica dela; só as mensagens NOVAS deste turno (a partir daqui) são persistidas no fim.
+  chamado.mensagens = await db.carregarMensagensChamado(chamado.id);
+  const totalAntes = chamado.mensagens.length;
+
   const agora = new Date().toISOString();
   chamado.mensagens.push({ autor, texto, criado_em: agora });
   chamado.atualizado_em = agora;
@@ -2826,8 +2825,11 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
     }
   }
 
+  const mensagensCompletas = chamado.mensagens;
+  for (const msg of mensagensCompletas.slice(totalAntes)) await db.salvarMensagemChamado(chamado.id, msg);
+  chamado.mensagens = [];
   db.save(data);
-  enviarJSON(res, 201, { chamado: chamadoComDetalhes(data, chamado) });
+  enviarJSON(res, 201, { chamado: { ...chamadoResumoLista(data, chamado), mensagens: mensagensCompletas } });
 });
 
 // POST /api/chamados/:id/assumir — técnico assume o atendimento; vira Ordem de Serviço na hora
@@ -2848,7 +2850,6 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   // toda O.S. aberta a partir de um chamado do chat nasce como "Atendimento" — é o técnico quem,
   // ao preencher o Laudo Técnico, define se era mesmo uma corretiva/preventiva de verdade
   const tipo = 'atendimento';
-  const primeiraMensagemCliente = chamado.mensagens.find((msg) => msg.autor === 'cliente');
 
   const agora = new Date();
   const inicioISO = agora.toISOString().slice(0, 16);
@@ -2865,7 +2866,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     data_hora_fim: fimISO,
     tipo,
     categoria: 'online',
-    problema: chamado.resumo_ia || (primeiraMensagemCliente ? primeiraMensagemCliente.texto : ''),
+    problema: chamado.resumo_ia || chamado.primeira_mensagem_cliente || '',
     contato: (cliente && cliente.nome_empresa) || '', telefone: (cliente && cliente.telefone) || '', email: (cliente && cliente.email) || '', setor_cliente: (cliente && cliente.setor) || '',
     endereco: (cliente && cliente.endereco) || '', numero: (cliente && cliente.numero) || '', bairro: (cliente && cliente.bairro) || '',
     cep: (cliente && cliente.cep) || '', cidade: (cliente && cliente.cidade) || '', estado: (cliente && cliente.estado) || '',
@@ -2917,14 +2918,14 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   chamado.os_id = osItem.id;
   chamado.assumido_em = agora.toISOString();
   chamado.lida_cliente = false;
-  chamado.mensagens.push({ autor: 'sistema', texto: `${user.nome} assumiu o atendimento — O.S. ${osItem.numero_os} aberta.`, criado_em: agora.toISOString() });
+  await db.salvarMensagemChamado(chamado.id, { autor: 'sistema', texto: `${user.nome} assumiu o atendimento — O.S. ${osItem.numero_os} aberta.`, criado_em: agora.toISOString() });
   db.save(data);
 
   if (chamado.origem === 'whatsapp' && chamado.telefone_whatsapp) {
     const nomeEmpresa = (data.empresas.find((e) => e.id === 1) || {}).nome || 'a empresa';
     whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, `${user.nome}, de ${nomeEmpresa}, assumiu seu atendimento e vai continuar por aqui.`).catch(() => {});
   }
-  enviarJSON(res, 200, { chamado: chamadoComDetalhes(data, chamado), agenda: agendaComDetalhes(data, osItem) });
+  enviarJSON(res, 200, { chamado: await chamadoComMensagens(data, chamado), agenda: agendaComDetalhes(data, osItem) });
 });
 
 // ---------- pós-venda / setor reparo / estoque (O.S. tipo "atendimento" que não resolveu no chat) ----------
@@ -2956,7 +2957,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encerrar-atendimento$/, async (req, res, m)
   const agora = new Date().toISOString();
   item.finalizada = true;
   item.finalizado_em = agora;
-  encerrarChamadoDaOS(data, item);
+  await encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -2983,7 +2984,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
   if (sla) Object.assign(item, sla);
   const chamadoOrigem = item.origem_chamado_id ? data.chamados.find((c) => c.id === item.origem_chamado_id) : null;
   if (chamadoOrigem) {
-    chamadoOrigem.mensagens.push({ autor: 'sistema', texto: 'Atendimento encaminhado pro setor de pós-venda.', criado_em: item.encaminhado_pos_venda_em });
+    await db.salvarMensagemChamado(chamadoOrigem.id, { autor: 'sistema', texto: 'Atendimento encaminhado pro setor de pós-venda.', criado_em: item.encaminhado_pos_venda_em });
     chamadoOrigem.atualizado_em = item.encaminhado_pos_venda_em;
   }
   db.save(data);
@@ -3091,7 +3092,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
     item.pos_venda_decisao_em = agora;
     item.finalizada = true;
     item.finalizado_em = agora;
-    encerrarChamadoDaOS(data, item);
+    await encerrarChamadoDaOS(data, item);
     db.save(data);
   }
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
@@ -3154,7 +3155,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/estoque\/confirmar-saida$/, async (req, res
   item.estoque_saida_em = agora;
   item.finalizada = true;
   item.finalizado_em = agora;
-  encerrarChamadoDaOS(data, item);
+  await encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
@@ -3215,7 +3216,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar-solicitacao$/, async (req, res, m
       novaOS.sla_dias_visita_tecnica = item.sla_dias_visita_tecnica;
     }
   }
-  encerrarChamadoDaOS(data, item);
+  await encerrarChamadoDaOS(data, item);
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });

@@ -49,7 +49,7 @@ async function enviarMensagemWhatsApp(para, texto) {
 
 // acha o chamado em andamento desse telefone (qualquer status que não seja encerrado) ou cria um
 // novo — assim a conversa inteira (IA e depois técnico) fica no mesmo chamado/thread.
-function encontrarOuCriarChamado(data, nextId, telefone) {
+function encontrarOuCriarChamado(data, nextId, telefone, textoPrimeiraMensagem) {
   let chamado = data.chamados.find((c) => c.telefone_whatsapp === telefone && c.status !== 'encerrado');
   if (chamado) return chamado;
   const cliente = encontrarClientePorTelefone(data, telefone);
@@ -65,6 +65,9 @@ function encontrarOuCriarChamado(data, nextId, telefone) {
     os_id: null,
     resumo_ia: '',
     resolvido_por: null,
+    primeira_mensagem_cliente: textoPrimeiraMensagem,
+    // mensagens fica só na memória durante a requisição — histórico de verdade mora numa tabela
+    // à parte (ver salvarMensagemChamado/carregarMensagensChamado em db.js)
     mensagens: [],
     lida_tecnico: true,
     lida_cliente: true,
@@ -125,7 +128,11 @@ function registrarRotasWhatsApp({ rota, enviarJSON, lerCorpo, url, db, enviarPus
 
 async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
   const data = db.load();
-  const chamado = encontrarOuCriarChamado(data, db.nextId, telefone);
+  const chamado = encontrarOuCriarChamado(data, db.nextId, telefone, texto);
+  // carrega o histórico de verdade (vazio pra chamado recém-criado) pra dentro do objeto em
+  // memória só pra esta requisição — só as mensagens NOVAS a partir daqui são persistidas no fim.
+  chamado.mensagens = await db.carregarMensagensChamado(chamado.id);
+  const totalAntes = chamado.mensagens.length;
   chamado.mensagens.push({ autor: 'cliente', texto, criado_em: new Date().toISOString() });
   chamado.atualizado_em = new Date().toISOString();
 
@@ -138,6 +145,8 @@ async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
       const tecnicos = data.usuarios.filter((u) => u.papel === 'suporte');
       await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente do WhatsApp precisa de ajuda.', url: '/' }).catch(() => {})));
     }
+    for (const msg of chamado.mensagens.slice(totalAntes)) await db.salvarMensagemChamado(chamado.id, msg);
+    chamado.mensagens = [];
     db.save(data);
     await enviarMensagemWhatsApp(telefone, resposta);
   } else {
@@ -147,6 +156,8 @@ async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
     if (enviarPush && chamado.tecnico_id) {
       enviarPush(data, chamado.tecnico_id, { titulo: 'Nova mensagem no atendimento', corpo: texto.slice(0, 120), url: '/' }).catch(() => {});
     }
+    for (const msg of chamado.mensagens.slice(totalAntes)) await db.salvarMensagemChamado(chamado.id, msg);
+    chamado.mensagens = [];
     db.save(data);
   }
 }

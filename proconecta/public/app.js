@@ -9622,8 +9622,7 @@ const PERGUNTAS_SLA = [
 
 function cardAtendimentoFila(c) {
   const naoLido = c.tecnico_id && !c.lida_tecnico;
-  const primeiraDoCliente = (c.mensagens || []).find((m) => m.autor === 'cliente');
-  const resumo = c.resumo_ia || (primeiraDoCliente ? primeiraDoCliente.texto : '');
+  const resumo = c.resumo_ia || c.primeira_mensagem_cliente || '';
   const encerradoOuEncaminhado = c.os_finalizada || (c.os_fase_atendimento && c.os_fase_atendimento !== 'em_atendimento');
   return `
     <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''} ${encerradoOuEncaminhado ? 'atendimento-card-finalizado' : ''}" onclick="abrirChatAtendimentoTecnico(${c.id})">

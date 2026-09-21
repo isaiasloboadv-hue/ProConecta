@@ -150,6 +150,9 @@ function migrar(data) {
     if (c.assumido_em === undefined) c.assumido_em = null;
     if (c.lida_tecnico === undefined) c.lida_tecnico = true;
     if (c.lida_cliente === undefined) c.lida_cliente = true;
+    // resumo (primeira mensagem do cliente) usado na fila/lista sem precisar buscar o histórico
+    // de mensagens (que agora mora numa tabela à parte — ver migrarMensagensParaTabelas)
+    if (c.primeira_mensagem_cliente === undefined) c.primeira_mensagem_cliente = '';
   }
   if (!data._seq.registros) data._seq.registros = 1;
   if (!data._seq.chamados) data._seq.chamados = 1;
@@ -329,6 +332,15 @@ async function inicializarPostgres() {
   const p = obterPool();
   await p.query('CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)');
   await p.query('CREATE TABLE IF NOT EXISTS fotos (id TEXT PRIMARY KEY, dados TEXT NOT NULL, criado_em TIMESTAMPTZ DEFAULT now())');
+  await p.query(`CREATE TABLE IF NOT EXISTS mensagens_chamado (
+    id SERIAL PRIMARY KEY, chamado_id INTEGER NOT NULL, autor TEXT NOT NULL, texto TEXT NOT NULL, criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await p.query('CREATE INDEX IF NOT EXISTS idx_mensagens_chamado_chamado_id ON mensagens_chamado (chamado_id)');
+  await p.query(`CREATE TABLE IF NOT EXISTS mensagens_internas_tbl (
+    id SERIAL PRIMARY KEY, remetente_id INTEGER NOT NULL, destinatario_id INTEGER NOT NULL,
+    texto TEXT NOT NULL, criado_em TIMESTAMPTZ NOT NULL DEFAULT now(), lida BOOLEAN NOT NULL DEFAULT false
+  )`);
+  await p.query('CREATE INDEX IF NOT EXISTS idx_mensagens_internas_par ON mensagens_internas_tbl (remetente_id, destinatario_id)');
   const r = await p.query('SELECT data FROM app_state WHERE id = 1');
   if (r.rows.length === 0) {
     const data = seed();
@@ -348,12 +360,13 @@ async function inicializarPostgres() {
 
 // server.js aguarda essa promise antes de abrir a porta. No modo arquivo, resolve na hora.
 // Se a conexão com o Postgres falhar, cai pro arquivo local em vez de derrubar o servidor.
-const pronto = usaPostgres
+const pronto = (usaPostgres
   ? inicializarPostgres().catch((e) => {
       console.error('Falha ao conectar no Postgres — usando o arquivo local como reserva:', e.message);
       cache = null;
     })
-  : Promise.resolve();
+  : Promise.resolve()
+).then(() => migrarMensagensSeNecessario());
 
 function load() {
   if (usaPostgres && cache) return cache;
@@ -408,4 +421,180 @@ async function carregarFoto(id) {
   return fs.existsSync(caminho) ? fs.readFileSync(caminho, 'utf8') : null;
 }
 
-module.exports = { load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto };
+// ---------- mensagens de chat (atendimento por chamado + chat interno da equipe) — mesma ideia
+// das fotos: antes ficavam embutidas dentro do bloco principal (chamados[].mensagens e o array
+// mensagens_internas), e como são a parte que mais cresce e mais escreve (uma mensagem nova
+// reescrevia o banco inteiro), agora moram à parte. Só uma migração automática (abaixo) move o
+// que já existia de dado antigo pra cá, uma única vez.
+
+const MENSAGENS_CHAMADO_PATH = path.join(__dirname, 'mensagens_chamado.json');
+const MENSAGENS_INTERNAS_PATH = path.join(__dirname, 'mensagens_internas.json');
+
+function carregarMensagensChamadoArquivo() {
+  if (!fs.existsSync(MENSAGENS_CHAMADO_PATH)) return [];
+  return JSON.parse(fs.readFileSync(MENSAGENS_CHAMADO_PATH, 'utf8'));
+}
+function salvarMensagensChamadoArquivo(lista) {
+  fs.writeFileSync(MENSAGENS_CHAMADO_PATH, JSON.stringify(lista));
+}
+function carregarMensagensInternasArquivo() {
+  if (!fs.existsSync(MENSAGENS_INTERNAS_PATH)) return [];
+  return JSON.parse(fs.readFileSync(MENSAGENS_INTERNAS_PATH, 'utf8'));
+}
+function salvarMensagensInternasArquivo(lista) {
+  fs.writeFileSync(MENSAGENS_INTERNAS_PATH, JSON.stringify(lista));
+}
+
+// o driver do Postgres devolve TIMESTAMPTZ como objeto Date — o resto do sistema sempre trabalha
+// com string ISO (comparação, fmtData no front, etc.), então converte de volta na leitura.
+function isoDe(valor) {
+  return valor instanceof Date ? valor.toISOString() : valor;
+}
+
+async function salvarMensagemChamado(chamadoId, msg) {
+  const autor = msg.autor;
+  const texto = msg.texto;
+  const criado_em = msg.criado_em || new Date().toISOString();
+  if (estaUsandoPostgres()) {
+    await obterPool().query('INSERT INTO mensagens_chamado (chamado_id, autor, texto, criado_em) VALUES ($1, $2, $3, $4)', [chamadoId, autor, texto, criado_em]);
+  } else {
+    const lista = carregarMensagensChamadoArquivo();
+    lista.push({ chamado_id: chamadoId, autor, texto, criado_em });
+    salvarMensagensChamadoArquivo(lista);
+  }
+  return { autor, texto, criado_em };
+}
+
+async function carregarMensagensChamado(chamadoId) {
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query('SELECT autor, texto, criado_em FROM mensagens_chamado WHERE chamado_id = $1 ORDER BY id ASC', [chamadoId]);
+    return r.rows.map((row) => ({ autor: row.autor, texto: row.texto, criado_em: isoDe(row.criado_em) }));
+  }
+  return carregarMensagensChamadoArquivo()
+    .filter((m) => m.chamado_id === chamadoId)
+    .map((m) => ({ autor: m.autor, texto: m.texto, criado_em: m.criado_em }));
+}
+
+async function salvarMensagemInterna({ remetente_id, destinatario_id, texto }) {
+  const criado_em = new Date().toISOString();
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query(
+      'INSERT INTO mensagens_internas_tbl (remetente_id, destinatario_id, texto, criado_em, lida) VALUES ($1, $2, $3, $4, false) RETURNING id',
+      [remetente_id, destinatario_id, texto, criado_em]
+    );
+    return { id: r.rows[0].id, remetente_id, destinatario_id, texto, criado_em, lida: false };
+  }
+  const lista = carregarMensagensInternasArquivo();
+  const id = lista.reduce((max, m) => Math.max(max, m.id), 0) + 1;
+  const msg = { id, remetente_id, destinatario_id, texto, criado_em, lida: false };
+  lista.push(msg);
+  salvarMensagensInternasArquivo(lista);
+  return msg;
+}
+
+async function carregarMensagensInternas(usuarioId, outroId) {
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query(
+      `SELECT id, remetente_id, destinatario_id, texto, criado_em, lida FROM mensagens_internas_tbl
+       WHERE (remetente_id = $1 AND destinatario_id = $2) OR (remetente_id = $2 AND destinatario_id = $1)
+       ORDER BY id ASC`,
+      [usuarioId, outroId]
+    );
+    return r.rows.map((row) => ({ ...row, criado_em: isoDe(row.criado_em) }));
+  }
+  return carregarMensagensInternasArquivo()
+    .filter((m) => (m.remetente_id === usuarioId && m.destinatario_id === outroId) || (m.remetente_id === outroId && m.destinatario_id === usuarioId))
+    .sort((a, b) => a.id - b.id);
+}
+
+async function marcarMensagensInternasLidas(usuarioId, outroId) {
+  if (estaUsandoPostgres()) {
+    await obterPool().query(
+      'UPDATE mensagens_internas_tbl SET lida = true WHERE destinatario_id = $1 AND remetente_id = $2 AND lida = false',
+      [usuarioId, outroId]
+    );
+    return;
+  }
+  const lista = carregarMensagensInternasArquivo();
+  let mudou = false;
+  for (const m of lista) {
+    if (m.destinatario_id === usuarioId && m.remetente_id === outroId && !m.lida) { m.lida = true; mudou = true; }
+  }
+  if (mudou) salvarMensagensInternasArquivo(lista);
+}
+
+// resumo de uma conversa (última mensagem + não lidas) — usado pra montar a lista de contatos
+// do chat interno sem carregar o histórico inteiro de todo mundo em memória a cada 15s.
+async function resumoContatoInterno(usuarioId, outroId) {
+  const conversa = await carregarMensagensInternas(usuarioId, outroId);
+  if (!conversa.length) return { ultima_mensagem_texto: null, ultima_mensagem_em: null, ultima_mensagem_propria: false, nao_lidas: 0 };
+  const ultima = conversa[conversa.length - 1];
+  const nao_lidas = conversa.filter((m) => m.destinatario_id === usuarioId && m.remetente_id === outroId && !m.lida).length;
+  return {
+    ultima_mensagem_texto: ultima.texto,
+    ultima_mensagem_em: ultima.criado_em,
+    ultima_mensagem_propria: ultima.remetente_id === usuarioId,
+    nao_lidas,
+  };
+}
+
+// migração única (idempotente): move qualquer mensagem que ainda esteja embutida no bloco
+// principal (banco de antes dessa mudança existir) pra cá, preservando texto/autor/data/lida
+// originais. Depois da primeira vez os arrays ficam vazios, então não faz nada nas próximas.
+async function migrarMensagensParaTabelas(data) {
+  let mudou = false;
+  for (const c of data.chamados) {
+    if (Array.isArray(c.mensagens) && c.mensagens.length) {
+      if (estaUsandoPostgres()) {
+        for (const m of c.mensagens) {
+          await obterPool().query('INSERT INTO mensagens_chamado (chamado_id, autor, texto, criado_em) VALUES ($1, $2, $3, $4)', [c.id, m.autor, m.texto, m.criado_em]);
+        }
+      } else {
+        const lista = carregarMensagensChamadoArquivo();
+        for (const m of c.mensagens) lista.push({ chamado_id: c.id, autor: m.autor, texto: m.texto, criado_em: m.criado_em });
+        salvarMensagensChamadoArquivo(lista);
+      }
+      if (!c.primeira_mensagem_cliente) {
+        const primeira = c.mensagens.find((m) => m.autor === 'cliente');
+        c.primeira_mensagem_cliente = primeira ? primeira.texto : '';
+      }
+      c.mensagens = [];
+      mudou = true;
+    }
+  }
+  if (Array.isArray(data.mensagens_internas) && data.mensagens_internas.length) {
+    if (estaUsandoPostgres()) {
+      for (const m of data.mensagens_internas) {
+        await obterPool().query(
+          'INSERT INTO mensagens_internas_tbl (remetente_id, destinatario_id, texto, criado_em, lida) VALUES ($1, $2, $3, $4, $5)',
+          [m.remetente_id, m.destinatario_id, m.texto, m.criado_em, !!m.lida]
+        );
+      }
+    } else {
+      const lista = carregarMensagensInternasArquivo();
+      let proximoId = lista.reduce((max, m) => Math.max(max, m.id), 0);
+      for (const m of data.mensagens_internas) {
+        proximoId += 1;
+        lista.push({ id: proximoId, remetente_id: m.remetente_id, destinatario_id: m.destinatario_id, texto: m.texto, criado_em: m.criado_em, lida: !!m.lida });
+      }
+      salvarMensagensInternasArquivo(lista);
+    }
+    data.mensagens_internas = [];
+    mudou = true;
+  }
+  return mudou;
+}
+
+// roda uma vez no boot (via `pronto`, antes de qualquer rota aceitar requisição) — nunca faz
+// parte do load()/save() de cada requisição, pra não tornar o caminho normal assíncrono.
+async function migrarMensagensSeNecessario() {
+  const data = usaPostgres && cache ? cache : carregarDoArquivo();
+  const mudou = await migrarMensagensParaTabelas(data);
+  if (mudou) save(data);
+}
+
+module.exports = {
+  load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto,
+  salvarMensagemChamado, carregarMensagensChamado,
+  salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
+};

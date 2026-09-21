@@ -1,4 +1,6 @@
 data.json
+mensagens_chamado.json
+mensagens_internas.json
 *.log
 node_modules/
 fotos/
