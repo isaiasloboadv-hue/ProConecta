@@ -707,14 +707,15 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     // garantia definida pelo administrador na abertura da OS — o técnico só visualiza no Laudo Técnico
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
-    // SLA não é definido aqui — o administrador não responde o questionário, só o técnico/
-    // pós-venda; se esta O.S. nasce de uma Solicitação de Atendimento, o SLA já definido lá é
-    // copiado automaticamente pra cá em finalizar-solicitacao.
-    sla_nivel: null,
-    sla_pontuacao: null,
-    sla_horas_atendimento: null,
-    sla_dias_manutencao: null,
-    sla_dias_visita_tecnica: null,
+    // SLA: se esta O.S. nasce de uma Solicitação de Atendimento, o SLA já definido lá é copiado
+    // automaticamente pra cá em finalizar-solicitacao (não passa por aqui). Numa O.S. aberta do
+    // zero pelo administrador, ninguém mais vai responder esse questionário depois — por isso ele
+    // pode (opcionalmente) preencher agora; se não preencher, fica null e o técnico/pós-venda
+    // ainda pode defini-lo mais tarde ao encaminhar pro pós-venda.
+    ...(slaDoBody(body, equipamentoEscolhido) || {
+      sla_nivel: null, sla_pontuacao: null, sla_horas_atendimento: null,
+      sla_dias_manutencao: null, sla_dias_visita_tecnica: null,
+    }),
     status: 'pendente',
     valor_servico: body.valor_servico || null,
     retrabalho: false,
@@ -798,7 +799,9 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
-    // o SLA não é editado por aqui (só o técnico/pós-venda define) — o que já tinha é preservado
+    // SLA: se já foi definido (pelo técnico/pós-venda, ou pelo próprio administrador na criação),
+    // fica preservado — não é reescrito por aqui. Só entra se a O.S. ainda não tinha SLA nenhum.
+    ...(item.sla_nivel === null ? (slaDoBody(body, equipamentoEscolhido) || {}) : {}),
     bonus_viagem: bonusViagem,
     justificativa_limite_viagens: bonusViagem ? justificativaLimiteViagens : '',
   });

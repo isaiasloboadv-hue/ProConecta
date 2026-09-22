@@ -1310,17 +1310,34 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       </div>
 
       ${(() => {
-        // SLA não é definido aqui — é o técnico (ou o pós-venda) quem responde o questionário
-        // ao encaminhar o atendimento; o administrador só visualiza e se baseia nele. Ao criar a
-        // O.S. de visita técnica a partir de uma Solicitação de Atendimento, o SLA já definido
-        // é aplicado automaticamente na nova O.S. (ver finalizar-solicitacao em server.js).
+        // se a O.S. já tem um SLA definido (veio de uma Solicitação de Atendimento, ou o técnico/
+        // pós-venda já respondeu ao encaminhar), só mostra — não deixa reescrever por aqui. Senão
+        // (O.S. aberta do zero pelo administrador, sem nenhum atendimento por trás), ninguém mais
+        // vai responder esse questionário depois, então o próprio administrador pode definir agora.
         const origemSla = (agendaItem && agendaItem.sla_nivel) ? agendaItem : (origemSolicitacao && origemSolicitacao.sla_nivel ? origemSolicitacao : null);
-        if (!origemSla) return '';
-        return `
+        if (origemSla) {
+          return `
       <h2>SLA</h2>
       <div class="panel" style="padding:14px 16px;">
         ${tagSla(origemSla)}
         <p style="color:var(--ink-soft); font-size:13px; margin:8px 0 0;">Definido pelo técnico/pós-venda ao encaminhar o atendimento${origemSolicitacao ? ' — será aplicado a esta O.S. automaticamente ao salvar.' : '.'}</p>
+      </div>`;
+        }
+        return `
+      <h2>SLA</h2>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600; text-transform:none; margin-bottom:10px;">
+        <input type="checkbox" id="na-sla-ativar" onchange="atualizarSlaNovaAtividade()" style="width:auto;">
+        Definir o SLA desta O.S. agora
+      </label>
+      <div id="na-sla-perguntas" class="form-grid hidden">
+        ${PERGUNTAS_SLA.map((p) => `
+          <div class="full">
+            <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
+            <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="sim" style="width:auto;"> Sim</label>
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="nao" style="width:auto;"> Não</label>
+            </div>
+          </div>`).join('')}
       </div>`;
       })()}
 
@@ -1476,6 +1493,18 @@ async function salvarNovaAtividade() {
     const equip = (window._equipamentosCache || []).find((e) => e.id === Number(equipId));
     if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
   }
+  // "na-sla-ativar" só existe quando a O.S. ainda não tem SLA de nenhuma origem (ver a seção SLA
+  // do formulário) — se não existir, é porque o SLA já veio de outro lugar e não deve ser mexido
+  let sla_respostas = null;
+  const slaAtivarEl = document.getElementById('na-sla-ativar');
+  if (slaAtivarEl && slaAtivarEl.checked) {
+    sla_respostas = {};
+    for (const p of PERGUNTAS_SLA) {
+      const marcado = document.querySelector(`input[name="na-sla-${p.chave}"]:checked`);
+      if (!marcado) return alert(`Responda a pergunta "${p.pergunta}", ou desmarque "Definir o SLA desta O.S. agora".`);
+      sla_respostas[p.chave] = marcado.value === 'sim';
+    }
+  }
   const body = {
     numero_os: document.getElementById('na-numero-os').value,
     tecnico_id: document.getElementById('na-tecnico').value,
@@ -1499,7 +1528,13 @@ async function salvarNovaAtividade() {
     garantia_obs: document.getElementById('na-garantia-obs').value,
     bonus_viagem: document.getElementById('na-bonus-viagem').checked,
   };
+  if (sla_respostas) body.sla_respostas = sla_respostas;
   await salvarNovaAtividadeExecutar(body);
+}
+
+function atualizarSlaNovaAtividade() {
+  const ativo = document.getElementById('na-sla-ativar').checked;
+  document.getElementById('na-sla-perguntas').classList.toggle('hidden', !ativo);
 }
 
 // separado de salvarNovaAtividade só pra poder chamar de novo, com a justificativa preenchida,
