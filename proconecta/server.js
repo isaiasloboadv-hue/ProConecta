@@ -2733,8 +2733,9 @@ rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
 });
 
 // GET /api/chamados — fila (técnico/administrador). ?fila=1 lista quem tá esperando um técnico
-// (qualquer técnico pode assumir); sem isso, lista os que o próprio técnico já assumiu
-// (administrador sempre vê tudo).
+// (qualquer técnico pode assumir); ?encerrados=1 (+ ?de=&ate= opcionais) é o histórico do
+// próprio técnico, só carregado sob demanda; sem nenhum dos dois, lista os ativos que o próprio
+// técnico já assumiu (administrador sempre vê tudo).
 rota('GET', /^\/api\/chamados$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
@@ -2745,10 +2746,14 @@ rota('GET', /^\/api\/chamados$/, async (req, res) => {
     lista = query.status ? data.chamados.filter((c) => c.status === query.status) : data.chamados.filter((c) => c.status !== 'encerrado');
   } else if (query.fila === '1') {
     lista = data.chamados.filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id);
+  } else if (query.encerrados === '1') {
+    lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status === 'encerrado');
+    if (query.de) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) >= query.de);
+    if (query.ate) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) <= query.ate);
   } else {
-    // fica listado mesmo depois de encerrado — é o card apagado (igual O.S. finalizada) que
-    // mostra pro técnico que aquele atendimento já foi concluído, em vez de simplesmente sumir
-    lista = data.chamados.filter((c) => c.tecnico_id === user.id);
+    // só os ativos — os encerrados ficam à parte, atrás do ?encerrados=1, pra não carregar (e
+    // desenhar) a lista toda, que só cresce, sempre que o técnico abre a fila
+    lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status !== 'encerrado');
   }
   lista = lista.sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || '')).map((c) => chamadoResumoLista(data, c));
   enviarJSON(res, 200, { chamados: lista });

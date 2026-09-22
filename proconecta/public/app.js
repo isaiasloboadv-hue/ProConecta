@@ -9682,9 +9682,46 @@ async function renderFilaAtendimento() {
     <div class="panel">
       <h2>Meus atendimentos</h2>
       <div class="atendimento-grid">
-        ${meus.length ? meus.map((c) => cardAtendimentoFila(c)).join('') : '<p class="empty">Você ainda não assumiu nenhum atendimento.</p>'}
+        ${meus.length ? meus.map((c) => cardAtendimentoFila(c)).join('') : '<p class="empty">Nenhum atendimento em andamento agora.</p>'}
       </div>
-    </div>`;
+    </div>
+    <div class="panel" style="text-align:center;">
+      <button class="btn-outline-sm" onclick="abrirHistoricoAtendimentoTecnico()">Ver atendimentos encerrados</button>
+    </div>
+    <div id="at-tec-historico"></div>`;
+}
+
+// histórico do próprio técnico (atendimentos que ele já encerrou) — igual ao histórico do
+// cliente, só carrega quando pedido e aceita filtro por período, em vez de vir junto com "Meus
+// atendimentos" toda vez que a fila abre (o que só cresce e não muda de um dia pro outro)
+async function abrirHistoricoAtendimentoTecnico() {
+  const alvo = document.getElementById('at-tec-historico');
+  if (!alvo) return;
+  alvo.innerHTML = `
+    <div class="page-head"><h1 style="font-size:16px;">Atendimentos encerrados</h1></div>
+    <div class="panel" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+      <label style="font-size:13px;">De<br><input type="date" id="hist-tec-de"></label>
+      <label style="font-size:13px;">Até<br><input type="date" id="hist-tec-ate"></label>
+      <button class="btn btn-primary btn-sm" onclick="carregarHistoricoAtendimentoTecnico()">Filtrar</button>
+    </div>
+    <div id="hist-tec-lista"></div>`;
+  await carregarHistoricoAtendimentoTecnico();
+}
+
+async function carregarHistoricoAtendimentoTecnico() {
+  const de = document.getElementById('hist-tec-de')?.value || '';
+  const ate = document.getElementById('hist-tec-ate')?.value || '';
+  const qs = new URLSearchParams({ encerrados: '1' });
+  if (de) qs.set('de', de);
+  if (ate) qs.set('ate', ate);
+  const { chamados } = await api(`/api/chamados?${qs.toString()}`);
+  const alvo = document.getElementById('hist-tec-lista');
+  if (!alvo) return;
+  alvo.innerHTML = chamados.length ? `
+    <div class="panel"><table>
+      <tr><th>Data</th><th>Cliente</th><th></th></tr>
+      ${chamados.map((c) => `<tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</td><td><button class="btn-outline-sm" onclick="abrirChatAtendimentoTecnico(${c.id})">Ver conversa</button></td></tr>`).join('')}
+    </table></div>` : `<p class="empty">Nenhum atendimento encontrado ${de || ate ? 'nesse período' : 'ainda'}.</p>`;
 }
 
 function legendaStatusChamado(c) {
