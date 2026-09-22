@@ -1166,18 +1166,26 @@ function osCardCorpo(a, numero) {
   const vencClasse = diffVenc < 0 ? 'os-venc-vencido' : diffVenc === 0 ? 'os-venc-hoje' : 'os-venc-futuro';
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
+  // sla e retrabalho ficam empilhados no canto do bloco de campos (sla em cima, retrabalho
+  // embaixo) — tirados da linha de tags do topo, que ficava apertada demais e cortava o texto
+  // quando os três (tipo, SLA e técnico) precisavam caber juntos
+  const sla = tagSla(a);
+  const temBadgeCanto = sla || a.retrabalho;
   return `
       ${numero ? `<div class="os-badge-numero" title="Ordem de atendimento">${numero}</div>` : ''}
       <div class="os-fase-banner os-fase-${fase.cor}">${esc(fase.label)}</div>
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
         <span class="tag tag-${TIPO_OS_COR[a.tipo] || 'blue'} os-tag-tipo" title="${esc(TIPO_OS_LABEL[a.tipo] || a.tipo)}">${esc(TIPO_OS_LABEL_CURTO[a.tipo] || TIPO_OS_LABEL[a.tipo] || a.tipo)}</span>
-        ${tagSla(a)}
         <span class="tag os-tag-tecnico" title="${esc(a.tecnico_nome || '—')}">${esc(a.tecnico_nome || '—')}</span>
       </div>
       <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
-      <div class="os-card-fields${a.retrabalho ? ' os-card-fields-retrabalho' : ''}">
-        ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
+      <div class="os-card-fields${temBadgeCanto ? ' os-card-fields-com-badges' : ''}">
+        ${temBadgeCanto ? `
+        <div class="os-card-fields-badges">
+          ${sla}
+          ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
+        </div>` : ''}
         <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">${esc(numeroOS(a))}</span></div>
         <div class="os-field"><span class="os-field-label">Contato</span><span class="os-field-value">${esc(a.contato || a.cliente_contato || '—')}</span></div>
         <div class="os-field"><span class="os-field-label">E-mail</span><span class="os-field-value">${esc(a.email || a.cliente_email || '—')}</span></div>
