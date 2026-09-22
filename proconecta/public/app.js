@@ -876,6 +876,23 @@ function filtrarPorStatusOS(lista, filtro) {
   return (lista || []).filter((a) => (filtro === 'finalizados') === !!a.finalizada);
 }
 
+// numeração sequencial (1, 2, 3...) dos cards de O.S. ativos, na ordem em que já aparecem na
+// tela (mais cedo primeiro) — indica a ordem de atendimento. Administrador vê a fila inteira, com
+// todo mundo contando pra numeração; técnico só numera as O.S. que são dele (mesmo numa tela que
+// também mostra O.S. de outros técnicos, como o Calendário — as dos outros não recebem número).
+// Como é recalculada a cada render a partir dos cards que sobraram (finalizada já sai da lista de
+// ativos), ao finalizar o nº 1 o que era nº 2 vira nº 1 sozinho, sem precisar de nenhuma lógica à
+// parte pra isso.
+function numerosSequenciaisOS(lista) {
+  const numeros = new Map();
+  let n = 0;
+  for (const a of lista || []) {
+    if (USER.papel !== 'administrador' && a.tecnico_id !== USER.id) continue;
+    numeros.set(a.id, ++n);
+  }
+  return numeros;
+}
+
 let minhaAgendaFiltro = 'ativos';
 
 async function renderAgenda() {
@@ -895,13 +912,14 @@ function alternarFiltroMinhaAgenda(valor) {
 
 function desenharMinhaAgenda() {
   const agenda = filtrarPorStatusOS(window._agendaCache, minhaAgendaFiltro);
+  const numeros = minhaAgendaFiltro === 'ativos' ? numerosSequenciaisOS(agenda) : new Map();
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
       ${botoesFiltroStatusOS(minhaAgendaFiltro, 'alternarFiltroMinhaAgenda')}
     </div>
-    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a)).join('')}</div>` : `<div class="empty">Nenhuma atividade ${minhaAgendaFiltro === 'finalizados' ? 'finalizada' : 'ativa'} no momento.</div>`}
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a, numeros.get(a.id))).join('')}</div>` : `<div class="empty">Nenhuma atividade ${minhaAgendaFiltro === 'finalizados' ? 'finalizada' : 'ativa'} no momento.</div>`}
     <div id="diario-form"></div>
   `;
 }
@@ -909,10 +927,10 @@ function desenharMinhaAgenda() {
 // card da própria O.S. do técnico na "Minha agenda" — mesmo layout de card usado em todo o
 // resto do sistema (osCardCorpo), pra ficar igual em qualquer tamanho de tela (PC ou app) e
 // já trazer o selo de retrabalho, a tarja de fase etc.
-function cardOSMinhaAgenda(a) {
+function cardOSMinhaAgenda(a, numero) {
   return `
     <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSMinhaAgenda(${a.id})" style="cursor:pointer;">
-      ${osCardCorpo(a)}
+      ${osCardCorpo(a, numero)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOSMinhaAgenda(${a.id})">Abrir</button>
       </div>
@@ -1049,6 +1067,7 @@ function renderDiaCalendario(iso) {
   const agenda = filtrarPorStatusOS(window._agendaCache, calFiltro)
     .filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  const numeros = calFiltro === 'ativos' ? numerosSequenciaisOS(agenda) : new Map();
   const [y, m, d] = iso.split('-');
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -1059,7 +1078,7 @@ function renderDiaCalendario(iso) {
         <button class="btn-outline-sm" onclick="renderAgendaCalendario()">‹ Voltar ao calendário</button>
       </div>
     </div>
-    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOS(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOS(a, numeros.get(a.id))).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
   `;
 }
 
@@ -1136,7 +1155,7 @@ function faseAtualOS(a) {
   return { label: 'Aguardando deslocamento', cor: 'amber' };
 }
 
-function osCardCorpo(a) {
+function osCardCorpo(a, numero) {
   const status = statusOS(a);
   const fase = faseAtualOS(a);
   const hojeISO = dataISOLocal(new Date());
@@ -1148,6 +1167,7 @@ function osCardCorpo(a) {
   const [vy, vm, vd] = diaAtendimento.split('-');
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
+      ${numero ? `<div class="os-badge-numero" title="Ordem de atendimento">${numero}</div>` : ''}
       ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
       <div class="os-fase-banner os-fase-${fase.cor}">${esc(fase.label)}</div>
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
@@ -1169,10 +1189,10 @@ function osCardCorpo(a) {
       </div>`;
 }
 
-function cardOS(a) {
+function cardOS(a, numero) {
   return `
     <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSCalendario(${a.id})" style="cursor:pointer;">
-      ${osCardCorpo(a)}
+      ${osCardCorpo(a, numero)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOSCalendario(${a.id})">Abrir</button>
       </div>
@@ -2640,6 +2660,7 @@ function desenharOrdemServico() {
     })
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
   if (osSomenteHoje) doMes = doMes.filter((a) => (a.data_hora_inicio || '').slice(0, 10) === hojeISO);
+  const numeros = osFiltro === 'ativos' ? numerosSequenciaisOS(doMes) : new Map();
   const reaberturas = Object.values(visitasPorAgenda).filter((v) => v.solicitacao_reabertura && v.solicitacao_reabertura.status === 'pendente');
 
   const main = document.getElementById('main');
@@ -2679,7 +2700,7 @@ function desenharOrdemServico() {
         </tr>`).join('')}
     </table></div>` : ''}
 
-    ${doMes.length ? `<div class="os-grid">${doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id])).join('')}</div>` : `<div class="empty">Nenhuma O.S. neste mês.</div>`}`;
+    ${doMes.length ? `<div class="os-grid">${doMes.map((a) => cardOSAdmin(a, visitasPorAgenda[a.id], numeros.get(a.id))).join('')}</div>` : `<div class="empty">Nenhuma O.S. neste mês.</div>`}`;
 }
 
 // ações disponíveis pra uma O.S. (aprovar/reprovar/reabrir/excluir relatório + editar/excluir a própria O.S.)
@@ -2854,10 +2875,10 @@ async function confirmarClienteRetornoOS(id) {
   catch (e) { alert('Erro ao confirmar: ' + e.message); }
 }
 
-function cardOSAdmin(a) {
+function cardOSAdmin(a, visita, numero) {
   return `
     <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOS(${a.id})" style="cursor:pointer;">
-      ${osCardCorpo(a)}
+      ${osCardCorpo(a, numero)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOS(${a.id})">Abrir</button>
       </div>
@@ -8584,6 +8605,9 @@ function renderDiaCalendarioTecnico(iso) {
   const agenda = filtrarPorStatusOS(window._agendaCache, calTecnicoFiltro)
     .filter((a) => (a.data_hora_inicio || '').slice(0, 10) === iso)
     .sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
+  // numerosSequenciaisOS já só numera as O.S. do próprio técnico — aqui a lista tem O.S. de
+  // todo mundo (?todas=1), então as dos outros técnicos ficam sem número
+  const numeros = calTecnicoFiltro === 'ativos' ? numerosSequenciaisOS(agenda) : new Map();
   const [y, m, d] = iso.split('-');
   const main = document.getElementById('main');
   main.innerHTML = `
@@ -8594,14 +8618,14 @@ function renderDiaCalendarioTecnico(iso) {
         <button class="btn-outline-sm" onclick="renderAgendaCalendarioTecnico()">‹ Voltar ao calendário</button>
       </div>
     </div>
-    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSCalendarioTecnico(a)).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
+    ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSCalendarioTecnico(a, numeros.get(a.id))).join('')}</div>` : `<div class="empty">Nenhuma O.S. agendada para este dia.</div>`}
   `;
 }
 
-function cardOSCalendarioTecnico(a) {
+function cardOSCalendarioTecnico(a, numero) {
   return `
     <div class="os-card${a.finalizada ? ' os-card-finalizada' : ''}" onclick="abrirDetalheOSCalendarioTecnico(${a.id})" style="cursor:pointer;">
-      ${osCardCorpo(a)}
+      ${osCardCorpo(a, numero)}
       <div class="os-card-actions" onclick="event.stopPropagation()">
         <button class="os-card-toggle" onclick="abrirDetalheOSCalendarioTecnico(${a.id})">Abrir</button>
       </div>
