@@ -89,7 +89,7 @@ proconecta/
 ├── server.js       servidor HTTP e todas as rotas da API
 ├── db.js           acesso ao "banco de dados" (arquivo data.json)
 ├── auth.js         hash de senha e token de sessão
-├── email.js        envio do e-mail de primeiro acesso (simulado por padrão)
+├── email.js        envio de e-mail (convite de acesso, cópia de relatório) — simulado por padrão
 ├── data.json        os dados salvos (gerado automaticamente)
 └── public/          o que o navegador carrega
     ├── index.html
@@ -167,19 +167,45 @@ npm install
 DATABASE_URL="sua-connection-string-aqui" node server.js
 ```
 
-## E-mail de convite de verdade
+## E-mail de verdade (convite de acesso e cópia de relatórios)
 
 Sem configuração, o link de primeiro acesso só aparece na tela do
-administrador e no log do servidor. Para enviar por e-mail de verdade, crie
-uma conta grátis em [resend.com](https://resend.com) e defina as variáveis de
-ambiente antes de rodar o servidor:
+administrador e no log do servidor, e o "enviar por e-mail" do relatório só é
+simulado (registrado no log). Para enviar de verdade usando uma conta Gmail
+ou Hotmail/Outlook comum — sem precisar de domínio próprio — defina as
+variáveis de ambiente antes de rodar o servidor:
 
 ```
-RESEND_API_KEY=sua_chave_aqui
-EMAIL_REMETENTE="Pro Conecta <onboarding@seudominio.com.br>"
+EMAIL_SMTP_USER=seuemail@hotmail.com
+EMAIL_SMTP_SENHA=a_senha_de_app_gerada_abaixo
 APP_URL=https://seu-dominio-em-producao.com.br
 node server.js
 ```
+
+O provedor (Gmail ou Hotmail/Outlook) é adivinhado a partir do domínio do
+`EMAIL_SMTP_USER`; pra usar um domínio diferente (Google Workspace com domínio
+próprio, por exemplo), defina `EMAIL_SMTP_PROVEDOR=gmail` ou `hotmail`
+explicitamente.
+
+**Importante — `EMAIL_SMTP_SENHA` não é a senha normal de login da conta.**
+É uma "senha de app", específica pra esse tipo de acesso, que precisa ser
+gerada separadamente:
+
+- **Gmail**: a conta precisa ter a verificação em duas etapas ativada
+  (myaccount.google.com → Segurança). Depois, em
+  [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
+  crie uma senha de app (qualquer nome, ex: "Pro Conecta") — copie os 16
+  caracteres gerados, sem espaços.
+- **Hotmail/Outlook**: em
+  [account.microsoft.com/security](https://account.microsoft.com/security) →
+  "Opções de segurança avançadas" → "Senhas de aplicativo" → "Criar uma nova
+  senha de aplicativo". Se a conta ainda não tem verificação em duas etapas,
+  o site pede pra ativar primeiro.
+
+Alternativa (mantida por compatibilidade): `RESEND_API_KEY` +
+`EMAIL_REMETENTE`, caso prefira usar o [resend.com](https://resend.com) em
+vez de uma conta Gmail/Hotmail — mas esse exige domínio próprio verificado.
+Se `EMAIL_SMTP_USER` estiver configurado, ele tem prioridade sobre o Resend.
 
 Nenhuma outra mudança é necessária — veja `email.js`.
 
