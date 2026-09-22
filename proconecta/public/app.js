@@ -1334,8 +1334,8 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
           <div class="full">
             <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
             <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
-              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="sim" style="width:auto;"> Sim</label>
-              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="nao" style="width:auto;"> Não</label>
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="sim" style="width:auto;" onchange="atualizarSugestaoSlaNovaAtividade()"> Sim</label>
+              <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="nao" style="width:auto;" onchange="atualizarSugestaoSlaNovaAtividade()"> Não</label>
             </div>
           </div>`).join('')}
       </div>`;
@@ -1343,7 +1343,10 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
 
       <h2>Data e horário</h2>
       <div class="form-grid">
-        <div><label>Início</label><input type="datetime-local" id="na-inicio" value="${agendaItem ? (agendaItem.data_hora_inicio || '').slice(0, 16) : ''}"></div>
+        <div>
+          <label>Início</label><input type="datetime-local" id="na-inicio" value="${agendaItem ? (agendaItem.data_hora_inicio || '').slice(0, 16) : ''}">
+          <div id="na-sla-sugestao"></div>
+        </div>
         <div><label>Fim previsto</label><input type="datetime-local" id="na-fim" value="${agendaItem ? (agendaItem.data_hora_fim || '').slice(0, 16) : ''}"></div>
       </div>
 
@@ -1423,6 +1426,7 @@ function preencherNumeroSerieNovaAtividade() {
   document.getElementById('na-numero-serie').value = equip ? equip.numero_serie : '';
   document.getElementById('na-data-fabricacao').value = equip ? (equip.data_fabricacao || '—') : '';
   atualizarGarantiaAutomatica(equip ? equip.data_fabricacao : '');
+  atualizarSugestaoSlaNovaAtividade();
 }
 
 // garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA). Dentro desse prazo,
@@ -1535,6 +1539,66 @@ async function salvarNovaAtividade() {
 function atualizarSlaNovaAtividade() {
   const ativo = document.getElementById('na-sla-ativar').checked;
   document.getElementById('na-sla-perguntas').classList.toggle('hidden', !ativo);
+  atualizarSugestaoSlaNovaAtividade();
+}
+
+// espelho local (só pro cálculo instantâneo da sugestão de prazo, sem round-trip no servidor) da
+// mesma tabela de pontuação usada em ia.js (calcularSla/PERGUNTAS_SLA/NIVEIS_SLA) — qualquer
+// mudança lá precisa ser replicada aqui também.
+const PONTOS_SLA_LOCAL = {
+  garantia_fabricacao: { sim: 7, nao: 0 },
+  garantia_manutencao: { sim: 7, nao: 0 },
+  linha_parada: { sim: 4, nao: 0 },
+  plano_preventiva_ativo: { sim: 3, nao: 1 },
+  possui_maquina_reserva: { sim: 1, nao: 3 },
+  compromete_qualidade: { sim: 3, nao: 0 },
+  erro_intermitente: { sim: 1, nao: 2 },
+  reparo_sem_sucesso: { sim: 5, nao: 1 },
+  acesso_remoto: { sim: 1, nao: 3 },
+  duvida_comum_top5: { sim: 1, nao: 2 },
+  solucao_no_manual: { sim: 1, nao: 2 },
+};
+const NIVEIS_SLA_LOCAL = [
+  { max: 7, label: 'Baixo', dias_visita_tecnica: 15 },
+  { max: 17, label: 'Médio', dias_visita_tecnica: 7 },
+  { max: 26, label: 'Alto', dias_visita_tecnica: 4 },
+  { max: Infinity, label: 'Crítico', dias_visita_tecnica: 2 },
+];
+
+// recalcula a cada pergunta respondida (não precisa esperar terminar o questionário) — dá só
+// uma sugestão de prazo com base no que já foi preenchido até agora; a decisão do dia e horário
+// continua sendo do administrador, o campo Início não é preenchido sozinho.
+function atualizarSugestaoSlaNovaAtividade() {
+  const alvo = document.getElementById('na-sla-sugestao');
+  if (!alvo) return;
+  const ativoEl = document.getElementById('na-sla-ativar');
+  if (!ativoEl || !ativoEl.checked) { alvo.innerHTML = ''; return; }
+
+  let pontuacao = 0;
+  let respondidas = 0;
+  for (const p of PERGUNTAS_SLA) {
+    const marcado = document.querySelector(`input[name="na-sla-${p.chave}"]:checked`);
+    if (!marcado) continue;
+    respondidas++;
+    pontuacao += PONTOS_SLA_LOCAL[p.chave][marcado.value];
+  }
+  // garantia de fábrica não é uma pergunta respondida pelo admin — é calculada sozinha a partir
+  // do equipamento escolhido, igual o servidor faz (ver dentroDaGarantiaDeFabrica)
+  const equipId = Number((document.getElementById('na-equip') || {}).value);
+  const equip = (window._equipamentosCache || []).find((e) => e.id === equipId);
+  const dentroGarantiaFabrica = equip ? (dentroDaGarantiaDeFabrica(equip.data_fabricacao) || false) : false;
+  pontuacao += PONTOS_SLA_LOCAL.garantia_fabricacao[dentroGarantiaFabrica ? 'sim' : 'nao'];
+
+  const faixa = NIVEIS_SLA_LOCAL.find((n) => pontuacao <= n.max);
+  const sugestao = new Date();
+  sugestao.setDate(sugestao.getDate() + faixa.dias_visita_tecnica);
+
+  alvo.innerHTML = `
+    <div style="margin-top:8px; padding:10px 12px; background:var(--blue-pale); border-radius:8px; font-size:12.5px; line-height:1.5;">
+      💡 <b>Sugestão de prazo (SLA ${esc(faixa.label)})</b>: atender até ${sugestao.toLocaleDateString('pt-BR')} (${faixa.dias_visita_tecnica} dia${faixa.dias_visita_tecnica === 1 ? '' : 's'})
+      ${respondidas < PERGUNTAS_SLA.length ? `<div style="color:var(--ink-soft);">Estimativa parcial — ${respondidas}/${PERGUNTAS_SLA.length} perguntas respondidas até agora.</div>` : ''}
+      <div style="color:var(--ink-soft);">É só uma sugestão — o dia e horário do Início continuam sendo sua escolha.</div>
+    </div>`;
 }
 
 // separado de salvarNovaAtividade só pra poder chamar de novo, com a justificativa preenchida,
