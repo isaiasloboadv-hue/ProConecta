@@ -1559,10 +1559,10 @@ const PONTOS_SLA_LOCAL = {
   solucao_no_manual: { sim: 1, nao: 2 },
 };
 const NIVEIS_SLA_LOCAL = [
-  { max: 7, label: 'Baixo', dias_visita_tecnica: 15 },
-  { max: 17, label: 'Médio', dias_visita_tecnica: 7 },
-  { max: 26, label: 'Alto', dias_visita_tecnica: 4 },
-  { max: Infinity, label: 'Crítico', dias_visita_tecnica: 2 },
+  { max: 7, nivel: 'baixo', label: 'Baixo', dias_visita_tecnica: 15 },
+  { max: 17, nivel: 'medio', label: 'Médio', dias_visita_tecnica: 7 },
+  { max: 26, nivel: 'alto', label: 'Alto', dias_visita_tecnica: 4 },
+  { max: Infinity, nivel: 'critico', label: 'Crítico', dias_visita_tecnica: 2 },
 ];
 
 // recalcula a cada pergunta respondida (não precisa esperar terminar o questionário) — dá só
@@ -1590,15 +1590,28 @@ function atualizarSugestaoSlaNovaAtividade() {
   pontuacao += PONTOS_SLA_LOCAL.garantia_fabricacao[dentroGarantiaFabrica ? 'sim' : 'nao'];
 
   const faixa = NIVEIS_SLA_LOCAL.find((n) => pontuacao <= n.max);
-  const sugestao = new Date();
-  sugestao.setDate(sugestao.getDate() + faixa.dias_visita_tecnica);
+  const sugestao = somarDiasUteis(new Date(), faixa.dias_visita_tecnica);
+  const tarja = tag(`SLA ${faixa.label}`, SLA_TAG_COR[faixa.nivel] || 'blue');
 
   alvo.innerHTML = `
     <div style="margin-top:8px; padding:10px 12px; background:var(--blue-pale); border-radius:8px; font-size:12.5px; line-height:1.5;">
-      💡 <b>Sugestão de prazo (SLA ${esc(faixa.label)})</b>: atender até ${sugestao.toLocaleDateString('pt-BR')} (${faixa.dias_visita_tecnica} dia${faixa.dias_visita_tecnica === 1 ? '' : 's'})
+      💡 <b>Sugestão de prazo</b> ${tarja}: atender até ${sugestao.toLocaleDateString('pt-BR')} (${faixa.dias_visita_tecnica} ${faixa.dias_visita_tecnica === 1 ? 'dia útil' : 'dias úteis'})
       ${respondidas < PERGUNTAS_SLA.length ? `<div style="color:var(--ink-soft);">Estimativa parcial — ${respondidas}/${PERGUNTAS_SLA.length} perguntas respondidas até agora.</div>` : ''}
       <div style="color:var(--ink-soft);">É só uma sugestão — o dia e horário do Início continuam sendo sua escolha.</div>
     </div>`;
+}
+
+// pula sábados e domingos ao contar os dias do prazo — a contagem de "dias de visita técnica"
+// da Tabela de Prioridade de Atendimento é em dias úteis
+function somarDiasUteis(data, dias) {
+  const resultado = new Date(data);
+  let restantes = dias;
+  while (restantes > 0) {
+    resultado.setDate(resultado.getDate() + 1);
+    const diaSemana = resultado.getDay();
+    if (diaSemana !== 0 && diaSemana !== 6) restantes--;
+  }
+  return resultado;
 }
 
 // separado de salvarNovaAtividade só pra poder chamar de novo, com a justificativa preenchida,
