@@ -1168,7 +1168,6 @@ function osCardCorpo(a, numero) {
   const diasAbertura = Math.max(0, diasEntre(diaAbertura, hojeISO));
   return `
       ${numero ? `<div class="os-badge-numero" title="Ordem de atendimento">${numero}</div>` : ''}
-      ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
       <div class="os-fase-banner os-fase-${fase.cor}">${esc(fase.label)}</div>
       <div class="os-tarja os-tarja-${status}">${STATUS_OS_LABEL[status]}</div>
       <div class="os-card-top">
@@ -1177,7 +1176,8 @@ function osCardCorpo(a, numero) {
         <span class="tag os-tag-tecnico" title="${esc(a.tecnico_nome || '—')}">${esc(a.tecnico_nome || '—')}</span>
       </div>
       <div class="os-card-title">${esc(a.cliente_nome || '—')}</div>
-      <div class="os-card-fields">
+      <div class="os-card-fields${a.retrabalho ? ' os-card-fields-retrabalho' : ''}">
+        ${a.retrabalho ? `<div class="os-badge-retrabalho" title="Retrabalho">R</div>` : ''}
         <div class="os-field"><span class="os-field-label"># Nº da O.S.</span><span class="os-field-value">${esc(numeroOS(a))}</span></div>
         <div class="os-field"><span class="os-field-label">Contato</span><span class="os-field-value">${esc(a.contato || a.cliente_contato || '—')}</span></div>
         <div class="os-field"><span class="os-field-label">E-mail</span><span class="os-field-value">${esc(a.email || a.cliente_email || '—')}</span></div>
