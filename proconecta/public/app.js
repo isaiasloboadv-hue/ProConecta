@@ -448,8 +448,8 @@ function sincronizarApp() {
 // escolhe se libera tudo ou só alguns desses itens.
 const MENUS_LABEL_POR_PAPEL = {
   suporte: {
-    'agenda': 'Minha agenda',
-    'fila-atendimento': 'Fila de Atendimento',
+    'agenda': 'Agenda',
+    'fila-atendimento': 'Chat',
     'relatorio-manutencao': 'Relatório',
     'calendario-tecnico': 'Calendário',
     'biblioteca': 'Biblioteca',
@@ -484,8 +484,8 @@ const MENUS_LABEL_POR_PAPEL = {
 
 const NAV = {
   suporte: [
-    { key: 'agenda', label: 'Minha agenda', page: 'agenda' },
-    { key: 'fila-atendimento', label: 'Fila de Atendimento', page: 'fila-atendimento' },
+    { key: 'agenda', label: 'Agenda', page: 'agenda' },
+    { key: 'fila-atendimento', label: 'Chat', page: 'fila-atendimento' },
     { key: 'relatorio-manutencao', label: 'Relatório', children: [
       { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
       { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
@@ -569,6 +569,26 @@ const NAV = {
   ],
 };
 
+// ícone de cada item de topo do menu lateral (só o nível principal — os submenus continuam sem
+// ícone, igual já era)
+const ICONE_MENU = {
+  agenda: '📅',
+  'fila-atendimento': '💬',
+  'relatorio-manutencao': '📝',
+  'calendario-tecnico': '🗓️',
+  biblioteca: '📚',
+  'fila-reparo': '🔧',
+  'painel-atendimentos': '📊',
+  'solicitacao-atendimento': '🆘',
+  'aprovacoes-visitas': '🧾',
+  clientes: '🏢',
+  equipamentos: '⚙️',
+  usuarios: '👤',
+  chamados: '💬',
+  'fila-pos-venda': '💰',
+  'fila-estoque': '📦',
+};
+
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
 // tem acesso_total, que aí só vê os itens de topo marcados em `menus` (ver MENUS_LABEL_POR_PAPEL /
 // checkboxes no cadastro). Vale pra qualquer tipo de acesso, não só suporte.
@@ -593,17 +613,18 @@ function buscarCaminho(nodes, pagina, caminho) {
 function renderNavNodes(nodes, nivel) {
   return nodes.map((node) => {
     const indent = 12 + nivel * 14;
+    const icone = nivel === 0 ? ICONE_MENU[node.key] : null;
     if (node.children) {
       const aberto = navAbertos.has(node.key);
       return `
         <button class="nav-group-header" style="padding-left:${indent}px" onclick="alternarGrupo('${node.key}')">
-          <span class="chevron ${aberto ? 'open' : ''}">▸</span>${node.label}
+          <span class="chevron ${aberto ? 'open' : ''}">▸</span>${icone ? `<span class="nav-icone">${icone}</span>` : ''}${node.label}
         </button>
         ${aberto ? renderNavNodes(node.children, nivel + 1) : ''}
       `;
     }
     const ativo = paginaAtual === node.page;
-    return `<button class="nav-leaf ${ativo ? 'active' : ''}" style="padding-left:${indent}px" onclick="ir('${node.page}')"><span class="dot"></span>${node.label}</button>`;
+    return `<button class="nav-leaf ${ativo ? 'active' : ''}" style="padding-left:${indent}px" onclick="ir('${node.page}')">${icone ? `<span class="nav-icone">${icone}</span>` : '<span class="dot"></span>'}${node.label}</button>`;
   }).join('');
 }
 
@@ -916,7 +937,7 @@ function desenharMinhaAgenda() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Minha agenda</h1><p>${agenda.length} atividade(s)</p></div>
+      <div><h1>Agenda</h1><p>${agenda.length} atividade(s)</p></div>
       ${botoesFiltroStatusOS(minhaAgendaFiltro, 'alternarFiltroMinhaAgenda')}
     </div>
     ${agenda.length ? `<div class="os-grid">${agenda.map((a) => cardOSMinhaAgenda(a, numeros.get(a.id))).join('')}</div>` : `<div class="empty">Nenhuma atividade ${minhaAgendaFiltro === 'finalizados' ? 'finalizada' : 'ativa'} no momento.</div>`}
@@ -9704,7 +9725,7 @@ async function renderFilaAtendimento() {
   ]);
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Fila de Atendimento</h1><p>Atendimentos que a IA não conseguiu resolver sozinha — qualquer técnico pode assumir.</p></div>
+    <div class="page-head"><h1>Chat</h1><p>Atendimentos que a IA não conseguiu resolver sozinha — qualquer técnico pode assumir.</p></div>
     <div class="panel">
       <h2>Aguardando técnico (${fila.length})</h2>
       <div class="atendimento-grid">
