@@ -43,7 +43,8 @@ function seed() {
     vapid: null,
     empresas: [],
     mensagens_internas: [],
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1 },
+    solicitacoes_rh: [],
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1 },
   };
 }
 
@@ -125,6 +126,8 @@ function migrar(data) {
   if (data.chamados_rr_index === undefined) data.chamados_rr_index = 0;
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
   if (!data.mensagens_internas) data.mensagens_internas = [];
+  if (!data.solicitacoes_rh) data.solicitacoes_rh = [];
+  if (!data._seq.solicitacoes_rh) data._seq.solicitacoes_rh = 1;
   sincronizarEmpresaPadrao(data);
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
@@ -263,6 +266,11 @@ function migrar(data) {
       a.fase_atendimento = 'em_atendimento';
       if (!a.tecnico_chat_id) a.tecnico_chat_id = a.tecnico_id;
     }
+    // bônus de viagem (R$200) — o administrador marca na O.S. quando ela dá direito ao bônus
+    // (nem toda região paga); conta pro limite de 7 viagens com bônus por técnico/mês (ver
+    // contarViagensBonusMes em server.js)
+    if (a.bonus_viagem === undefined) a.bonus_viagem = false;
+    if (a.justificativa_limite_viagens === undefined) a.justificativa_limite_viagens = '';
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;

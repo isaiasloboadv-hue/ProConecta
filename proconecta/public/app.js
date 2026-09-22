@@ -118,6 +118,7 @@ async function api(path, opts = {}) {
     if (!res.ok) {
       const erro = new Error(data.erro || 'Erro na requisição');
       erro.status = res.status;
+      erro.corpo = data;
       // resposta sem JSON válido (ou sem campo erro) não veio do nosso backend — é sintoma de
       // instabilidade da hospedagem (ex: "acordando" após período inativo no plano gratuito),
       // não um erro de validação de verdade
@@ -454,6 +455,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'calendario-tecnico': 'Calendário',
     'biblioteca': 'Biblioteca',
     'fila-reparo': 'Setor Reparo',
+    'solicitacoes-rh': 'Solicitações',
     'chat-interno': 'Mensagens',
   },
   administrador: {
@@ -465,6 +467,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
     'usuarios': 'Usuários',
+    'tecnicos-rh': 'Técnicos',
     'chat-interno': 'Mensagens',
   },
   cliente: {
@@ -505,6 +508,7 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
+    { key: 'solicitacoes-rh', label: 'Solicitações', page: 'solicitacoes-rh' },
   ],
   administrador: [
     { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
@@ -530,6 +534,10 @@ const NAV = {
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
     { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
+    { key: 'tecnicos-rh', label: 'Técnicos', children: [
+      { key: 'acompanhamento', label: 'Acompanhamento de viagens', page: 'tecnicos-acompanhamento' },
+      { key: 'solicitacoes', label: 'Solicitações', page: 'tecnicos-solicitacoes' },
+    ]},
   ],
   cliente: [
     { key: 'biblioteca', label: 'Biblioteca', children: [
@@ -587,6 +595,8 @@ const ICONE_MENU = {
   chamados: '💬',
   'fila-pos-venda': '💰',
   'fila-estoque': '📦',
+  'tecnicos-rh': '🧑‍🔧',
+  'solicitacoes-rh': '🙋',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -701,6 +711,9 @@ async function ir(pagina) {
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
     if (pagina === 'fila-solicitacao-atendimento') return renderFilaSolicitacaoAtendimento();
+    if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
+    if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
+    if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -857,6 +870,11 @@ async function clicarNotificacao(registroId, tipo) {
     abrirChatAtendimentoTecnico(registroId);
   } else if (tipo === 'chamado_mensagem_cliente') {
     ir('chamados');
+  } else if (tipo === 'solicitacao_rh_pendente') {
+    ir('tecnicos-solicitacoes');
+  } else if (tipo === 'solicitacao_rh_decidida') {
+    try { await api(`/api/solicitacoes-rh/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
+    ir('solicitacoes-rh');
   } else {
     ir('aprovacoes-biblioteca');
   }
@@ -1315,6 +1333,10 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <h2>Técnico designado</h2>
       <div class="form-grid">
         <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
+        <div class="full" style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="na-bonus-viagem" style="width:auto;" ${agendaItem && agendaItem.bonus_viagem ? 'checked' : ''}>
+          <label for="na-bonus-viagem" style="margin:0; text-transform:none; font-weight:600;">💰 Conta bônus de viagem (R$200) — limite de 7 por técnico/mês</label>
+        </div>
       </div>
 
       <div style="display:flex; gap:10px;">
@@ -1475,7 +1497,14 @@ async function salvarNovaAtividade() {
     estado: document.getElementById('na-estado').value,
     garantia: (document.querySelector('input[name="na-garantia"]:checked') || {}).value || '',
     garantia_obs: document.getElementById('na-garantia-obs').value,
+    bonus_viagem: document.getElementById('na-bonus-viagem').checked,
   };
+  await salvarNovaAtividadeExecutar(body);
+}
+
+// separado de salvarNovaAtividade só pra poder chamar de novo, com a justificativa preenchida,
+// sem duplicar a leitura dos campos do formulário — ver o catch abaixo (precisa_justificativa)
+async function salvarNovaAtividadeExecutar(body) {
   try {
     if (agendaEmEdicaoId) {
       await api(`/api/agenda/${agendaEmEdicaoId}`, { method: 'PUT', body });
@@ -1493,7 +1522,18 @@ async function salvarNovaAtividade() {
     }
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
     else renderAgenda();
-  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+  } catch (e) {
+    // técnico já bateu o limite de 7 viagens com bônus no mês — pede a justificativa e tenta
+    // salvar de novo com ela, em vez de simplesmente barrar o administrador
+    if (e.corpo && e.corpo.precisa_justificativa) {
+      const justificativa = prompt(e.message);
+      if (justificativa && justificativa.trim()) {
+        return salvarNovaAtividadeExecutar({ ...body, justificativa_limite_viagens: justificativa.trim() });
+      }
+      return;
+    }
+    alert('Erro ao salvar: ' + e.message);
+  }
 }
 
 function abrirDiario(agendaId) {
@@ -10525,6 +10565,231 @@ function mostrarToast(texto) {
   toast.classList.add('show');
   clearTimeout(window._toastTimer);
   window._toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// ---------- Técnicos: acompanhamento de viagens/bônus + solicitações de RH ----------
+// bônus de R$200 por viagem (marcado manualmente pelo administrador na O.S. — nem toda região
+// paga), com limite de 7 por técnico/mês antes de exigir justificativa (ver POST/PUT /api/agenda
+// no servidor). Solicitações de RH (folga, banco de horas, férias, home office) seguem o mesmo
+// padrão de pedido -> aprovação já usado no resto do sistema.
+
+const LABEL_SOLICITACAO_RH_FRONT = { folga: 'Folga', banco_horas: 'Banco de horas', ferias: 'Férias', home_office: 'Home office' };
+
+function tagStatusSolicitacaoRH(status) {
+  if (status === 'aprovado') return tag('Aprovado', 'green');
+  if (status === 'reprovado') return tag('Reprovado', 'falha');
+  return tag('Pendente', 'amber');
+}
+
+let acompanhamentoMes = new Date().toISOString().slice(0, 7);
+
+async function renderTecnicosAcompanhamento() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Acompanhamento de viagens</h1><p>Bônus de R$200 por viagem — limite de 7 por técnico/mês antes de precisar de justificativa.</p></div>
+      <input type="month" id="acomp-mes" value="${acompanhamentoMes}" onchange="mudarMesAcompanhamento()">
+    </div>
+    <div id="acomp-lista"><div class="empty">Carregando...</div></div>`;
+  await carregarAcompanhamento();
+}
+
+function mudarMesAcompanhamento() {
+  acompanhamentoMes = document.getElementById('acomp-mes').value;
+  carregarAcompanhamento();
+}
+
+async function carregarAcompanhamento() {
+  const resp = await api(`/api/tecnicos/viagens?mes=${acompanhamentoMes}`);
+  window._acompanhamentoCache = resp;
+  const { tecnicos, limite } = resp;
+  const alvo = document.getElementById('acomp-lista');
+  if (!alvo) return;
+  alvo.innerHTML = tecnicos.length ? `
+    <div class="panel"><table>
+      <tr><th>Técnico</th><th>Viagens</th><th>Bônus (R$)</th><th></th></tr>
+      ${tecnicos.map((t) => `
+        <tr>
+          <td data-label="Técnico">${esc(t.tecnico_nome)}</td>
+          <td data-label="Viagens">${t.quantidade}${t.passou_limite ? ` ${tag(`acima do limite (${limite})`, 'falha')}` : ''}</td>
+          <td data-label="Bônus (R$)">R$ ${t.valor_total}</td>
+          <td>${t.quantidade ? `<button class="btn-outline-sm" onclick="mostrarDetalheViagens(${t.tecnico_id})">Ver viagens</button>` : ''}</td>
+        </tr>`).join('')}
+    </table></div>
+    <div id="acomp-detalhe"></div>` : `<p class="empty">Nenhum técnico com viagens de bônus neste mês.</p>`;
+}
+
+function mostrarDetalheViagens(tecnicoId) {
+  const resp = window._acompanhamentoCache || {};
+  const t = (resp.tecnicos || []).find((x) => x.tecnico_id === tecnicoId);
+  const alvo = document.getElementById('acomp-detalhe');
+  if (!t || !alvo) return;
+  alvo.innerHTML = `
+    <div class="panel"><div class="panel-head">Viagens de ${esc(t.tecnico_nome)}</div><table>
+      <tr><th>O.S.</th><th>Cliente</th><th>Data</th><th>Justificativa</th></tr>
+      ${t.viagens.map((v) => `
+        <tr>
+          <td data-label="O.S.">${esc(v.numero_os)}</td>
+          <td data-label="Cliente">${esc(v.cliente_nome)}</td>
+          <td data-label="Data">${fmtData(v.data_hora_inicio)}</td>
+          <td data-label="Justificativa">${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}</td>
+        </tr>`).join('')}
+    </table></div>`;
+}
+
+let solicitacoesRHFiltroTipo = '';
+let solicitacoesRHFiltroStatus = 'pendente';
+
+async function renderTecnicosSolicitacoes() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Solicitações dos técnicos</h1><p>Folga, banco de horas, férias e home office.</p></div>
+    <div class="panel" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+      <label style="font-size:13px;">Tipo<br><select id="sol-filtro-tipo" onchange="filtrarSolicitacoesRH()">
+        <option value="">Todos</option>
+        <option value="folga">Folga</option>
+        <option value="banco_horas">Banco de horas</option>
+        <option value="ferias">Férias</option>
+        <option value="home_office">Home office</option>
+      </select></label>
+      <label style="font-size:13px;">Status<br><select id="sol-filtro-status" onchange="filtrarSolicitacoesRH()">
+        <option value="pendente">Pendentes</option>
+        <option value="aprovado">Aprovadas</option>
+        <option value="reprovado">Reprovadas</option>
+        <option value="">Todas</option>
+      </select></label>
+    </div>
+    <div id="sol-rh-lista"><div class="empty">Carregando...</div></div>`;
+  document.getElementById('sol-filtro-tipo').value = solicitacoesRHFiltroTipo;
+  document.getElementById('sol-filtro-status').value = solicitacoesRHFiltroStatus;
+  await carregarSolicitacoesRH();
+}
+
+function filtrarSolicitacoesRH() {
+  solicitacoesRHFiltroTipo = document.getElementById('sol-filtro-tipo').value;
+  solicitacoesRHFiltroStatus = document.getElementById('sol-filtro-status').value;
+  carregarSolicitacoesRH();
+}
+
+async function carregarSolicitacoesRH() {
+  const qs = new URLSearchParams();
+  if (solicitacoesRHFiltroTipo) qs.set('tipo', solicitacoesRHFiltroTipo);
+  if (solicitacoesRHFiltroStatus) qs.set('status', solicitacoesRHFiltroStatus);
+  const { solicitacoes } = await api(`/api/solicitacoes-rh${qs.toString() ? '?' + qs.toString() : ''}`);
+  const alvo = document.getElementById('sol-rh-lista');
+  if (!alvo) return;
+  alvo.innerHTML = solicitacoes.length ? `
+    <div class="panel"><table>
+      <tr><th>Técnico</th><th>Tipo</th><th>Período</th><th>Motivo</th><th>Status</th><th></th></tr>
+      ${solicitacoes.map((s) => `
+        <tr>
+          <td data-label="Técnico">${esc(s.tecnico_nome)}</td>
+          <td data-label="Tipo">${LABEL_SOLICITACAO_RH_FRONT[s.tipo]}${s.tipo === 'banco_horas' ? ` (${s.operacao === 'credito' ? '+' : '-'}${s.horas}h)` : ''}</td>
+          <td data-label="Período">${fmtData(s.data_inicio)}${s.data_fim && s.data_fim !== s.data_inicio ? ' a ' + fmtData(s.data_fim) : ''}</td>
+          <td data-label="Motivo">${esc(s.motivo)}</td>
+          <td data-label="Status">${tagStatusSolicitacaoRH(s.status)}${s.resposta_admin ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">${esc(s.resposta_admin)}</div>` : ''}</td>
+          <td>${s.status === 'pendente' ? `
+            <button class="btn btn-primary btn-sm" onclick="decidirSolicitacaoRH(${s.id}, 'aprovado')">Aprovar</button>
+            <button class="btn-ghost btn-sm" onclick="decidirSolicitacaoRH(${s.id}, 'reprovado')">Reprovar</button>` : ''}
+          </td>
+        </tr>`).join('')}
+    </table></div>` : `<p class="empty">Nenhuma solicitação encontrada.</p>`;
+}
+
+async function decidirSolicitacaoRH(id, status) {
+  const resposta = prompt(status === 'aprovado' ? 'Alguma observação? (opcional)' : 'Motivo da reprovação (opcional):') || '';
+  try {
+    await api(`/api/solicitacoes-rh/${id}/decidir`, { method: 'POST', body: { status, resposta_admin: resposta } });
+    mostrarToast(status === 'aprovado' ? 'Solicitação aprovada.' : 'Solicitação reprovada.');
+    carregarSolicitacoesRH();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- Solicitações (técnico): pedir folga, banco de horas, férias ou home office ----------
+
+async function renderSolicitacoesRH() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Solicitações</h1><p>Peça folga, banco de horas, férias ou home office — o administrador aprova ou reprova.</p></div>
+    <div class="panel">
+      <div class="panel-head">Nova solicitação</div>
+      <div class="form-grid">
+        <div><label>Tipo</label><select id="srh-tipo" onchange="atualizarFormSolicitacaoRH()">
+          <option value="folga">Folga</option>
+          <option value="banco_horas">Banco de horas</option>
+          <option value="ferias">Férias</option>
+          <option value="home_office">Home office</option>
+        </select></div>
+        <div><label>Data</label><input type="date" id="srh-data-inicio"></div>
+        <div id="srh-data-fim-wrap"><label>Até (opcional, se for um período)</label><input type="date" id="srh-data-fim"></div>
+        <div class="hidden" id="srh-horas-wrap"><label>Horas</label><input type="number" id="srh-horas" min="1" step="0.5"></div>
+        <div class="hidden" id="srh-operacao-wrap"><label>Crédito ou débito</label><select id="srh-operacao">
+          <option value="credito">Crédito (horas a favor)</option>
+          <option value="debito">Débito (horas a repor)</option>
+        </select></div>
+        <div class="full"><label>Motivo</label><textarea id="srh-motivo" placeholder="Explique o motivo do pedido..."></textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="enviarSolicitacaoRH()">Enviar pedido</button>
+    </div>
+    <div id="srh-lista"><div class="empty">Carregando...</div></div>`;
+  await carregarMinhasSolicitacoesRH();
+}
+
+function atualizarFormSolicitacaoRH() {
+  const tipo = document.getElementById('srh-tipo').value;
+  document.getElementById('srh-data-fim-wrap').classList.toggle('hidden', tipo === 'banco_horas');
+  document.getElementById('srh-horas-wrap').classList.toggle('hidden', tipo !== 'banco_horas');
+  document.getElementById('srh-operacao-wrap').classList.toggle('hidden', tipo !== 'banco_horas');
+}
+
+async function enviarSolicitacaoRH() {
+  const tipo = document.getElementById('srh-tipo').value;
+  const dataInicio = document.getElementById('srh-data-inicio').value;
+  if (!dataInicio) return alert('Escolha a data.');
+  const motivo = document.getElementById('srh-motivo').value;
+  if (!motivo.trim()) return alert('Descreva o motivo do pedido.');
+  const body = {
+    tipo, data_inicio: dataInicio,
+    data_fim: tipo === 'banco_horas' ? dataInicio : (document.getElementById('srh-data-fim').value || dataInicio),
+    motivo,
+  };
+  if (tipo === 'banco_horas') {
+    body.horas = document.getElementById('srh-horas').value;
+    body.operacao = document.getElementById('srh-operacao').value;
+    if (!body.horas) return alert('Informe as horas.');
+  }
+  try {
+    await api('/api/solicitacoes-rh', { method: 'POST', body });
+    mostrarToast('Solicitação enviada.');
+    renderSolicitacoesRH();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function carregarMinhasSolicitacoesRH() {
+  const { solicitacoes } = await api('/api/solicitacoes-rh');
+  solicitacoes.filter((s) => s.status !== 'pendente' && !s.lida_tecnico).forEach((s) => {
+    api(`/api/solicitacoes-rh/${s.id}/marcar-lida`, { method: 'POST' }).catch(() => {});
+  });
+  const alvo = document.getElementById('srh-lista');
+  if (!alvo) return;
+  alvo.innerHTML = solicitacoes.length ? `
+    <div class="panel"><table>
+      <tr><th>Tipo</th><th>Período</th><th>Motivo</th><th>Status</th><th></th></tr>
+      ${solicitacoes.map((s) => `
+        <tr>
+          <td data-label="Tipo">${LABEL_SOLICITACAO_RH_FRONT[s.tipo]}${s.tipo === 'banco_horas' ? ` (${s.operacao === 'credito' ? '+' : '-'}${s.horas}h)` : ''}</td>
+          <td data-label="Período">${fmtData(s.data_inicio)}${s.data_fim && s.data_fim !== s.data_inicio ? ' a ' + fmtData(s.data_fim) : ''}</td>
+          <td data-label="Motivo">${esc(s.motivo)}</td>
+          <td data-label="Status">${tagStatusSolicitacaoRH(s.status)}${s.resposta_admin ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">${esc(s.resposta_admin)}</div>` : ''}</td>
+          <td>${s.status === 'pendente' ? `<button class="btn-ghost btn-sm" onclick="cancelarSolicitacaoRH(${s.id})">Cancelar</button>` : ''}</td>
+        </tr>`).join('')}
+    </table></div>` : `<p class="empty">Nenhuma solicitação ainda.</p>`;
+}
+
+async function cancelarSolicitacaoRH(id) {
+  if (!confirm('Cancelar esse pedido?')) return;
+  try { await api(`/api/solicitacoes-rh/${id}`, { method: 'DELETE' }); mostrarToast('Pedido cancelado.'); renderSolicitacoesRH(); }
+  catch (e) { alert('Erro: ' + e.message); }
 }
 
 tentarSessaoExistente();

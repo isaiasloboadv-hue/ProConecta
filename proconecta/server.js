@@ -111,6 +111,21 @@ function papelGerenciavelPorAdmin(admin, papelAlvo) {
   return false;
 }
 
+// bônus de viagem (R$200) — nem toda O.S. dá direito (depende da região), então o administrador
+// marca isso manualmente ao abrir/editar a O.S. Acima de 7 viagens com bônus no mês, o técnico
+// precisaria se deslocar demais — o administrador tem que justificar antes de atribuir mais uma.
+const LIMITE_VIAGENS_BONUS_MES = 7;
+const VALOR_BONUS_VIAGEM = 200;
+function contarViagensBonusMes(data, tecnicoId, dataIso, excluirId) {
+  const mesAno = String(dataIso || '').slice(0, 7); // "AAAA-MM"
+  return data.agenda.filter((a) =>
+    a.id !== excluirId &&
+    a.tecnico_id === tecnicoId &&
+    a.bonus_viagem &&
+    String(a.data_hora_inicio || '').slice(0, 7) === mesAno
+  ).length;
+}
+
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
 function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
@@ -662,6 +677,17 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   if (numeroOSDigitado && data.agenda.some((a) => (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado)) {
     return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
   }
+  const bonusViagem = !!body.bonus_viagem;
+  let justificativaLimiteViagens = '';
+  if (bonusViagem) {
+    const jaTem = contarViagensBonusMes(data, Number(body.tecnico_id), body.data_hora_inicio, null);
+    if (jaTem >= LIMITE_VIAGENS_BONUS_MES) {
+      justificativaLimiteViagens = String(body.justificativa_limite_viagens || '').trim();
+      if (!justificativaLimiteViagens) {
+        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} viagens com bônus neste mês (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
+      }
+    }
+  }
   const novoId = nextId(data, 'agenda');
   const item = {
     id: novoId,
@@ -705,6 +731,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     retorno_confirmado_cliente_em: null,
     retorno_deslocamento_iniciado_em: null,
     retorno_chegada_confirmada_em: null,
+    bonus_viagem: bonusViagem,
+    justificativa_limite_viagens: justificativaLimiteViagens,
   };
   data.agenda.push(item);
   db.save(data);
@@ -744,6 +772,17 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     const jaExisteEmOutra = data.agenda.some((a) => a.id !== item.id && (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado);
     if (jaExisteEmOutra) return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
   }
+  const bonusViagem = !!body.bonus_viagem;
+  let justificativaLimiteViagens = '';
+  if (bonusViagem) {
+    const jaTem = contarViagensBonusMes(data, Number(body.tecnico_id), body.data_hora_inicio, item.id);
+    if (jaTem >= LIMITE_VIAGENS_BONUS_MES) {
+      justificativaLimiteViagens = String(body.justificativa_limite_viagens || item.justificativa_limite_viagens || '').trim();
+      if (!justificativaLimiteViagens) {
+        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} viagens com bônus neste mês (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
+      }
+    }
+  }
   // se o técnico designado mudou, ele ainda não viu essa atribuição — reabre a notificação
   const trocouTecnico = Number(body.tecnico_id) !== item.tecnico_id;
   Object.assign(item, {
@@ -760,10 +799,155 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
     garantia: body.garantia || '', garantia_obs: body.garantia_obs || '',
     // o SLA não é editado por aqui (só o técnico/pós-venda define) — o que já tinha é preservado
+    bonus_viagem: bonusViagem,
+    justificativa_limite_viagens: bonusViagem ? justificativaLimiteViagens : '',
   });
   if (trocouTecnico) item.lida_tecnico = false;
   db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// GET /api/tecnicos/viagens?mes=AAAA-MM — acompanhamento do bônus de viagem por técnico: quantas
+// O.S. com bônus cada um tem no mês, o valor total (R$200 cada) e quais passaram do limite de 7
+// (com a justificativa que o administrador deu ao atribuir).
+rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha o bônus de viagem.' });
+  const { query } = url.parse(req.url, true);
+  const mes = query.mes || new Date().toISOString().slice(0, 7);
+  const data = db.load();
+  const tecnicos = data.usuarios.filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  const porTecnico = tecnicos.map((t) => {
+    const viagens = data.agenda
+      .filter((a) => a.tecnico_id === t.id && a.bonus_viagem && String(a.data_hora_inicio || '').slice(0, 7) === mes)
+      .sort((x, y) => (x.data_hora_inicio || '').localeCompare(y.data_hora_inicio || ''));
+    return {
+      tecnico_id: t.id,
+      tecnico_nome: t.nome,
+      quantidade: viagens.length,
+      valor_total: viagens.length * VALOR_BONUS_VIAGEM,
+      passou_limite: viagens.length > LIMITE_VIAGENS_BONUS_MES,
+      viagens: viagens.map((a) => ({
+        id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
+        cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id) || {}).nome_empresa || '—',
+        data_hora_inicio: a.data_hora_inicio,
+        justificativa_limite_viagens: a.justificativa_limite_viagens || '',
+      })),
+    };
+  }).sort((a, b) => b.quantidade - a.quantidade);
+  enviarJSON(res, 200, { mes, limite: LIMITE_VIAGENS_BONUS_MES, valor_bonus: VALOR_BONUS_VIAGEM, tecnicos: porTecnico });
+});
+
+// ---------- solicitações de RH do técnico (folga, banco de horas, férias, home office) ----------
+// mesmo padrão de "solicitação -> aprovação" já usado em outras partes do sistema (ex.: solicitação
+// de edição na biblioteca) — o técnico pede, o administrador aprova ou reprova com uma resposta.
+
+const TIPOS_SOLICITACAO_RH = ['folga', 'banco_horas', 'ferias', 'home_office'];
+const LABEL_SOLICITACAO_RH = { folga: 'folga', banco_horas: 'banco de horas', ferias: 'férias', home_office: 'home office' };
+
+// POST /api/solicitacoes-rh — o técnico cria um pedido
+rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico faz esse tipo de solicitação.' });
+  const body = await lerCorpo(req);
+  if (!TIPOS_SOLICITACAO_RH.includes(body.tipo)) return enviarJSON(res, 400, { erro: 'Tipo de solicitação inválido.' });
+  if (!body.data_inicio) return enviarJSON(res, 400, { erro: 'Informe a data.' });
+  if (body.tipo === 'banco_horas' && (!body.horas || !['credito', 'debito'].includes(body.operacao))) {
+    return enviarJSON(res, 400, { erro: 'Informe as horas e se é crédito ou débito no banco de horas.' });
+  }
+  if (!String(body.motivo || '').trim()) return enviarJSON(res, 400, { erro: 'Descreva o motivo do pedido.' });
+  const data = db.load();
+  const item = {
+    id: nextId(data, 'solicitacoes_rh'),
+    empresa_id: 1,
+    tecnico_id: user.id,
+    tipo: body.tipo,
+    data_inicio: body.data_inicio,
+    data_fim: body.data_fim || body.data_inicio,
+    horas: body.tipo === 'banco_horas' ? Number(body.horas) : null,
+    operacao: body.tipo === 'banco_horas' ? body.operacao : null,
+    motivo: String(body.motivo).trim(),
+    status: 'pendente',
+    resposta_admin: '',
+    lida_tecnico: true,
+    criado_em: new Date().toISOString(),
+    resolvido_em: null,
+    resolvido_por: null,
+  };
+  data.solicitacoes_rh.push(item);
+  db.save(data);
+  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  await Promise.all(admins.map((a) => enviarPush(data, a.id, {
+    titulo: 'Nova solicitação de técnico',
+    corpo: `${user.nome} pediu ${LABEL_SOLICITACAO_RH[body.tipo]}.`,
+    url: '/',
+  }).catch(() => {})));
+  enviarJSON(res, 201, { solicitacao: item });
+});
+
+// GET /api/solicitacoes-rh — técnico vê só as dele; administrador vê de todo mundo (com filtros
+// opcionais ?tipo= e ?status=)
+rota('GET', /^\/api\/solicitacoes-rh$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = user.papel === 'suporte' ? data.solicitacoes_rh.filter((s) => s.tecnico_id === user.id) : data.solicitacoes_rh.slice();
+  if (query.tipo) lista = lista.filter((s) => s.tipo === query.tipo);
+  if (query.status) lista = lista.filter((s) => s.status === query.status);
+  lista = lista
+    .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
+    .map((s) => ({ ...s, tecnico_nome: (data.usuarios.find((u) => u.id === s.tecnico_id) || {}).nome || '—' }));
+  enviarJSON(res, 200, { solicitacoes: lista });
+});
+
+// POST /api/solicitacoes-rh/:id/decidir — administrador aprova ou reprova
+rota('POST', /^\/api\/solicitacoes-rh\/(\d+)\/decidir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador decide solicitações.' });
+  const body = await lerCorpo(req);
+  if (!['aprovado', 'reprovado'].includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
+  const data = db.load();
+  const item = data.solicitacoes_rh.find((s) => s.id === Number(m[1]));
+  if (!item) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Esta solicitação já foi decidida.' });
+  item.status = body.status;
+  item.resposta_admin = String(body.resposta_admin || '').trim();
+  item.lida_tecnico = false;
+  item.resolvido_em = new Date().toISOString();
+  item.resolvido_por = user.id;
+  db.save(data);
+  enviarPush(data, item.tecnico_id, {
+    titulo: `Solicitação ${body.status === 'aprovado' ? 'aprovada' : 'reprovada'}`,
+    corpo: `Seu pedido de ${LABEL_SOLICITACAO_RH[item.tipo]} foi ${body.status === 'aprovado' ? 'aprovado' : 'reprovado'}${item.resposta_admin ? ': ' + item.resposta_admin : '.'}`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { solicitacao: item });
+});
+
+// POST /api/solicitacoes-rh/:id/marcar-lida — o técnico marcou a decisão como vista
+rota('POST', /^\/api\/solicitacoes-rh\/(\d+)\/marcar-lida$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const item = data.solicitacoes_rh.find((s) => s.id === Number(m[1]) && s.tecnico_id === user.id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  item.lida_tecnico = true;
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// DELETE /api/solicitacoes-rh/:id — o técnico desiste de um pedido ainda pendente
+rota('DELETE', /^\/api\/solicitacoes-rh\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const idx = data.solicitacoes_rh.findIndex((s) => s.id === Number(m[1]) && s.tecnico_id === user.id);
+  if (idx === -1) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (data.solicitacoes_rh[idx].status !== 'pendente') return enviarJSON(res, 400, { erro: 'Só é possível cancelar um pedido ainda pendente.' });
+  data.solicitacoes_rh.splice(idx, 1);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // checa se a O.S. já pode chegar na etapa de feedback do cliente: o relatório original
@@ -1831,6 +2015,11 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
           })
       );
     }
+    notificacoes = notificacoes.concat(
+      data.solicitacoes_rh
+        .filter((s) => s.tecnico_id === user.id && s.status !== 'pendente' && !s.lida_tecnico)
+        .map((s) => ({ id: s.id, tipo: 'solicitacao_rh_decidida', texto: `Seu pedido de ${LABEL_SOLICITACAO_RH[s.tipo]} foi ${s.status}${s.resposta_admin ? ': ' + s.resposta_admin : '.'}`, registro_id: s.id }))
+    );
   } else if (user.papel === 'cliente') {
     notificacoes = data.chamados
       .filter((c) => c.cliente_id === user.cliente_id && !c.lida_cliente)
@@ -1851,6 +2040,14 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       data.registros
         .filter((r) => r.solicitacao_edicao)
         .map((r) => ({ id: r.id, tipo: 'edicao_solicitada_biblioteca', texto: `${r.solicitacao_edicao.solicitante_nome} pediu uma edição no caso "${r.titulo}" da biblioteca`, registro_id: r.id }))
+    );
+    notificacoes = notificacoes.concat(
+      data.solicitacoes_rh
+        .filter((s) => s.status === 'pendente')
+        .map((s) => {
+          const tecnico = data.usuarios.find((u) => u.id === s.tecnico_id);
+          return { id: s.id, tipo: 'solicitacao_rh_pendente', texto: `${tecnico ? tecnico.nome : 'Um técnico'} pediu ${LABEL_SOLICITACAO_RH[s.tipo]}`, registro_id: s.id };
+        })
     );
   }
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });
