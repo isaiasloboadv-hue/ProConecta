@@ -24,6 +24,7 @@
 // verificado. Se EMAIL_SMTP_USER estiver configurado, ele tem prioridade sobre o Resend.
 
 const nodemailer = require('nodemailer');
+const dns = require('dns').promises;
 
 const PROVEDORES_SMTP = {
   gmail: { host: 'smtp.gmail.com', port: 465, secure: true },
@@ -41,7 +42,7 @@ function detectarProvedor(userEmail) {
 }
 
 let transporteCache = null;
-function obterTransporte() {
+async function obterTransporte() {
   const user = process.env.EMAIL_SMTP_USER;
   const senha = process.env.EMAIL_SMTP_SENHA;
   if (!user || !senha) return null;
@@ -53,8 +54,24 @@ function obterTransporte() {
     console.error(`[email] EMAIL_SMTP_USER "${user}" não é Gmail nem Hotmail/Outlook — defina EMAIL_SMTP_PROVEDOR=gmail ou hotmail explicitamente.`);
     return null;
   }
+
+  // muitos PaaS (Render incluso) não têm rota de saída IPv6, mas o Gmail e o Outlook
+  // anunciam endereço IPv6 pro próprio domínio SMTP, e o nodemailer às vezes escolhe
+  // esse endereço e a conexão morre na hora com ENETUNREACH. Resolve pra IPv4 na mão e
+  // conecta direto no IP — o hostname original vira só o "servername" do TLS, senão o
+  // certificado do provedor (emitido pro hostname, não pro IP) não bate na validação.
+  let hostConectar = config.host;
+  try {
+    const enderecos = await dns.resolve4(config.host);
+    if (enderecos && enderecos.length) hostConectar = enderecos[0];
+  } catch (e) {
+    console.error(`[email] Não deu pra resolver IPv4 de ${config.host} (${e.message}) — tentando pelo hostname mesmo.`);
+  }
+
   transporteCache = nodemailer.createTransport({
     ...config,
+    host: hostConectar,
+    tls: { servername: config.host },
     auth: { user, pass: senha },
     // sem isso, um provedor fora do ar ou bloqueado pela rede trava a requisição
     // (criação de usuário / envio de relatório) esperando indefinidamente
@@ -81,7 +98,7 @@ function comLimiteDeTempo(promessa, ms) {
 }
 
 async function enviarViaSmtp({ to, assunto, corpoHtml, attachments }) {
-  const transporte = obterTransporte();
+  const transporte = await obterTransporte();
   if (!transporte) return null; // sem SMTP configurado — quem chamou decide o próximo provedor/fallback
   await comLimiteDeTempo(
     transporte.sendMail({ from: remetente(), to, subject: assunto, html: corpoHtml, attachments }),
