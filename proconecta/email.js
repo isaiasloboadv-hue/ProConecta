@@ -110,18 +110,33 @@ async function enviarViaResend({ to, assunto, corpoHtml, attachments }) {
   return { enviado: true, modo: 'resend' };
 }
 
-// tenta SMTP (Gmail/Hotmail) primeiro, depois Resend; se nenhum estiver configurado,
-// só loga no console (modo simulado, usado em desenvolvimento)
+// tenta SMTP (Gmail/Hotmail) primeiro; se estiver configurado mas falhar (provedor fora do
+// ar, rede bloqueando a porta, credencial errada), cai pro Resend em vez de desistir — os
+// dois podem estar configurados ao mesmo tempo, e nesse caso o Resend serve de rede de
+// segurança. Só desiste (modo 'erro') se os dois estiverem configurados e os dois falharem;
+// se nenhum estiver configurado, só loga no console (modo simulado, usado em desenvolvimento).
 async function enviar({ to, assunto, corpoHtml, attachments, logSimulado }) {
+  let houveFalha = false;
+
   try {
     const viaSmtp = await enviarViaSmtp({ to, assunto, corpoHtml, attachments });
     if (viaSmtp) return viaSmtp;
+  } catch (e) {
+    console.error('[email] Falha ao enviar via SMTP:', e.message);
+    houveFalha = true;
+  }
+
+  try {
     const viaResend = await enviarViaResend({ to, assunto, corpoHtml, attachments });
     if (viaResend) return viaResend;
   } catch (e) {
-    console.error('[email] Falha ao enviar:', e.message);
-    return { enviado: false, modo: 'erro' };
+    console.error('[email] Falha ao enviar via Resend:', e.message);
+    houveFalha = true;
   }
+
+  // pelo menos um provedor estava configurado e a tentativa falhou de verdade —
+  // diferente de "nenhum provedor configurado" (modo simulado)
+  if (houveFalha) return { enviado: false, modo: 'erro' };
   console.log('\n[email] Nenhum provedor configurado (EMAIL_SMTP_USER/EMAIL_SMTP_SENHA ou RESEND_API_KEY ausentes).');
   logSimulado();
   return { enviado: false, modo: 'simulado' };
