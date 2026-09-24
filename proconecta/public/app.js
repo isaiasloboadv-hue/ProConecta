@@ -2801,6 +2801,132 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// PDF do relatório simples (treinamento online / demonstração técnica) — mesmo padrão visual
+// (capa azul, conteúdo, página de contato) dos outros PDFs, só que bem mais enxuto: esses
+// tipos não têm checklist, peças, fotos nem assinatura, só os dados do atendimento e as
+// observações do técnico.
+function gerarPdfRelatorioSimples(r, a, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `relatorio - ${limparPdf(r.empresa) || a.numero_os || ''}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+  const titulo = TIPO_OS_LABEL[a.tipo] || 'Atendimento';
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text(`Relatório de ${titulo}`, pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13; y += 16;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(titulo.toUpperCase(), pageW / 2, 420, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text(`O.S. ${limparPdf(a.numero_os) || '—'}`, pageW / 2, 466, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Dados do atendimento');
+  linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 0.7 }, { label: 'O.S. Nº', valor: a.numero_os, frac: 0.3 }]);
+  linhaCampos([{ label: 'Contato', valor: r.contato, frac: 0.5 }, { label: 'Telefone', valor: r.telefone, frac: 0.5 }]);
+  linhaCampos([{ label: 'E-mail', valor: a.email, frac: 0.5 }, { label: 'Setor', valor: a.setor_cliente, frac: 0.5 }]);
+  linhaCampos([{ label: 'Data', valor: fmtData(a.data_hora_inicio), frac: 0.5 }, { label: 'Técnico', valor: r.tecnico_nome, frac: 0.5 }]);
+  y += 8;
+
+  tituloCentro('Equipamento');
+  linhaCampos([{ label: 'Equipamento', valor: r.equipamento_tipo, frac: 0.4 }, { label: 'Modelo', valor: r.equipamento_modelo, frac: 0.35 }, { label: 'Nº Série', valor: r.numero_serie, frac: 0.25 }]);
+  y += 8;
+
+  tituloCentro('Observações');
+  {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(r.observacoes) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+
+  return doc.output('bloburl');
+}
+
 // ---------- APROVAÇÃO DE VISITAS (diário técnico ligado à agenda) ----------
 let osAno = new Date().getFullYear();
 let osMes = new Date().getMonth();
@@ -3285,6 +3411,7 @@ function detalheCompletoOS(a, visita) {
         <div class="os-relatorio-box-titulo">Relatório enviado pelo técnico</div>
         ${detalheRelatorioVisita(visita)}
         ${visita.laudo && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfLaudoAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
+        ${visita.relatorio_simples && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfRelatorioSimplesAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
       </div>` : `<div class="admin-note" style="margin-top:14px;">${a.tipo === 'atendimento' ? 'Ainda não há relatório — acompanhe o andamento na linha do tempo abaixo.' : 'O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.'}</div>`}
     ${a.visita_retorno_id ? `
       <div class="os-relatorio-box" style="margin-top:14px;">
@@ -3301,6 +3428,19 @@ async function baixarPdfLaudoAprovado(agendaId) {
   try {
     const logo = await carregarLogoDataUri();
     const url = gerarPdfLaudo(v.laudo, a, logo);
+    window.open(url, '_blank');
+  } catch (e) {
+    alert('Erro ao gerar o PDF: ' + e.message);
+  }
+}
+
+async function baixarPdfRelatorioSimplesAprovado(agendaId) {
+  const a = (window._agendaCache || []).find((x) => x.id === agendaId);
+  const v = (window._visitasPorAgenda || {})[agendaId];
+  if (!a || !v || !v.relatorio_simples) return alert('Não foi possível localizar o relatório aprovado desta O.S.');
+  try {
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioSimples(v.relatorio_simples, a, logo);
     window.open(url, '_blank');
   } catch (e) {
     alert('Erro ao gerar o PDF: ' + e.message);
