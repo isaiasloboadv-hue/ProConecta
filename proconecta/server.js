@@ -293,6 +293,13 @@ const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva', 'atendimento'];
 // enquanto o modelo de referência específico dele não chega
 const TIPOS_TERMO_ACEITE = ['treinamento_presencial'];
 
+// treinamento online e atendimento (nascido do chat) são os únicos tipos sem deslocamento até
+// o cliente — os demais (corretiva, preventiva, treinamento presencial, demonstração técnica)
+// exigem o técnico se deslocar. categoria 'online' desliga as etapas de deslocamento/chegada na
+// linha do tempo e nas ações do técnico (ver timelineOS/botaoDeslocamento/acoesOSCalendarioTecnico
+// em app.js).
+function categoriaDoTipo(tipo) { return (tipo === 'treinamento_online' || tipo === 'atendimento') ? 'online' : 'inloco'; }
+
 // garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA) — mesma regra do front
 // (dentroDaGarantiaDeFabrica em public/app.js) e da IA (ia.js), usada aqui pra preencher sozinha
 // a pergunta de garantia_fabricacao do SLA quando o admin preenche a O.S. manualmente
@@ -699,7 +706,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     data_hora_inicio: body.data_hora_inicio,
     data_hora_fim: body.data_hora_fim,
     tipo: body.tipo, // preventiva | corretiva | treinamento
-    categoria: body.categoria || 'inloco', // online | inloco
+    categoria: categoriaDoTipo(body.tipo), // online | inloco
     problema: body.problema || '',
     // dados do atendimento definidos pelo administrador ao abrir a OS — o técnico só visualiza
     contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
@@ -794,6 +801,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     data_hora_inicio: body.data_hora_inicio,
     data_hora_fim: body.data_hora_fim,
     tipo: body.tipo,
+    categoria: categoriaDoTipo(body.tipo),
     problema: body.problema || '',
     contato: body.contato, telefone: body.telefone, email: body.email, setor_cliente: body.setor_cliente || '',
     endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
@@ -3075,7 +3083,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     data_hora_inicio: inicioISO,
     data_hora_fim: fimISO,
     tipo,
-    categoria: 'online',
+    categoria: categoriaDoTipo(tipo),
     problema: chamado.resumo_ia || chamado.primeira_mensagem_cliente || '',
     contato: (cliente && cliente.nome_empresa) || '', telefone: (cliente && cliente.telefone) || '', email: (cliente && cliente.email) || '', setor_cliente: (cliente && cliente.setor) || '',
     endereco: (cliente && cliente.endereco) || '', numero: (cliente && cliente.numero) || '', bairro: (cliente && cliente.bairro) || '',

@@ -194,6 +194,10 @@ function migrar(data) {
   for (const a of data.agenda) {
     if (a.email === undefined) a.email = '';
     if (a.criado_em === undefined) a.criado_em = a.data_hora_inicio || new Date().toISOString();
+    // categoria sempre foi derivada do tipo (treinamento online e atendimento do chat não têm
+    // deslocamento até o cliente) — recalcula sempre, não só quando ausente, porque O.S. criadas
+    // antes dessa regra existir ficaram gravadas com 'inloco' mesmo sendo treinamento online
+    a.categoria = (a.tipo === 'treinamento_online' || a.tipo === 'atendimento') ? 'online' : 'inloco';
     for (const campo of ['garantia', 'garantia_obs']) {
       if (a[campo] === undefined) a[campo] = '';
     }
