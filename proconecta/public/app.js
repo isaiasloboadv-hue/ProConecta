@@ -7281,8 +7281,10 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   tituloCentro('Aceite');
   {
     if (y + 20 > pageH - margem) novaPagina();
-    opcaoCheckbox(pageW / 2 - 90, y, r.aceite === 'aceito', 'LI E ACEITO OS TERMOS');
-    opcaoCheckbox(pageW / 2 + 20, y, r.aceite === 'nao_aceito', 'NÃO ACEITO');
+    // posição da 2ª opção depende da largura real da 1ª (medida por opcaoCheckbox) — um
+    // espaçamento fixo estourava e as duas ficavam coladas/sobrepostas no PDF
+    const fimPrimeiraOpcao = opcaoCheckbox(margem, y, r.aceite === 'aceito', 'LI E ACEITO OS TERMOS');
+    opcaoCheckbox(fimPrimeiraOpcao + 30, y, r.aceite === 'nao_aceito', 'NÃO ACEITO');
     y += 22;
   }
 
