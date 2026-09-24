@@ -29,6 +29,11 @@ const TIPO_OS_COR = {
   corretiva: 'falha', preventiva: 'green', treinamento_online: 'blue',
   treinamento_presencial: 'amber', demonstracao_tecnica: 'orange', atendimento: 'purple',
 };
+// treinamento online e atendimento (nascido do chat) não têm deslocamento até o cliente — decide
+// direto pelo tipo (nunca precisa de migração/sincronização) em vez de confiar no campo
+// categoria vindo do servidor, que já se mostrou instável em produção (Postgres com cache em
+// memória por processo — ver categoriaDoTipo em server.js).
+function ehAtendimentoOnline(a) { return a.tipo === 'treinamento_online' || a.tipo === 'atendimento'; }
 // laudo técnico (diagnóstico + serviço + peças + fotos, sem checklist/assinatura) — "atendimento"
 // (O.S. aberta automaticamente quando um técnico assume um chamado do chat) usa o mesmo laudo
 const TIPOS_LAUDO_TECNICO = ['corretiva', 'preventiva', 'atendimento'];
@@ -1191,9 +1196,9 @@ function faseAtualOS(a) {
   if (a.chegada_confirmada_em) return { label: 'Chegou', cor: 'teal' };
   if (a.deslocamento_iniciado_em) return { label: 'Técnico a caminho', cor: 'blue' };
   if (!a.confirmado_cliente_em) return { label: 'Confirmação cliente', cor: 'purple' };
-  // categoria 'online' (treinamento online, atendimento do chat) não tem deslocamento até o
-  // cliente — nunca mostra essa etapa, o técnico já pode executar direto
-  if (a.categoria === 'online') return { label: 'Aguardando execução', cor: 'amber' };
+  // treinamento online/atendimento não tem deslocamento até o cliente — nunca mostra essa
+  // etapa, o técnico já pode executar direto
+  if (ehAtendimentoOnline(a)) return { label: 'Aguardando execução', cor: 'amber' };
   return { label: 'Aguardando deslocamento', cor: 'amber' };
 }
 
@@ -3316,9 +3321,9 @@ function timelineOS(a, visita) {
     ? { label: 'Cliente confirmou o agendamento', data: a.confirmado_cliente_em, estado: 'feito' }
     : { label: 'Aguardando confirmação do cliente', data: null, estado: 'pendente' });
 
-  // categoria 'online' (treinamento online) não exige o técnico se deslocar até o cliente —
-  // pula direto pro relatório, sem as etapas de deslocamento/chegada
-  if (a.categoria !== 'online') {
+  // treinamento online/atendimento não exige o técnico se deslocar até o cliente — pula
+  // direto pro relatório, sem as etapas de deslocamento/chegada
+  if (!ehAtendimentoOnline(a)) {
     passos.push(a.deslocamento_iniciado_em
       ? { label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' }
       : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
@@ -3579,10 +3584,10 @@ async function solicitarReaberturaVisita(id) {
 // notificação push quando o técnico toca nele.
 function botaoDeslocamento(a) {
   if (a.tecnico_id !== USER.id || a.finalizada) return '';
-  // categoria 'online' (treinamento online) não tem deslocamento até o cliente — o botão de
+  // treinamento online/atendimento não tem deslocamento até o cliente — o botão de
   // deslocamento nunca aparece, mas ainda mostra a tag de confirmação do cliente enquanto ela
   // não acontece, pra manter o feedback visual; depois disso "Executar" já libera direto
-  if (a.categoria === 'online') {
+  if (ehAtendimentoOnline(a)) {
     if (a.status !== 'concluida' && !a.confirmado_cliente_em) {
       return `<span class="tag" style="background:var(--line); color:var(--ink-soft); margin-right:6px;">Aguardando confirmação do cliente</span>`;
     }
@@ -9015,9 +9020,9 @@ function acoesOSCalendarioTecnico(a, visita) {
   }
   if (a.status !== 'concluida') {
     let botaoExec = '';
-    // categoria 'online' não tem deslocamento/chegada — libera "Executar" assim que o cliente
-    // confirma o agendamento, sem passar pelas etapas de viagem
-    if (a.categoria === 'online') {
+    // treinamento online/atendimento não tem deslocamento/chegada — libera "Executar" assim
+    // que o cliente confirma o agendamento, sem passar pelas etapas de viagem
+    if (ehAtendimentoOnline(a)) {
       if (a.confirmado_cliente_em) botaoExec = `<button class="btn btn-primary btn-sm" onclick="abrirDiario(${a.id})">Executar</button>`;
     } else if (a.deslocamento_iniciado_em && !a.chegada_confirmada_em) {
       botaoExec = `<button class="btn-outline-sm" onclick="confirmarChegada(${a.id})" style="margin-right:6px;">📍 Registrar chegada</button>`;
