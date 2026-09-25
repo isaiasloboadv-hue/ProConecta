@@ -18,7 +18,7 @@ function t(chave, padrao) {
   return (USER && USER.terminologia && USER.terminologia[chave]) || padrao;
 }
 
-const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque' };
+const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
 // Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
 const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda' };
@@ -588,6 +588,11 @@ const NAV = {
   estoque: [
     { key: 'fila-estoque', modulo: 'os_chamados', label: 'Estoque', page: 'fila-estoque' },
   ],
+  // super_admin não pertence a nenhuma empresa (não tem modulos_ativos) — item sem `modulo`
+  // passa direto pelo filtro de módulo do menu (moduloAtivoNoMenu trata ausência como núcleo).
+  super_admin: [
+    { key: 'painel-plataforma', label: 'Plataforma', page: 'painel-plataforma' },
+  ],
 };
 
 // ícone de cada item de topo do menu lateral (só o nível principal — os submenus continuam sem
@@ -739,8 +744,95 @@ async function ir(pagina) {
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
+    if (pagina === 'painel-plataforma') return renderPainelPlataforma();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
+  }
+}
+
+// ---------- painel da plataforma (Super Admin) ----------
+// funcional, sem estilo refinado — lista empresas, cria empresa nova (nome + versão), liga/desliga
+// módulo avulso por checkbox e edita terminologia (por enquanto só a chave "equipamento", a mesma
+// que o resto do sistema já lê via t() — ver public/app.js no topo do arquivo).
+
+let _plataformaModulosCache = [];
+let _plataformaVersoesCache = [];
+
+async function renderPainelPlataforma() {
+  const [{ empresas }, { modulos }, { versoes }] = await Promise.all([
+    api('/api/plataforma/empresas'), api('/api/plataforma/modulos'), api('/api/plataforma/versoes'),
+  ]);
+  _plataformaModulosCache = modulos;
+  _plataformaVersoesCache = versoes;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Plataforma</h1><p>${empresas.length} empresa(s) cadastrada(s).</p></div>
+    <div class="panel">
+      <div class="panel-head">Nova empresa</div>
+      <div class="form-grid">
+        <div><label>Nome*</label><input id="pe-nome" placeholder="Nome da empresa cliente"></div>
+        <div><label>Versão</label><select id="pe-versao">
+          <option value="">Nenhuma (sem módulo nenhum ativo)</option>
+          ${versoes.map((v) => `<option value="${v.id}">${esc(v.nome)} (${v.modulos.map(esc).join(', ')})</option>`).join('')}
+        </select></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarEmpresaPlataforma()">Cadastrar empresa</button>
+    </div>
+    <div id="pe-lista">${renderListaEmpresasPlataforma(empresas)}</div>`;
+}
+
+function renderListaEmpresasPlataforma(empresas) {
+  return empresas.map((e) => `
+    <div class="panel">
+      <div class="panel-head">${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''}</div>
+      <h2 style="margin-top:0;">Módulos ativos</h2>
+      <div class="form-grid">
+        ${_plataformaModulosCache.map((m) => `
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+            <input type="checkbox" data-empresa="${e.id}" data-chave="${m.chave}" ${(e.modulos_ativos || []).includes(m.chave) ? 'checked' : ''}>
+            ${esc(m.nome)}
+          </label>`).join('')}
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarModulosPlataforma(${e.id})">Salvar módulos</button>
+      <h2>Terminologia</h2>
+      <div class="form-grid">
+        <div><label>Termo pra "Equipamento"</label><input id="pe-term-equipamento-${e.id}" value="${esc((e.terminologia || {}).equipamento || '')}" placeholder="Equipamento"></div>
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarTerminologiaPlataforma(${e.id})">Salvar terminologia</button>
+    </div>`).join('');
+}
+
+async function criarEmpresaPlataforma() {
+  const nome = document.getElementById('pe-nome').value.trim();
+  if (!nome) return mostrarToast('Informe o nome da empresa.');
+  const versaoId = document.getElementById('pe-versao').value;
+  try {
+    await api('/api/plataforma/empresas', { method: 'POST', body: { nome, versao_id: versaoId || null } });
+    mostrarToast('Empresa cadastrada.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarModulosPlataforma(empresaId) {
+  const checks = document.querySelectorAll(`input[type="checkbox"][data-empresa="${empresaId}"]`);
+  const modulos = [...checks].filter((c) => c.checked).map((c) => c.dataset.chave);
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}/modulos`, { method: 'PUT', body: { modulos } });
+    mostrarToast('Módulos atualizados.');
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarTerminologiaPlataforma(empresaId) {
+  const equipamento = document.getElementById(`pe-term-equipamento-${empresaId}`).value.trim();
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}/terminologia`, { method: 'PUT', body: { terminologia: { equipamento } } });
+    mostrarToast('Terminologia atualizada.');
+  } catch (e) {
+    mostrarToast(e.message);
   }
 }
 

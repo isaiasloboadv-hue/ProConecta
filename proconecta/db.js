@@ -76,7 +76,9 @@ function seed() {
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
     versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, versoes: 2 },
+    // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
+    // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -149,6 +151,27 @@ function protegerAdminMaster(data) {
   master.protegido = true;
 }
 
+// dono da plataforma (não pertence a nenhuma empresa — empresa_id fica null de propósito, pra
+// nunca ser confundido com a empresa 1 nem entrar em nenhum tenant.listar/buscar). Mesmo padrão
+// de bootstrap do ADMIN_EMAIL/ADMIN_SENHA, com variáveis próprias — assim dá pra ter os dois tipos
+// de conta master ativos ao mesmo tempo (o admin da PRO Marking e o super admin da plataforma).
+function bootstrapSuperAdmin(data) {
+  const email = process.env.SUPERADMIN_EMAIL;
+  const senha = process.env.SUPERADMIN_SENHA;
+  if (!email || !senha) return false;
+  if (data.usuarios.some((u) => u.email === email)) return false;
+  const { salt, hash } = hashSenha(senha);
+  data.usuarios.push({
+    id: nextId(data, 'usuarios'),
+    nome: 'Super Admin', email, papel: 'super_admin', empresa_id: null,
+    cargo: '', setor: '', celular: '', cliente_id: null,
+    status: 'ativo', convite_token: null, salt, hash,
+    protegido: true,
+  });
+  console.log(`[db] Conta de super admin criada automaticamente: ${email}`);
+  return true;
+}
+
 // migração leve: bancos criados antes destes campos existirem ganham valores padrão.
 // Roda uma vez ao carregar (seja do arquivo ou do Postgres) — mutila e devolve o mesmo objeto.
 function migrar(data) {
@@ -170,6 +193,9 @@ function migrar(data) {
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
   if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];
   if (!data._seq.versoes) data._seq.versoes = 2;
+  // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
+  // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
+  if (!data._seq.empresas) data._seq.empresas = 2;
   sincronizarEmpresaPadrao(data);
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
@@ -354,12 +380,14 @@ function carregarDoArquivo() {
   if (!fs.existsSync(DB_PATH)) {
     const data = seed();
     bootstrapAdminMaster(data);
+    bootstrapSuperAdmin(data);
     sincronizarEmpresaPadrao(data);
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
     return data;
   }
   const data = migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
-  if (bootstrapAdminMaster(data)) salvarNoArquivo(data);
+  const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
+  if (criouAlguem) salvarNoArquivo(data);
   return data;
 }
 
@@ -399,12 +427,14 @@ async function inicializarPostgres() {
   if (r.rows.length === 0) {
     const data = seed();
     bootstrapAdminMaster(data);
+    bootstrapSuperAdmin(data);
     sincronizarEmpresaPadrao(data);
     await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
     cache = data;
   } else {
     const data = migrar(r.rows[0].data);
-    if (bootstrapAdminMaster(data)) {
+    const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
+    if (criouAlguem) {
       await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);
     }
     cache = data;

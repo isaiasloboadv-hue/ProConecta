@@ -3518,6 +3518,97 @@ rota('GET', /^\/api\/admin\/diagnostico-memoria$/, async (req, res) => {
   });
 });
 
+// ---------- painel da plataforma (Super Admin) ----------
+// papel `super_admin` é o dono da plataforma, não de uma empresa — não tem empresa_id (fica null
+// de propósito, ver bootstrapSuperAdmin em db.js) e nunca passa pelas coleções tenant-scoped.
+// Essas rotas ficam de fora da checagem de módulo (não têm prefixo em rotas-modulo.js, então caem
+// no padrão 'nucleo': exige login, mas não módulo ativo) — a única checagem de acesso real é o
+// papel, feita aqui dentro, do mesmo jeito que qualquer outra rota admin-only já faz com
+// exigirPapel.
+
+// GET /api/plataforma/modulos — catálogo fixo de módulos que o sistema sabe suportar
+rota('GET', /^\/api\/plataforma\/modulos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  enviarJSON(res, 200, { modulos: db.MODULOS_DISPONIVEIS });
+});
+
+// GET /api/plataforma/versoes — pacotes prontos de módulos (ex.: "Manutenção")
+rota('GET', /^\/api\/plataforma\/versoes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const data = db.load();
+  enviarJSON(res, 200, { versoes: data.versoes });
+});
+
+// GET /api/plataforma/empresas — todas as empresas cadastradas na plataforma
+rota('GET', /^\/api\/plataforma\/empresas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const data = db.load();
+  enviarJSON(res, 200, { empresas: data.empresas });
+});
+
+// POST /api/plataforma/empresas — cadastra uma empresa nova, já com os módulos da versão escolhida
+rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  const data = db.load();
+  const versao = body.versao_id ? data.versoes.find((v) => v.id === Number(body.versao_id)) : null;
+  if (body.versao_id && !versao) return enviarJSON(res, 400, { erro: 'Versão não encontrada.' });
+  const empresa = {
+    id: nextId(data, 'empresas'),
+    nome: String(body.nome).trim(),
+    site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
+    emails: Array.isArray(body.emails) ? body.emails : [],
+    cor_primaria: body.cor_primaria || '#0A2647', cor_secundaria: body.cor_secundaria || '#0E7C86',
+    versao_id: versao ? versao.id : null,
+    modulos_ativos: versao ? [...versao.modulos] : [],
+    terminologia: {},
+  };
+  data.empresas.push(empresa);
+  db.save(data);
+  enviarJSON(res, 201, { empresa });
+});
+
+// PUT /api/plataforma/empresas/:id/modulos — liga/desliga módulos avulsos, independente da versão
+// original (body.modulos = array final de chaves ativas — o painel manda a lista já resolvida)
+rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/modulos$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!Array.isArray(body.modulos)) return enviarJSON(res, 400, { erro: 'Informe a lista de módulos.' });
+  const invalido = body.modulos.find((chave) => !db.CHAVES_MODULOS.includes(chave));
+  if (invalido) return enviarJSON(res, 400, { erro: `Módulo desconhecido: ${invalido}` });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === Number(m[1]));
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  empresa.modulos_ativos = [...new Set(body.modulos)];
+  db.save(data);
+  enviarJSON(res, 200, { empresa });
+});
+
+// PUT /api/plataforma/empresas/:id/terminologia — troca os termos padrão do sistema pelos que a
+// empresa escolher (ex.: { equipamento: 'Paciente' }); chave ausente/vazia volta a usar o padrão.
+rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/terminologia$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!body.terminologia || typeof body.terminologia !== 'object') return enviarJSON(res, 400, { erro: 'Informe a terminologia.' });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === Number(m[1]));
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  const limpa = {};
+  for (const [chave, valor] of Object.entries(body.terminologia)) {
+    if (String(valor || '').trim()) limpa[chave] = String(valor).trim();
+  }
+  empresa.terminologia = limpa;
+  db.save(data);
+  enviarJSON(res, 200, { empresa });
+});
+
 // ---------- assistente de suporte via WhatsApp (opcional) ----------
 // só funciona se as variáveis de ambiente estiverem configuradas (WHATSAPP_TOKEN,
 // WHATSAPP_PHONE_ID, WHATSAPP_VERIFY_TOKEN, ANTHROPIC_API_KEY) — ver whatsapp.js
