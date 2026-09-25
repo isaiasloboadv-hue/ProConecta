@@ -173,7 +173,7 @@ function migrar(data) {
   sincronizarEmpresaPadrao(data);
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
-  for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao]) {
+  for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao, data.solicitacoes_rh, data.mensagens_internas]) {
     for (const item of lista) {
       if (item.empresa_id === undefined) item.empresa_id = 1;
     }

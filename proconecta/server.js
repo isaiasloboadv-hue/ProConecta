@@ -84,7 +84,7 @@ const PAPEIS_CHAT_INTERNO = ['suporte', 'administrador', 'producao', 'pos_venda'
 // papel — o filtro dos demais menus acontece no sidebar do front, ver navDoUsuario em app.js).
 function temAcessoMenu(data, user, chave) {
   if (!user) return false;
-  const completo = data.usuarios.find((u) => u.id === user.id) || user;
+  const completo = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
   if (completo.papel !== 'suporte') return true;
   if (completo.acesso_total !== false) return true;
   return Array.isArray(completo.menus) && completo.menus.includes(chave);
@@ -130,9 +130,9 @@ function contarViagensBonusMes(data, empresaId, tecnicoId, dataIso, excluirId) {
 
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
 function agendaComDetalhes(data, item) {
-  const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
-  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
-  const equipamento = data.equipamentos.find((e) => e.id === item.equipamento_id);
+  const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id && u.empresa_id === item.empresa_id);
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
+  const equipamento = data.equipamentos.find((e) => e.id === item.equipamento_id && e.empresa_id === item.empresa_id);
   const visita = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && (v.rodada || 1) === 1);
   const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && v.rodada === 2);
   const osCriada = item.os_criada_id ? tenant.buscar(data, 'agenda', item.os_criada_id, item.empresa_id) : null;
@@ -265,7 +265,7 @@ async function verificarLembretesDeslocamento() {
       if (!item.data_hora_inicio || !item.data_hora_inicio.startsWith(hojeISO)) continue;
       const horario = horarioBrasiliaParaData(item.data_hora_inicio);
       if (!horario || agora < horario) continue; // só lembra a partir do horário marcado
-      const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+      const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
       await enviarPush(data, item.tecnico_id, {
         titulo: 'Atendimento hoje',
         corpo: `Não esqueça: ${cliente ? cliente.nome_empresa : 'seu atendimento'} hoje (${fmtDataHoraCurta(item.data_hora_inicio)}). Toque pra marcar "Iniciar deslocamento".`,
@@ -334,10 +334,10 @@ function slaDoBody(body, equipamento) {
 // dados do atendimento definidos pelo administrador na abertura da OS — o técnico só visualiza,
 // nunca são aceitos a partir do que o técnico envia (mesmo que ele tente via chamada direta à API)
 function dadosAtendimentoBloqueados(data, agendaItem, user) {
-  const cliente = data.clientes.find((c) => c.id === agendaItem.cliente_id);
-  const equipamento = data.equipamentos.find((e) => e.id === agendaItem.equipamento_id);
+  const cliente = data.clientes.find((c) => c.id === agendaItem.cliente_id && c.empresa_id === agendaItem.empresa_id);
+  const equipamento = data.equipamentos.find((e) => e.id === agendaItem.equipamento_id && e.empresa_id === agendaItem.empresa_id);
   // o token de sessão só carrega id/papel/nome/cliente_id — o e-mail vem do cadastro completo
-  const usuarioCompleto = data.usuarios.find((u) => u.id === user.id);
+  const usuarioCompleto = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
   return {
     empresa: cliente ? cliente.nome_empresa : '',
     contato: agendaItem.contato || (cliente ? cliente.contato : ''),
@@ -532,7 +532,7 @@ function usuarioPublico(u) {
 }
 
 function registroComAutor(data, r) {
-  const autor = data.usuarios.find((u) => u.id === r.autor_id);
+  const autor = data.usuarios.find((u) => u.id === r.autor_id && u.empresa_id === r.empresa_id);
   return { ...r, autor_nome: autor ? autor.nome : null };
 }
 
@@ -678,7 +678,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
   }
   const data = db.load();
-  const equipamentoEscolhido = data.equipamentos.find((e) => e.id === Number(body.equipamento_id));
+  const equipamentoEscolhido = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
@@ -743,7 +743,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   });
   if (!item.numero_os) item.numero_os = `OS-${String(item.id).padStart(6, '0')}`;
   db.save(data);
-  const clienteNovaOS = data.clientes.find((c) => c.id === item.cliente_id);
+  const clienteNovaOS = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
   enviarPush(data, item.tecnico_id, {
     titulo: 'Nova O.S. atribuída',
     corpo: `${clienteNovaOS ? clienteNovaOS.nome_empresa : 'Novo atendimento'} — ${fmtDataHoraCurta(item.data_hora_inicio)}.`,
@@ -770,7 +770,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && body.garantia === 'na' && !String(body.garantia_obs || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
   }
-  const equipamentoEscolhido = data.equipamentos.find((e) => e.id === Number(body.equipamento_id));
+  const equipamentoEscolhido = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
@@ -839,7 +839,7 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
       passou_limite: viagens.length > LIMITE_VIAGENS_BONUS_MES,
       viagens: viagens.map((a) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
-        cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id) || {}).nome_empresa || '—',
+        cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || '—',
         data_hora_inicio: a.data_hora_inicio,
         justificativa_limite_viagens: a.justificativa_limite_viagens || '',
       })),
@@ -867,9 +867,7 @@ rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
   }
   if (!String(body.motivo || '').trim()) return enviarJSON(res, 400, { erro: 'Descreva o motivo do pedido.' });
   const data = db.load();
-  const item = {
-    id: nextId(data, 'solicitacoes_rh'),
-    empresa_id: 1,
+  const item = tenant.criar(data, 'solicitacoes_rh', user.empresa_id, {
     tecnico_id: user.id,
     tipo: body.tipo,
     data_inicio: body.data_inicio,
@@ -883,10 +881,9 @@ rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
     criado_em: new Date().toISOString(),
     resolvido_em: null,
     resolvido_por: null,
-  };
-  data.solicitacoes_rh.push(item);
+  });
   db.save(data);
-  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
   await Promise.all(admins.map((a) => enviarPush(data, a.id, {
     titulo: 'Nova solicitação de técnico',
     corpo: `${user.nome} pediu ${LABEL_SOLICITACAO_RH[body.tipo]}.`,
@@ -902,12 +899,13 @@ rota('GET', /^\/api\/solicitacoes-rh$/, async (req, res) => {
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
-  let lista = user.papel === 'suporte' ? data.solicitacoes_rh.filter((s) => s.tecnico_id === user.id) : data.solicitacoes_rh.slice();
+  const solicitacoesDaEmpresa = tenant.listar(data, 'solicitacoes_rh', user.empresa_id);
+  let lista = user.papel === 'suporte' ? solicitacoesDaEmpresa.filter((s) => s.tecnico_id === user.id) : solicitacoesDaEmpresa.slice();
   if (query.tipo) lista = lista.filter((s) => s.tipo === query.tipo);
   if (query.status) lista = lista.filter((s) => s.status === query.status);
   lista = lista
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
-    .map((s) => ({ ...s, tecnico_nome: (data.usuarios.find((u) => u.id === s.tecnico_id) || {}).nome || '—' }));
+    .map((s) => ({ ...s, tecnico_nome: (data.usuarios.find((u) => u.id === s.tecnico_id && u.empresa_id === user.empresa_id) || {}).nome || '—' }));
   enviarJSON(res, 200, { solicitacoes: lista });
 });
 
@@ -918,7 +916,7 @@ rota('POST', /^\/api\/solicitacoes-rh\/(\d+)\/decidir$/, async (req, res, m) => 
   const body = await lerCorpo(req);
   if (!['aprovado', 'reprovado'].includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
   const data = db.load();
-  const item = data.solicitacoes_rh.find((s) => s.id === Number(m[1]));
+  const item = tenant.buscar(data, 'solicitacoes_rh', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
   if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Esta solicitação já foi decidida.' });
   item.status = body.status;
@@ -940,7 +938,7 @@ rota('POST', /^\/api\/solicitacoes-rh\/(\d+)\/marcar-lida$/, async (req, res, m)
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const item = data.solicitacoes_rh.find((s) => s.id === Number(m[1]) && s.tecnico_id === user.id);
+  const item = data.solicitacoes_rh.find((s) => s.id === Number(m[1]) && s.tecnico_id === user.id && s.empresa_id === user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
   item.lida_tecnico = true;
   db.save(data);
@@ -952,10 +950,10 @@ rota('DELETE', /^\/api\/solicitacoes-rh\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const data = db.load();
-  const idx = data.solicitacoes_rh.findIndex((s) => s.id === Number(m[1]) && s.tecnico_id === user.id);
-  if (idx === -1) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
-  if (data.solicitacoes_rh[idx].status !== 'pendente') return enviarJSON(res, 400, { erro: 'Só é possível cancelar um pedido ainda pendente.' });
-  data.solicitacoes_rh.splice(idx, 1);
+  const solicitacaoExcluir = data.solicitacoes_rh.find((s) => s.id === Number(m[1]) && s.tecnico_id === user.id && s.empresa_id === user.empresa_id);
+  if (!solicitacaoExcluir) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (solicitacaoExcluir.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Só é possível cancelar um pedido ainda pendente.' });
+  data.solicitacoes_rh = data.solicitacoes_rh.filter((s) => s.id !== solicitacaoExcluir.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
@@ -1122,7 +1120,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   item.finalizado_em = agora;
   await encerrarChamadoDaOS(data, item);
   db.save(data);
-  const clienteFinal = data.clientes.find((c) => c.id === item.cliente_id);
+  const clienteFinal = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
   enviarPush(data, item.tecnico_id, {
     titulo: 'Serviço confirmado pelo cliente',
     corpo: `${clienteFinal ? clienteFinal.nome_empresa : 'O atendimento'} confirmou e a O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')} foi finalizada.`,
@@ -1205,8 +1203,8 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
     item.deslocamento_iniciado_em = new Date().toISOString();
   }
   db.save(data);
-  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
-  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
+  const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
   admins.forEach((admin) => {
     enviarPush(data, admin.id, {
       titulo: 'Técnico a caminho',
@@ -1232,7 +1230,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada$/, async (req, res, m) =>
   if (item.chegada_confirmada_em) return enviarJSON(res, 400, { erro: 'A chegada já foi registrada.' });
   item.chegada_confirmada_em = new Date().toISOString();
   db.save(data);
-  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
   admins.forEach((admin) => {
     enviarPush(data, admin.id, {
       titulo: 'Técnico chegou',
@@ -1282,7 +1280,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retorno\/confirmar-chegada$/, async (req, r
   if (item.retorno_chegada_confirmada_em) return enviarJSON(res, 400, { erro: 'A chegada já foi registrada.' });
   item.retorno_chegada_confirmada_em = new Date().toISOString();
   db.save(data);
-  const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+  const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
   admins.forEach((admin) => {
     enviarPush(data, admin.id, {
       titulo: 'Técnico chegou (retorno)',
@@ -1326,7 +1324,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     if (agendaItem.fase_atendimento === 'em_diagnostico_reparo') {
       agendaItem.fase_atendimento = 'aguardando_pos_venda';
       db.save(data);
-      const posVendas = data.usuarios.filter((u) => u.papel === 'pos_venda');
+      const posVendas = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'pos_venda');
       await Promise.all(posVendas.map((pv) => enviarPush(data, pv.id, {
         titulo: 'Diagnóstico pronto — enviar orçamento',
         corpo: `${agendaItem.numero_os || 'OS-' + String(agendaItem.id).padStart(6, '0')} está de volta pro pós-venda.`,
@@ -1337,7 +1335,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
       agendaItem.equipamento_liberado_reparo_em = agora;
       agendaItem.fase_atendimento = 'aguardando_saida_estoque';
       db.save(data);
-      const estoques = data.usuarios.filter((u) => u.papel === 'estoque');
+      const estoques = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'estoque');
       await Promise.all(estoques.map((e) => enviarPush(data, e.id, {
         titulo: 'Equipamento liberado — confirmar saída',
         corpo: `${agendaItem.numero_os || 'OS-' + String(agendaItem.id).padStart(6, '0')} pronto pra devolução ao cliente.`,
@@ -1412,7 +1410,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     visitaRetorno.data_aprovacao = new Date().toISOString();
     agendaItem.retorno_pendente_tecnico = false;
     db.save(data);
-    const adminsRetorno = data.usuarios.filter((u) => u.papel === 'administrador');
+    const adminsRetorno = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
     adminsRetorno.forEach((admin) => {
       enviarPush(data, admin.id, {
         titulo: 'Relatório de retorno enviado',
@@ -1435,9 +1433,9 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   // marcado como relevante: entra na fila de aprovação da Biblioteca de Defeitos/Falhas assim que o
   // técnico envia o relatório — o administrador vê na tela de Biblioteca > Aprovação e no sino, sem
   // depender de já ter aprovado a O.S. em si
-  const registroExistente = data.registros.find((r) => r.origem === 'visita' && r.visita_id === visita.id);
+  const registroExistente = data.registros.find((r) => r.origem === 'visita' && r.visita_id === visita.id && r.empresa_id === visita.empresa_id);
   if (camposVisita.relevante_biblioteca) {
-    const eq = data.equipamentos.find((e) => e.id === visita.equipamento_id);
+    const eq = data.equipamentos.find((e) => e.id === visita.equipamento_id && e.empresa_id === visita.empresa_id);
     const titulo = agendaItem.problema || 'Caso técnico';
     const campos = {
       titulo,
@@ -1453,9 +1451,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     if (registroExistente) {
       Object.assign(registroExistente, campos);
     } else {
-      data.registros.push({
-        id: nextId(data, 'registros'),
-        empresa_id: 1,
+      tenant.criar(data, 'registros', visita.empresa_id, {
         tipo: 'defeito',
         origem: 'visita',
         visita_id: visita.id,
@@ -1516,8 +1512,8 @@ rota('GET', /^\/api\/visitas$/, async (req, res) => {
   if (user.papel === 'suporte' && query.todas !== '1') lista = lista.filter((v) => v.tecnico_id === user.id);
   if (query.status) lista = lista.filter((v) => v.status_aprovacao === query.status);
   lista = lista.map((v) => {
-    const eq = data.equipamentos.find((e) => e.id === v.equipamento_id);
-    const tec = data.usuarios.find((u) => u.id === v.tecnico_id);
+    const eq = data.equipamentos.find((e) => e.id === v.equipamento_id && e.empresa_id === v.empresa_id);
+    const tec = data.usuarios.find((u) => u.id === v.tecnico_id && u.empresa_id === v.empresa_id);
     return { ...v, equipamento_tipo: eq ? eq.tipo : null, tecnico_nome: tec ? tec.nome : null };
   });
   enviarJSON(res, 200, { visitas: lista });
@@ -1541,7 +1537,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/aprovar$/, async (req, res, m) => {
   // próprio fluxo de aprovação em Biblioteca > Aprovação, independente da aprovação da O.S. em si;
   // "incluir_biblioteca" deixa o administrador aprovar os dois de uma vez só.
   if (body.incluir_biblioteca) {
-    const registro = data.registros.find((r) => r.origem === 'visita' && r.visita_id === visita.id);
+    const registro = data.registros.find((r) => r.origem === 'visita' && r.visita_id === visita.id && r.empresa_id === visita.empresa_id);
     if (registro) {
       registro.status = 'aprovado';
       registro.comentario_admin = null;
@@ -1708,7 +1704,7 @@ rota('GET', /^\/api\/registros$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
-  let lista = data.registros.filter((r) => r.status === 'aprovado');
+  let lista = tenant.listar(data, 'registros', user.empresa_id).filter((r) => r.status === 'aprovado');
   if (query.tipo) lista = lista.filter((r) => r.tipo === query.tipo);
   if (query.equipamento) {
     const eq = query.equipamento.toLowerCase();
@@ -1732,7 +1728,7 @@ rota('GET', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   enviarJSON(res, 200, { registro: await hidratarFotosProfundo(registroComAutor(data, registro)) });
 });
@@ -1742,7 +1738,7 @@ rota('GET', /^\/api\/registros\/meus$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const lista = data.registros
+  const lista = tenant.listar(data, 'registros', user.empresa_id)
     .filter((r) => r.autor_id === user.id)
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
   enviarJSON(res, 200, { registros: await hidratarFotosProfundo(lista) });
@@ -1754,7 +1750,7 @@ rota('GET', /^\/api\/registros\/ranking$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
   const contagem = new Map();
-  for (const r of data.registros) {
+  for (const r of tenant.listar(data, 'registros', user.empresa_id)) {
     if (r.status !== 'aprovado') continue;
     const atual = contagem.get(r.autor_id) || { total: 0, defeitos: 0, procedimentos: 0 };
     atual.total += 1;
@@ -1762,7 +1758,7 @@ rota('GET', /^\/api\/registros\/ranking$/, async (req, res) => {
     contagem.set(r.autor_id, atual);
   }
   const ranking = [...contagem.entries()].map(([autor_id, c]) => {
-    const autor = data.usuarios.find((u) => u.id === autor_id);
+    const autor = data.usuarios.find((u) => u.id === autor_id && u.empresa_id === user.empresa_id);
     return { autor_id, autor_nome: autor ? autor.nome : 'Ex-usuário', ...c };
   }).sort((a, b) => b.total - a.total);
   enviarJSON(res, 200, { ranking });
@@ -1773,7 +1769,7 @@ rota('GET', /^\/api\/registros\/fila$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acessa a fila de aprovação.' });
   const data = db.load();
-  const lista = data.registros
+  const lista = tenant.listar(data, 'registros', user.empresa_id)
     .filter((r) => r.status === 'em_analise')
     .map((r) => registroComAutor(data, r))
     .sort((a, b) => (a.criado_em || '').localeCompare(b.criado_em || ''));
@@ -1788,9 +1784,7 @@ rota('POST', /^\/api\/registros$/, async (req, res) => {
   const erro = validarRegistro(body);
   if (erro) return enviarJSON(res, 400, { erro });
   const data = db.load();
-  const item = {
-    id: nextId(data, 'registros'),
-    empresa_id: 1,
+  const item = tenant.criar(data, 'registros', user.empresa_id, {
     tipo: body.tipo,
     origem: 'manual',
     autor_id: user.id,
@@ -1801,8 +1795,7 @@ rota('POST', /^\/api\/registros$/, async (req, res) => {
     aprovado_por: null,
     data_aprovacao: null,
     criado_em: new Date().toISOString(),
-  };
-  data.registros.push(item);
+  });
   db.save(data);
   enviarJSON(res, 201, { registro: item });
 });
@@ -1813,7 +1806,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/reenviar$/, async (req, res, m) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   if (registro.autor_id !== user.id) return enviarJSON(res, 403, { erro: 'Este registro não é seu.' });
   if (registro.status !== 'alteracao_sugerida') return enviarJSON(res, 400, { erro: 'Só é possível reenviar um registro com alteração sugerida.' });
@@ -1830,7 +1823,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/aprovar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador aprova.' });
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   registro.status = 'aprovado';
   registro.comentario_admin = null;
@@ -1847,7 +1840,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/sugerir-alteracao$/, async (req, res, m)
   const body = await lerCorpo(req);
   if (!body.comentario || !body.comentario.trim()) return enviarJSON(res, 400, { erro: 'O comentário é obrigatório ao sugerir uma alteração.' });
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   registro.status = 'alteracao_sugerida';
   registro.comentario_admin = body.comentario;
@@ -1863,7 +1856,7 @@ rota('PUT', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita diretamente.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   const erro = validarRegistro({ ...registro, ...body, tipo: registro.tipo });
   if (erro) return enviarJSON(res, 400, { erro });
@@ -1883,7 +1876,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/solicitar-edicao$/, async (req, res, m) 
   const body = await lerCorpo(req);
   if (!body.comentario || !body.comentario.trim()) return enviarJSON(res, 400, { erro: 'Descreva o que precisa ser corrigido.' });
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   registro.solicitacao_edicao = { comentario: body.comentario, solicitante_id: user.id, solicitante_nome: user.nome, criado_em: new Date().toISOString() };
   db.save(data);
@@ -1895,7 +1888,7 @@ rota('GET', /^\/api\/registros\/solicitacoes-edicao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê as solicitações de edição.' });
   const data = db.load();
-  const lista = data.registros
+  const lista = tenant.listar(data, 'registros', user.empresa_id)
     .filter((r) => r.solicitacao_edicao)
     .map((r) => registroComAutor(data, r))
     .sort((a, b) => (b.solicitacao_edicao.criado_em || '').localeCompare(a.solicitacao_edicao.criado_em || ''));
@@ -1907,9 +1900,9 @@ rota('DELETE', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui registros.' });
   const data = db.load();
-  const idx = data.registros.findIndex((r) => r.id === Number(m[1]));
-  if (idx === -1) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
-  data.registros.splice(idx, 1);
+  const registroExcluir = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
+  if (!registroExcluir) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  data.registros = data.registros.filter((r) => r.id !== registroExcluir.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
@@ -1919,7 +1912,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const registro = data.registros.find((r) => r.id === Number(m[1]));
+  const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
   if (registro.autor_id !== user.id) return enviarJSON(res, 403, { erro: 'Este registro não é seu.' });
   registro.lida = true;
@@ -1978,7 +1971,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
   const data = db.load();
   let notificacoes = [];
   if (user.papel === 'suporte' || user.papel === 'producao') {
-    notificacoes = data.registros
+    notificacoes = tenant.listar(data, 'registros', user.empresa_id)
       .filter((r) => r.autor_id === user.id && r.status === 'alteracao_sugerida' && !r.lida)
       .map((r) => ({ id: r.id, tipo: 'alteracao_sugerida', texto: `Alteração sugerida em "${r.titulo}"`, registro_id: r.id }));
     notificacoes = notificacoes.concat(
@@ -1998,7 +1991,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       tenant.listar(data, 'agenda', user.empresa_id)
         .filter((a) => a.tecnico_id === user.id && !a.lida_tecnico)
         .map((a) => {
-          const cliente = data.clientes.find((c) => c.id === a.cliente_id);
+          const cliente = data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id);
           return { id: a.id, tipo: 'os_atribuida', texto: `Nova Ordem de Serviço atribuída a você${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: a.id };
         })
     );
@@ -2007,7 +2000,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
         tenant.listar(data, 'chamados', user.empresa_id)
           .filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id)
           .map((c) => {
-            const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
+            const cliente = data.clientes.find((cl) => cl.id === c.cliente_id && cl.empresa_id === c.empresa_id);
             return { id: c.id, tipo: 'chamado_fila', texto: `Atendimento aguardando técnico${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: c.id };
           })
       );
@@ -2015,13 +2008,13 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
         tenant.listar(data, 'chamados', user.empresa_id)
           .filter((c) => c.tecnico_id === user.id && !c.lida_tecnico)
           .map((c) => {
-            const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
+            const cliente = data.clientes.find((cl) => cl.id === c.cliente_id && cl.empresa_id === c.empresa_id);
             return { id: c.id, tipo: 'chamado_mensagem', texto: `Nova mensagem no atendimento${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: c.id };
           })
       );
     }
     notificacoes = notificacoes.concat(
-      data.solicitacoes_rh
+      tenant.listar(data, 'solicitacoes_rh', user.empresa_id)
         .filter((s) => s.tecnico_id === user.id && s.status !== 'pendente' && !s.lida_tecnico)
         .map((s) => ({ id: s.id, tipo: 'solicitacao_rh_decidida', texto: `Seu pedido de ${LABEL_SOLICITACAO_RH[s.tipo]} foi ${s.status}${s.resposta_admin ? ': ' + s.resposta_admin : '.'}`, registro_id: s.id }))
     );
@@ -2030,27 +2023,27 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       .filter((c) => c.cliente_id === user.cliente_id && !c.lida_cliente)
       .map((c) => ({ id: c.id, tipo: 'chamado_mensagem_cliente', texto: 'Nova mensagem no seu atendimento', registro_id: c.id }));
   } else if (user.papel === 'administrador') {
-    notificacoes = data.registros
+    notificacoes = tenant.listar(data, 'registros', user.empresa_id)
       .filter((r) => r.status === 'em_analise')
       .map((r) => ({ id: r.id, tipo: 'aprovacao_pendente', texto: `"${r.titulo}" aguardando aprovação`, registro_id: r.id }));
     notificacoes = notificacoes.concat(
       tenant.listar(data, 'visitas', user.empresa_id)
         .filter((v) => v.status_aprovacao === 'pendente')
         .map((v) => {
-          const tecnico = data.usuarios.find((u) => u.id === v.tecnico_id);
+          const tecnico = data.usuarios.find((u) => u.id === v.tecnico_id && u.empresa_id === v.empresa_id);
           return { id: v.id, tipo: 'relatorio_pendente', texto: `Relatório de ${tecnico ? tecnico.nome : 'um técnico'} aguardando aprovação`, registro_id: v.id };
         })
     );
     notificacoes = notificacoes.concat(
-      data.registros
+      tenant.listar(data, 'registros', user.empresa_id)
         .filter((r) => r.solicitacao_edicao)
         .map((r) => ({ id: r.id, tipo: 'edicao_solicitada_biblioteca', texto: `${r.solicitacao_edicao.solicitante_nome} pediu uma edição no caso "${r.titulo}" da biblioteca`, registro_id: r.id }))
     );
     notificacoes = notificacoes.concat(
-      data.solicitacoes_rh
+      tenant.listar(data, 'solicitacoes_rh', user.empresa_id)
         .filter((s) => s.status === 'pendente')
         .map((s) => {
-          const tecnico = data.usuarios.find((u) => u.id === s.tecnico_id);
+          const tecnico = data.usuarios.find((u) => u.id === s.tecnico_id && u.empresa_id === user.empresa_id);
           return { id: s.id, tipo: 'solicitacao_rh_pendente', texto: `${tecnico ? tecnico.nome : 'Um técnico'} pediu ${LABEL_SOLICITACAO_RH[s.tipo]}`, registro_id: s.id };
         })
     );
@@ -2068,7 +2061,7 @@ rota('GET', /^\/api\/chat-interno\/contatos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, PAPEIS_CHAT_INTERNO)) return enviarJSON(res, 403, { erro: 'Só a equipe interna usa o chat interno.' });
   const data = db.load();
-  const outros = data.usuarios.filter((u) => u.papel !== 'cliente' && u.id !== user.id);
+  const outros = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel !== 'cliente' && u.id !== user.id);
   const contatos = await Promise.all(outros.map(async (u) => {
     const resumo = await db.resumoContatoInterno(user.id, u.id);
     return { id: u.id, nome: u.nome, papel: u.papel, departamento: u.departamento || null, ...resumo };
@@ -2084,7 +2077,7 @@ rota('GET', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
   if (!exigirPapel(user, PAPEIS_CHAT_INTERNO)) return enviarJSON(res, 403, { erro: 'Só a equipe interna usa o chat interno.' });
   const outroId = Number(m[1]);
   const data = db.load();
-  const outro = data.usuarios.find((u) => u.id === outroId);
+  const outro = data.usuarios.find((u) => u.id === outroId && u.empresa_id === user.empresa_id);
   if (!outro || outro.papel === 'cliente') return enviarJSON(res, 404, { erro: 'Contato não encontrado.' });
   const mensagens = await db.carregarMensagensInternas(user.id, outroId);
   await db.marcarMensagensInternasLidas(user.id, outroId);
@@ -2101,9 +2094,9 @@ rota('POST', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
   const texto = (body.texto || '').trim();
   if (!texto) return enviarJSON(res, 400, { erro: 'Escreva uma mensagem.' });
   const data = db.load();
-  const outro = data.usuarios.find((u) => u.id === outroId);
+  const outro = data.usuarios.find((u) => u.id === outroId && u.empresa_id === user.empresa_id);
   if (!outro || outro.papel === 'cliente') return enviarJSON(res, 404, { erro: 'Contato não encontrado.' });
-  const remetente = data.usuarios.find((u) => u.id === user.id);
+  const remetente = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
   const mensagem = await db.salvarMensagemInterna({ remetente_id: user.id, destinatario_id: outroId, texto });
   await enviarPush(data, outroId, {
     titulo: `Mensagem de ${remetente ? remetente.nome : 'alguém'}`,
@@ -2128,7 +2121,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
-  const lista = data.relatorios_manutencao
+  const lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id)
     .filter((r) => r.autor_id === user.id)
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
     .map((r) => { const { fotos, ...resto } = r; return resto; });
@@ -2140,7 +2133,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
-  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
@@ -2228,10 +2221,8 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   }
   const data = db.load();
   // o token de login só carrega id/papel/nome — busca o cadastro completo pra pegar e-mail/cargo/setor
-  const autor = data.usuarios.find((u) => u.id === user.id);
-  const item = {
-    id: nextId(data, 'relatorios_manutencao'),
-    empresa_id: 1,
+  const autor = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
+  const item = tenant.criar(data, 'relatorios_manutencao', user.empresa_id, {
     tipo,
     autor_id: user.id,
     autor_nome: user.nome,
@@ -2312,8 +2303,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
     } : {}),
-  };
-  data.relatorios_manutencao.push(item);
+  });
   db.save(data);
   enviarJSON(res, 201, { relatorio: item });
 });
@@ -2325,7 +2315,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
-  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id);
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   if (item.tipo === 'ficha') {
@@ -2462,9 +2452,9 @@ rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
   const data = db.load();
-  const idx = data.relatorios_manutencao.findIndex((r) => r.id === Number(m[1]) && r.autor_id === user.id);
-  if (idx === -1) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
-  data.relatorios_manutencao.splice(idx, 1);
+  const relatorioExcluir = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
+  if (!relatorioExcluir) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
+  data.relatorios_manutencao = data.relatorios_manutencao.filter((r) => r.id !== relatorioExcluir.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
@@ -2474,7 +2464,7 @@ rota('GET', /^\/api\/clientes$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção veem clientes.' });
   const data = db.load();
-  enviarJSON(res, 200, { clientes: data.clientes });
+  enviarJSON(res, 200, { clientes: tenant.listar(data, 'clientes', user.empresa_id) });
 });
 
 // POST /api/clientes — administrador cadastra uma nova empresa-cliente
@@ -2486,9 +2476,7 @@ rota('POST', /^\/api\/clientes$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
   }
   const data = db.load();
-  const item = {
-    id: nextId(data, 'clientes'),
-    empresa_id: 1,
+  const item = tenant.criar(data, 'clientes', user.empresa_id, {
     nome_empresa: body.nome_empresa.trim(),
     contato: body.contato || '',
     telefone: body.telefone || '',
@@ -2501,8 +2489,7 @@ rota('POST', /^\/api\/clientes$/, async (req, res) => {
     cep: body.cep || '',
     cidade: body.cidade || '',
     estado: body.estado || '',
-  };
-  data.clientes.push(item);
+  });
   db.save(data);
   enviarJSON(res, 201, { cliente: item });
 });
@@ -2516,7 +2503,7 @@ rota('PUT', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
     return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
   }
   const data = db.load();
-  const cliente = data.clientes.find((c) => c.id === Number(m[1]));
+  const cliente = tenant.buscar(data, 'clientes', Number(m[1]), user.empresa_id);
   if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
   Object.assign(cliente, {
     nome_empresa: body.nome_empresa.trim(),
@@ -2534,11 +2521,11 @@ rota('DELETE', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui clientes.' });
   const data = db.load();
   const id = Number(m[1]);
-  const cliente = data.clientes.find((c) => c.id === id);
+  const cliente = tenant.buscar(data, 'clientes', id, user.empresa_id);
   if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
-  if (data.usuarios.some((u) => u.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem usuários vinculados a este cliente. Remova ou reatribua-os antes de excluir.' });
+  if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem usuários vinculados a este cliente. Remova ou reatribua-os antes de excluir.' });
   if (tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este cliente. Exclua-as antes.' });
-  if (data.equipamentos.some((e) => e.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem equipamentos atrelados a este cliente. Remova-os antes.' });
+  if (tenant.listar(data, 'equipamentos', user.empresa_id).some((e) => e.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem equipamentos atrelados a este cliente. Remova-os antes.' });
   data.clientes = data.clientes.filter((c) => c.id !== id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
@@ -2549,7 +2536,7 @@ rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  let lista = data.equipamentos;
+  let lista = tenant.listar(data, 'equipamentos', user.empresa_id);
   if (user.papel === 'cliente') lista = lista.filter((e) => e.cliente_id === user.cliente_id);
   enviarJSON(res, 200, { equipamentos: lista });
 });
@@ -2565,9 +2552,9 @@ rota('GET', /^\/api\/equipamentos\/buscar-por-serie$/, async (req, res) => {
   const serie = String(query.numero_serie || '').trim().toLowerCase();
   if (!serie) return enviarJSON(res, 400, { erro: 'Informe o número de série.' });
   const data = db.load();
-  const equipamento = data.equipamentos.find((e) => e.numero_serie && e.numero_serie.trim().toLowerCase() === serie);
+  const equipamento = tenant.listar(data, 'equipamentos', user.empresa_id).find((e) => e.numero_serie && e.numero_serie.trim().toLowerCase() === serie);
   if (!equipamento) return enviarJSON(res, 200, { equipamento: null, cliente: null });
-  const cliente = equipamento.cliente_id ? data.clientes.find((c) => c.id === equipamento.cliente_id) : null;
+  const cliente = equipamento.cliente_id ? data.clientes.find((c) => c.id === equipamento.cliente_id && c.empresa_id === user.empresa_id) : null;
   enviarJSON(res, 200, {
     equipamento: { id: equipamento.id, tipo: equipamento.tipo, modelo: equipamento.modelo, numero_serie: equipamento.numero_serie, data_fabricacao: equipamento.data_fabricacao },
     cliente: cliente ? {
@@ -2587,13 +2574,10 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Tipo e modelo são obrigatórios.' });
   }
   const data = db.load();
-  const item = {
-    id: nextId(data, 'equipamentos'),
-    empresa_id: 1,
+  const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: null,
     tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
-  };
-  data.equipamentos.push(item);
+  });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
 });
@@ -2605,7 +2589,7 @@ rota('PUT', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita equipamentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const equipamento = data.equipamentos.find((e) => e.id === Number(m[1]));
+  const equipamento = tenant.buscar(data, 'equipamentos', Number(m[1]), user.empresa_id);
   if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
   if (equipamento.cliente_id === null) {
     if (!body.tipo || !String(body.tipo).trim() || !body.modelo || !String(body.modelo).trim()) {
@@ -2631,7 +2615,7 @@ rota('DELETE', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui equipamentos.' });
   const data = db.load();
   const id = Number(m[1]);
-  const equipamento = data.equipamentos.find((e) => e.id === id);
+  const equipamento = tenant.buscar(data, 'equipamentos', id, user.empresa_id);
   if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
   if (tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.equipamento_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este equipamento. Exclua-as antes.' });
   data.equipamentos = data.equipamentos.filter((e) => e.id !== id);
@@ -2646,24 +2630,21 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção atrelam equipamentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const catalogo = data.equipamentos.find((e) => e.id === Number(m[1]) && e.cliente_id === null);
-  if (!catalogo) return enviarJSON(res, 404, { erro: 'Equipamento do catálogo não encontrado.' });
+  const catalogo = tenant.buscar(data, 'equipamentos', Number(m[1]), user.empresa_id);
+  if (!catalogo || catalogo.cliente_id !== null) return enviarJSON(res, 404, { erro: 'Equipamento do catálogo não encontrado.' });
   if (!body.cliente_id || !body.numero_serie || !String(body.numero_serie).trim()) {
     return enviarJSON(res, 400, { erro: 'Cliente e número de série são obrigatórios.' });
   }
-  const cliente = data.clientes.find((c) => c.id === Number(body.cliente_id));
+  const cliente = tenant.buscar(data, 'clientes', Number(body.cliente_id), user.empresa_id);
   if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
-  const item = {
-    id: nextId(data, 'equipamentos'),
-    empresa_id: 1,
+  const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: cliente.id,
     tipo: catalogo.tipo,
     modelo: catalogo.modelo,
     numero_serie: body.numero_serie.trim(),
     data_fabricacao: body.data_fabricacao || '',
     localizacao: body.localizacao || '',
-  };
-  data.equipamentos.push(item);
+  });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
 });
@@ -2684,10 +2665,11 @@ rota('GET', /^\/api\/usuarios$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê usuários.' });
   const data = db.load();
-  const admin = data.usuarios.find((u) => u.id === user.id) || user;
+  const usuariosDaEmpresa = tenant.listar(data, 'usuarios', user.empresa_id);
+  const admin = usuariosDaEmpresa.find((u) => u.id === user.id) || user;
   const usuarios = admin.departamento
-    ? data.usuarios.filter((u) => u.id === admin.id || papelGerenciavelPorAdmin(admin, u.papel))
-    : data.usuarios;
+    ? usuariosDaEmpresa.filter((u) => u.id === admin.id || papelGerenciavelPorAdmin(admin, u.papel))
+    : usuariosDaEmpresa;
   enviarJSON(res, 200, { usuarios: usuarios.map(usuarioPublico) });
 });
 
@@ -2700,27 +2682,24 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'nome, email e papel são obrigatórios.' });
   }
   const data = db.load();
-  const admin = data.usuarios.find((u) => u.id === user.id) || user;
+  const admin = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
   if (!papelGerenciavelPorAdmin(admin, body.papel)) {
     return enviarJSON(res, 403, { erro: 'Você só pode cadastrar usuários do seu departamento e clientes.' });
   }
-  if (data.usuarios.some((u) => u.email === body.email)) {
+  if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
   const convite_token = gerarTokenConvite();
   const { acesso_total, menus } = sanitizarMenusAcesso(body.papel, body);
   const departamento = body.papel === 'administrador' && !admin.departamento && DEPARTAMENTOS_ADMIN.includes(body.departamento) ? body.departamento : null;
-  const novo = {
-    id: nextId(data, 'usuarios'),
-    empresa_id: 1,
+  const novo = tenant.criar(data, 'usuarios', user.empresa_id, {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', cliente_id: body.cliente_id || null,
     acesso_total, menus, departamento,
     status: 'convite_enviado', convite_token,
     salt: null, hash: null,
-  };
-  data.usuarios.push(novo);
+  });
   db.save(data);
   const link = `${APP_URL}/ativar.html?token=${convite_token}`;
   const resultado = await email.enviarConvite({ nome: novo.nome, email: novo.email, link });
@@ -2732,8 +2711,8 @@ rota('POST', /^\/api\/usuarios\/(\d+)\/reenviar-convite$/, async (req, res, m) =
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador reenvia convites.' });
   const data = db.load();
-  const admin = data.usuarios.find((u) => u.id === user.id) || user;
-  const u = data.usuarios.find((x) => x.id === Number(m[1]));
+  const admin = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
+  const u = tenant.buscar(data, 'usuarios', Number(m[1]), user.empresa_id);
   if (!u) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
   if (!papelGerenciavelPorAdmin(admin, u.papel)) {
     return enviarJSON(res, 403, { erro: 'Você só pode reenviar convites do seu departamento e clientes.' });
@@ -2755,8 +2734,8 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
     return enviarJSON(res, 400, { erro: 'nome, email e papel são obrigatórios.' });
   }
   const data = db.load();
-  const admin = data.usuarios.find((u) => u.id === user.id) || user;
-  const alvo = data.usuarios.find((u) => u.id === Number(m[1]));
+  const admin = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
+  const alvo = tenant.buscar(data, 'usuarios', Number(m[1]), user.empresa_id);
   if (!alvo) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
   if (alvo.protegido && alvo.id !== user.id) {
     return enviarJSON(res, 403, { erro: 'Esta conta é protegida e só pode ser editada por ela mesma.' });
@@ -2768,7 +2747,7 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   if (!editandoASiMesmo && (!papelGerenciavelPorAdmin(admin, alvo.papel) || !papelGerenciavelPorAdmin(admin, body.papel))) {
     return enviarJSON(res, 403, { erro: 'Você só pode editar usuários do seu departamento e clientes.' });
   }
-  if (data.usuarios.some((u) => u.id !== alvo.id && u.email === body.email)) {
+  if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.id !== alvo.id && u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
   const { acesso_total, menus } = sanitizarMenusAcesso(body.papel, body);
@@ -2792,16 +2771,16 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   const id = Number(m[1]);
   if (id === user.id) return enviarJSON(res, 400, { erro: 'Você não pode excluir a si mesmo.' });
   const data = db.load();
-  const admin = data.usuarios.find((u) => u.id === user.id) || user;
-  const idx = data.usuarios.findIndex((u) => u.id === id);
-  if (idx === -1) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
-  if (data.usuarios[idx].protegido) {
+  const admin = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
+  const alvoExcluir = tenant.buscar(data, 'usuarios', id, user.empresa_id);
+  if (!alvoExcluir) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  if (alvoExcluir.protegido) {
     return enviarJSON(res, 403, { erro: 'Esta conta é protegida e não pode ser excluída.' });
   }
-  if (!papelGerenciavelPorAdmin(admin, data.usuarios[idx].papel)) {
+  if (!papelGerenciavelPorAdmin(admin, alvoExcluir.papel)) {
     return enviarJSON(res, 403, { erro: 'Você só pode excluir usuários do seu departamento e clientes.' });
   }
-  data.usuarios.splice(idx, 1);
+  data.usuarios = data.usuarios.filter((u) => u.id !== alvoExcluir.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
@@ -2814,9 +2793,9 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
 // versão pra LISTA (fila, histórico) — sem buscar o histórico de mensagens (mora numa tabela à
 // parte agora); usa o resumo já salvo no próprio chamado (primeira_mensagem_cliente) igual antes.
 function chamadoResumoLista(data, c) {
-  const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
-  const tecnico = data.usuarios.find((u) => u.id === c.tecnico_id);
-  const equipamento = data.equipamentos.find((e) => e.id === c.equipamento_id);
+  const cliente = data.clientes.find((cl) => cl.id === c.cliente_id && cl.empresa_id === c.empresa_id);
+  const tecnico = data.usuarios.find((u) => u.id === c.tecnico_id && u.empresa_id === c.empresa_id);
+  const equipamento = data.equipamentos.find((e) => e.id === c.equipamento_id && e.empresa_id === c.empresa_id);
   const os = c.os_id ? tenant.buscar(data, 'agenda', c.os_id, c.empresa_id) : null;
   return {
     ...c,
@@ -2836,8 +2815,8 @@ async function chamadoComMensagens(data, c) {
   return { ...chamadoResumoLista(data, c), mensagens };
 }
 
-async function enviarPushTecnicos(data, payload) {
-  const tecnicos = data.usuarios.filter((u) => u.papel === 'suporte');
+async function enviarPushTecnicos(data, empresaId, payload) {
+  const tecnicos = tenant.listar(data, 'usuarios', empresaId).filter((u) => u.papel === 'suporte');
   await Promise.all(tecnicos.map((t) => enviarPush(data, t.id, payload).catch(() => {})));
 }
 
@@ -2845,8 +2824,8 @@ async function enviarPushTecnicos(data, payload) {
 // (não atribui a ninguém): o chamado fica no pool "Aguardando técnico", visível pra qualquer
 // técnico, até alguém entrar e assumir manualmente — nunca vai direto pra um técnico específico.
 function notificarNovoAtendimento(data, chamado) {
-  const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
-  enviarPushTecnicos(data, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
+  const cliente = data.clientes.find((c) => c.id === chamado.cliente_id && c.empresa_id === chamado.empresa_id);
+  enviarPushTecnicos(data, chamado.empresa_id, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
 }
 
 // POST /api/chamados — o cliente (logado no ProConecta) inicia um atendimento com a primeira
@@ -3030,7 +3009,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
     if (chamado.origem === 'whatsapp' && chamado.telefone_whatsapp) {
       whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, texto).catch((e) => console.error('Erro ao enviar mensagem pro WhatsApp:', e.message));
     } else if (chamado.cliente_id) {
-      const usuarioCliente = data.usuarios.find((u) => u.cliente_id === chamado.cliente_id && u.papel === 'cliente');
+      const usuarioCliente = data.usuarios.find((u) => u.cliente_id === chamado.cliente_id && u.papel === 'cliente' && u.empresa_id === chamado.empresa_id);
       if (usuarioCliente) enviarPush(data, usuarioCliente.id, { titulo: 'Nova mensagem do técnico', corpo: texto.slice(0, 120), url: '/' }).catch(() => {});
     }
   }
@@ -3055,8 +3034,8 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   if (chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando um técnico.' });
   if (!chamado.cliente_id) return enviarJSON(res, 400, { erro: 'Este atendimento não tem um cliente identificado no cadastro — não é possível abrir uma O.S. a partir dele.' });
 
-  const cliente = data.clientes.find((c) => c.id === chamado.cliente_id);
-  const equipamentoDoChamado = chamado.equipamento_id ? data.equipamentos.find((e) => e.id === chamado.equipamento_id && e.cliente_id === chamado.cliente_id) : null;
+  const cliente = data.clientes.find((c) => c.id === chamado.cliente_id && c.empresa_id === chamado.empresa_id);
+  const equipamentoDoChamado = chamado.equipamento_id ? data.equipamentos.find((e) => e.id === chamado.equipamento_id && e.cliente_id === chamado.cliente_id && e.empresa_id === chamado.empresa_id) : null;
   // toda O.S. aberta a partir de um chamado do chat nasce como "Atendimento" — é o técnico quem,
   // ao preencher o Laudo Técnico, define se era mesmo uma corretiva/preventiva de verdade
   const tipo = 'atendimento';
@@ -3185,7 +3164,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
   item.motivo_pos_venda = body.motivo;
   item.encaminhado_pos_venda_em = new Date().toISOString();
   // o técnico pode responder o questionário de SLA aqui, antes de encaminhar — opcional
-  const equipamentoDoItem = item.equipamento_id ? data.equipamentos.find((e) => e.id === item.equipamento_id) : null;
+  const equipamentoDoItem = item.equipamento_id ? data.equipamentos.find((e) => e.id === item.equipamento_id && e.empresa_id === item.empresa_id) : null;
   const sla = slaDoBody(body, equipamentoDoItem);
   if (sla) Object.assign(item, sla);
   const chamadoOrigem = item.origem_chamado_id ? data.chamados.find((c) => c.id === item.origem_chamado_id && c.empresa_id === item.empresa_id) : null;
@@ -3194,8 +3173,8 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
     chamadoOrigem.atualizado_em = item.encaminhado_pos_venda_em;
   }
   db.save(data);
-  const posVendas = data.usuarios.filter((u) => u.papel === 'pos_venda');
-  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+  const posVendas = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'pos_venda');
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
   await Promise.all(posVendas.map((pv) => enviarPush(data, pv.id, {
     titulo: 'Atendimento aguardando pós-venda',
     corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
@@ -3216,8 +3195,8 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/aguardando-equipamento$/, async 
   if (item.fase_atendimento !== 'aguardando_pos_venda') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando uma decisão do pós-venda.' });
   item.fase_atendimento = 'aguardando_equipamento';
   db.save(data);
-  const estoques = data.usuarios.filter((u) => u.papel === 'estoque');
-  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+  const estoques = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'estoque');
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
   await Promise.all(estoques.map((e) => enviarPush(data, e.id, {
     titulo: 'Equipamento a caminho do estoque',
     corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
@@ -3258,14 +3237,14 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
   if (body.aprovado) {
     item.pos_venda_decisao = 'aprovado';
     item.pos_venda_decisao_em = agora;
-    const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+    const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
     const numeroOSItem = item.numero_os || 'OS-' + String(item.id).padStart(6, '0');
     if (item.motivo_pos_venda === 'cliente_envia_equipamento') {
       // o equipamento já está com o setor de reparo (fez o diagnóstico) — agora executa o
       // conserto de verdade e libera com um segundo relatório
       item.fase_atendimento = 'executando_reparo';
       db.save(data);
-      const reparos = data.usuarios.filter((u) => u.papel === 'suporte' && temAcessoMenu(data, u, 'fila-reparo'));
+      const reparos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && temAcessoMenu(data, u, 'fila-reparo'));
       await Promise.all(reparos.map((r) => enviarPush(data, r.id, {
         titulo: 'Orçamento aprovado — executar reparo',
         corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${numeroOSItem}.`,
@@ -3275,7 +3254,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
       // não tem reparo nenhum — é só o estoque despachar a peça pro cliente
       item.fase_atendimento = 'aguardando_saida_estoque';
       db.save(data);
-      const estoques = data.usuarios.filter((u) => u.papel === 'estoque');
+      const estoques = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'estoque');
       await Promise.all(estoques.map((e) => enviarPush(data, e.id, {
         titulo: 'Orçamento aprovado — enviar peça pro cliente',
         corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${numeroOSItem}.`,
@@ -3286,7 +3265,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
       // técnica) — ver "Solicitação de Atendimento"
       item.fase_atendimento = 'aguardando_criacao_os';
       db.save(data);
-      const admins = data.usuarios.filter((u) => u.papel === 'administrador');
+      const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
       await Promise.all(admins.map((adm) => enviarPush(data, adm.id, {
         titulo: 'Orçamento aprovado — criar O.S. de visita técnica',
         corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${numeroOSItem}.`,
@@ -3337,8 +3316,8 @@ rota('POST', /^\/api\/agenda\/(\d+)\/estoque\/confirmar-chegada$/, async (req, r
   if (item.estoque_recebido_em) return enviarJSON(res, 400, { erro: 'A chegada já foi confirmada.' });
   item.estoque_recebido_em = new Date().toISOString();
   db.save(data);
-  const reparos = data.usuarios.filter((u) => u.papel === 'suporte' && temAcessoMenu(data, u, 'fila-reparo'));
-  const cliente = data.clientes.find((c) => c.id === item.cliente_id);
+  const reparos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && temAcessoMenu(data, u, 'fila-reparo'));
+  const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
   await Promise.all(reparos.map((r) => enviarPush(data, r.id, {
     titulo: 'Equipamento pronto pro diagnóstico',
     corpo: `${cliente ? cliente.nome_empresa : 'Um cliente'} — ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
@@ -3491,7 +3470,7 @@ rota('POST', /^\/api\/tecnico\/online$/, async (req, res) => {
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só técnico controla a própria presença.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const usuario = data.usuarios.find((u) => u.id === user.id);
+  const usuario = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
   if (!usuario) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
   const novoOnline = !!body.online;
   if (novoOnline && !usuario.online) usuario.online_desde = new Date().toISOString();

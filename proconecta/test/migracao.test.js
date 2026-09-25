@@ -14,7 +14,12 @@ function dadosAntigos() {
     equipamentos: [{ id: 1, nome: 'Equipamento X', empresa_id: 1 }],
     agenda: [{ id: 1, numero_os: 'OS-000001', tipo: 'corretiva', empresa_id: 1 }],
     visitas: [],
-    _seq: { usuarios: 2, clientes: 2, equipamentos: 2, agenda: 2, visitas: 1 },
+    // de antes do multiempresa: essas duas coleções não passavam pelo backfill de empresa_id
+    // (só entraram nele quando a Etapa 4 achou o buraco) — sem isso, tenant.listar/buscar nunca
+    // devolveria esses registros pra ninguém.
+    solicitacoes_rh: [{ id: 1, tecnico_id: 1, tipo: 'folga', status: 'pendente' }],
+    mensagens_internas: [{ remetente_id: 1, destinatario_id: 1, texto: 'oi' }],
+    _seq: { usuarios: 2, clientes: 2, equipamentos: 2, agenda: 2, visitas: 1, solicitacoes_rh: 2 },
     empresas: [
       {
         id: 1, nome: 'PRO Marking', site: 'promarking.com.br',
@@ -68,6 +73,12 @@ test('migrar é idempotente: rodar duas vezes não muda nada na segunda', () => 
   const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
   assert.deepEqual(duas.versoes, uma.versoes);
   assert.deepEqual(duas.empresas[0].modulos_ativos, uma.empresas[0].modulos_ativos);
+});
+
+test('migrar backfilla empresa_id em coleções que ficaram de fora do multiempresa (solicitacoes_rh, mensagens_internas)', () => {
+  const data = db.migrar(dadosAntigos());
+  assert.equal(data.solicitacoes_rh[0].empresa_id, 1);
+  assert.equal(data.mensagens_internas[0].empresa_id, 1);
 });
 
 test('depois de migrar, os módulos da empresa 1 ficam ativos de acordo com moduloAtivo', () => {
