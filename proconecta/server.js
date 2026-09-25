@@ -14,6 +14,7 @@ const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
 const { moduloDaRota } = require('./rotas-modulo');
+const tenant = require('./tenant');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -117,9 +118,9 @@ function papelGerenciavelPorAdmin(admin, papelAlvo) {
 // precisaria se deslocar demais — o administrador tem que justificar antes de atribuir mais uma.
 const LIMITE_VIAGENS_BONUS_MES = 7;
 const VALOR_BONUS_VIAGEM = 200;
-function contarViagensBonusMes(data, tecnicoId, dataIso, excluirId) {
+function contarViagensBonusMes(data, empresaId, tecnicoId, dataIso, excluirId) {
   const mesAno = String(dataIso || '').slice(0, 7); // "AAAA-MM"
-  return data.agenda.filter((a) =>
+  return tenant.listar(data, 'agenda', empresaId).filter((a) =>
     a.id !== excluirId &&
     a.tecnico_id === tecnicoId &&
     a.bonus_viagem &&
@@ -134,7 +135,7 @@ function agendaComDetalhes(data, item) {
   const equipamento = data.equipamentos.find((e) => e.id === item.equipamento_id);
   const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
   const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
-  const osCriada = item.os_criada_id ? data.agenda.find((a) => a.id === item.os_criada_id) : null;
+  const osCriada = item.os_criada_id ? tenant.buscar(data, 'agenda', item.os_criada_id, item.empresa_id) : null;
   return {
     ...item,
     visita_id: visita ? visita.id : null,
@@ -174,7 +175,7 @@ function agendaComDetalhes(data, item) {
 // um novo chamado do cliente, mesmo com a conversa parada.
 function chamadoEstaComPosVenda(data, chamado) {
   if (!chamado.os_id) return false;
-  const os = data.agenda.find((a) => a.id === chamado.os_id);
+  const os = tenant.buscar(data, 'agenda', chamado.os_id, chamado.empresa_id);
   return !!(os && os.tipo === 'atendimento' && os.fase_atendimento && os.fase_atendimento !== 'em_atendimento');
 }
 
@@ -640,7 +641,7 @@ rota('GET', /^\/api\/agenda$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
-  let lista = data.agenda;
+  let lista = tenant.listar(data, 'agenda', user.empresa_id);
   if (user.papel === 'suporte' && query.todas !== '1') {
     lista = lista.filter((a) => a.tecnico_id === user.id);
   } else if (user.papel === 'cliente') {
@@ -682,13 +683,13 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
   const numeroOSDigitado = String(body.numero_os || '').trim();
-  if (numeroOSDigitado && data.agenda.some((a) => (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado)) {
+  if (numeroOSDigitado && tenant.listar(data, 'agenda', user.empresa_id).some((a) => (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado)) {
     return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
   }
   const bonusViagem = !!body.bonus_viagem;
   let justificativaLimiteViagens = '';
   if (bonusViagem) {
-    const jaTem = contarViagensBonusMes(data, Number(body.tecnico_id), body.data_hora_inicio, null);
+    const jaTem = contarViagensBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, null);
     if (jaTem >= LIMITE_VIAGENS_BONUS_MES) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
@@ -696,11 +697,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
       }
     }
   }
-  const novoId = nextId(data, 'agenda');
-  const item = {
-    id: novoId,
-    empresa_id: 1,
-    numero_os: numeroOSDigitado || `OS-${String(novoId).padStart(6, '0')}`,
+  const item = tenant.criar(data, 'agenda', user.empresa_id, {
+    numero_os: numeroOSDigitado || null, // preenchido logo abaixo, depois de saber o id gerado
     tecnico_id: Number(body.tecnico_id),
     cliente_id: Number(body.cliente_id),
     equipamento_id: Number(body.equipamento_id),
@@ -742,8 +740,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     retorno_chegada_confirmada_em: null,
     bonus_viagem: bonusViagem,
     justificativa_limite_viagens: justificativaLimiteViagens,
-  };
-  data.agenda.push(item);
+  });
+  if (!item.numero_os) item.numero_os = `OS-${String(item.id).padStart(6, '0')}`;
   db.save(data);
   const clienteNovaOS = data.clientes.find((c) => c.id === item.cliente_id);
   enviarPush(data, item.tecnico_id, {
@@ -760,7 +758,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita ordens de serviço.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 403, { erro: 'Esta O.S. já foi finalizada e não pode mais ser alterada. Abra uma nova O.S. se for necessário um novo atendimento.' });
   const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
@@ -778,13 +776,13 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   }
   const numeroOSDigitado = String(body.numero_os || '').trim();
   if (numeroOSDigitado) {
-    const jaExisteEmOutra = data.agenda.some((a) => a.id !== item.id && (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado);
+    const jaExisteEmOutra = tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.id !== item.id && (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado);
     if (jaExisteEmOutra) return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
   }
   const bonusViagem = !!body.bonus_viagem;
   let justificativaLimiteViagens = '';
   if (bonusViagem) {
-    const jaTem = contarViagensBonusMes(data, Number(body.tecnico_id), body.data_hora_inicio, item.id);
+    const jaTem = contarViagensBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, item.id);
     if (jaTem >= LIMITE_VIAGENS_BONUS_MES) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || item.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
@@ -828,9 +826,9 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();
-  const tecnicos = data.usuarios.filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  const tecnicos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
   const porTecnico = tecnicos.map((t) => {
-    const viagens = data.agenda
+    const viagens = tenant.listar(data, 'agenda', user.empresa_id)
       .filter((a) => a.tecnico_id === t.id && a.bonus_viagem && String(a.data_hora_inicio || '').slice(0, 7) === mes)
       .sort((x, y) => (x.data_hora_inicio || '').localeCompare(y.data_hora_inicio || ''));
     return {
@@ -986,7 +984,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-aprovado$/, async (req, res, m) =
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador aprova o orçamento.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
@@ -1017,7 +1015,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-reprovado$/, async (req, res, m) 
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra a decisão do orçamento.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
@@ -1044,7 +1042,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/registrar-feedback$/, async (req, res, m) =
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra o feedback do cliente.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   const erro = erroAntesDoFeedback(data, item);
@@ -1062,7 +1060,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retrabalho$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador registra o retrabalho.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   const erro = erroAntesDoFeedback(data, item);
@@ -1093,7 +1091,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   const body = await lerCorpo(req);
   const forcar = !!body.forcar;
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já está finalizada.' });
   const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
@@ -1139,15 +1137,14 @@ rota('DELETE', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui ordens de serviço.' });
   const data = db.load();
-  const idx = data.agenda.findIndex((a) => a.id === Number(m[1]));
-  if (idx === -1) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
-  const agendaId = data.agenda[idx].id;
-  const visita = data.visitas.find((v) => v.agenda_id === agendaId);
+  const agendaItem = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!agendaItem) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  const visita = data.visitas.find((v) => v.agenda_id === agendaItem.id);
   if (visita) {
     data.registros = data.registros.filter((r) => !(r.origem === 'visita' && r.visita_id === visita.id));
     data.visitas = data.visitas.filter((v) => v.id !== visita.id);
   }
-  data.agenda.splice(idx, 1);
+  data.agenda = data.agenda.filter((a) => a.id !== agendaItem.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
@@ -1157,7 +1154,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   item.lida_tecnico = true;
@@ -1172,7 +1169,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-cliente$/, async (req, res, m) =>
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador confirma o cliente.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'O cliente já foi confirmado para esta O.S.' });
@@ -1194,7 +1191,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado inicia o deslocamento.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
@@ -1227,7 +1224,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada$/, async (req, res, m) =>
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado registra a chegada.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
@@ -1254,7 +1251,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retorno\/confirmar-cliente$/, async (req, r
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador confirma o cliente.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (!item.retorno_pendente_tecnico) return enviarJSON(res, 400, { erro: 'Esta O.S. não tem retorno pendente.' });
@@ -1276,7 +1273,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retorno\/confirmar-chegada$/, async (req, r
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado registra a chegada.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
@@ -1302,7 +1299,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
-  const agendaItem = data.agenda.find((a) => a.id === Number(body.agenda_id));
+  const agendaItem = tenant.buscar(data, 'agenda', Number(body.agenda_id), user.empresa_id);
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
 
   // atendimento (chat) virado O.S. de pós-venda/reparo: o setor de reparo preenche o relatório
@@ -1591,7 +1588,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/sugerir-edicao$/, async (req, res, m) => {
   visita.aprovado_por = user.id;
   visita.data_aprovacao = new Date().toISOString();
   visita.lida_tecnico = false;
-  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  const agendaItem = tenant.buscar(data, 'agenda', visita.agenda_id, visita.empresa_id);
   if (agendaItem) agendaItem.status = 'pendente';
   db.save(data);
   enviarJSON(res, 200, { visita });
@@ -1620,7 +1617,7 @@ rota('DELETE', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
   const visita = data.visitas[idx];
   data.registros = data.registros.filter((r) => !(r.origem === 'visita' && r.visita_id === visita.id));
   data.visitas.splice(idx, 1);
-  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  const agendaItem = tenant.buscar(data, 'agenda', visita.agenda_id, visita.empresa_id);
   if (agendaItem) agendaItem.status = 'pendente';
   db.save(data);
   enviarJSON(res, 200, { ok: true });
@@ -1633,7 +1630,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reabrir$/, async (req, res, m) => {
   const data = db.load();
   const visita = data.visitas.find((v) => v.id === Number(m[1]));
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
-  const agendaItem = data.agenda.find((a) => a.id === visita.agenda_id);
+  const agendaItem = tenant.buscar(data, 'agenda', visita.agenda_id, visita.empresa_id);
   if (agendaItem && agendaItem.finalizada) return enviarJSON(res, 403, { erro: 'Esta O.S. já foi finalizada e não pode mais ser reaberta.' });
   visita.status_aprovacao = 'pendente';
   visita.aprovado_por = null;
@@ -2002,7 +1999,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
         })
     );
     notificacoes = notificacoes.concat(
-      data.agenda
+      tenant.listar(data, 'agenda', user.empresa_id)
         .filter((a) => a.tecnico_id === user.id && !a.lida_tecnico)
         .map((a) => {
           const cliente = data.clientes.find((c) => c.id === a.cliente_id);
@@ -2544,7 +2541,7 @@ rota('DELETE', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
   const cliente = data.clientes.find((c) => c.id === id);
   if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
   if (data.usuarios.some((u) => u.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem usuários vinculados a este cliente. Remova ou reatribua-os antes de excluir.' });
-  if (data.agenda.some((a) => a.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este cliente. Exclua-as antes.' });
+  if (tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este cliente. Exclua-as antes.' });
   if (data.equipamentos.some((e) => e.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem equipamentos atrelados a este cliente. Remova-os antes.' });
   data.clientes = data.clientes.filter((c) => c.id !== id);
   db.save(data);
@@ -2640,7 +2637,7 @@ rota('DELETE', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
   const id = Number(m[1]);
   const equipamento = data.equipamentos.find((e) => e.id === id);
   if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
-  if (data.agenda.some((a) => a.equipamento_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este equipamento. Exclua-as antes.' });
+  if (tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.equipamento_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este equipamento. Exclua-as antes.' });
   data.equipamentos = data.equipamentos.filter((e) => e.id !== id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
@@ -2681,8 +2678,8 @@ rota('GET', /^\/api\/equipamentos\/(\d+)\/historico$/, async (req, res, m) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
   const eqId = Number(m[1]);
-  const agendaItens = data.agenda.filter((a) => a.equipamento_id === eqId).map((a) => agendaComDetalhes(data, a));
-  const visitasItens = data.visitas.filter((v) => v.equipamento_id === eqId);
+  const agendaItens = tenant.listar(data, 'agenda', user.empresa_id).filter((a) => a.equipamento_id === eqId).map((a) => agendaComDetalhes(data, a));
+  const visitasItens = data.visitas.filter((v) => v.equipamento_id === eqId && v.empresa_id === user.empresa_id);
   enviarJSON(res, 200, { agenda: agendaItens, visitas: visitasItens });
 });
 
@@ -2824,7 +2821,7 @@ function chamadoResumoLista(data, c) {
   const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
   const tecnico = data.usuarios.find((u) => u.id === c.tecnico_id);
   const equipamento = data.equipamentos.find((e) => e.id === c.equipamento_id);
-  const os = c.os_id ? data.agenda.find((a) => a.id === c.os_id) : null;
+  const os = c.os_id ? tenant.buscar(data, 'agenda', c.os_id, c.empresa_id) : null;
   return {
     ...c,
     cliente_nome: cliente ? cliente.nome_empresa : null,
@@ -3073,11 +3070,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   const agora = new Date();
   const inicioISO = agora.toISOString().slice(0, 16);
   const fimISO = new Date(agora.getTime() + 60 * 60000).toISOString().slice(0, 16);
-  const novoId = nextId(data, 'agenda');
-  const osItem = {
-    id: novoId,
-    empresa_id: 1,
-    numero_os: `OS-${String(novoId).padStart(6, '0')}`,
+  const osItem = tenant.criar(data, 'agenda', user.empresa_id, {
     tecnico_id: user.id,
     cliente_id: chamado.cliente_id,
     equipamento_id: equipamentoDoChamado ? equipamentoDoChamado.id : null,
@@ -3129,8 +3122,8 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     equipamento_liberado_reparo_em: null,
     estoque_saida_em: null,
     os_criada_id: null,
-  };
-  data.agenda.push(osItem);
+  });
+  osItem.numero_os = `OS-${String(osItem.id).padStart(6, '0')}`;
 
   chamado.status = 'convertido_os';
   chamado.tecnico_id = user.id;
@@ -3168,7 +3161,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encerrar-atendimento$/, async (req, res, m)
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico encerra o atendimento.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tipo !== 'atendimento') return enviarJSON(res, 400, { erro: 'Só O.S. de atendimento são encerradas por aqui.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
@@ -3189,7 +3182,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
   const body = await lerCorpo(req);
   if (!MOTIVOS_POS_VENDA.includes(body.motivo)) return enviarJSON(res, 400, { erro: 'Motivo inválido.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tipo !== 'atendimento') return enviarJSON(res, 400, { erro: 'Só O.S. de atendimento passam pelo pós-venda.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
@@ -3223,7 +3216,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/aguardando-equipamento$/, async 
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda faz isso.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'aguardando_pos_venda') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando uma decisão do pós-venda.' });
@@ -3246,7 +3239,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/orcamento-enviado$/, async (req,
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda faz isso.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'aguardando_pos_venda') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando uma decisão do pós-venda.' });
@@ -3263,7 +3256,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/pos-venda\/decisao$/, async (req, res, m) =
   if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda faz isso.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'orcamento_enviado') return enviarJSON(res, 400, { erro: 'O orçamento ainda não foi enviado pro cliente.' });
@@ -3323,7 +3316,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/reparo\/iniciar-atendimento$/, async (req, 
   const user = usuarioAutenticado(req);
   const data = db.load();
   if (!exigirPapel(user, ['suporte', 'administrador']) || !temAcessoMenu(data, user, 'fila-reparo')) return enviarJSON(res, 403, { erro: 'Só o setor de reparo faz isso.' });
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'aguardando_equipamento') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando o equipamento.' });
@@ -3341,7 +3334,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/estoque\/confirmar-chegada$/, async (req, r
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['estoque', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o estoque faz isso.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'aguardando_equipamento' || item.motivo_pos_venda !== 'cliente_envia_equipamento') {
@@ -3366,7 +3359,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/estoque\/confirmar-saida$/, async (req, res
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['estoque', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o estoque faz isso.' });
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'aguardando_saida_estoque') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando uma saída do estoque.' });
@@ -3385,7 +3378,7 @@ rota('GET', /^\/api\/agenda\/fila-estoque$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['estoque', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o estoque acessa esta fila.' });
   const data = db.load();
-  const lista = data.agenda
+  const lista = tenant.listar(data, 'agenda', user.empresa_id)
     .filter((a) => a.tipo === 'atendimento' && !a.finalizada && (
       (a.fase_atendimento === 'aguardando_equipamento' && a.motivo_pos_venda === 'cliente_envia_equipamento' && !a.estoque_recebido_em) ||
       a.fase_atendimento === 'aguardando_saida_estoque'
@@ -3401,7 +3394,7 @@ rota('GET', /^\/api\/agenda\/fila-solicitacao-atendimento$/, async (req, res) =>
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acessa esta fila.' });
   const data = db.load();
-  const lista = data.agenda
+  const lista = tenant.listar(data, 'agenda', user.empresa_id)
     .filter((a) => a.tipo === 'atendimento' && !a.finalizada && a.fase_atendimento === 'aguardando_criacao_os')
     .sort((a, b) => (a.pos_venda_decisao_em || '').localeCompare(b.pos_venda_decisao_em || ''))
     .map((a) => agendaComDetalhes(data, a));
@@ -3415,7 +3408,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar-solicitacao$/, async (req, res, m
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador faz isso.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const item = data.agenda.find((a) => a.id === Number(m[1]));
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
   if (item.fase_atendimento !== 'aguardando_criacao_os') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando a criação de uma O.S.' });
@@ -3426,7 +3419,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar-solicitacao$/, async (req, res, m
   // o SLA já foi definido pelo técnico/pós-venda no atendimento original — passa pra nova O.S.
   // de visita técnica automaticamente, pro administrador se basear nele (não redefine aqui)
   if (item.os_criada_id && item.sla_nivel) {
-    const novaOS = data.agenda.find((a) => a.id === item.os_criada_id);
+    const novaOS = tenant.buscar(data, 'agenda', item.os_criada_id, user.empresa_id);
     if (novaOS) {
       novaOS.sla_nivel = item.sla_nivel;
       novaOS.sla_pontuacao = item.sla_pontuacao;
@@ -3445,7 +3438,7 @@ rota('GET', /^\/api\/agenda\/fila-pos-venda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['pos_venda', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o pós-venda acessa esta fila.' });
   const data = db.load();
-  const lista = data.agenda
+  const lista = tenant.listar(data, 'agenda', user.empresa_id)
     .filter((a) => a.tipo === 'atendimento' && !a.finalizada && ['aguardando_pos_venda', 'orcamento_enviado'].includes(a.fase_atendimento))
     .sort((a, b) => (a.encaminhado_pos_venda_em || '').localeCompare(b.encaminhado_pos_venda_em || ''))
     .map((a) => agendaComDetalhes(data, a));
@@ -3458,7 +3451,7 @@ rota('GET', /^\/api\/agenda\/fila-reparo$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   const data = db.load();
   if (!exigirPapel(user, ['suporte', 'administrador']) || !temAcessoMenu(data, user, 'fila-reparo')) return enviarJSON(res, 403, { erro: 'Só o setor de reparo acessa esta fila.' });
-  const lista = data.agenda
+  const lista = tenant.listar(data, 'agenda', user.empresa_id)
     .filter((a) => a.tipo === 'atendimento' && !a.finalizada && (
       (a.fase_atendimento === 'aguardando_equipamento' && !!a.estoque_recebido_em) ||
       a.fase_atendimento === 'executando_reparo' ||
