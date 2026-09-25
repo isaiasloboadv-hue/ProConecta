@@ -10,6 +10,14 @@ let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
 let relatorioAgendaAtual = null;
 
+// terminologia configurável por empresa (ver empresa.terminologia em db.js, exposta em
+// USER.terminologia pelo login/GET /api/me) — troca um termo padrão do sistema (ex: "Equipamento")
+// pelo termo que a empresa escolheu (ex: "Paciente"), sem precisar mexer em cada tela. Empresa sem
+// nada configurado (objeto vazio, o padrão) continua vendo os termos de sempre.
+function t(chave, padrao) {
+  return (USER && USER.terminologia && USER.terminologia[chave]) || padrao;
+}
+
 const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
 // Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
@@ -1311,7 +1319,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
 
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
-        <div class="full"><label>Equipamento</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
+        <div class="full"><label>${t('equipamento', 'Equipamento')}</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
         <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito...">${agendaItem ? esc(agendaItem.problema || '') : ''}</textarea></div>
       </div>
       <div class="form-grid" id="na-laudo-equip-wrap">
@@ -2213,7 +2221,7 @@ async function renderRelatorioSimples(item, exigirSerie) {
         <div><label>Telefone</label><input id="rs-telefone" value="${esc(r.telefone)}" disabled></div>
         <div><label>Data</label><input id="rs-data" value="${esc((item.data_hora_inicio || '').slice(0, 10))}" disabled></div>
         <div><label>Técnico</label><input id="rs-tecnico" value="${esc(r.tecnico_nome)}" disabled></div>
-        <div><label>Equipamento</label><input id="rs-equip-tipo" value="${esc(r.equipamento_tipo)}" disabled></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input id="rs-equip-tipo" value="${esc(r.equipamento_tipo)}" disabled></div>
         <div><label>Modelo</label><input id="rs-equip-modelo" value="${esc(r.equipamento_modelo)}" disabled></div>
         ${exigirSerie ? `<div><label>Nº de série</label><input id="rs-serie" value="${esc(r.numero_serie)}" disabled></div>` : ''}
       </div>
@@ -2321,7 +2329,7 @@ async function renderLaudoTecnico(item) {
         <div><label>Telefone</label><input value="${esc(item.telefone || item.cliente_telefone || '')}" disabled></div>
         <div class="full"><label>Endereço</label><input value="${esc(`${item.endereco || item.cliente_endereco || ''}, ${item.numero || item.cliente_numero || ''} — ${item.bairro || item.cliente_bairro || ''}, ${item.cidade || item.cliente_cidade || ''}/${item.estado || item.cliente_estado || ''}`)}" disabled></div>
         <div><label>Técnico</label><input value="${esc(USER.nome)}" disabled></div>
-        <div><label>Equipamento</label><input value="${esc(`${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''}`)}" disabled></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input value="${esc(`${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''}`)}" disabled></div>
         <div><label>Nº de série</label><input value="${esc(item.equipamento_serie || '')}" disabled></div>
       </div>
     </div>
@@ -2330,7 +2338,7 @@ async function renderLaudoTecnico(item) {
       <h2>Dados do equipamento</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Nº de série, data de fabricação, defeito informado e garantia são definidos pelo administrador na abertura da OS — não podem ser alterados aqui.</p>
       <div class="form-grid">
-        <div><label>Equipamento</label><input value="${esc(`${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''}`)}" disabled></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input value="${esc(`${item.equipamento_tipo || ''} — ${item.equipamento_modelo || ''}`)}" disabled></div>
         <div><label>Data de fabricação</label><input id="lt-data_fabricacao" disabled></div>
         <div class="full"><label>Acessórios recebidos</label><input id="lt-acessorios" placeholder="ex: cabo de força, fonte, controle..." oninput="atualizarRascunhoLaudo()"></div>
         <div class="full"><label>Defeito informado pelo cliente</label><input id="lt-defeito_informado" disabled></div>
@@ -3680,7 +3688,7 @@ async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
   main.innerHTML = `
     <div class="page-head"><h1>Biblioteca — Defeitos/Falhas</h1><p>Casos aprovados pela liderança, pesquisáveis por equipamento, palavra-chave ou nº de série</p></div>
     <div class="filtros-row">
-      <div class="field"><label>Equipamento</label><input id="f-equip" value="${esc(filtros.equipamento || '')}" placeholder="ex: Máquina de Gelo"></div>
+      <div class="field"><label>${t('equipamento', 'Equipamento')}</label><input id="f-equip" value="${esc(filtros.equipamento || '')}" placeholder="ex: Máquina de Gelo"></div>
       <div class="field"><label>Nº de série</label><input id="f-serie" value="${esc(filtros.serie || '')}" placeholder="ex: 2301013587"></div>
       <div class="field"><label>Palavra-chave</label><input id="f-q" value="${esc(filtros.q || '')}" placeholder="sintoma, causa ou solução"></div>
       <button class="btn btn-primary btn-sm" onclick="filtrarDefeitos()">Buscar</button>
@@ -3746,7 +3754,7 @@ function abrirEditarDefeito(i, origem) {
     <div class="panel">
       <div class="form-grid">
         <div class="full"><label>Título resumo</label><input id="fd-titulo" value="${esc(r.titulo)}"></div>
-        <div><label>Equipamento</label><input id="fd-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input id="fd-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
         <div><label>Modelo</label><input id="fd-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
         <div><label>Número de série (opcional)</label><input id="fd-serie" value="${esc(r.numero_serie || '')}"></div>
         <div class="full"><label>Defeito/sintoma encontrado</label><textarea id="fd-sintoma">${esc(r.sintoma)}</textarea></div>
@@ -3833,7 +3841,7 @@ async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
   main.innerHTML = `
     <div class="page-head"><h1>Biblioteca — Manual de Procedimentos</h1><p>Procedimentos preventivos aprovados, pesquisáveis por equipamento ou título</p></div>
     <div class="filtros-row">
-      <div class="field"><label>Equipamento</label><input id="f-equip" value="${esc(filtros.equipamento || '')}" placeholder="ex: Torre de Bebidas"></div>
+      <div class="field"><label>${t('equipamento', 'Equipamento')}</label><input id="f-equip" value="${esc(filtros.equipamento || '')}" placeholder="ex: Torre de Bebidas"></div>
       <div class="field"><label>Título</label><input id="f-q" value="${esc(filtros.q || '')}" placeholder="título do procedimento"></div>
       <button class="btn btn-primary btn-sm" onclick="filtrarProcedimentos()">Buscar</button>
     </div>
@@ -3905,7 +3913,7 @@ function abrirEditarProcedimento(i, origem) {
     <div class="panel">
       <div class="form-grid">
         <div class="full"><label>Título do procedimento</label><input id="fp-titulo" value="${esc(r.titulo)}"></div>
-        <div><label>Equipamento</label><input id="fp-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input id="fp-equip-tipo" value="${esc(r.equipamento_tipo)}"></div>
         <div><label>Modelo</label><input id="fp-equip-modelo" value="${esc(r.equipamento_modelo)}"></div>
         <div><label>Periodicidade</label>
           <select id="fp-periodicidade">
@@ -5108,7 +5116,7 @@ function mostrarFormCiclagem(existente) {
       <h2>Dados gerais</h2>
       <div class="form-grid">
         <div><label>Cliente*</label><input id="ec-empresa" value="${esc(d.empresa)}"></div>
-        <div><label>Equipamento*</label><input id="ec-equipamento" value="${esc(d.equipamento)}"></div>
+        <div><label>${t('equipamento', 'Equipamento')}*</label><input id="ec-equipamento" value="${esc(d.equipamento)}"></div>
         <div><label>Data</label><input id="ec-data" type="date" value="${esc(d.data_conclusao)}"></div>
         <div><label>MTBF encontrado</label><input id="ec-mtbf" placeholder="ex: N/A" value="${esc(d.mtbf_encontrado)}"></div>
       </div>
@@ -5288,7 +5296,7 @@ function mostrarFormRelatorioManutencao(existente) {
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
         <div><label>Marca</label><input id="rm-marca" value="${esc(d.marca)}"></div>
-        <div><label>Equipamento*</label><input id="rm-equipamento" value="${esc(d.equipamento)}"></div>
+        <div><label>${t('equipamento', 'Equipamento')}*</label><input id="rm-equipamento" value="${esc(d.equipamento)}"></div>
         <div><label>Nº de série</label><input id="rm-numero_serie" value="${esc(d.numero_serie)}"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="rm-data_fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(d.data_fabricacao)}"></div>
       </div>
@@ -6492,7 +6500,7 @@ function mostrarFormRelatorioTecnico(existente) {
       <div class="form-grid">
         <div><label>Marca*</label><input id="rt-marca" value="${esc(d.marca)}"></div>
         <div>
-          <label>Equipamento*</label>
+          <label>${t('equipamento', 'Equipamento')}*</label>
           <select id="rt-equipamento" onchange="document.getElementById('rt-equipamento-outro-wrap').style.display = this.value === 'Outro' ? 'block' : 'none';">
             <option value="" ${!d.equipamento || !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? 'selected' : ''} disabled>Selecione...</option>
             ${Object.keys(EQUIPAMENTOS_PREVENTIVA).map((nome) => `<option value="${esc(nome)}" ${d.equipamento === nome ? 'selected' : ''}>${esc(nome)}</option>`).join('')}
@@ -9090,7 +9098,7 @@ function renderFormDefeito(main, prefill) {
     <div class="panel">
       <div class="form-grid">
         <div class="full"><label>Título resumo</label><input id="fd-titulo" value="${esc(prefill ? prefill.titulo : '')}" placeholder="ex: Máquina não liga após queda de energia"></div>
-        <div><label>Equipamento</label><input id="fd-equip-tipo" value="${esc(prefill ? prefill.equipamento_tipo : '')}" placeholder="ex: Máquina de Gelo"></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input id="fd-equip-tipo" value="${esc(prefill ? prefill.equipamento_tipo : '')}" placeholder="ex: Máquina de Gelo"></div>
         <div><label>Modelo</label><input id="fd-equip-modelo" value="${esc(prefill ? prefill.equipamento_modelo : '')}" placeholder="ex: MP5-80P"></div>
         <div><label>Número de série (opcional)</label><input id="fd-serie" value="${esc(prefill ? prefill.numero_serie : '')}"></div>
         <div class="full"><label>Defeito/sintoma encontrado</label><textarea id="fd-sintoma" placeholder="O que foi observado...">${esc(prefill ? prefill.sintoma : '')}</textarea></div>
@@ -9130,7 +9138,7 @@ function renderFormProcedimento(main, prefill) {
     <div class="panel">
       <div class="form-grid">
         <div class="full"><label>Título do procedimento</label><input id="fp-titulo" value="${esc(prefill ? prefill.titulo : '')}" placeholder="ex: Limpeza mensal do condensador"></div>
-        <div><label>Equipamento</label><input id="fp-equip-tipo" value="${esc(prefill ? prefill.equipamento_tipo : '')}" placeholder="ex: Torre de Bebidas"></div>
+        <div><label>${t('equipamento', 'Equipamento')}</label><input id="fp-equip-tipo" value="${esc(prefill ? prefill.equipamento_tipo : '')}" placeholder="ex: Torre de Bebidas"></div>
         <div><label>Modelo</label><input id="fp-equip-modelo" value="${esc(prefill ? prefill.equipamento_modelo : '')}" placeholder="ex: TB-200"></div>
         <div><label>Periodicidade</label>
           <select id="fp-periodicidade">
@@ -9618,7 +9626,7 @@ async function renderEquipamentosAtrelar() {
     <div class="panel"><div class="panel-head">Atrelar a um cliente</div>
       <div class="form-grid">
         <div><label>Cliente*</label><select id="ae-cliente">${clientes.length ? clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('') : '<option value="">Nenhum cliente cadastrado</option>'}</select></div>
-        <div><label>Equipamento (catálogo)*</label><select id="ae-equipamento">${window._catalogoCache.length ? window._catalogoCache.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('') : '<option value="">Nenhum equipamento no catálogo</option>'}</select></div>
+        <div><label>${t('equipamento', 'Equipamento')} (catálogo)*</label><select id="ae-equipamento">${window._catalogoCache.length ? window._catalogoCache.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('') : '<option value="">Nenhum equipamento no catálogo</option>'}</select></div>
         <div><label>Número de série*</label><input id="ae-numero-serie"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="ae-data-fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
         <div><label>Localização</label><input id="ae-localizacao" placeholder="ex: Cozinha"></div>
