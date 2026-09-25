@@ -133,8 +133,8 @@ function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id);
   const cliente = data.clientes.find((c) => c.id === item.cliente_id);
   const equipamento = data.equipamentos.find((e) => e.id === item.equipamento_id);
-  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
-  const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && (v.rodada || 1) === 1);
+  const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && v.rodada === 2);
   const osCriada = item.os_criada_id ? tenant.buscar(data, 'agenda', item.os_criada_id, item.empresa_id) : null;
   return {
     ...item,
@@ -964,7 +964,7 @@ rota('DELETE', /^\/api\/solicitacoes-rh\/(\d+)$/, async (req, res, m) => {
 // precisa estar aprovado, o orçamento (se houve peças fornecidas) precisa estar aprovado, e
 // não pode haver um retorno do técnico ainda pendente
 function erroAntesDoFeedback(data, item) {
-  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && (v.rodada || 1) === 1);
   if (!visita || visita.status_aprovacao !== 'aprovado') {
     return 'Só é possível avançar depois do relatório aprovado.';
   }
@@ -987,7 +987,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-aprovado$/, async (req, res, m) =
   const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
-  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && (v.rodada || 1) === 1);
   if (!visita || visita.status_aprovacao !== 'aprovado') {
     return enviarJSON(res, 400, { erro: 'Só é possível aprovar o orçamento depois do relatório aprovado.' });
   }
@@ -1018,7 +1018,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/orcamento-reprovado$/, async (req, res, m) 
   const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
-  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && (v.rodada || 1) === 1);
   if (!visita || visita.status_aprovacao !== 'aprovado') {
     return enviarJSON(res, 400, { erro: 'Só é possível decidir o orçamento depois do relatório aprovado.' });
   }
@@ -1066,7 +1066,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retrabalho$/, async (req, res, m) => {
   const erro = erroAntesDoFeedback(data, item);
   if (erro) return enviarJSON(res, 400, { erro });
   if (item.feedback_cliente_em) return enviarJSON(res, 400, { erro: 'O feedback do cliente já foi registrado.' });
-  if (item.retrabalho || data.visitas.some((v) => v.agenda_id === item.id && v.rodada === 2)) {
+  if (item.retrabalho || data.visitas.some((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && v.rodada === 2)) {
     return enviarJSON(res, 400, { erro: 'Esta O.S. já passou por uma rodada de retrabalho.' });
   }
   item.retrabalho = true;
@@ -1094,7 +1094,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
   const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já está finalizada.' });
-  const visita = data.visitas.find((v) => v.agenda_id === item.id && (v.rodada || 1) === 1);
+  const visita = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && (v.rodada || 1) === 1);
   if (item.status !== 'concluida' || !visita || visita.status_aprovacao !== 'aprovado') {
     return enviarJSON(res, 400, { erro: 'Só é possível finalizar uma O.S. já concluída e aprovada.' });
   }
@@ -1103,7 +1103,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/finalizar$/, async (req, res, m) => {
     if (!item.feedback_cliente_em) {
       return enviarJSON(res, 400, { erro: 'Registre o feedback do cliente antes de finalizar esta O.S.' });
     }
-    const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.rodada === 2);
+    const visitaRetorno = data.visitas.find((v) => v.agenda_id === item.id && v.empresa_id === item.empresa_id && v.rodada === 2);
     const visitaBase = visitaRetorno || visita;
     const umDiaEmMs = 24 * 60 * 60 * 1000;
     if (!visitaBase.data_aprovacao || (Date.now() - new Date(visitaBase.data_aprovacao).getTime()) < umDiaEmMs) {
@@ -1139,7 +1139,7 @@ rota('DELETE', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const agendaItem = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
-  const visita = data.visitas.find((v) => v.agenda_id === agendaItem.id);
+  const visita = data.visitas.find((v) => v.agenda_id === agendaItem.id && v.empresa_id === agendaItem.empresa_id);
   if (visita) {
     data.registros = data.registros.filter((r) => !(r.origem === 'visita' && r.visita_id === visita.id));
     data.visitas = data.visitas.filter((v) => v.id !== visita.id);
@@ -1311,18 +1311,17 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     const laudoCompleto = { ...(body.laudo || {}), ...dadosAtendimentoBloqueados(data, agendaItem, user) };
     const erroLaudo = validarLaudoTecnico(laudoCompleto);
     if (erroLaudo) return enviarJSON(res, 400, { erro: erroLaudo });
-    const rodada = data.visitas.filter((v) => v.agenda_id === agendaItem.id).length + 1;
+    const rodada = data.visitas.filter((v) => v.agenda_id === agendaItem.id && v.empresa_id === agendaItem.empresa_id).length + 1;
     const agora = new Date().toISOString();
-    const visitaReparo = {
-      id: nextId(data, 'visitas'), empresa_id: 1, agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id,
+    const visitaReparo = tenant.criar(data, 'visitas', agendaItem.empresa_id, {
+      agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id,
       rodada, criado_em: agora,
       analise: body.analise || '', causa: body.causa || laudoCompleto.laudo_tecnico || '', correcao: body.correcao || laudoCompleto.servico_realizado || '',
       resultado: body.resultado || 'solucionado', relevante_biblioteca: !!body.relevante_biblioteca,
       relatorio: null, relatorio_simples: null, laudo: laudoCompleto,
       status_aprovacao: 'aprovado', aprovado_por: null, data_aprovacao: agora,
       solicitacao_reabertura: null, lida_tecnico: false,
-    };
-    data.visitas.push(visitaReparo);
+    });
     agendaItem.tecnico_id = user.id;
     if (agendaItem.fase_atendimento === 'em_diagnostico_reparo') {
       agendaItem.fase_atendimento = 'aguardando_pos_venda';
@@ -1407,11 +1406,10 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   // retrabalho por feedback negativo do cliente): gera um SEGUNDO relatório, separado do
   // original, e já entra aprovado — sem passar de novo pela fila do gestor
   if (agendaItem.retorno_pendente_tecnico) {
-    const visitaRetorno = { id: nextId(data, 'visitas'), empresa_id: 1, agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, rodada: 2, criado_em: new Date().toISOString(), ...camposVisita };
+    const visitaRetorno = tenant.criar(data, 'visitas', agendaItem.empresa_id, { agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, rodada: 2, criado_em: new Date().toISOString(), ...camposVisita });
     visitaRetorno.status_aprovacao = 'aprovado';
     visitaRetorno.aprovado_por = null;
     visitaRetorno.data_aprovacao = new Date().toISOString();
-    data.visitas.push(visitaRetorno);
     agendaItem.retorno_pendente_tecnico = false;
     db.save(data);
     const adminsRetorno = data.usuarios.filter((u) => u.papel === 'administrador');
@@ -1426,12 +1424,11 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
   }
 
   // se a atividade já tinha uma visita (reaberta pelo administrador), edita a mesma em vez de duplicar
-  let visita = data.visitas.find((v) => v.agenda_id === agendaItem.id && (v.rodada || 1) === 1);
+  let visita = data.visitas.find((v) => v.agenda_id === agendaItem.id && v.empresa_id === agendaItem.empresa_id && (v.rodada || 1) === 1);
   if (visita) {
     Object.assign(visita, camposVisita, { atualizado_em: new Date().toISOString() });
   } else {
-    visita = { id: nextId(data, 'visitas'), empresa_id: 1, agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, criado_em: new Date().toISOString(), ...camposVisita };
-    data.visitas.push(visita);
+    visita = tenant.criar(data, 'visitas', agendaItem.empresa_id, { agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, criado_em: new Date().toISOString(), ...camposVisita });
   }
   agendaItem.status = 'concluida';
 
@@ -1486,7 +1483,7 @@ rota('GET', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (user.papel === 'suporte' && visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
   enviarJSON(res, 200, { visita: await hidratarFotosProfundo(visita) });
@@ -1501,7 +1498,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res, m) =>
     return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
   }
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
   const nomeArquivo = `relatorio-tecnico-${visita.id}.pdf`;
@@ -1515,7 +1512,7 @@ rota('GET', /^\/api\/visitas$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
-  let lista = data.visitas;
+  let lista = tenant.listar(data, 'visitas', user.empresa_id);
   if (user.papel === 'suporte' && query.todas !== '1') lista = lista.filter((v) => v.tecnico_id === user.id);
   if (query.status) lista = lista.filter((v) => v.status_aprovacao === query.status);
   lista = lista.map((v) => {
@@ -1533,7 +1530,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/aprovar$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador aprova.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   visita.status_aprovacao = 'aprovado';
   visita.aprovado_por = user.id;
@@ -1562,7 +1559,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reprovar$/, async (req, res, m) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador reprova.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   visita.status_aprovacao = 'reprovado';
   visita.comentario_reprovacao = body.comentario || '';
@@ -1581,7 +1578,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/sugerir-edicao$/, async (req, res, m) => {
   const body = await lerCorpo(req);
   if (!body.comentario || !body.comentario.trim()) return enviarJSON(res, 400, { erro: 'O comentário é obrigatório ao sugerir uma edição.' });
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   visita.status_aprovacao = 'alteracao_sugerida';
   visita.comentario_edicao = body.comentario;
@@ -1599,7 +1596,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/marcar-lida$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
   visita.lida_tecnico = true;
@@ -1612,11 +1609,10 @@ rota('DELETE', /^\/api\/visitas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui relatórios.' });
   const data = db.load();
-  const idx = data.visitas.findIndex((v) => v.id === Number(m[1]));
-  if (idx === -1) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
-  const visita = data.visitas[idx];
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   data.registros = data.registros.filter((r) => !(r.origem === 'visita' && r.visita_id === visita.id));
-  data.visitas.splice(idx, 1);
+  data.visitas = data.visitas.filter((v) => v.id !== visita.id);
   const agendaItem = tenant.buscar(data, 'agenda', visita.agenda_id, visita.empresa_id);
   if (agendaItem) agendaItem.status = 'pendente';
   db.save(data);
@@ -1628,7 +1624,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/reabrir$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador reabre relatórios.' });
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   const agendaItem = tenant.buscar(data, 'agenda', visita.agenda_id, visita.empresa_id);
   if (agendaItem && agendaItem.finalizada) return enviarJSON(res, 403, { erro: 'Esta O.S. já foi finalizada e não pode mais ser reaberta.' });
@@ -1647,7 +1643,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/solicitar-reabertura$/, async (req, res, m
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico solicita reabertura.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
   visita.solicitacao_reabertura = { motivo: body.motivo || '', solicitado_em: new Date().toISOString(), status: 'pendente' };
@@ -1660,7 +1656,7 @@ rota('POST', /^\/api\/visitas\/(\d+)\/recusar-reabertura$/, async (req, res, m) 
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador decide sobre a reabertura.' });
   const data = db.load();
-  const visita = data.visitas.find((v) => v.id === Number(m[1]));
+  const visita = tenant.buscar(data, 'visitas', Number(m[1]), user.empresa_id);
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (!visita.solicitacao_reabertura) return enviarJSON(res, 400, { erro: 'Não há solicitação de reabertura para esta visita.' });
   visita.solicitacao_reabertura.status = 'recusada';
@@ -1986,7 +1982,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       .filter((r) => r.autor_id === user.id && r.status === 'alteracao_sugerida' && !r.lida)
       .map((r) => ({ id: r.id, tipo: 'alteracao_sugerida', texto: `Alteração sugerida em "${r.titulo}"`, registro_id: r.id }));
     notificacoes = notificacoes.concat(
-      data.visitas
+      tenant.listar(data, 'visitas', user.empresa_id)
         .filter((v) => v.tecnico_id === user.id && !v.lida_tecnico && ['aprovado', 'reprovado', 'alteracao_sugerida'].includes(v.status_aprovacao))
         .map((v) => {
           if (v.status_aprovacao === 'aprovado') {
@@ -2038,7 +2034,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       .filter((r) => r.status === 'em_analise')
       .map((r) => ({ id: r.id, tipo: 'aprovacao_pendente', texto: `"${r.titulo}" aguardando aprovação`, registro_id: r.id }));
     notificacoes = notificacoes.concat(
-      data.visitas
+      tenant.listar(data, 'visitas', user.empresa_id)
         .filter((v) => v.status_aprovacao === 'pendente')
         .map((v) => {
           const tecnico = data.usuarios.find((u) => u.id === v.tecnico_id);
