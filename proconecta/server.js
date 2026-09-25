@@ -181,7 +181,7 @@ function chamadoEstaComPosVenda(data, chamado) {
 
 async function encerrarChamadoDaOS(data, agendaItem) {
   if (!agendaItem.origem_chamado_id) return;
-  const chamado = data.chamados.find((c) => c.id === agendaItem.origem_chamado_id);
+  const chamado = data.chamados.find((c) => c.id === agendaItem.origem_chamado_id && c.empresa_id === agendaItem.empresa_id);
   if (!chamado || chamado.status === 'encerrado') return;
   const agora = new Date().toISOString();
   chamado.status = 'encerrado';
@@ -2004,7 +2004,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
     );
     if (user.papel === 'suporte') {
       notificacoes = notificacoes.concat(
-        data.chamados
+        tenant.listar(data, 'chamados', user.empresa_id)
           .filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id)
           .map((c) => {
             const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
@@ -2012,7 +2012,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
           })
       );
       notificacoes = notificacoes.concat(
-        data.chamados
+        tenant.listar(data, 'chamados', user.empresa_id)
           .filter((c) => c.tecnico_id === user.id && !c.lida_tecnico)
           .map((c) => {
             const cliente = data.clientes.find((cl) => cl.id === c.cliente_id);
@@ -2026,7 +2026,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
         .map((s) => ({ id: s.id, tipo: 'solicitacao_rh_decidida', texto: `Seu pedido de ${LABEL_SOLICITACAO_RH[s.tipo]} foi ${s.status}${s.resposta_admin ? ': ' + s.resposta_admin : '.'}`, registro_id: s.id }))
     );
   } else if (user.papel === 'cliente') {
-    notificacoes = data.chamados
+    notificacoes = tenant.listar(data, 'chamados', user.empresa_id)
       .filter((c) => c.cliente_id === user.cliente_id && !c.lida_cliente)
       .map((c) => ({ id: c.id, tipo: 'chamado_mensagem_cliente', texto: 'Nova mensagem no seu atendimento', registro_id: c.id }));
   } else if (user.papel === 'administrador') {
@@ -2862,9 +2862,7 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
 
   const agora = new Date().toISOString();
   const textoInicial = String(body.mensagem).trim();
-  const chamado = {
-    id: nextId(data, 'chamados'),
-    empresa_id: 1,
+  const chamado = tenant.criar(data, 'chamados', user.empresa_id, {
     cliente_id: user.cliente_id,
     telefone_whatsapp: null,
     origem: 'app',
@@ -2885,8 +2883,7 @@ rota('POST', /^\/api\/chamados$/, async (req, res) => {
     atualizado_em: agora,
     assumido_em: null,
     resolvido_em: null,
-  };
-  data.chamados.push(chamado);
+  });
 
   if (ia.ativa()) {
     await ia.processarTurno(data, chamado);
@@ -2910,7 +2907,7 @@ rota('GET', /^\/api\/chamados\/meu-ativo$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só clientes usam este atendimento.' });
   const data = db.load();
-  const chamado = data.chamados
+  const chamado = tenant.listar(data, 'chamados', user.empresa_id)
     .filter((c) => c.cliente_id === user.cliente_id && c.status !== 'encerrado')
     .sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || ''))[0];
   if (chamado && !chamado.lida_cliente) { chamado.lida_cliente = true; db.save(data); }
@@ -2925,7 +2922,7 @@ rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
   if (!exigirPapel(user, ['cliente'])) return enviarJSON(res, 403, { erro: 'Só clientes usam este atendimento.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
-  let lista = data.chamados.filter((c) => c.cliente_id === user.cliente_id && c.status === 'encerrado');
+  let lista = tenant.listar(data, 'chamados', user.empresa_id).filter((c) => c.cliente_id === user.cliente_id && c.status === 'encerrado');
   if (query.de) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) >= query.de);
   if (query.ate) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) <= query.ate);
   lista = lista
@@ -2943,19 +2940,20 @@ rota('GET', /^\/api\/chamados$/, async (req, res) => {
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
+  const chamadosDaEmpresa = tenant.listar(data, 'chamados', user.empresa_id);
   let lista;
   if (user.papel === 'administrador') {
-    lista = query.status ? data.chamados.filter((c) => c.status === query.status) : data.chamados.filter((c) => c.status !== 'encerrado');
+    lista = query.status ? chamadosDaEmpresa.filter((c) => c.status === query.status) : chamadosDaEmpresa.filter((c) => c.status !== 'encerrado');
   } else if (query.fila === '1') {
-    lista = data.chamados.filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id);
+    lista = chamadosDaEmpresa.filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id);
   } else if (query.encerrados === '1') {
-    lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status === 'encerrado');
+    lista = chamadosDaEmpresa.filter((c) => c.tecnico_id === user.id && c.status === 'encerrado');
     if (query.de) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) >= query.de);
     if (query.ate) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) <= query.ate);
   } else {
     // só os ativos — os encerrados ficam à parte, atrás do ?encerrados=1, pra não carregar (e
     // desenhar) a lista toda, que só cresce, sempre que o técnico abre a fila
-    lista = data.chamados.filter((c) => c.tecnico_id === user.id && c.status !== 'encerrado');
+    lista = chamadosDaEmpresa.filter((c) => c.tecnico_id === user.id && c.status !== 'encerrado');
   }
   lista = lista.sort((a, b) => (b.atualizado_em || '').localeCompare(a.atualizado_em || '')).map((c) => chamadoResumoLista(data, c));
   enviarJSON(res, 200, { chamados: lista });
@@ -2966,7 +2964,7 @@ rota('GET', /^\/api\/chamados\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
-  const chamado = data.chamados.find((c) => c.id === Number(m[1]));
+  const chamado = tenant.buscar(data, 'chamados', Number(m[1]), user.empresa_id);
   if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
   if (user.papel === 'cliente' && chamado.cliente_id !== user.cliente_id) return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
   if (user.papel === 'suporte' && chamado.tecnico_id !== user.id && chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 403, { erro: 'Este atendimento não é seu.' });
@@ -2984,7 +2982,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
   if (!body.texto || !String(body.texto).trim()) return enviarJSON(res, 400, { erro: 'Mensagem vazia.' });
   const texto = String(body.texto).trim();
   const data = db.load();
-  const chamado = data.chamados.find((c) => c.id === Number(m[1]));
+  const chamado = tenant.buscar(data, 'chamados', Number(m[1]), user.empresa_id);
   if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
   if (chamado.status === 'encerrado') return enviarJSON(res, 400, { erro: 'Este atendimento já foi encerrado.' });
 
@@ -3052,7 +3050,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador assumem atendimentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
-  const chamado = data.chamados.find((c) => c.id === Number(m[1]));
+  const chamado = tenant.buscar(data, 'chamados', Number(m[1]), user.empresa_id);
   if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
   if (chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando um técnico.' });
   if (!chamado.cliente_id) return enviarJSON(res, 400, { erro: 'Este atendimento não tem um cliente identificado no cadastro — não é possível abrir uma O.S. a partir dele.' });
@@ -3190,7 +3188,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/encaminhar-pos-venda$/, async (req, res, m)
   const equipamentoDoItem = item.equipamento_id ? data.equipamentos.find((e) => e.id === item.equipamento_id) : null;
   const sla = slaDoBody(body, equipamentoDoItem);
   if (sla) Object.assign(item, sla);
-  const chamadoOrigem = item.origem_chamado_id ? data.chamados.find((c) => c.id === item.origem_chamado_id) : null;
+  const chamadoOrigem = item.origem_chamado_id ? data.chamados.find((c) => c.id === item.origem_chamado_id && c.empresa_id === item.empresa_id) : null;
   if (chamadoOrigem) {
     await db.salvarMensagemChamado(chamadoOrigem.id, { autor: 'sistema', texto: 'Atendimento encaminhado pro setor de pós-venda.', criado_em: item.encaminhado_pos_venda_em });
     chamadoOrigem.atualizado_em = item.encaminhado_pos_venda_em;
@@ -3463,11 +3461,12 @@ rota('GET', /^\/api\/chamados\/stats$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê as estatísticas de atendimento.' });
   const data = db.load();
+  const chamadosDaEmpresa = tenant.listar(data, 'chamados', user.empresa_id);
   const hojeISO = new Date().toISOString().slice(0, 10);
-  const deHoje = data.chamados.filter((c) => (c.criado_em || '').slice(0, 10) === hojeISO);
+  const deHoje = chamadosDaEmpresa.filter((c) => (c.criado_em || '').slice(0, 10) === hojeISO);
   const resolvidosIa = deHoje.filter((c) => c.status === 'encerrado' && c.resolvido_por === 'ia');
   const paraTecnico = deHoje.filter((c) => c.status === 'convertido_os' || (c.status !== 'ia' && c.tecnico_id));
-  const aguardando = data.chamados.filter((c) => c.status === 'aguardando_tecnico').length; // fila atual, não só de hoje
+  const aguardando = chamadosDaEmpresa.filter((c) => c.status === 'aguardando_tecnico').length; // fila atual, não só de hoje
   const mediaMinutos = (lista, campoFim, campoInicio) => {
     const validos = lista.filter((c) => c[campoFim] && c[campoInicio]);
     if (!validos.length) return null;
