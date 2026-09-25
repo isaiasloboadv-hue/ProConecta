@@ -4,7 +4,8 @@
   "description": "Pro Conecta - Fase 1 (sem dependências no modo arquivo; usa 'pg' só quando DATABASE_URL está configurada)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"
