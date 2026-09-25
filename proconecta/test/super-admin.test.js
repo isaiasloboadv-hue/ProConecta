@@ -122,6 +122,43 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     const empresaFinal = listaFinal.empresas.find((e) => e.id === nova.id);
     assert.ok(empresaFinal.modulos_ativos.includes('crm'));
     assert.ok(!empresaFinal.modulos_ativos.includes('smp_preventivas'));
+
+    // empresa recém-criada nasce sem administrador nenhum — ninguém consegue logar nela ainda
+    assert.deepEqual(nova.administradores, []);
+    assert.deepEqual(empresaFinal.administradores, []);
+
+    // super admin cria o primeiro administrador da empresa nova
+    const criarAdminResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/administrador`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Admin Clínica', email: 'admin@clinica-teste.com', senha: 'clinica1234' }),
+    });
+    assert.equal(criarAdminResp.status, 201);
+    const { usuario: novoAdmin } = await criarAdminResp.json();
+    assert.equal(novoAdmin.papel, 'administrador');
+    assert.equal(novoAdmin.empresa_id, nova.id);
+
+    // e-mail duplicado é rejeitado
+    const emailDuplicado = await fetch(`${base}/api/plataforma/empresas/${nova.id}/administrador`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Outro', email: 'admin@clinica-teste.com', senha: 'outrasenha' }),
+    });
+    assert.equal(emailDuplicado.status, 409);
+
+    // o novo administrador realmente consegue logar, e só vê os módulos da própria empresa
+    const loginNovoAdmin = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@clinica-teste.com', senha: 'clinica1234' }),
+    });
+    assert.equal(loginNovoAdmin.status, 200);
+    const loginBody = await loginNovoAdmin.json();
+    assert.equal(loginBody.usuario.papel, 'administrador');
+    assert.deepEqual(loginBody.usuario.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+
+    // e a lista de empresas do painel agora mostra o administrador criado
+    const listaComAdmin = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
+    const empresaComAdmin = listaComAdmin.empresas.find((e) => e.id === nova.id);
+    assert.equal(empresaComAdmin.administradores.length, 1);
+    assert.equal(empresaComAdmin.administradores[0].email, 'admin@clinica-teste.com');
   } finally {
     servidor.kill();
     fs.rmSync(dbTemp, { force: true });

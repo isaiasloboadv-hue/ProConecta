@@ -3555,12 +3555,19 @@ rota('GET', /^\/api\/plataforma\/versoes$/, async (req, res) => {
   enviarJSON(res, 200, { versoes: data.versoes });
 });
 
-// GET /api/plataforma/empresas — todas as empresas cadastradas na plataforma
+// GET /api/plataforma/empresas — todas as empresas cadastradas na plataforma, cada uma já com a
+// lista de administradores (pra o painel saber se a empresa ainda não tem ninguém pra logar).
 rota('GET', /^\/api\/plataforma\/empresas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
   const data = db.load();
-  enviarJSON(res, 200, { empresas: data.empresas });
+  const empresas = data.empresas.map((e) => ({
+    ...e,
+    administradores: data.usuarios
+      .filter((u) => u.empresa_id === e.id && u.papel === 'administrador')
+      .map((u) => ({ id: u.id, nome: u.nome, email: u.email, status: u.status })),
+  }));
+  enviarJSON(res, 200, { empresas });
 });
 
 // POST /api/plataforma/empresas — cadastra uma empresa nova, já com os módulos da versão escolhida
@@ -3584,7 +3591,33 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
   };
   data.empresas.push(empresa);
   db.save(data);
-  enviarJSON(res, 201, { empresa });
+  enviarJSON(res, 201, { empresa: { ...empresa, administradores: [] } });
+});
+
+// POST /api/plataforma/empresas/:id/administrador — cria o login de administrador da empresa.
+// Empresa cadastrada pelo painel não nasce com usuário nenhum (só o registro da empresa em si) —
+// sem isso não tem como ninguém entrar nela. Pode ser chamada mais de uma vez pra criar mais de
+// um administrador na mesma empresa.
+rota('POST', /^\/api\/plataforma\/empresas\/(\d+)\/administrador$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome é obrigatório.' });
+  if (!body.email || !String(body.email).trim()) return enviarJSON(res, 400, { erro: 'E-mail é obrigatório.' });
+  if (!body.senha || String(body.senha).length < 6) return enviarJSON(res, 400, { erro: 'A senha precisa ter pelo menos 6 caracteres.' });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === Number(m[1]));
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  if (data.usuarios.some((u) => u.email === body.email)) return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
+  const { salt, hash } = hashSenha(body.senha);
+  const admin = tenant.criar(data, 'usuarios', empresa.id, {
+    nome: String(body.nome).trim(), email: String(body.email).trim(), papel: 'administrador',
+    cargo: '', setor: '', celular: '', cliente_id: null,
+    acesso_total: true, menus: [], departamento: null,
+    status: 'ativo', convite_token: null, salt, hash,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { usuario: usuarioPublico(admin) });
 });
 
 // PUT /api/plataforma/empresas/:id/modulos — liga/desliga módulos avulsos, independente da versão

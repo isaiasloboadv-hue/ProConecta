@@ -781,11 +781,18 @@ async function renderPainelPlataforma() {
     <div class="panel">
       <div class="panel-head">Nova empresa</div>
       <div class="form-grid">
-        <div><label>Nome*</label><input id="pe-nome" placeholder="Nome da empresa cliente"></div>
+        <div><label>Nome da empresa*</label><input id="pe-nome" placeholder="Nome da empresa cliente"></div>
         <div><label>Versão</label><select id="pe-versao">
           <option value="">Nenhuma (sem módulo nenhum ativo)</option>
           ${versoes.map((v) => `<option value="${v.id}">${esc(v.nome)} (${v.modulos.map(esc).join(', ')})</option>`).join('')}
         </select></div>
+      </div>
+      <h2>Primeiro administrador (opcional agora, dá pra criar depois)</h2>
+      <p style="margin-top:-8px; color:var(--gray-500, #666);">Sem um administrador, ninguém consegue logar nessa empresa.</p>
+      <div class="form-grid">
+        <div><label>Nome</label><input id="pe-admin-nome" placeholder="Nome do administrador"></div>
+        <div><label>E-mail</label><input id="pe-admin-email" type="email" placeholder="email@empresa.com"></div>
+        <div><label>Senha</label><input id="pe-admin-senha" type="password" placeholder="mínimo 6 caracteres"></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="criarEmpresaPlataforma()">Cadastrar empresa</button>
     </div>
@@ -796,7 +803,17 @@ function renderListaEmpresasPlataforma(empresas) {
   return empresas.map((e) => `
     <div class="panel">
       <div class="panel-head">${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''}</div>
-      <h2 style="margin-top:0;">Módulos ativos</h2>
+      <h2 style="margin-top:0;">Administradores</h2>
+      ${(e.administradores || []).length ? `
+        <ul>${e.administradores.map((a) => `<li>${esc(a.nome)} — ${esc(a.email)}</li>`).join('')}</ul>
+      ` : `<p style="color:var(--red, #c00);"><b>Nenhum administrador ainda — ninguém consegue logar nessa empresa.</b></p>`}
+      <div class="form-grid">
+        <div><label>Nome</label><input id="pe-novoadmin-nome-${e.id}" placeholder="Nome do administrador"></div>
+        <div><label>E-mail</label><input id="pe-novoadmin-email-${e.id}" type="email" placeholder="email@empresa.com"></div>
+        <div><label>Senha</label><input id="pe-novoadmin-senha-${e.id}" type="password" placeholder="mínimo 6 caracteres"></div>
+      </div>
+      <button class="btn btn-outline-sm" onclick="criarAdministradorPlataforma(${e.id})">Criar administrador</button>
+      <h2>Módulos ativos</h2>
       <div class="form-grid">
         ${_plataformaModulosCache.map((m) => `
           <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
@@ -817,9 +834,31 @@ async function criarEmpresaPlataforma() {
   const nome = document.getElementById('pe-nome').value.trim();
   if (!nome) return mostrarToast('Informe o nome da empresa.');
   const versaoId = document.getElementById('pe-versao').value;
+  const adminNome = document.getElementById('pe-admin-nome').value.trim();
+  const adminEmail = document.getElementById('pe-admin-email').value.trim();
+  const adminSenha = document.getElementById('pe-admin-senha').value;
   try {
-    await api('/api/plataforma/empresas', { method: 'POST', body: { nome, versao_id: versaoId || null } });
-    mostrarToast('Empresa cadastrada.');
+    const { empresa } = await api('/api/plataforma/empresas', { method: 'POST', body: { nome, versao_id: versaoId || null } });
+    if (adminNome || adminEmail || adminSenha) {
+      await api(`/api/plataforma/empresas/${empresa.id}/administrador`, { method: 'POST', body: { nome: adminNome, email: adminEmail, senha: adminSenha } });
+      mostrarToast('Empresa e administrador cadastrados.');
+    } else {
+      mostrarToast('Empresa cadastrada. Crie um administrador pra alguém conseguir logar nela.');
+    }
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function criarAdministradorPlataforma(empresaId) {
+  const nome = document.getElementById(`pe-novoadmin-nome-${empresaId}`).value.trim();
+  const email = document.getElementById(`pe-novoadmin-email-${empresaId}`).value.trim();
+  const senha = document.getElementById(`pe-novoadmin-senha-${empresaId}`).value;
+  if (!nome || !email || !senha) return mostrarToast('Preencha nome, e-mail e senha do administrador.');
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}/administrador`, { method: 'POST', body: { nome, email, senha } });
+    mostrarToast('Administrador criado — já pode logar com esse e-mail e senha.');
     renderPainelPlataforma();
   } catch (e) {
     mostrarToast(e.message);
