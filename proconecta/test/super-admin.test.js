@@ -154,6 +154,31 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(loginBody.usuario.papel, 'administrador');
     assert.deepEqual(loginBody.usuario.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
 
+    // login também identifica de qual empresa é a sessão — é o que o front usa pra mostrar o
+    // nome da empresa no cabeçalho (sem isso, quem loga não tem como saber em qual empresa está)
+    assert.equal(loginBody.usuario.empresa.nome, 'Clínica Teste');
+    assert.equal(loginBody.usuario.empresa.id, nova.id);
+
+    // GET /api/me devolve a mesma identificação de empresa
+    const meNovoAdmin = await (await fetch(`${base}/api/me`, { headers: { Authorization: `Bearer ${loginBody.token}` } })).json();
+    assert.equal(meNovoAdmin.usuario.empresa.nome, 'Clínica Teste');
+
+    // o admin original (PRO Marking) continua vendo a própria empresa, não a nova
+    const loginAdminOriginal = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@teste-super.com', senha: 'senha1234' }),
+    });
+    const bodyAdminOriginal = await loginAdminOriginal.json();
+    assert.equal(bodyAdminOriginal.usuario.empresa.nome, 'PRO Marking');
+
+    // super_admin não pertence a nenhuma empresa — empresa vem null, não a de outra empresa
+    assert.equal(loginSuper.status, 200);
+    const bodySuper = await (await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'super@teste-super.com', senha: 'super1234' }),
+    })).json();
+    assert.equal(bodySuper.usuario.empresa, null);
+
     // e a lista de empresas do painel agora mostra o administrador criado
     const listaComAdmin = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
     const empresaComAdmin = listaComAdmin.empresas.find((e) => e.id === nova.id);

@@ -151,10 +151,12 @@ async function api(path, opts = {}) {
   }
 }
 
-// dados de marca da empresa dona da instalação (nome, contato) — buscados uma vez no boot,
-// antes até do login, e usados em vez de texto fixo nos PDFs/Word e telas de contato. Assim
-// instalar o sistema pra outra empresa não exige mexer em código, só nas variáveis de ambiente
-// (ver db.js). Os valores de fallback abaixo só entram em jogo se a busca falhar.
+// dados de marca da empresa — usados nos PDFs/Word e telas de contato. Antes do login não dá pra
+// saber de qual empresa é a sessão (login é só e-mail+senha), então carregarEmpresa() busca uma
+// marca genérica só pra tela de login não ficar em branco; assim que USER loga, entrarNoApp()
+// troca window._empresa pelos dados reais da empresa do usuário (USER.empresa, vindo do
+// login/GET /api/me) — sem isso, PDF gerado por empresa B sairia com o nome da empresa A.
+// Os valores de fallback abaixo só entram em jogo se nem uma coisa nem outra estiver disponível.
 window._empresa = null;
 async function carregarEmpresa() {
   try { window._empresa = (await api('/api/empresa')).empresa; } catch (e) {}
@@ -219,6 +221,9 @@ function sair() {
   salvarTokenSW(null);
   document.getElementById('appView').style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
+  const empresaTag = document.getElementById('empresaTag');
+  if (empresaTag) empresaTag.textContent = '';
+  carregarEmpresa();
 }
 
 async function tentarSessaoExistente() {
@@ -381,6 +386,9 @@ async function ativarNotificacoesPush() {
 function entrarNoApp() {
   document.getElementById('authView').style.display = 'none';
   document.getElementById('appView').style.display = 'block';
+  if (USER.empresa) window._empresa = USER.empresa;
+  const empresaTag = document.getElementById('empresaTag');
+  if (empresaTag) empresaTag.textContent = USER.empresa ? USER.empresa.nome : (USER.papel === 'super_admin' ? 'Painel da plataforma' : '');
   montarSidebar();
   atualizarSino();
   sinoTimer = setInterval(atualizarSino, 15000);

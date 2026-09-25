@@ -531,6 +531,14 @@ function usuarioPublico(u) {
   return resto;
 }
 
+// resumo da empresa exposto no login/GET /api/me — pra tela e PDF saberem, sem consulta à parte,
+// de qual empresa é a sessão atual (super_admin não tem empresa, vem null).
+function empresaResumo(empresa) {
+  if (!empresa) return null;
+  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria } = empresa;
+  return { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria };
+}
+
 function registroComAutor(data, r) {
   const autor = data.usuarios.find((u) => u.id === r.autor_id && u.empresa_id === r.empresa_id);
   return { ...r, autor_nome: autor ? autor.nome : null };
@@ -590,6 +598,7 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   const empresaDoUsuario = data.empresas.find((e) => e.id === u.empresa_id);
   enviarJSON(res, 200, { token, usuario: {
     ...usuarioPublico(u),
+    empresa: empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
   } });
@@ -611,6 +620,7 @@ rota('GET', /^\/api\/me$/, async (req, res) => {
   const empresaDoUsuario = data.empresas.find((e) => e.id === user.empresa_id);
   enviarJSON(res, 200, { usuario: {
     ...user,
+    empresa: empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
   } });

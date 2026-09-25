@@ -48,6 +48,8 @@ header{
 .wordmark.inline{display:flex;align-items:baseline;gap:6px;}
 .wordmark.inline .pro{color:#5FC1EE;font-size:17px;letter-spacing:.8px;}
 .wordmark.inline .conecta{color:#fff;font-size:17px;letter-spacing:.8px;}
+.empresa-tag{margin-left:4px;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
+.empresa-tag:empty{display:none;}
 
 .header-right{display:flex;align-items:center;gap:14px;}
 .user-chip{display:flex;align-items:center;gap:10px;}
@@ -433,6 +435,7 @@ tr:last-child td{border-bottom:none;}
 }
 @media(max-width:520px){
   .brand .wordmark.inline{display:none;}
+  .empresa-tag{display:none;}
 }
 
 /* ---------- atendimento por chat (IA -> fila -> técnico) ---------- */
