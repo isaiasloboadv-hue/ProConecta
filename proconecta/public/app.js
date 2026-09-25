@@ -776,6 +776,7 @@ async function ir(pagina) {
 
 let _plataformaModulosCache = [];
 let _plataformaVersoesCache = [];
+let _plataformaEmpresasCache = [];
 
 async function renderPainelPlataforma() {
   const [{ empresas }, { modulos }, { versoes }] = await Promise.all([
@@ -783,6 +784,7 @@ async function renderPainelPlataforma() {
   ]);
   _plataformaModulosCache = modulos;
   _plataformaVersoesCache = versoes;
+  _plataformaEmpresasCache = empresas;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head"><h1>Plataforma</h1><p>${empresas.length} empresa(s) cadastrada(s).</p></div>
@@ -810,11 +812,35 @@ async function renderPainelPlataforma() {
 function renderListaEmpresasPlataforma(empresas) {
   return empresas.map((e) => `
     <div class="panel">
-      <div class="panel-head">${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''}</div>
-      <h2 style="margin-top:0;">Administradores</h2>
-      ${(e.administradores || []).length ? `
-        <ul>${e.administradores.map((a) => `<li>${esc(a.nome)} — ${esc(a.email)}</li>`).join('')}</ul>
-      ` : `<p style="color:var(--red, #c00);"><b>Nenhum administrador ainda — ninguém consegue logar nessa empresa.</b></p>`}
+      <div class="panel-head" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <span>${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''}</span>
+        ${e.id !== 1 ? `<button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="excluirEmpresaPlataforma(${e.id})">Excluir empresa</button>` : ''}
+      </div>
+      <h2 style="margin-top:0;">Dados da empresa</h2>
+      <div class="form-grid">
+        <div><label>Nome</label><input id="pe-dados-nome-${e.id}" value="${esc(e.nome)}"></div>
+        <div><label>Site</label><input id="pe-dados-site-${e.id}" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
+        <div><label>WhatsApp</label><input id="pe-dados-whatsapp-${e.id}" value="${esc(e.whatsapp || '')}"></div>
+        <div><label>Telefone</label><input id="pe-dados-telefone-${e.id}" value="${esc(e.telefone || '')}"></div>
+        <div><label>Cor primária</label><input type="color" id="pe-dados-corprim-${e.id}" value="${esc(e.cor_primaria || '#0A2647')}"></div>
+        <div><label>Cor secundária</label><input type="color" id="pe-dados-corsec-${e.id}" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarDadosEmpresaPlataforma(${e.id})">Salvar dados</button>
+      <h2>Administradores</h2>
+      ${(e.administradores || []).length ? e.administradores.map((a) => `
+        <div class="form-grid" style="align-items:end;">
+          <div><label>Nome</label><input id="pe-adm-nome-${a.id}" value="${esc(a.nome)}"></div>
+          <div><label>E-mail</label><input id="pe-adm-email-${a.id}" type="email" value="${esc(a.email)}"></div>
+          <div><label>Status</label><select id="pe-adm-status-${a.id}">
+            <option value="ativo" ${a.status === 'ativo' ? 'selected' : ''}>Ativo</option>
+            <option value="inativo" ${a.status === 'inativo' ? 'selected' : ''}>Inativo</option>
+          </select></div>
+          <div><label>Nova senha (opcional)</label><input id="pe-adm-senha-${a.id}" type="password" placeholder="deixe em branco pra manter"></div>
+        </div>
+        <button class="btn-outline-sm" onclick="salvarAdministradorPlataforma(${a.id})">Salvar administrador</button>
+        <button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="excluirAdministradorPlataforma(${a.id})">Excluir administrador</button>
+        <hr style="margin:14px 0; border:none; border-top:1px solid var(--line,#e5e5e5);">
+      `).join('') : `<p style="color:var(--red, #c00);"><b>Nenhum administrador ainda — ninguém consegue logar nessa empresa.</b></p>`}
       <div class="form-grid">
         <div><label>Nome</label><input id="pe-novoadmin-nome-${e.id}" placeholder="Nome do administrador"></div>
         <div><label>E-mail</label><input id="pe-novoadmin-email-${e.id}" type="email" placeholder="email@empresa.com"></div>
@@ -867,6 +893,70 @@ async function criarAdministradorPlataforma(empresaId) {
   try {
     await api(`/api/plataforma/empresas/${empresaId}/administrador`, { method: 'POST', body: { nome, email, senha } });
     mostrarToast('Administrador criado — já pode logar com esse e-mail e senha.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarDadosEmpresaPlataforma(empresaId) {
+  const nome = document.getElementById(`pe-dados-nome-${empresaId}`).value.trim();
+  if (!nome) return mostrarToast('Informe o nome da empresa.');
+  const body = {
+    nome,
+    site: document.getElementById(`pe-dados-site-${empresaId}`).value.trim(),
+    whatsapp: document.getElementById(`pe-dados-whatsapp-${empresaId}`).value.trim(),
+    telefone: document.getElementById(`pe-dados-telefone-${empresaId}`).value.trim(),
+    cor_primaria: document.getElementById(`pe-dados-corprim-${empresaId}`).value,
+    cor_secundaria: document.getElementById(`pe-dados-corsec-${empresaId}`).value,
+  };
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}`, { method: 'PUT', body });
+    mostrarToast('Dados da empresa atualizados.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+// exclusão de empresa é irreversível e apaga todo o dado dela (usuários, O.S., clientes,
+// biblioteca...) — por isso pede pra digitar o nome exato como segunda confirmação, e o servidor
+// confere de novo (ver DELETE /api/plataforma/empresas/:id).
+async function excluirEmpresaPlataforma(empresaId) {
+  const empresa = _plataformaEmpresasCache.find((e) => e.id === empresaId);
+  if (!empresa) return;
+  const digitado = prompt(`Isso apaga a empresa "${empresa.nome}" e TODOS os dados dela (usuários, O.S., clientes, biblioteca etc.) — não pode ser desfeito.\n\nPra confirmar, digite o nome exato da empresa:`);
+  if (digitado === null) return;
+  if (digitado.trim() !== empresa.nome) return mostrarToast('Nome não confere — nada foi excluído.');
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}`, { method: 'DELETE', body: { confirmar_nome: digitado.trim() } });
+    mostrarToast('Empresa excluída.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarAdministradorPlataforma(adminId) {
+  const nome = document.getElementById(`pe-adm-nome-${adminId}`).value.trim();
+  const email = document.getElementById(`pe-adm-email-${adminId}`).value.trim();
+  const status = document.getElementById(`pe-adm-status-${adminId}`).value;
+  const senha = document.getElementById(`pe-adm-senha-${adminId}`).value;
+  if (!nome || !email) return mostrarToast('Preencha nome e e-mail do administrador.');
+  try {
+    await api(`/api/plataforma/administradores/${adminId}`, { method: 'PUT', body: { nome, email, status, senha: senha || undefined } });
+    mostrarToast('Administrador atualizado.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function excluirAdministradorPlataforma(adminId) {
+  if (!confirm('Excluir este administrador? Se for o único da empresa, ninguém mais vai conseguir logar nela até criar outro.')) return;
+  try {
+    await api(`/api/plataforma/administradores/${adminId}`, { method: 'DELETE' });
+    mostrarToast('Administrador excluído.');
     renderPainelPlataforma();
   } catch (e) {
     mostrarToast(e.message);

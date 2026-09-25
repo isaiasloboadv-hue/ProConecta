@@ -13,7 +13,7 @@ function dadosComSuperAdmin() {
   const senhaSuper = hashSenha('super1234');
   return {
     usuarios: [
-      { id: 1, nome: 'Admin PRO Marking', email: 'admin@teste-super.com', papel: 'administrador', status: 'ativo', empresa_id: 1, ...senhaAdmin },
+      { id: 1, nome: 'Admin PRO Marking', email: 'admin@teste-super.com', papel: 'administrador', status: 'ativo', empresa_id: 1, protegido: true, ...senhaAdmin },
       { id: 2, nome: 'Super Admin', email: 'super@teste-super.com', papel: 'super_admin', status: 'ativo', empresa_id: null, ...senhaSuper },
     ],
     clientes: [], equipamentos: [], agenda: [], visitas: [],
@@ -184,6 +184,124 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     const empresaComAdmin = listaComAdmin.empresas.find((e) => e.id === nova.id);
     assert.equal(empresaComAdmin.administradores.length, 1);
     assert.equal(empresaComAdmin.administradores[0].email, 'admin@clinica-teste.com');
+    const adminId = empresaComAdmin.administradores[0].id;
+
+    // ---------- editar dados da empresa ----------
+    const editarEmpresaResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Clínica Teste Renomeada', site: 'clinica.com.br', whatsapp: '11 99999-0000', telefone: '11 3333-0000' }),
+    });
+    assert.equal(editarEmpresaResp.status, 200);
+    const { empresa: empresaEditada } = await editarEmpresaResp.json();
+    assert.equal(empresaEditada.nome, 'Clínica Teste Renomeada');
+    assert.equal(empresaEditada.site, 'clinica.com.br');
+    // módulos/versão não foram afetados pela edição de dados básicos
+    assert.deepEqual(empresaEditada.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+
+    // nome vazio é rejeitado
+    const editarEmpresaVazio = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: '' }),
+    });
+    assert.equal(editarEmpresaVazio.status, 400);
+
+    // instalação atual (empresa 1) não pode ter dados alterados por quem não é dela? — na verdade
+    // pode editar dados básicos da empresa 1 sem problema, só não pode EXCLUIR (checado abaixo)
+    const editarEmpresa1 = await fetch(`${base}/api/plataforma/empresas/1`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'PRO Marking' }),
+    });
+    assert.equal(editarEmpresa1.status, 200);
+
+    // ---------- editar administrador ----------
+    const editarAdminResp = await fetch(`${base}/api/plataforma/administradores/${adminId}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Admin Clínica Editado', email: 'admin-editado@clinica-teste.com', status: 'ativo' }),
+    });
+    assert.equal(editarAdminResp.status, 200);
+    const { usuario: adminEditado } = await editarAdminResp.json();
+    assert.equal(adminEditado.nome, 'Admin Clínica Editado');
+    assert.equal(adminEditado.email, 'admin-editado@clinica-teste.com');
+
+    // login com o e-mail antigo não funciona mais, com o novo funciona
+    const loginEmailAntigo = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@clinica-teste.com', senha: 'clinica1234' }),
+    });
+    assert.equal(loginEmailAntigo.status, 401);
+    const loginEmailNovo = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin-editado@clinica-teste.com', senha: 'clinica1234' }),
+    });
+    assert.equal(loginEmailNovo.status, 200);
+
+    // redefinir a senha do administrador
+    const redefinirSenhaResp = await fetch(`${base}/api/plataforma/administradores/${adminId}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Admin Clínica Editado', email: 'admin-editado@clinica-teste.com', senha: 'novasenha123' }),
+    });
+    assert.equal(redefinirSenhaResp.status, 200);
+    const loginSenhaNova = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin-editado@clinica-teste.com', senha: 'novasenha123' }),
+    });
+    assert.equal(loginSenhaNova.status, 200);
+
+    // a conta master (ADMIN_EMAIL, protegida) não pode ser editada nem excluída por aqui
+    const listaAdminsProMarking = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
+    const proMarking = listaAdminsProMarking.empresas.find((e) => e.id === 1);
+    const adminProtegido = proMarking.administradores.find((a) => a.email === 'admin@teste-super.com');
+    assert.ok(adminProtegido, 'admin@teste-super.com deveria existir na PRO Marking');
+    const editarProtegidoResp = await fetch(`${base}/api/plataforma/administradores/${adminProtegido.id}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Hackeado', email: 'hackeado@x.com' }),
+    });
+    assert.equal(editarProtegidoResp.status, 403);
+    const excluirProtegidoResp = await fetch(`${base}/api/plataforma/administradores/${adminProtegido.id}`, {
+      method: 'DELETE', headers: authSuper,
+    });
+    assert.equal(excluirProtegidoResp.status, 403);
+
+    // ---------- excluir administrador ----------
+    const excluirAdminResp = await fetch(`${base}/api/plataforma/administradores/${adminId}`, {
+      method: 'DELETE', headers: authSuper,
+    });
+    assert.equal(excluirAdminResp.status, 200);
+    // agora a empresa fica sem administrador de novo
+    const listaSemAdmin = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
+    const empresaSemAdminDeNovo = listaSemAdmin.empresas.find((e) => e.id === nova.id);
+    assert.deepEqual(empresaSemAdminDeNovo.administradores, []);
+    // e o login antigo já não funciona mais
+    const loginAposExcluir = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin-editado@clinica-teste.com', senha: 'novasenha123' }),
+    });
+    assert.equal(loginAposExcluir.status, 401);
+
+    // ---------- excluir empresa ----------
+    // sem confirmar_nome batendo: rejeitado, nada é apagado
+    const excluirSemConfirmar = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
+      method: 'DELETE', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmar_nome: 'nome errado' }),
+    });
+    assert.equal(excluirSemConfirmar.status, 400);
+
+    // empresa 1 (instalação atual) nunca pode ser excluída, mesmo confirmando certinho
+    const excluirEmpresa1 = await fetch(`${base}/api/plataforma/empresas/1`, {
+      method: 'DELETE', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmar_nome: 'PRO Marking' }),
+    });
+    assert.equal(excluirEmpresa1.status, 400);
+
+    // com o nome certo: exclui de verdade
+    const excluirOk = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
+      method: 'DELETE', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmar_nome: 'Clínica Teste Renomeada' }),
+    });
+    assert.equal(excluirOk.status, 200);
+    const listaFinalSemEmpresa = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
+    assert.equal(listaFinalSemEmpresa.empresas.length, 1);
+    assert.equal(listaFinalSemEmpresa.empresas[0].id, 1);
   } finally {
     servidor.kill();
     fs.rmSync(dbTemp, { force: true });

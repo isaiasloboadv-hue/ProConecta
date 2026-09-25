@@ -3604,6 +3604,51 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
   enviarJSON(res, 201, { empresa: { ...empresa, administradores: [] } });
 });
 
+// PUT /api/plataforma/empresas/:id — edita os dados básicos da empresa (nome, contato, cores).
+// Não mexe em versão/módulos/terminologia — isso continua nas rotas próprias abaixo.
+rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === Number(m[1]));
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  Object.assign(empresa, {
+    nome: String(body.nome).trim(),
+    site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
+    emails: Array.isArray(body.emails) ? body.emails : [],
+    cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { empresa });
+});
+
+// DELETE /api/plataforma/empresas/:id — exclui a empresa e todo o dado que pertence só a ela
+// (usuários, clientes, equipamentos, O.S., visitas, biblioteca, chamados, relatórios, RH, chat
+// interno). Irreversível, por isso exige `confirmar_nome` batendo com o nome atual da empresa
+// (o painel já confirma com o usuário antes de mandar — isso aqui é a segunda trava, no servidor).
+// A empresa 1 (instalação atual) nunca pode ser excluída por aqui.
+rota('DELETE', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const id = Number(m[1]);
+  if (id === 1) return enviarJSON(res, 400, { erro: 'A instalação atual (empresa 1) não pode ser excluída.' });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === id);
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  const body = await lerCorpo(req);
+  if (String(body.confirmar_nome || '').trim() !== empresa.nome) {
+    return enviarJSON(res, 400, { erro: 'Confirmação não bate com o nome da empresa.' });
+  }
+  for (const colecao of ['usuarios', 'clientes', 'equipamentos', 'agenda', 'visitas', 'registros', 'chamados', 'relatorios_manutencao', 'solicitacoes_rh', 'mensagens_internas']) {
+    data[colecao] = data[colecao].filter((r) => r.empresa_id !== id);
+  }
+  data.empresas = data.empresas.filter((e) => e.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // POST /api/plataforma/empresas/:id/administrador — cria o login de administrador da empresa.
 // Empresa cadastrada pelo painel não nasce com usuário nenhum (só o registro da empresa em si) —
 // sem isso não tem como ninguém entrar nela. Pode ser chamada mais de uma vez pra criar mais de
@@ -3628,6 +3673,50 @@ rota('POST', /^\/api\/plataforma\/empresas\/(\d+)\/administrador$/, async (req, 
   });
   db.save(data);
   enviarJSON(res, 201, { usuario: usuarioPublico(admin) });
+});
+
+// PUT /api/plataforma/administradores/:id — edita nome/e-mail/status (e, opcionalmente, redefine a
+// senha) de um administrador de qualquer empresa. Diferente de PUT /api/usuarios/:id (que só edita
+// dentro da própria empresa de quem está logado) porque o super admin não pertence a empresa
+// nenhuma — precisa de uma rota que enxergue todas.
+rota('PUT', /^\/api\/plataforma\/administradores\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome é obrigatório.' });
+  if (!body.email || !String(body.email).trim()) return enviarJSON(res, 400, { erro: 'E-mail é obrigatório.' });
+  const data = db.load();
+  const admin = data.usuarios.find((u) => u.id === Number(m[1]) && u.papel === 'administrador');
+  if (!admin) return enviarJSON(res, 404, { erro: 'Administrador não encontrado.' });
+  if (admin.protegido) return enviarJSON(res, 403, { erro: 'Esta conta é protegida e só pode ser editada por ela mesma.' });
+  if (data.usuarios.some((u) => u.id !== admin.id && u.email === body.email)) {
+    return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
+  }
+  admin.nome = String(body.nome).trim();
+  admin.email = String(body.email).trim();
+  if (body.status === 'ativo' || body.status === 'inativo') admin.status = body.status;
+  if (body.senha) {
+    if (String(body.senha).length < 6) return enviarJSON(res, 400, { erro: 'A senha precisa ter pelo menos 6 caracteres.' });
+    const { salt, hash } = hashSenha(body.senha);
+    admin.salt = salt; admin.hash = hash;
+  }
+  db.save(data);
+  enviarJSON(res, 200, { usuario: usuarioPublico(admin) });
+});
+
+// DELETE /api/plataforma/administradores/:id — remove o login de um administrador de qualquer
+// empresa. Se era o único administrador da empresa, ela volta ao estado "sem administrador" (o
+// próprio painel já trata isso, mostrando o aviso e o formulário de criar administrador de novo).
+rota('DELETE', /^\/api\/plataforma\/administradores\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const data = db.load();
+  const admin = data.usuarios.find((u) => u.id === Number(m[1]) && u.papel === 'administrador');
+  if (!admin) return enviarJSON(res, 404, { erro: 'Administrador não encontrado.' });
+  if (admin.protegido) return enviarJSON(res, 403, { erro: 'Esta conta é protegida e não pode ser excluída.' });
+  data.usuarios = data.usuarios.filter((u) => u.id !== admin.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // PUT /api/plataforma/empresas/:id/modulos — liga/desliga módulos avulsos, independente da versão
