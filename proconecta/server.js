@@ -13,6 +13,7 @@ const whatsapp = require('./whatsapp');
 const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
+const { moduloDaRota } = require('./rotas-modulo');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -573,7 +574,7 @@ async function hidratarFotosProfundo(valor) {
 
 const rotas = [];
 function rota(metodo, regex, handler) {
-  rotas.push({ metodo, regex, handler });
+  rotas.push({ metodo, regex, handler, modulo: moduloDaRota(regex) });
 }
 
 // POST /api/login
@@ -584,7 +585,7 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   if (!u || u.status !== 'ativo' || !conferirSenha(senha || '', u.salt, u.hash)) {
     return enviarJSON(res, 401, { erro: 'E-mail ou senha inválidos.' });
   }
-  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id });
+  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
 });
 
@@ -627,7 +628,7 @@ rota('POST', /^\/api\/convite\/([a-f0-9]+)\/ativar$/, async (req, res, m) => {
   u.status = 'ativo';
   u.convite_token = null;
   db.save(data);
-  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id });
+  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
 });
 
@@ -3569,6 +3570,16 @@ const server = http.createServer(async (req, res) => {
       // espera o banco (Postgres) terminar de conectar antes de tocar em qualquer
       // rota da API, pra nenhuma requisição cair no fallback de arquivo local por engano
       await db.pronto;
+      // bloqueio central de módulo: roda antes de qualquer handler, então nenhuma rota escapa
+      // dessa checagem — mesmo uma chamada direta na API (sem passar pelo menu do front) recebe
+      // 403 se o módulo dono da rota não estiver ativo pra empresa do usuário.
+      if (rotaEncontrada.modulo !== 'publico') {
+        const user = usuarioAutenticado(req);
+        if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+        if (rotaEncontrada.modulo !== 'nucleo' && !db.moduloAtivo(db.load(), user.empresa_id, rotaEncontrada.modulo)) {
+          return enviarJSON(res, 403, { erro: `Módulo "${rotaEncontrada.modulo}" não está ativo pra sua empresa.` });
+        }
+      }
       const m = pathname.match(rotaEncontrada.regex);
       await rotaEncontrada.handler(req, res, m);
     } catch (e) {

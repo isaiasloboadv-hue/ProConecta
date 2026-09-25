@@ -7,7 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DB_PATH = path.join(__dirname, 'data.json');
+// DB_PATH é configurável (DB_PATH_ARQUIVO) pra testes de ponta a ponta poderem subir o servidor
+// de verdade contra um arquivo descartável, sem tocar no data.json real do ambiente.
+const DB_PATH = process.env.DB_PATH_ARQUIVO || path.join(__dirname, 'data.json');
 const usaPostgres = !!process.env.DATABASE_URL;
 
 function hashSenha(senha, salt) {
