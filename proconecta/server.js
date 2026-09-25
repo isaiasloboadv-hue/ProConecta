@@ -587,7 +587,8 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
     return enviarJSON(res, 401, { erro: 'E-mail ou senha inválidos.' });
   }
   const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
-  enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
+  const empresaDoUsuario = data.empresas.find((e) => e.id === u.empresa_id);
+  enviarJSON(res, 200, { token, usuario: { ...usuarioPublico(u), modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [] } });
 });
 
 // dados de marca da empresa (nome, contato, cores) — pública porque a tela de login também usa,
@@ -602,7 +603,9 @@ rota('GET', /^\/api\/empresa$/, async (req, res) => {
 rota('GET', /^\/api\/me$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
-  enviarJSON(res, 200, { usuario: user });
+  const data = db.load();
+  const empresaDoUsuario = data.empresas.find((e) => e.id === user.empresa_id);
+  enviarJSON(res, 200, { usuario: { ...user, modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [] } });
 });
 
 // ---------- convite de primeiro acesso ----------

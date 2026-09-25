@@ -492,15 +492,15 @@ const MENUS_LABEL_POR_PAPEL = {
 
 const NAV = {
   suporte: [
-    { key: 'agenda', label: 'Agenda', page: 'agenda' },
-    { key: 'fila-atendimento', label: 'Chat', page: 'fila-atendimento' },
-    { key: 'relatorio-manutencao', label: 'Relatório', children: [
+    { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
+    { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
+    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', children: [
       { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
       { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
       { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
     ]},
-    { key: 'calendario-tecnico', label: 'Calendário', page: 'calendario-tecnico' },
-    { key: 'biblioteca', label: 'Biblioteca', children: [
+    { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
@@ -512,15 +512,15 @@ const NAV = {
       { key: 'meus-registros', label: 'Meus registros', page: 'meus-registros' },
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
-    { key: 'fila-reparo', label: 'Setor Reparo', page: 'fila-reparo' },
-    { key: 'solicitacoes-rh', label: 'Solicitações', page: 'solicitacoes-rh' },
+    { key: 'fila-reparo', modulo: 'os_chamados', label: 'Setor Reparo', page: 'fila-reparo' },
+    { key: 'solicitacoes-rh', modulo: 'os_chamados', label: 'Solicitações', page: 'solicitacoes-rh' },
   ],
   administrador: [
-    { key: 'agenda', label: 'Agenda geral', page: 'agenda' },
-    { key: 'painel-atendimentos', label: 'Atendimentos', page: 'painel-atendimentos' },
-    { key: 'solicitacao-atendimento', label: 'Solicitação de Atendimento', page: 'fila-solicitacao-atendimento' },
-    { key: 'aprovacoes-visitas', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
-    { key: 'biblioteca', label: 'Biblioteca', children: [
+    { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
+    { key: 'painel-atendimentos', modulo: 'os_chamados', label: 'Atendimentos', page: 'painel-atendimentos' },
+    { key: 'solicitacao-atendimento', modulo: 'os_chamados', label: 'Solicitação de Atendimento', page: 'fila-solicitacao-atendimento' },
+    { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
@@ -533,30 +533,30 @@ const NAV = {
       ]},
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
-    { key: 'clientes', label: 'Clientes', page: 'clientes' },
-    { key: 'equipamentos', label: 'Equipamentos', children: [
+    { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
+    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
-    { key: 'usuarios', label: 'Usuários', page: 'usuarios' },
-    { key: 'tecnicos-rh', label: 'Técnicos', children: [
+    { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
+    { key: 'tecnicos-rh', modulo: 'os_chamados', label: 'Técnicos', children: [
       { key: 'acompanhamento', label: 'Acompanhamento de viagens', page: 'tecnicos-acompanhamento' },
       { key: 'solicitacoes', label: 'Solicitações', page: 'tecnicos-solicitacoes' },
     ]},
   ],
   cliente: [
-    { key: 'biblioteca', label: 'Biblioteca', children: [
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
       ]},
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
-    { key: 'equipamentos', label: 'Meus equipamentos', page: 'equipamentos' },
-    { key: 'chamados', label: 'Atendimento', page: 'chamados' },
+    { key: 'equipamentos', modulo: 'os_chamados', label: 'Meus equipamentos', page: 'equipamentos' },
+    { key: 'chamados', modulo: 'os_chamados', label: 'Atendimento', page: 'chamados' },
   ],
   producao: [
-    { key: 'biblioteca', label: 'Biblioteca', children: [
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
@@ -568,17 +568,17 @@ const NAV = {
       { key: 'meus-registros', label: 'Meus registros', page: 'meus-registros' },
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
-    { key: 'clientes', label: 'Clientes', page: 'clientes' },
-    { key: 'equipamentos', label: 'Equipamentos', children: [
+    { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
+    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
   ],
   pos_venda: [
-    { key: 'fila-pos-venda', label: 'Pós-venda', page: 'fila-pos-venda' },
+    { key: 'fila-pos-venda', modulo: 'os_chamados', label: 'Pós-venda', page: 'fila-pos-venda' },
   ],
   estoque: [
-    { key: 'fila-estoque', label: 'Estoque', page: 'fila-estoque' },
+    { key: 'fila-estoque', modulo: 'os_chamados', label: 'Estoque', page: 'fila-estoque' },
   ],
 };
 
@@ -607,8 +607,20 @@ const ICONE_MENU = {
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
 // tem acesso_total, que aí só vê os itens de topo marcados em `menus` (ver MENUS_LABEL_POR_PAPEL /
 // checkboxes no cadastro). Vale pra qualquer tipo de acesso, não só suporte.
+//
+// Antes disso, todo item de menu com `modulo` (ver NAV acima) só aparece se esse módulo estiver
+// entre os `modulos_ativos` da empresa do usuário logado (ver USER.modulos_ativos, vindo do
+// login/GET /api/me) — item sem `modulo` (núcleo) sempre aparece. Isso é só cosmético: o
+// bloqueio de verdade é no backend (ver rotas-modulo.js); aqui é só pra não mostrar no menu um
+// item que a empresa não contratou.
+function moduloAtivoNoMenu(modulo) {
+  if (!modulo || modulo === 'nucleo') return true;
+  const ativos = Array.isArray(USER.modulos_ativos) ? USER.modulos_ativos : [];
+  return ativos.includes(modulo);
+}
+
 function navDoUsuario() {
-  const nav = NAV[USER.papel] || [];
+  const nav = (NAV[USER.papel] || []).filter((node) => moduloAtivoNoMenu(node.modulo));
   if (USER.acesso_total !== false) return nav;
   const menus = Array.isArray(USER.menus) ? USER.menus : [];
   return nav.filter((node) => menus.includes(node.key));
