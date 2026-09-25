@@ -39,3 +39,21 @@ test('rotas de registros pertencem a biblioteca', () => {
 test('rota nova sem prefixo conhecido cai em núcleo por padrão', () => {
   assert.equal(moduloDaRota(/^\/api\/algo-que-nao-existe$/), 'nucleo');
 });
+
+test('rotas dos módulos novos (crm, agendamento, financeiro, prestação de contas)', () => {
+  assert.equal(moduloDaRota(/^\/api\/crm\/status$/), 'crm');
+  assert.equal(moduloDaRota(/^\/api\/agendamento\/status$/), 'agendamento');
+  assert.equal(moduloDaRota(/^\/api\/financeiro\/status$/), 'financeiro');
+  assert.equal(moduloDaRota(/^\/api\/prestacao-contas\/status$/), 'prestacao_contas');
+});
+
+// regressão: "/api/agendamento" é prefixo de string de "/api/agenda" só ao contrário (agenda é
+// prefixo de agendamento) — um startsWith ingênuo prendia rota de agendamento no módulo
+// os_chamados por engano. bateComPrefixo (interno) exige que o próximo caractere seja "/" ou fim
+// de string, não só que a string comece igual.
+test('agenda e agendamento não se confundem (prefixo de string não é prefixo de caminho)', () => {
+  assert.equal(moduloDaRota(/^\/api\/agenda$/), 'os_chamados');
+  assert.equal(moduloDaRota(/^\/api\/agenda\/(\d+)$/), 'os_chamados');
+  assert.equal(moduloDaRota(/^\/api\/agendamento\/status$/), 'agendamento');
+  assert.notEqual(moduloDaRota(/^\/api\/agendamento\/status$/), 'os_chamados');
+});

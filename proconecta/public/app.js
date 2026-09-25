@@ -551,6 +551,13 @@ const NAV = {
       { key: 'acompanhamento', label: 'Acompanhamento de viagens', page: 'tecnicos-acompanhamento' },
       { key: 'solicitacoes', label: 'Solicitações', page: 'tecnicos-solicitacoes' },
     ]},
+    // esqueleto dos módulos novos — sem tela de verdade ainda, só prova que o pipeline de
+    // ativação funciona ponta a ponta (ver renderModuloEmBreve). Só aparece se a empresa tiver
+    // contratado o módulo (moduloAtivoNoMenu, igual qualquer outro item com `modulo`).
+    { key: 'crm', modulo: 'crm', label: 'CRM', page: 'crm-em-breve' },
+    { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
+    { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
+    { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-em-breve' },
   ],
   cliente: [
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -745,6 +752,10 @@ async function ir(pagina) {
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
+    if (pagina === 'crm-em-breve') return renderModuloEmBreve('crm', 'CRM');
+    if (pagina === 'agendamento-em-breve') return renderModuloEmBreve('agendamento', 'Agendamento Online');
+    if (pagina === 'financeiro-em-breve') return renderModuloEmBreve('financeiro', 'Financeiro');
+    if (pagina === 'prestacao-contas-em-breve') return renderModuloEmBreve('prestacao-contas', 'Prestação de Contas');
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -834,6 +845,21 @@ async function salvarTerminologiaPlataforma(empresaId) {
   } catch (e) {
     mostrarToast(e.message);
   }
+}
+
+// ---------- esqueleto dos módulos novos (crm, agendamento, financeiro, prestação de contas) ----------
+// sem tela de verdade ainda — chama a rota de status (gated pelo módulo certo, ver
+// rotas-modulo.js) só pra provar que o pipeline de ativação funciona ponta a ponta: se o item de
+// menu apareceu é porque o módulo está ativo, e a chamada abaixo confirma que o backend concorda.
+async function renderModuloEmBreve(caminhoApi, titulo) {
+  const main = document.getElementById('main');
+  const { status } = await api(`/api/${caminhoApi}/status`);
+  main.innerHTML = `
+    <div class="page-head"><h1>${esc(titulo)}</h1></div>
+    <div class="panel empty">
+      <p>Módulo <b>${esc(titulo)}</b> ativo pra sua empresa — status do servidor: <i>${esc(status)}</i>.</p>
+      <p>As telas de verdade desse módulo ainda não existem. Em breve.</p>
+    </div>`;
 }
 
 function tag(texto, cor) { return `<span class="tag tag-${cor}">${texto}</span>`; }

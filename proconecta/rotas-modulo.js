@@ -23,16 +23,30 @@ const PREFIXO_MODULO = [
   ['/api/tecnicos', 'os_chamados'],
   ['/api/tecnico', 'os_chamados'],
   ['/api/registros', 'biblioteca'],
+  ['/api/crm', 'crm'],
+  ['/api/agendamento', 'agendamento'],
+  ['/api/financeiro', 'financeiro'],
+  ['/api/prestacao-contas', 'prestacao_contas'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à
 // parte), /api/me, /api/clientes, /api/usuarios, /api/notificacoes, /api/push, /api/chat-interno,
 // /api/admin — sempre disponível pra qualquer empresa, qualquer que seja o módulo contratado.
 
+// bate só no prefixo inteiro (o próximo caractere tem que ser fim da string ou "/") — startsWith
+// puro combinava por engano "/api/agendamento" com o prefixo "/api/agenda" (é prefixo de string,
+// mas não é o mesmo caminho).
+function bateComPrefixo(caminho, prefixo) {
+  return caminho === prefixo || caminho.startsWith(`${prefixo}/`);
+}
+
 function moduloDaRota(regex) {
-  const caminho = regex.source.replace(/\\\//g, '/').replace(/^\^/, '');
-  if (PREFIXOS_PUBLICOS.some((p) => caminho.startsWith(p))) return 'publico';
-  const achado = PREFIXO_MODULO.find(([prefixo]) => caminho.startsWith(prefixo));
+  // regex.source ainda traz os metacaracteres de âncora escapados (\^.../api\/agenda\$) — tira o
+  // ^ do início e o \$ do fim antes de comparar, senão "/api/agenda" nunca bate exatamente com
+  // "/api/agenda\$" (o \$ sobrando quebra a comparação exata que bateComPrefixo faz).
+  const caminho = regex.source.replace(/\\\//g, '/').replace(/^\^/, '').replace(/\\?\$$/, '');
+  if (PREFIXOS_PUBLICOS.some((p) => bateComPrefixo(caminho, p))) return 'publico';
+  const achado = PREFIXO_MODULO.find(([prefixo]) => bateComPrefixo(caminho, prefixo));
   return achado ? achado[1] : 'nucleo';
 }
 

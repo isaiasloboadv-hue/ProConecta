@@ -3518,6 +3518,20 @@ rota('GET', /^\/api\/admin\/diagnostico-memoria$/, async (req, res) => {
   });
 });
 
+// ---------- esqueleto dos módulos novos (crm, agendamento, financeiro, prestacao_contas) ----------
+// ainda não têm tela nem dado nenhum — só provam que o pipeline de ativação funciona ponta a
+// ponta pros 4 de uma vez: rota gated pelo módulo certo (ver rotas-modulo.js), menu que só aparece
+// se o módulo estiver ativo (ver NAV em public/app.js) levando a uma tela "Em breve". Quando um
+// desses módulos ganhar telas de verdade, essa rota de status é substituída pelas rotas reais.
+for (const chave of ['crm', 'agendamento', 'financeiro', 'prestacao_contas']) {
+  const caminho = chave === 'prestacao_contas' ? 'prestacao-contas' : chave;
+  rota('GET', new RegExp(`^/api/${caminho}/status$`), async (req, res) => {
+    const user = usuarioAutenticado(req);
+    if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+    enviarJSON(res, 200, { modulo: chave, status: 'em construção' });
+  });
+}
+
 // ---------- painel da plataforma (Super Admin) ----------
 // papel `super_admin` é o dono da plataforma, não de uma empresa — não tem empresa_id (fica null
 // de propósito, ver bootstrapSuperAdmin em db.js) e nunca passa pelas coleções tenant-scoped.
