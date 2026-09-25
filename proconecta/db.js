@@ -26,6 +26,32 @@ function gerarTokenConvite() {
   return crypto.randomBytes(24).toString('hex');
 }
 
+// módulos que o próprio código sabe suportar — lista fixa, não é dado editável: pra existir um
+// módulo de verdade é preciso ter código pra ele. O que É editável por empresa é só QUAIS desses
+// módulos estão ligados (empresa.modulos_ativos, ver moduloAtivo abaixo) — isso sim é dado.
+// "núcleo" não entra aqui: é sempre ativo pra toda empresa, não passa por essa checagem.
+const MODULOS_DISPONIVEIS = [
+  { chave: 'os_chamados', nome: 'O.S. e Chamados' },
+  { chave: 'smp_preventivas', nome: 'Procedimentos e Preventivas' },
+  { chave: 'biblioteca', nome: 'Biblioteca' },
+  { chave: 'prestacao_contas', nome: 'Prestação de Contas' },
+  { chave: 'crm', nome: 'CRM' },
+  { chave: 'agendamento', nome: 'Agendamento Online' },
+  { chave: 'financeiro', nome: 'Financeiro' },
+  { chave: 'assistente_ia', nome: 'Assistente IA' },
+];
+const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
+
+// módulos padrão da versão "Manutenção" — o pacote que toda empresa migrada do sistema antigo
+// (só a PRO Marking, por enquanto) já usa hoje.
+const MODULOS_VERSAO_MANUTENCAO = ['os_chamados', 'smp_preventivas', 'biblioteca'];
+
+function moduloAtivo(data, empresaId, chave) {
+  if (!CHAVES_MODULOS.includes(chave)) return false;
+  const empresa = data.empresas.find((e) => e.id === empresaId);
+  return !!empresa && Array.isArray(empresa.modulos_ativos) && empresa.modulos_ativos.includes(chave);
+}
+
 // banco novo começa vazio — o primeiro acesso vem do bootstrap de admin master
 // (ADMIN_EMAIL/ADMIN_SENHA) ou de um convite criado manualmente por quem tiver acesso ao banco.
 function seed() {
@@ -44,7 +70,11 @@ function seed() {
     empresas: [],
     mensagens_internas: [],
     solicitacoes_rh: [],
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1 },
+    // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
+    // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
+    // empresa independente da versão original (empresa.modulos_ativos).
+    versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, versoes: 2 },
   };
 }
 
@@ -69,6 +99,12 @@ function sincronizarEmpresaPadrao(data) {
     };
     data.empresas.push(empresa);
   }
+  // multiempresa: empresa 1 (PRO Marking) já usa o sistema hoje com os módulos da versão
+  // Manutenção — isso também cobre quem já tinha essa empresa criada antes desses 3 campos
+  // existirem (roda em todo boot, idempotente).
+  if (empresa.versao_id === undefined) empresa.versao_id = 1;
+  if (!Array.isArray(empresa.modulos_ativos)) empresa.modulos_ativos = [...MODULOS_VERSAO_MANUTENCAO];
+  if (!empresa.terminologia || typeof empresa.terminologia !== 'object') empresa.terminologia = {};
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;
@@ -128,6 +164,10 @@ function migrar(data) {
   if (!data.mensagens_internas) data.mensagens_internas = [];
   if (!data.solicitacoes_rh) data.solicitacoes_rh = [];
   if (!data._seq.solicitacoes_rh) data._seq.solicitacoes_rh = 1;
+  // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
+  // Manutenção, que é o que o sistema sempre ofereceu até agora.
+  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];
+  if (!data._seq.versoes) data._seq.versoes = 2;
   sincronizarEmpresaPadrao(data);
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
@@ -609,4 +649,5 @@ module.exports = {
   load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
+  MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,
 };
