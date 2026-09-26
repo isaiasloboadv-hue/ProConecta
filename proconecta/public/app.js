@@ -4900,6 +4900,56 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// ---------- rascunho automático dos relatórios (Relatório > Manual) ----------
+// evita perder o preenchimento se a página recarregar sem querer (queda de conexão, app fechado
+// no celular etc.) — mesmo mecanismo que já existia só pro Laudo Técnico/Termo de Aceite da O.S.
+// (chaveRascunho/chaveRascunhoLaudo, ver acima), generalizado aqui pra qualquer relatório manual.
+// Em vez de cada formulário precisar de um oninput="..." em cada campo, um único listener
+// delegado no #main (que nunca é recriado, só seu innerHTML muda) cobre todos os campos de
+// qualquer formulário — cada mostrarFormRelatorioX() só registra, em window._draftSyncAtual, a
+// função que sabe ler os próprios campos do DOM pro objeto de rascunho e salvar.
+window._draftSyncAtual = null;
+(function ligarAutoSalvarRascunho() {
+  const main = document.getElementById('main');
+  const disparar = () => { if (window._draftSyncAtual) window._draftSyncAtual(); };
+  main.addEventListener('input', disparar);
+  main.addEventListener('change', disparar);
+  // 'click' também, pra pegar na hora ações como +/x de peça, foto, e-mail (que mudam o rascunho
+  // sem disparar input/change) — window._draftSyncAtual só existe enquanto um relatório está
+  // aberto, então isso não tem custo nas telas que não são de relatório.
+  main.addEventListener('click', disparar);
+})();
+
+function chaveRascunhoManual(tipo, idExistente) {
+  return `pc_rascunho_manual_${tipo}${idExistente ? '_edit_' + idExistente : '_novo'}`;
+}
+function carregarRascunhoManual(tipo, idExistente) {
+  try {
+    const bruto = localStorage.getItem(chaveRascunhoManual(tipo, idExistente));
+    return bruto ? JSON.parse(bruto) : null;
+  } catch (e) { return null; }
+}
+// salva o draft inteiro (já lido do DOM por quem chama) e atualiza a mensagenzinha de status —
+// statusElId é opcional, o rascunho ainda salva mesmo se o elemento de status não existir no form.
+function salvarRascunhoManual(tipo, draft, idExistente, statusElId) {
+  try {
+    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    localStorage.setItem(chaveRascunhoManual(tipo, idExistente), JSON.stringify({ draft, em: agora }));
+    const status = statusElId && document.getElementById(statusElId);
+    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${agora}`;
+  } catch (e) {}
+}
+function limparRascunhoManual(tipo, idExistente) {
+  localStorage.removeItem(chaveRascunhoManual(tipo, idExistente));
+}
+// HTML do aviso "rascunho recuperado" (mostrado quando o form abre já com dados de um rascunho
+// salvo) + a linha de status que atualizarRascunho*() vai preenchendo a cada campo editado.
+function blocoRascunhoManual(statusElId, salvoEm, recuperado) {
+  return `
+    ${recuperado ? `<p style="font-size:12.5px; color:var(--amber, #a66a00);">Rascunho recuperado — havia um preenchimento salvo neste dispositivo de ${salvoEm}.</p>` : ''}
+    <p id="${statusElId}" style="font-size:12px; color:var(--green);">${!recuperado && salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>`;
+}
+
 // ---------- CRIAR RELATÓRIO (manutenção interna, avulso — sem vínculo com O.S./agenda) ----------
 
 // Relatório > Manual é um único relatório — o "Tipo de formulário" é escolhido dentro do próprio
@@ -5546,7 +5596,9 @@ function relatorioManutPadrao() {
 }
 
 function mostrarFormRelatorioManutencao(existente) {
-  relatorioManutDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioManutPadrao();
+  const rascunho = carregarRascunhoManual('completo', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioManutDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioManutPadrao());
   const d = relatorioManutDraft;
   const editando = !!d.id;
   const main = document.getElementById('main');
@@ -5632,13 +5684,23 @@ function mostrarFormRelatorioManutencao(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('rm-rascunho-status', rascunho && rascunho.em, recuperado)}
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoCompleto(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="salvarRelatorioManutencao()">Gerar PDF e salvar</button>
       </div>
     </div>`;
   renderPecasRelatorioManut();
   renderBlocosFotosRelatorioManut();
+  window._draftSyncAtual = () => { lerCamposRelatorioManut(); salvarRascunhoManual('completo', relatorioManutDraft, d.id, 'rm-rascunho-status'); };
+}
+
+async function limparRascunhoCompleto(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('completo', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioManutencao(relatorio); }
+  else mostrarFormRelatorioManual('completo');
 }
 
 function renderPecasRelatorioManut() {
@@ -5811,7 +5873,7 @@ function corCssParaRgb(cor) {
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
-async function salvarRelatorioManutencao() {
+function lerCamposRelatorioManut() {
   const d = relatorioManutDraft;
   d.empresa = document.getElementById('rm-empresa').value;
   d.contato = document.getElementById('rm-contato').value;
@@ -5834,6 +5896,11 @@ async function salvarRelatorioManutencao() {
   d.data_conclusao = document.getElementById('rm-data_conclusao').value;
   d.laudo_tecnico = document.getElementById('rm-laudo_tecnico').value;
   d.servico_realizado = document.getElementById('rm-servico_realizado').value;
+}
+
+async function salvarRelatorioManutencao() {
+  const d = relatorioManutDraft;
+  lerCamposRelatorioManut();
 
   if (!d.empresa.trim() || !d.equipamento.trim()) { alert('Preencha ao menos Empresa e Equipamento.'); return; }
 
@@ -5841,6 +5908,7 @@ async function salvarRelatorioManutencao() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('completo', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioManutencao(relatorio, logo);
     window.open(url, '_blank');
@@ -5896,7 +5964,9 @@ function relatorioPreventivaPadrao() {
 }
 
 function mostrarFormRelatorioPreventiva(existente) {
-  relatorioPreventivaDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioPreventivaPadrao();
+  const rascunho = carregarRascunhoManual('preventiva', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioPreventivaDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioPreventivaPadrao());
   const d = relatorioPreventivaDraft;
   const editando = !!d.id;
   const main = document.getElementById('main');
@@ -6006,9 +6076,11 @@ function mostrarFormRelatorioPreventiva(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('rp-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoPreventiva(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPreventiva()">Concluir e enviar termo</button>
       </div>
     </div>`;
@@ -6019,6 +6091,14 @@ function mostrarFormRelatorioPreventiva(existente) {
   renderEmailsPreventiva();
   montarAssinaturaPreventiva('cliente');
   montarAssinaturaPreventiva('tecnico');
+  window._draftSyncAtual = () => { lerCamposPreventiva(); salvarRascunhoManual('preventiva', relatorioPreventivaDraft, d.id, 'rp-rascunho-status'); };
+}
+
+async function limparRascunhoPreventiva(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('preventiva', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioPreventiva(relatorio); }
+  else mostrarFormRelatorioManual('preventiva');
 }
 
 function blocoAssinaturaPreventiva(chave, titulo) {
@@ -6183,6 +6263,7 @@ function montarAssinaturaPreventiva(chave) {
     if (assinaturaEstadoPreventiva[chave].temTraco) {
       relatorioPreventivaDraft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
       atualizarStatusAssinaturaPreventiva(chave);
+      if (window._draftSyncAtual) window._draftSyncAtual();
     }
   }
   canvas.addEventListener('mousedown', iniciar);
@@ -6252,7 +6333,7 @@ function confirmarAssinaturaModalPreventiva(chave) {
 }
 
 // ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
-async function concluirRelatorioPreventiva() {
+function lerCamposPreventiva() {
   const d = relatorioPreventivaDraft;
   d.os_uf = document.getElementById('rp-os_uf').value;
   d.os_numero = document.getElementById('rp-os_numero').value;
@@ -6279,6 +6360,11 @@ async function concluirRelatorioPreventiva() {
   d.satisfacao_autoriza = autoriza ? autoriza.value : '';
   d.assinatura_cliente_nome = document.getElementById('rp-assinatura-cliente-nome').value;
   d.assinatura_tecnico_nome = document.getElementById('rp-assinatura-tecnico-nome').value;
+}
+
+async function concluirRelatorioPreventiva() {
+  const d = relatorioPreventivaDraft;
+  lerCamposPreventiva();
 
   const obrigatorios = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
     'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
@@ -6305,6 +6391,7 @@ async function concluirRelatorioPreventiva() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('preventiva', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioPreventiva(relatorio, logo);
     window.open(url, '_blank');
@@ -6346,7 +6433,9 @@ function relatorioCorretivaPadrao() {
 }
 
 function mostrarFormRelatorioCorretiva(existente) {
-  relatorioCorretivaDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioCorretivaPadrao();
+  const rascunho = carregarRascunhoManual('corretiva', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioCorretivaDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioCorretivaPadrao());
   const d = relatorioCorretivaDraft;
   const editando = !!d.id;
   const main = document.getElementById('main');
@@ -6450,9 +6539,11 @@ function mostrarFormRelatorioCorretiva(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('rcm-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoCorretiva(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioCorretiva()">Concluir e enviar termo</button>
       </div>
     </div>`;
@@ -6462,6 +6553,14 @@ function mostrarFormRelatorioCorretiva(existente) {
   renderEmailsCorretiva();
   montarAssinaturaCorretiva('cliente');
   montarAssinaturaCorretiva('tecnico');
+  window._draftSyncAtual = () => { lerCamposCorretiva(); salvarRascunhoManual('corretiva', relatorioCorretivaDraft, d.id, 'rcm-rascunho-status'); };
+}
+
+async function limparRascunhoCorretiva(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('corretiva', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioCorretiva(relatorio); }
+  else mostrarFormRelatorioManual('corretiva');
 }
 
 function blocoAssinaturaCorretiva(chave, titulo) {
@@ -6595,6 +6694,7 @@ function montarAssinaturaCorretiva(chave) {
     if (assinaturaEstadoCorretiva[chave].temTraco) {
       relatorioCorretivaDraft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
       atualizarStatusAssinaturaCorretiva(chave);
+      if (window._draftSyncAtual) window._draftSyncAtual();
     }
   }
   canvas.addEventListener('mousedown', iniciar);
@@ -6664,7 +6764,7 @@ function confirmarAssinaturaModalCorretiva(chave) {
 }
 
 // ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
-async function concluirRelatorioCorretiva() {
+function lerCamposCorretiva() {
   const d = relatorioCorretivaDraft;
   d.os_uf = document.getElementById('rcm-os_uf').value;
   d.os_numero = document.getElementById('rcm-os_numero').value;
@@ -6691,6 +6791,11 @@ async function concluirRelatorioCorretiva() {
   d.satisfacao_autoriza = autoriza ? autoriza.value : '';
   d.assinatura_cliente_nome = document.getElementById('rcm-assinatura-cliente-nome').value;
   d.assinatura_tecnico_nome = document.getElementById('rcm-assinatura-tecnico-nome').value;
+}
+
+async function concluirRelatorioCorretiva() {
+  const d = relatorioCorretivaDraft;
+  lerCamposCorretiva();
 
   const obrigatorios = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
     'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
@@ -6714,6 +6819,7 @@ async function concluirRelatorioCorretiva() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('corretiva', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioCorretiva(relatorio, logo);
     window.open(url, '_blank');
@@ -6750,7 +6856,9 @@ function relatorioTecnicoPadrao() {
 }
 
 function mostrarFormRelatorioTecnico(existente) {
-  relatorioTecnicoDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioTecnicoPadrao();
+  const rascunho = carregarRascunhoManual('relatorio_tecnico', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioTecnicoDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioTecnicoPadrao());
   const d = relatorioTecnicoDraft;
   const editando = !!d.id;
   const tiposServico = [['amostra', 'Amostra'], ['analise', 'Análise'], ['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['outros', 'Outros']];
@@ -6861,14 +6969,24 @@ function mostrarFormRelatorioTecnico(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('rt-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do relatório é gerado automaticamente para download.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoTecnico(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioTecnico()">Concluir e gerar PDF</button>
       </div>
     </div>`;
   renderPecasTecnico();
   renderFotosTecnico();
+  window._draftSyncAtual = () => { lerCamposTecnico(); salvarRascunhoManual('relatorio_tecnico', relatorioTecnicoDraft, d.id, 'rt-rascunho-status'); };
+}
+
+async function limparRascunhoTecnico(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('relatorio_tecnico', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioTecnico(relatorio); }
+  else mostrarFormRelatorioManual('relatorio_tecnico');
 }
 
 function renderPecasTecnico() {
@@ -6907,7 +7025,7 @@ function atualizarPeriodoTecnico() {
   document.getElementById('rt-periodo').value = periodoReparo({ data_entrada, data_conclusao });
 }
 
-async function concluirRelatorioTecnico() {
+function lerCamposTecnico() {
   const d = relatorioTecnicoDraft;
   d.empresa = document.getElementById('rt-empresa').value;
   d.contato = document.getElementById('rt-contato').value;
@@ -6929,6 +7047,11 @@ async function concluirRelatorioTecnico() {
   d.laudo_tecnico = document.getElementById('rt-laudo_tecnico').value;
   d.servico_realizado = document.getElementById('rt-servico_realizado').value;
   d.observacoes = document.getElementById('rt-observacoes').value;
+}
+
+async function concluirRelatorioTecnico() {
+  const d = relatorioTecnicoDraft;
+  lerCamposTecnico();
 
   if (!d.empresa.trim() || !d.contato.trim() || !d.telefone.trim()) return alert('Preencha os dados do cliente (Empresa, Contato e Telefone).');
   if (!d.tipo_servico.length) return alert('Selecione ao menos um tipo de serviço.');
@@ -6944,6 +7067,7 @@ async function concluirRelatorioTecnico() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('relatorio_tecnico', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioTecnico(relatorio, logo);
     window.open(url, '_blank');
@@ -7253,7 +7377,9 @@ function textoSobreEquipamentoAceite(modelo) {
 }
 
 function mostrarFormRelatorioAceite(existente) {
-  relatorioAceiteDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioAceitePadrao();
+  const rascunho = carregarRascunhoManual('aceite_entrega', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioAceiteDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioAceitePadrao());
   const d = relatorioAceiteDraft;
   const editando = !!d.id;
   const main = document.getElementById('main');
@@ -7365,9 +7491,11 @@ function mostrarFormRelatorioAceite(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('rae-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoAceite(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioAceite()">Concluir e enviar termo</button>
       </div>
     </div>`;
@@ -7376,6 +7504,14 @@ function mostrarFormRelatorioAceite(existente) {
   renderEmailsAceite();
   montarAssinaturaAceite('cliente');
   montarAssinaturaAceite('tecnico');
+  window._draftSyncAtual = () => { lerCamposAceite(); salvarRascunhoManual('aceite_entrega', relatorioAceiteDraft, d.id, 'rae-rascunho-status'); };
+}
+
+async function limparRascunhoAceite(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('aceite_entrega', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioAceite(relatorio); }
+  else mostrarFormRelatorioManual('aceite_entrega');
 }
 
 function selecionarModeloAceite(nome) {
@@ -7467,6 +7603,7 @@ function montarAssinaturaAceite(chave) {
     if (assinaturaEstadoAceite[chave].temTraco) {
       relatorioAceiteDraft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
       atualizarStatusAssinaturaAceite(chave);
+      if (window._draftSyncAtual) window._draftSyncAtual();
     }
   }
   canvas.addEventListener('mousedown', iniciar);
@@ -7535,8 +7672,7 @@ function confirmarAssinaturaModalAceite(chave) {
   document.getElementById('modal-assinatura').classList.remove('show');
 }
 
-// ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
-async function concluirRelatorioAceite() {
+function lerCamposAceite() {
   const d = relatorioAceiteDraft;
   d.os_uf = document.getElementById('rae-os_uf').value;
   d.os_numero = document.getElementById('rae-os_numero').value;
@@ -7565,6 +7701,12 @@ async function concluirRelatorioAceite() {
   d.satisfacao_apto = apto ? apto.value : '';
   d.assinatura_cliente_nome = document.getElementById('rae-assinatura-cliente-nome').value;
   d.assinatura_tecnico_nome = document.getElementById('rae-assinatura-tecnico-nome').value;
+}
+
+// ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
+async function concluirRelatorioAceite() {
+  const d = relatorioAceiteDraft;
+  lerCamposAceite();
 
   const obrigatorios = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
     'servico', 'empresa', 'setor', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'contato'];
@@ -7589,6 +7731,7 @@ async function concluirRelatorioAceite() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('aceite_entrega', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioAceite(relatorio, logo);
     window.open(url, '_blank');
@@ -7828,7 +7971,9 @@ function relatorioPromotorPadrao() {
 }
 
 async function mostrarFormRelatorioPromotor(existente) {
-  relatorioPromotorDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioPromotorPadrao();
+  const rascunho = carregarRascunhoManual('promotor', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioPromotorDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioPromotorPadrao());
   const d = relatorioPromotorDraft;
   const editando = !!d.id;
   const osList = await osDemonstracaoTecnica();
@@ -7887,12 +8032,15 @@ async function mostrarFormRelatorioPromotor(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('pm-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do briefing é gerado automaticamente para download.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoPromotor(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPromotor()">Concluir e gerar PDF</button>
       </div>
     </div>`;
+  window._draftSyncAtual = () => { lerCamposPromotor(); salvarRascunhoManual('promotor', relatorioPromotorDraft, d.id, 'pm-rascunho-status'); };
 }
 
 function preencherPromotorPelaOS(agendaId) {
@@ -7902,9 +8050,18 @@ function preencherPromotorPelaOS(agendaId) {
   document.getElementById('pm-data_visita').value = (os.data_hora_inicio || '').slice(0, 10);
   document.getElementById('pm-contato').value = os.contato || os.cliente_contato || '';
   if (os.tecnico_nome) document.getElementById('pm-promotor').value = os.tecnico_nome;
+  // não precisa chamar o rascunho aqui: o próprio "change" do <select> já borbulha até o #main e
+  // dispara window._draftSyncAtual() depois que esta função termina de rodar.
 }
 
-async function concluirRelatorioPromotor() {
+async function limparRascunhoPromotor(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('promotor', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioPromotor(relatorio); }
+  else mostrarFormRelatorioManual('promotor');
+}
+
+function lerCamposPromotor() {
   const d = relatorioPromotorDraft;
   const agendaSel = document.getElementById('pm-agenda_id').value;
   d.agenda_id = agendaSel || null;
@@ -7923,6 +8080,11 @@ async function concluirRelatorioPromotor() {
   d.o_que_observar = document.getElementById('pm-o_que_observar').value;
   d.objetivo_visita = document.getElementById('pm-objetivo_visita').value;
   d.ponto_principal_observar = document.getElementById('pm-ponto_principal_observar').value;
+}
+
+async function concluirRelatorioPromotor() {
+  const d = relatorioPromotorDraft;
+  lerCamposPromotor();
 
   const obrig = ['empresa', 'data_visita', 'vendedor', 'promotor', 'motivo_visita', 'processo_atual',
     'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes',
@@ -7935,6 +8097,7 @@ async function concluirRelatorioPromotor() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('promotor', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioPromotor(relatorio, logo);
     window.open(url, '_blank');
@@ -8090,7 +8253,9 @@ function relatorioDevolutivoPadrao() {
 const OPCOES_TIPO_OPORTUNIDADE = [['automacao', 'Automação'], ['retrofit', 'Retrofit'], ['equipamento_personalizado', 'Equipamento personalizado'], ['outro', 'Outro']];
 
 async function mostrarFormRelatorioDevolutivo(existente) {
-  relatorioDevolutivoDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioDevolutivoPadrao();
+  const rascunho = carregarRascunhoManual('devolutivo', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioDevolutivoDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioDevolutivoPadrao());
   const d = relatorioDevolutivoDraft;
   const editando = !!d.id;
   const osList = await osDemonstracaoTecnica();
@@ -8164,12 +8329,15 @@ async function mostrarFormRelatorioDevolutivo(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('dv-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do devolutivo é gerado automaticamente pra encaminhar ao líder de vendas.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoDevolutivo(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioDevolutivo()">Concluir e gerar PDF</button>
       </div>
     </div>`;
+  window._draftSyncAtual = () => { lerCamposDevolutivo(); salvarRascunhoManual('devolutivo', relatorioDevolutivoDraft, d.id, 'dv-rascunho-status'); };
 }
 
 function alternarOportunidadeDevolutivo(valor) {
@@ -8186,7 +8354,14 @@ function preencherDevolutivoPelaOS(agendaId) {
   if (os.equipamento_tipo) document.getElementById('dv-equipamento_demonstrado').value = [os.equipamento_tipo, os.equipamento_modelo].filter(Boolean).join(' ');
 }
 
-async function concluirRelatorioDevolutivo() {
+async function limparRascunhoDevolutivo(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('devolutivo', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioDevolutivo(relatorio); }
+  else mostrarFormRelatorioManual('devolutivo');
+}
+
+function lerCamposDevolutivo() {
   const d = relatorioDevolutivoDraft;
   const agendaSel = document.getElementById('dv-agenda_id').value;
   d.agenda_id = agendaSel || null;
@@ -8207,6 +8382,11 @@ async function concluirRelatorioDevolutivo() {
   d.valor_agregado = document.getElementById('dv-valor_agregado').value;
   d.proximos_passos = document.getElementById('dv-proximos_passos').value;
   d.observacoes_finais = document.getElementById('dv-observacoes_finais').value;
+}
+
+async function concluirRelatorioDevolutivo() {
+  const d = relatorioDevolutivoDraft;
+  lerCamposDevolutivo();
 
   if (!d.empresa.trim() || !d.data_visita.trim() || !d.promotor.trim()) return alert('Preencha cliente, data e promotor.');
   if (!d.equipamento_demonstrado.trim()) return alert('Informe o equipamento demonstrado.');
@@ -8223,6 +8403,7 @@ async function concluirRelatorioDevolutivo() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('devolutivo', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioDevolutivo(relatorio, logo);
     window.open(url, '_blank');
@@ -8419,7 +8600,9 @@ function relatorioLevantamentoPadrao() {
 }
 
 async function mostrarFormRelatorioLevantamentoTecnico(existente) {
-  relatorioLevantamentoDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioLevantamentoPadrao();
+  const rascunho = carregarRascunhoManual('levantamento_tecnico', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioLevantamentoDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioLevantamentoPadrao());
   const d = relatorioLevantamentoDraft;
   const editando = !!d.id;
   const [devolutivos, osList] = await Promise.all([devolutivosComOportunidade(), osDemonstracaoTecnica()]);
@@ -8497,16 +8680,26 @@ async function mostrarFormRelatorioLevantamentoTecnico(existente) {
     </div>
 
     <div class="panel">
+      ${blocoRascunhoManual('lt-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do levantamento é gerado automaticamente para download.</p>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-outline-sm" onclick="limparRascunhoLevantamento(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioLevantamentoTecnico()">Concluir e gerar PDF</button>
       </div>
     </div>`;
   if (d.devolutivo_id) preencherLevantamentoPeloDevolutivo(d.devolutivo_id);
+  window._draftSyncAtual = () => { lerCamposLevantamento(); salvarRascunhoManual('levantamento_tecnico', relatorioLevantamentoDraft, d.id, 'lt-rascunho-status'); };
 }
 
-async function concluirRelatorioLevantamentoTecnico() {
+async function limparRascunhoLevantamento(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('levantamento_tecnico', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioLevantamentoTecnico(relatorio); }
+  else mostrarFormRelatorioManual('levantamento_tecnico');
+}
+
+function lerCamposLevantamento() {
   const d = relatorioLevantamentoDraft;
   const devolutivoSel = document.getElementById('lt-devolutivo_id').value;
   d.devolutivo_id = devolutivoSel || null;
@@ -8532,6 +8725,11 @@ async function concluirRelatorioLevantamentoTecnico() {
   d.viabilidade_tecnica = document.getElementById('lt-viabilidade_tecnica').value;
   d.observacoes_tecnicas = document.getElementById('lt-observacoes_tecnicas').value;
   d.proximos_passos = document.getElementById('lt-proximos_passos').value;
+}
+
+async function concluirRelatorioLevantamentoTecnico() {
+  const d = relatorioLevantamentoDraft;
+  lerCamposLevantamento();
 
   const obrig = ['empresa', 'data_levantamento', 'responsavel_tecnico', 'tempo_ciclo_atual', 'volume_producao',
     'material_peca', 'automacao_existente', 'integracao_necessaria', 'espaco_disponivel',
@@ -8545,6 +8743,7 @@ async function concluirRelatorioLevantamentoTecnico() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('levantamento_tecnico', d.id);
     const logo = await carregarLogoDataUri();
     const url = gerarPdfRelatorioLevantamentoTecnico(relatorio, logo);
     window.open(url, '_blank');
