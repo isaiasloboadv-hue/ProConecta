@@ -5074,7 +5074,10 @@ function descricaoRelatorioManutencao(r) {
 function renderRelatorioAutomatico() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados e você escolhe que tipo de relatório gerar com eles.</p></div>
+    <div class="page-head">
+      <button class="btn-outline-sm" onclick="renderRelatorioManutencao()" style="margin-bottom:10px;">‹ Voltar</button>
+      <h1>Automático</h1><p>Tire uma foto da etiqueta/placa de identificação do equipamento — a IA lê os dados e você escolhe que tipo de relatório gerar com eles.</p>
+    </div>
     <div class="panel" style="text-align:center;">
       <div id="ra-preview" style="margin-bottom:14px;"></div>
       <label class="photo-add" style="display:inline-flex;">
