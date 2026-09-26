@@ -4976,14 +4976,45 @@ function carregarRascunhoManual(tipo, idExistente) {
 // statusElId é opcional, o rascunho ainda salva mesmo se o elemento de status não existir no form.
 function salvarRascunhoManual(tipo, draft, idExistente, statusElId) {
   try {
-    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    localStorage.setItem(chaveRascunhoManual(tipo, idExistente), JSON.stringify({ draft, em: agora }));
+    const agoraDate = new Date();
+    const agora = agoraDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    localStorage.setItem(chaveRascunhoManual(tipo, idExistente), JSON.stringify({ draft, em: agora, salvoEmISO: agoraDate.toISOString() }));
     const status = statusElId && document.getElementById(statusElId);
     if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${agora}`;
   } catch (e) {}
 }
 function limparRascunhoManual(tipo, idExistente) {
   localStorage.removeItem(chaveRascunhoManual(tipo, idExistente));
+}
+// diz se o rascunho tem algum preenchimento de verdade — abrir um formulário novo (sem digitar
+// nada) já dispara o autosalvamento (o clique no botão "Manual" borbulha até o listener
+// delegado), então sem esse filtro toda vez que alguém só abre e sai apareceria um "Rascunho"
+// fantasma, vazio, na lista.
+function rascunhoTemConteudo(draft) {
+  return Object.entries(draft).some(([chave, valor]) => {
+    if (chave === 'tipo' || chave === 'agenda_id' || chave === 'devolutivo_id') return false;
+    if (typeof valor === 'string') return valor.trim() !== '';
+    if (Array.isArray(valor)) return valor.length > 0;
+    if (typeof valor === 'boolean') return valor === true;
+    return valor != null && valor !== '';
+  });
+}
+// rascunhos de relatório novo (ainda não enviado pro servidor) salvos neste dispositivo — pra
+// listar na tela de Relatório junto dos já salvos, deixando claro que ainda falta concluir.
+// Só pega os "_novo" (rascunho de edição de um relatório já existente não entra aqui: esse já
+// aparece na lista como o próprio relatório salvo).
+function rascunhosNovosPendentes() {
+  return tiposRelatorioManual()
+    .map((t) => {
+      const rascunho = carregarRascunhoManual(t.tipo, null);
+      return rascunho && rascunho.draft ? { tipo: t.tipo, label: t.label, draft: { ...rascunho.draft, tipo: t.tipo }, em: rascunho.em, salvoEmISO: rascunho.salvoEmISO } : null;
+    })
+    .filter((p) => p && rascunhoTemConteudo(p.draft));
+}
+function descartarRascunhoPendente(tipo) {
+  if (!confirm('Descartar este rascunho? O preenchimento salvo neste dispositivo será apagado.')) return;
+  limparRascunhoManual(tipo, null);
+  renderRelatorioManutencao();
 }
 // HTML do aviso "rascunho recuperado" (mostrado quando o form abre já com dados de um rascunho
 // salvo) + a linha de status que atualizarRascunho*() vai preenchendo a cada campo editado.
@@ -5048,6 +5079,9 @@ function mostrarFormRelatorioManual(tipo) {
 async function renderRelatorioManutencao() {
   const { relatorios } = await api('/api/relatorios-manutencao/meus');
   window._relatoriosManutCache = relatorios;
+  // rascunhos ainda não enviados (salvos só neste dispositivo) — mostrados junto na lista,
+  // marcados como "Rascunho", pra ficar claro que falta concluir e dar como retomar/descartar.
+  const pendentes = rascunhosNovosPendentes();
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
@@ -5062,6 +5096,16 @@ async function renderRelatorioManutencao() {
     </div>
     <div class="panel"><table>
       <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
+      ${pendentes.map((p) => `
+        <tr style="background:var(--amber-bg);">
+          <td data-label="Data">${p.salvoEmISO ? fmtData(p.salvoEmISO) : `Salvo às ${esc(p.em)}`}</td>
+          <td data-label="Descrição">${descricaoRelatorioManutencao(p.draft)}</td>
+          <td data-label="Tipo">${tag('Rascunho · ' + p.label, 'amber')}</td>
+          <td class="td-acoes">
+            <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual('${p.tipo}')">Continuar</button>
+            <button class="btn-outline-sm" onclick="descartarRascunhoPendente('${p.tipo}')" style="color:var(--red); border-color:var(--red);">Descartar</button>
+          </td>
+        </tr>`).join('')}
       ${relatorios.length ? relatorios.map((r, i) => `
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
@@ -5074,7 +5118,7 @@ async function renderRelatorioManutencao() {
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
-        </tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`}
+        </tr>`).join('') : (pendentes.length ? '' : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`)}
     </table></div>`;
 }
 
