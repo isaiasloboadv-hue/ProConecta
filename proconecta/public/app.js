@@ -511,11 +511,9 @@ const NAV = {
   suporte: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
     { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
-    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', children: [
-      { key: 'relatorio-manual', label: 'Manual', page: 'relatorio-manutencao' },
-      { key: 'relatorio-automatico', label: 'Automático', page: 'relatorio-automatico' },
-      { key: 'relatorio-ciclagem', label: 'Ensaio de Ciclagem', page: 'relatorio-ciclagem' },
-    ]},
+    // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
+    // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
+    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -5018,7 +5016,13 @@ async function renderRelatorioManutencao() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Relatório</h1><p>A maioria é avulsa (sem vínculo com O.S.); o Promotor e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">+ Novo relatório</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">Manual</button>
+        ${USER.papel === 'suporte' ? `
+          <button class="btn-outline-sm" onclick="ir('relatorio-automatico')">Automático</button>
+          <button class="btn-outline-sm" onclick="ir('relatorio-ciclagem')">Ensaio de Ciclagem</button>
+        ` : ''}
+      </div>
     </div>
     <div class="panel"><table>
       <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
