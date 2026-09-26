@@ -484,6 +484,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'painel-atendimentos': 'Atendimentos',
     'solicitacao-atendimento': 'Solicitação de Atendimento',
     'aprovacoes-visitas': 'Ordem de Serviço',
+    'relatorio-manutencao': 'Relatório',
     'biblioteca': 'Biblioteca',
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
@@ -536,6 +537,10 @@ const NAV = {
     { key: 'painel-atendimentos', modulo: 'os_chamados', label: 'Atendimentos', page: 'painel-atendimentos' },
     { key: 'solicitacao-atendimento', modulo: 'os_chamados', label: 'Solicitação de Atendimento', page: 'fila-solicitacao-atendimento' },
     { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
+    // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
+    // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
+    // tiposRelatorioManual em renderRelatorioManutencao).
+    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -4900,23 +4905,32 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 // Relatório > Manual é um único relatório — o "Tipo de formulário" é escolhido dentro do próprio
 // preenchimento (não numa tela separada): cada tipo continua com sua própria tela/função/
 // validação/PDF já existentes (Completo, Preventiva, Corretiva, Relatório Técnico, Termo de
-// Aceite); trocar o seletor só troca qual dessas telas aparece embaixo dele.
-const TIPOS_RELATORIO_MANUAL = [
-  { tipo: 'completo', label: 'Completo', fn: 'mostrarFormRelatorioManutencao' },
-  { tipo: 'preventiva', label: 'Preventiva', fn: 'mostrarFormRelatorioPreventiva' },
-  { tipo: 'corretiva', label: 'Corretiva', fn: 'mostrarFormRelatorioCorretiva' },
-  { tipo: 'relatorio_tecnico', label: 'Relatório Técnico', fn: 'mostrarFormRelatorioTecnico' },
-  { tipo: 'aceite_entrega', label: 'Termo de Aceite', fn: 'mostrarFormRelatorioAceite' },
-];
+// Aceite, Promotor, Devolutivo); trocar o seletor só troca qual dessas telas aparece embaixo dele.
+// Administrador só vê "Promotor" (é quem prepara o briefing antes da visita de demonstração
+// técnica); o técnico vê todos, incluindo o "Devolutivo" que ele preenche depois da visita.
+function tiposRelatorioManual() {
+  const promotor = { tipo: 'promotor', label: 'Promotor (Briefing Pré-Visita)', fn: 'mostrarFormRelatorioPromotor' };
+  if (USER.papel === 'administrador') return [promotor];
+  return [
+    { tipo: 'completo', label: 'Completo', fn: 'mostrarFormRelatorioManutencao' },
+    { tipo: 'preventiva', label: 'Preventiva', fn: 'mostrarFormRelatorioPreventiva' },
+    { tipo: 'corretiva', label: 'Corretiva', fn: 'mostrarFormRelatorioCorretiva' },
+    { tipo: 'relatorio_tecnico', label: 'Relatório Técnico', fn: 'mostrarFormRelatorioTecnico' },
+    { tipo: 'aceite_entrega', label: 'Termo de Aceite', fn: 'mostrarFormRelatorioAceite' },
+    promotor,
+    { tipo: 'devolutivo', label: 'Devolutivo (pós-visita)', fn: 'mostrarFormRelatorioDevolutivo' },
+  ];
+}
 
 function mostrarFormRelatorioManual(tipo) {
-  const def = TIPOS_RELATORIO_MANUAL.find((t) => t.tipo === tipo) || TIPOS_RELATORIO_MANUAL[0];
+  const tipos = tiposRelatorioManual();
+  const def = tipos.find((t) => t.tipo === tipo) || tipos[0];
   window[def.fn]();
   const seletorHtml = `
     <div class="panel">
       <label>Tipo de formulário</label>
       <select onchange="mostrarFormRelatorioManual(this.value)">
-        ${TIPOS_RELATORIO_MANUAL.map((t) => `<option value="${t.tipo}" ${t.tipo === def.tipo ? 'selected' : ''}>${t.label}</option>`).join('')}
+        ${tipos.map((t) => `<option value="${t.tipo}" ${t.tipo === def.tipo ? 'selected' : ''}>${t.label}</option>`).join('')}
       </select>
       <p style="color:var(--ink-soft); font-size:12.5px; margin-top:6px;">Ao trocar o tipo, os campos abaixo mudam para os daquele formulário.</p>
     </div>`;
@@ -4932,7 +4946,7 @@ async function renderRelatorioManutencao() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Relatório</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S., fica salvo só aqui no seu histórico</p></div>
+      <div><h1>Relatório</h1><p>A maioria é avulsa (sem vínculo com O.S.); o Promotor e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">+ Novo relatório</button>
     </div>
     <div class="panel"><table>
@@ -4941,11 +4955,11 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
-            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
+            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
@@ -4963,6 +4977,12 @@ function descricaoRelatorioManutencao(r) {
   }
   if (r.tipo === 'preventiva' || r.tipo === 'corretiva' || r.tipo === 'aceite_entrega') {
     return `${esc(r.modelo_maquina)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
+  }
+  if (r.tipo === 'promotor') {
+    return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">Promotor: ${esc(r.promotor)}</span>`;
+  }
+  if (r.tipo === 'devolutivo') {
+    return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">${esc(r.equipamento_demonstrado)}</span>`;
   }
   return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
 }
@@ -5834,6 +5854,8 @@ async function editarRelatorioManutencao(i) {
   else if (r.tipo === 'corretiva') mostrarFormRelatorioCorretiva(r);
   else if (r.tipo === 'relatorio_tecnico') mostrarFormRelatorioTecnico(r);
   else if (r.tipo === 'aceite_entrega') mostrarFormRelatorioAceite(r);
+  else if (r.tipo === 'promotor') mostrarFormRelatorioPromotor(r);
+  else if (r.tipo === 'devolutivo') mostrarFormRelatorioDevolutivo(r);
   else mostrarFormRelatorioManutencao(r);
 }
 
@@ -7764,6 +7786,580 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// ---------- Briefing Pré-Visita "Promotor" (Relatório > Manual > Promotor) ----------
+// preenchido pelo vendedor (administrador) ANTES da visita de demonstração técnica, pra dar
+// contexto pro promotor (técnico) que vai fazer a demo — espelha o modelo em Excel que o time
+// comercial já usa hoje (Briefing Pré-Visita | Vendedor -> Promotor), campo por campo. Pode ficar
+// vinculado a uma O.S. de "Demonstração Técnica" já agendada, ou avulso se a O.S. ainda nem existe.
+
+// busca as O.S. de "Demonstração Técnica" pra popular o dropdown de vínculo do Promotor/Devolutivo
+// (administrador vê as de toda a empresa, técnico só as próprias — mesma regra do GET /api/agenda).
+async function osDemonstracaoTecnica() {
+  try {
+    const { agenda } = await api('/api/agenda');
+    const lista = agenda.filter((a) => a.tipo === 'demonstracao_tecnica').sort((a, b) => (b.data_hora_inicio || '').localeCompare(a.data_hora_inicio || ''));
+    window._osDemonstracaoCache = lista;
+    return lista;
+  } catch (e) { window._osDemonstracaoCache = []; return []; }
+}
+
+function opcoesOsDemonstracao(lista, agendaIdSelecionado) {
+  return `
+    <option value="">Avulso — sem vínculo com O.S.</option>
+    ${lista.map((a) => `<option value="${a.id}" ${Number(agendaIdSelecionado) === a.id ? 'selected' : ''}>${esc(a.cliente_nome || 'Cliente')} — ${fmtData(a.data_hora_inicio)}${a.numero_os ? ' (' + esc(a.numero_os) + ')' : ''}</option>`).join('')}`;
+}
+
+let relatorioPromotorDraft = null;
+function relatorioPromotorPadrao() {
+  return {
+    tipo: 'promotor', agenda_id: null,
+    empresa: '', contato: '', data_visita: '',
+    vendedor: USER.nome, promotor: '',
+    motivo_visita: '', processo_atual: '', necessidade_informada: '',
+    o_que_demonstrar: '', ponto_importante_demo: '',
+    duvidas_preocupacoes: '', concorrente: '', o_que_observar: '',
+    objetivo_visita: '', ponto_principal_observar: '',
+  };
+}
+
+async function mostrarFormRelatorioPromotor(existente) {
+  relatorioPromotorDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioPromotorPadrao();
+  const d = relatorioPromotorDraft;
+  const editando = !!d.id;
+  const osList = await osDemonstracaoTecnica();
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Briefing Pré-Visita — Promotor</h1><p>Preencher antes da visita. Dá ao Promotor contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>1. Identificação</h2>
+      <div class="form-grid">
+        <div class="full"><label>Vincular a uma O.S. de Demonstração Técnica (opcional)</label>
+          <select id="pm-agenda_id" onchange="preencherPromotorPelaOS(this.value)">${opcoesOsDemonstracao(osList, d.agenda_id)}</select>
+        </div>
+        <div><label>Cliente*</label><input id="pm-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Data*</label><input id="pm-data_visita" type="date" value="${esc(d.data_visita)}"></div>
+        <div><label>Vendedor*</label><input id="pm-vendedor" value="${esc(d.vendedor)}"></div>
+        <div><label>Promotor*</label><input id="pm-promotor" value="${esc(d.promotor)}"></div>
+        <div><label>Contato / Cargo</label><input id="pm-contato" value="${esc(d.contato)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>2. Contexto da Oportunidade</h2>
+      <label>Por que estamos indo ao cliente?*</label>
+      <textarea id="pm-motivo_visita" placeholder="Ex.: demonstração de equipamento, gravação de peça...">${esc(d.motivo_visita)}</textarea>
+      <label>Como o cliente faz esse processo hoje?*</label>
+      <textarea id="pm-processo_atual">${esc(d.processo_atual)}</textarea>
+      <label>O que o cliente informou que precisa resolver ou melhorar?*</label>
+      <textarea id="pm-necessidade_informada">${esc(d.necessidade_informada)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>3. Demonstração</h2>
+      <label>O que vamos demonstrar?*</label>
+      <textarea id="pm-o_que_demonstrar">${esc(d.o_que_demonstrar)}</textarea>
+      <label>O que é mais importante mostrar nessa demonstração?*</label>
+      <textarea id="pm-ponto_importante_demo">${esc(d.ponto_importante_demo)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>4. Pontos de Atenção</h2>
+      <label>Existe alguma dúvida, preocupação ou informação importante já mencionada pelo cliente?*</label>
+      <textarea id="pm-duvidas_preocupacoes">${esc(d.duvidas_preocupacoes)}</textarea>
+      <label>Existe concorrente? Se sim, qual?*</label>
+      <textarea id="pm-concorrente">${esc(d.concorrente)}</textarea>
+      <label>O que você quer que o Promotor observe durante a visita?*</label>
+      <textarea id="pm-o_que_observar">${esc(d.o_que_observar)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>5. Resumo para o Promotor</h2>
+      <label>Objetivo da visita — em uma frase*</label>
+      <textarea id="pm-objetivo_visita">${esc(d.objetivo_visita)}</textarea>
+      <label>Ponto principal a observar*</label>
+      <textarea id="pm-ponto_principal_observar">${esc(d.ponto_principal_observar)}</textarea>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do briefing é gerado automaticamente para download.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPromotor()">Concluir e gerar PDF</button>
+      </div>
+    </div>`;
+}
+
+function preencherPromotorPelaOS(agendaId) {
+  const os = (window._osDemonstracaoCache || []).find((a) => String(a.id) === String(agendaId));
+  if (!os) return;
+  document.getElementById('pm-empresa').value = os.cliente_nome || '';
+  document.getElementById('pm-data_visita').value = (os.data_hora_inicio || '').slice(0, 10);
+  document.getElementById('pm-contato').value = os.contato || os.cliente_contato || '';
+  if (os.tecnico_nome) document.getElementById('pm-promotor').value = os.tecnico_nome;
+}
+
+async function concluirRelatorioPromotor() {
+  const d = relatorioPromotorDraft;
+  const agendaSel = document.getElementById('pm-agenda_id').value;
+  d.agenda_id = agendaSel || null;
+  d.empresa = document.getElementById('pm-empresa').value;
+  d.data_visita = document.getElementById('pm-data_visita').value;
+  d.vendedor = document.getElementById('pm-vendedor').value;
+  d.promotor = document.getElementById('pm-promotor').value;
+  d.contato = document.getElementById('pm-contato').value;
+  d.motivo_visita = document.getElementById('pm-motivo_visita').value;
+  d.processo_atual = document.getElementById('pm-processo_atual').value;
+  d.necessidade_informada = document.getElementById('pm-necessidade_informada').value;
+  d.o_que_demonstrar = document.getElementById('pm-o_que_demonstrar').value;
+  d.ponto_importante_demo = document.getElementById('pm-ponto_importante_demo').value;
+  d.duvidas_preocupacoes = document.getElementById('pm-duvidas_preocupacoes').value;
+  d.concorrente = document.getElementById('pm-concorrente').value;
+  d.o_que_observar = document.getElementById('pm-o_que_observar').value;
+  d.objetivo_visita = document.getElementById('pm-objetivo_visita').value;
+  d.ponto_principal_observar = document.getElementById('pm-ponto_principal_observar').value;
+
+  const obrig = ['empresa', 'data_visita', 'vendedor', 'promotor', 'motivo_visita', 'processo_atual',
+    'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes',
+    'concorrente', 'o_que_observar', 'objetivo_visita', 'ponto_principal_observar'];
+  for (const c of obrig) {
+    if (!String(d[c] || '').trim()) return alert('Preencha todos os campos obrigatórios.');
+  }
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioPromotor(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Briefing atualizado e PDF gerado.' : 'Briefing salvo e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+function gerarPdfRelatorioPromotor(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Briefing Pré-Visita — Promotor', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 18;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  function paragrafo(label, texto, corBorda, corFundo) {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(label, margem, y); y += 12;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(texto) || '—', largura - 16);
+    const altura = Math.max(20, linhas.length * 12 + 10);
+    if (y + altura > pageH - margem) novaPagina();
+    if (corFundo) { doc.setFillColor(...corFundo); doc.rect(margem, y, largura, altura, 'F'); }
+    doc.setDrawColor(...(corBorda || PDF_COR.line)); doc.setLineWidth(corBorda ? 1.2 : 0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.setTextColor(...PDF_COR.ink);
+    doc.text(linhas, margem + 8, y + 13);
+    y += altura + 12;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold');
+  doc.text('BRIEFING PRÉ-VISITA', pageW / 2, 410, { align: 'center' });
+  doc.setFontSize(13); doc.setFont(undefined, 'normal');
+  doc.text('VENDEDOR  →  PROMOTOR', pageW / 2, 434, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('1. Identificação');
+  linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Promotor', valor: r.promotor, frac: 0.5 }]);
+  linhaCampos([{ label: 'Vendedor', valor: r.vendedor, frac: 0.5 }, { label: 'Contato / Cargo', valor: r.contato, frac: 0.5 }]);
+  y += 12;
+
+  tituloCentro('2. Contexto da Oportunidade');
+  paragrafo('Por que estamos indo ao cliente?', r.motivo_visita);
+  paragrafo('Como o cliente faz esse processo hoje?', r.processo_atual);
+  paragrafo('O que o cliente informou que precisa resolver ou melhorar?', r.necessidade_informada);
+
+  tituloCentro('3. Demonstração');
+  paragrafo('O que vamos demonstrar?', r.o_que_demonstrar);
+  paragrafo('O que é mais importante mostrar nessa demonstração?', r.ponto_importante_demo);
+
+  tituloCentro('4. Pontos de Atenção');
+  paragrafo('Dúvidas, preocupações ou informações já mencionadas pelo cliente', r.duvidas_preocupacoes);
+  paragrafo('Concorrente', r.concorrente);
+  paragrafo('O que o Promotor deve observar durante a visita', r.o_que_observar);
+
+  tituloCentro('5. Resumo para o Promotor');
+  paragrafo('Objetivo da visita — em uma frase', r.objetivo_visita);
+  paragrafo('Ponto principal a observar', r.ponto_principal_observar);
+
+  if (y > pageH - margem - 20) novaPagina();
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), margem, pageH - margem);
+
+  return doc.output('bloburl');
+}
+
+// ---------- Relatório Devolutivo (Relatório > Manual > Devolutivo) ----------
+// preenchido pelo promotor (técnico) DEPOIS da visita, pra devolver ao líder de vendas o
+// resultado da demonstração — principalmente quando a visita revela uma necessidade a mais do
+// cliente (ex.: automação, retrofit) que pode virar uma venda de equipamento personalizado, com
+// valor agregado, além do que já foi demonstrado.
+let relatorioDevolutivoDraft = null;
+function relatorioDevolutivoPadrao() {
+  return {
+    tipo: 'devolutivo', agenda_id: null,
+    empresa: '', contato: '', data_visita: '', promotor: USER.nome,
+    equipamento_demonstrado: '', resultado_demonstracao: '',
+    feedback_cliente: '', pontos_positivos: '', pontos_ajuste: '',
+    identificou_oportunidade_adicional: null,
+    tipo_oportunidade: [], tipo_oportunidade_outro: '',
+    descricao_oportunidade: '', valor_agregado: '',
+    proximos_passos: '', observacoes_finais: '',
+  };
+}
+
+const OPCOES_TIPO_OPORTUNIDADE = [['automacao', 'Automação'], ['retrofit', 'Retrofit'], ['equipamento_personalizado', 'Equipamento personalizado'], ['outro', 'Outro']];
+
+async function mostrarFormRelatorioDevolutivo(existente) {
+  relatorioDevolutivoDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioDevolutivoPadrao();
+  const d = relatorioDevolutivoDraft;
+  const editando = !!d.id;
+  const osList = await osDemonstracaoTecnica();
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Relatório Devolutivo</h1><p>Preencher depois da visita — o que foi demonstrado e se o cliente revelou uma necessidade a mais (ex.: automação, retrofit), pra devolver pro líder de vendas. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Identificação</h2>
+      <div class="form-grid">
+        <div class="full"><label>Vincular a uma O.S. de Demonstração Técnica (opcional)</label>
+          <select id="dv-agenda_id" onchange="preencherDevolutivoPelaOS(this.value)">${opcoesOsDemonstracao(osList, d.agenda_id)}</select>
+        </div>
+        <div><label>Cliente*</label><input id="dv-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Data*</label><input id="dv-data_visita" type="date" value="${esc(d.data_visita)}"></div>
+        <div><label>Promotor (quem atendeu)*</label><input id="dv-promotor" value="${esc(d.promotor)}"></div>
+        <div><label>Contato do cliente</label><input id="dv-contato" value="${esc(d.contato)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Resultado da demonstração</h2>
+      <div class="form-grid">
+        <div><label>Equipamento demonstrado*</label><input id="dv-equipamento_demonstrado" value="${esc(d.equipamento_demonstrado)}"></div>
+        <div><label>Resultado*</label>
+          <select id="dv-resultado_demonstracao">
+            <option value="" ${!d.resultado_demonstracao ? 'selected' : ''} disabled>Selecione...</option>
+            <option value="aprovado" ${d.resultado_demonstracao === 'aprovado' ? 'selected' : ''}>Aprovado tecnicamente</option>
+            <option value="aprovado_parcial" ${d.resultado_demonstracao === 'aprovado_parcial' ? 'selected' : ''}>Aprovado parcialmente</option>
+            <option value="reprovado" ${d.resultado_demonstracao === 'reprovado' ? 'selected' : ''}>Reprovado</option>
+            <option value="em_analise" ${d.resultado_demonstracao === 'em_analise' ? 'selected' : ''}>Em análise pelo cliente</option>
+          </select>
+        </div>
+      </div>
+      <label>Feedback do cliente*</label>
+      <textarea id="dv-feedback_cliente">${esc(d.feedback_cliente)}</textarea>
+      <label>Pontos positivos</label>
+      <textarea id="dv-pontos_positivos">${esc(d.pontos_positivos)}</textarea>
+      <label>Pontos de ajuste / negativos</label>
+      <textarea id="dv-pontos_ajuste">${esc(d.pontos_ajuste)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Oportunidade adicional identificada</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Mesmo levando um equipamento pra demonstração, a visita pode revelar uma necessidade a mais do cliente — uma automação ou um retrofit, por exemplo — que pode virar uma venda de equipamento personalizado, com valor agregado.</p>
+      <label>Foi identificada uma necessidade adicional do cliente?*</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="dv-oportunidade" value="sim" style="width:auto;" ${d.identificou_oportunidade_adicional === true ? 'checked' : ''} onchange="alternarOportunidadeDevolutivo(true)"> Sim</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="dv-oportunidade" value="nao" style="width:auto;" ${d.identificou_oportunidade_adicional === false ? 'checked' : ''} onchange="alternarOportunidadeDevolutivo(false)"> Não</label>
+      </div>
+      <div id="dv-oportunidade-detalhe" style="display:${d.identificou_oportunidade_adicional ? 'block' : 'none'};">
+        <label>Tipo de oportunidade*</label>
+        <div style="display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px;">
+          ${OPCOES_TIPO_OPORTUNIDADE.map(([v, l]) => `
+            <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="checkbox" class="dv-tipo-oportunidade" value="${v}" style="width:auto;" ${d.tipo_oportunidade.includes(v) ? 'checked' : ''} onchange="document.getElementById('dv-tipo-outro-wrap').style.display = document.querySelector('.dv-tipo-oportunidade[value=\\'outro\\']').checked ? 'block' : 'none';"> ${l}</label>`).join('')}
+        </div>
+        <div id="dv-tipo-outro-wrap" style="display:${d.tipo_oportunidade.includes('outro') ? 'block' : 'none'};"><label>Especifique</label><input id="dv-tipo_oportunidade_outro" value="${esc(d.tipo_oportunidade_outro)}"></div>
+        <label>Descreva a necessidade adicional identificada*</label>
+        <textarea id="dv-descricao_oportunidade">${esc(d.descricao_oportunidade)}</textarea>
+        <label>Como isso pode virar uma venda de maior valor?*</label>
+        <textarea id="dv-valor_agregado">${esc(d.valor_agregado)}</textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Próximos passos</h2>
+      <label>Recomendação / próximos passos</label>
+      <textarea id="dv-proximos_passos">${esc(d.proximos_passos)}</textarea>
+      <label>Observações finais</label>
+      <textarea id="dv-observacoes_finais">${esc(d.observacoes_finais)}</textarea>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do devolutivo é gerado automaticamente pra encaminhar ao líder de vendas.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioDevolutivo()">Concluir e gerar PDF</button>
+      </div>
+    </div>`;
+}
+
+function alternarOportunidadeDevolutivo(valor) {
+  document.getElementById('dv-oportunidade-detalhe').style.display = valor ? 'block' : 'none';
+}
+
+function preencherDevolutivoPelaOS(agendaId) {
+  const os = (window._osDemonstracaoCache || []).find((a) => String(a.id) === String(agendaId));
+  if (!os) return;
+  document.getElementById('dv-empresa').value = os.cliente_nome || '';
+  document.getElementById('dv-data_visita').value = (os.data_hora_inicio || '').slice(0, 10);
+  document.getElementById('dv-contato').value = os.contato || os.cliente_contato || '';
+  if (os.tecnico_nome) document.getElementById('dv-promotor').value = os.tecnico_nome;
+  if (os.equipamento_tipo) document.getElementById('dv-equipamento_demonstrado').value = [os.equipamento_tipo, os.equipamento_modelo].filter(Boolean).join(' ');
+}
+
+async function concluirRelatorioDevolutivo() {
+  const d = relatorioDevolutivoDraft;
+  const agendaSel = document.getElementById('dv-agenda_id').value;
+  d.agenda_id = agendaSel || null;
+  d.empresa = document.getElementById('dv-empresa').value;
+  d.data_visita = document.getElementById('dv-data_visita').value;
+  d.promotor = document.getElementById('dv-promotor').value;
+  d.contato = document.getElementById('dv-contato').value;
+  d.equipamento_demonstrado = document.getElementById('dv-equipamento_demonstrado').value;
+  d.resultado_demonstracao = document.getElementById('dv-resultado_demonstracao').value;
+  d.feedback_cliente = document.getElementById('dv-feedback_cliente').value;
+  d.pontos_positivos = document.getElementById('dv-pontos_positivos').value;
+  d.pontos_ajuste = document.getElementById('dv-pontos_ajuste').value;
+  const oportunidadeRadio = document.querySelector('input[name="dv-oportunidade"]:checked');
+  d.identificou_oportunidade_adicional = oportunidadeRadio ? oportunidadeRadio.value === 'sim' : null;
+  d.tipo_oportunidade = Array.from(document.querySelectorAll('.dv-tipo-oportunidade:checked')).map((el) => el.value);
+  d.tipo_oportunidade_outro = document.getElementById('dv-tipo_oportunidade_outro').value;
+  d.descricao_oportunidade = document.getElementById('dv-descricao_oportunidade').value;
+  d.valor_agregado = document.getElementById('dv-valor_agregado').value;
+  d.proximos_passos = document.getElementById('dv-proximos_passos').value;
+  d.observacoes_finais = document.getElementById('dv-observacoes_finais').value;
+
+  if (!d.empresa.trim() || !d.data_visita.trim() || !d.promotor.trim()) return alert('Preencha cliente, data e promotor.');
+  if (!d.equipamento_demonstrado.trim()) return alert('Informe o equipamento demonstrado.');
+  if (!d.resultado_demonstracao) return alert('Marque o resultado da demonstração.');
+  if (!d.feedback_cliente.trim()) return alert('Preencha o feedback do cliente.');
+  if (d.identificou_oportunidade_adicional === null) return alert('Responda se foi identificada uma necessidade adicional do cliente.');
+  if (d.identificou_oportunidade_adicional) {
+    if (!d.tipo_oportunidade.length) return alert('Selecione ao menos um tipo de oportunidade.');
+    if (!d.descricao_oportunidade.trim()) return alert('Descreva a necessidade adicional identificada.');
+    if (!d.valor_agregado.trim()) return alert('Descreva como isso pode virar uma venda de maior valor.');
+  }
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioDevolutivo(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Devolutivo atualizado e PDF gerado.' : 'Devolutivo salvo e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Relatório Devolutivo', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 18;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  function paragrafo(label, texto, corBorda, corFundo) {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(label, margem, y); y += 12;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(texto) || '—', largura - 16);
+    const altura = Math.max(20, linhas.length * 12 + 10);
+    if (y + altura > pageH - margem) novaPagina();
+    if (corFundo) { doc.setFillColor(...corFundo); doc.rect(margem, y, largura, altura, 'F'); }
+    doc.setDrawColor(...(corBorda || PDF_COR.line)); doc.setLineWidth(corBorda ? 1.2 : 0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.setTextColor(...PDF_COR.ink);
+    doc.text(linhas, margem + 8, y + 13);
+    y += altura + 12;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold');
+  doc.text('RELATÓRIO DEVOLUTIVO', pageW / 2, 410, { align: 'center' });
+  doc.setFontSize(13); doc.setFont(undefined, 'normal');
+  doc.text('PROMOTOR  →  LÍDER DE VENDAS', pageW / 2, 434, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Identificação');
+  linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Promotor', valor: r.promotor, frac: 0.5 }]);
+  linhaCampos([{ label: 'Equipamento demonstrado', valor: r.equipamento_demonstrado, frac: 0.6 }, { label: 'Contato', valor: r.contato, frac: 0.4 }]);
+  y += 12;
+
+  const RESULTADO_LABEL = { aprovado: 'Aprovado tecnicamente', aprovado_parcial: 'Aprovado parcialmente', reprovado: 'Reprovado', em_analise: 'Em análise pelo cliente' };
+  tituloCentro('Resultado da demonstração');
+  linhaCampos([{ label: 'Resultado', valor: RESULTADO_LABEL[r.resultado_demonstracao] || r.resultado_demonstracao, frac: 1 }]);
+  paragrafo('Feedback do cliente', r.feedback_cliente);
+  if (r.pontos_positivos) paragrafo('Pontos positivos', r.pontos_positivos);
+  if (r.pontos_ajuste) paragrafo('Pontos de ajuste / negativos', r.pontos_ajuste);
+
+  tituloCentro('Oportunidade adicional identificada');
+  if (r.identificou_oportunidade_adicional) {
+    const tipos = (Array.isArray(r.tipo_oportunidade) ? r.tipo_oportunidade : []).map((v) => {
+      if (v === 'outro') return r.tipo_oportunidade_outro || 'Outro';
+      return (OPCOES_TIPO_OPORTUNIDADE.find(([vv]) => vv === v) || [, v])[1];
+    }).join(', ');
+    linhaCampos([{ label: 'Tipo de oportunidade', valor: tipos, frac: 1 }]);
+    paragrafo('Necessidade adicional identificada', r.descricao_oportunidade, PDF_COR.green, PDF_COR.greenBg);
+    paragrafo('Como isso pode virar uma venda de maior valor', r.valor_agregado, PDF_COR.green, PDF_COR.greenBg);
+  } else {
+    doc.setFontSize(9); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Nenhuma necessidade adicional identificada nesta visita.', margem, y); y += 20;
+  }
+
+  if (r.proximos_passos || r.observacoes_finais) {
+    tituloCentro('Próximos passos');
+    if (r.proximos_passos) paragrafo('Recomendação / próximos passos', r.proximos_passos);
+    if (r.observacoes_finais) paragrafo('Observações finais', r.observacoes_finais);
+  }
+
+  if (y > pageH - margem - 20) novaPagina();
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), margem, pageH - margem);
+
+  return doc.output('bloburl');
+}
+
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
 // completo (com fotos) na hora que alguma ação realmente precisa delas, e guarda de volta
 // no cache pra não buscar de novo se a pessoa clicar noutra ação do mesmo relatório.
@@ -7781,7 +8377,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }

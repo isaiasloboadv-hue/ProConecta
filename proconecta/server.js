@@ -500,6 +500,51 @@ function validarRelatorioAceite(r) {
   return null;
 }
 
+// ---------- Briefing Pré-Visita "Promotor" (Relatório > Manual > Promotor) ----------
+// preenchido pelo vendedor (administrador) ANTES da visita de demonstração técnica, pra dar
+// contexto pro promotor (técnico) que vai fazer a demo — espelha o modelo em Excel que o time
+// comercial já usa hoje (Briefing Pré-Visita | Vendedor -> Promotor), campo por campo. Pode ficar
+// vinculado a uma O.S. de "Demonstração Técnica" (agenda_id) ou avulso, se a O.S. ainda nem existe.
+function validarRelatorioPromotor(r) {
+  if (!r || typeof r !== 'object') return 'Dados do briefing são obrigatórios.';
+  const camposTexto = ['empresa', 'data_visita', 'vendedor', 'promotor',
+    'motivo_visita', 'processo_atual', 'necessidade_informada',
+    'o_que_demonstrar', 'ponto_importante_demo',
+    'duvidas_preocupacoes', 'concorrente', 'o_que_observar',
+    'objetivo_visita', 'ponto_principal_observar'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  return null;
+}
+
+// ---------- Relatório Devolutivo (Relatório > Manual > Devolutivo) ----------
+// preenchido pelo promotor (técnico) DEPOIS da visita, pra devolver ao líder de vendas o
+// resultado da demonstração — principalmente quando a visita revela uma necessidade a mais do
+// cliente (ex.: automação, retrofit) que pode virar uma venda de equipamento personalizado, com
+// valor agregado, além do que já foi demonstrado.
+function validarRelatorioDevolutivo(r) {
+  if (!r || typeof r !== 'object') return 'Dados do relatório devolutivo são obrigatórios.';
+  const camposTexto = ['empresa', 'data_visita', 'promotor', 'equipamento_demonstrado', 'feedback_cliente'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!['aprovado', 'aprovado_parcial', 'reprovado', 'em_analise'].includes(r.resultado_demonstracao)) {
+    return 'Marque o resultado da demonstração.';
+  }
+  if (r.identificou_oportunidade_adicional !== true && r.identificou_oportunidade_adicional !== false) {
+    return 'Responda se foi identificada uma necessidade adicional do cliente.';
+  }
+  if (r.identificou_oportunidade_adicional) {
+    if (!Array.isArray(r.tipo_oportunidade) || !r.tipo_oportunidade.length) {
+      return 'Selecione ao menos um tipo de oportunidade (automação, retrofit...).';
+    }
+    if (!String(r.descricao_oportunidade || '').trim()) return 'Descreva a necessidade adicional identificada.';
+    if (!String(r.valor_agregado || '').trim()) return 'Descreva como isso pode virar uma venda de maior valor.';
+  }
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -2140,7 +2185,9 @@ rota('POST', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
 // o técnico realmente abre o PDF/Word/fotos de um relatório específico.
 rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  // administrador entra aqui só pra ver os briefings "Promotor" que ele mesmo criou — o filtro
+  // por autor_id logo abaixo já garante que ele não vê relatório de outra pessoa.
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
   const lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id)
     .filter((r) => r.autor_id === user.id)
@@ -2152,7 +2199,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
 // GET /api/relatorios-manutencao/:id — reabrir um relatório já criado (pra gerar o PDF de novo)
 rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
@@ -2209,9 +2256,14 @@ function sanitizarCiclos(lista) {
 // "ciclagem" (Ensaio de Ciclagem — ciclos de teste com amostras OK/com desvio).
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico cria este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : 'completo';
+  // os tipos de campo (avulsos, de manutenção interna) continuam só do técnico — só o Promotor
+  // (briefing do vendedor) é que o administrador também pode criar.
+  if (tipo !== 'promotor' && user.papel === 'administrador') {
+    return enviarJSON(res, 403, { erro: 'Administrador só cria o relatório "Promotor" (briefing pré-visita).' });
+  }
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
@@ -2237,6 +2289,12 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'aceite_entrega') {
     const erroAceite = validarRelatorioAceite(body);
     if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
+  } else if (tipo === 'promotor') {
+    const erroPromotor = validarRelatorioPromotor(body);
+    if (erroPromotor) return enviarJSON(res, 400, { erro: erroPromotor });
+  } else if (tipo === 'devolutivo') {
+    const erroDevolutivo = validarRelatorioDevolutivo(body);
+    if (erroDevolutivo) return enviarJSON(res, 400, { erro: erroDevolutivo });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2324,6 +2382,33 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
     } : {}),
+    ...(tipo === 'promotor' ? {
+      agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+      data_visita: body.data_visita || '',
+      vendedor: body.vendedor || '', promotor: body.promotor || '',
+      motivo_visita: body.motivo_visita || '', processo_atual: body.processo_atual || '',
+      necessidade_informada: body.necessidade_informada || '',
+      o_que_demonstrar: body.o_que_demonstrar || '', ponto_importante_demo: body.ponto_importante_demo || '',
+      duvidas_preocupacoes: body.duvidas_preocupacoes || '', concorrente: body.concorrente || '',
+      o_que_observar: body.o_que_observar || '',
+      objetivo_visita: body.objetivo_visita || '', ponto_principal_observar: body.ponto_principal_observar || '',
+    } : {}),
+    ...(tipo === 'devolutivo' ? {
+      agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+      data_visita: body.data_visita || '',
+      promotor: body.promotor || '',
+      equipamento_demonstrado: body.equipamento_demonstrado || '',
+      resultado_demonstracao: ['aprovado', 'aprovado_parcial', 'reprovado', 'em_analise'].includes(body.resultado_demonstracao) ? body.resultado_demonstracao : '',
+      feedback_cliente: body.feedback_cliente || '',
+      pontos_positivos: body.pontos_positivos || '', pontos_ajuste: body.pontos_ajuste || '',
+      identificou_oportunidade_adicional: body.identificou_oportunidade_adicional === true,
+      tipo_oportunidade: Array.isArray(body.tipo_oportunidade) ? body.tipo_oportunidade : [],
+      tipo_oportunidade_outro: body.tipo_oportunidade_outro || '',
+      descricao_oportunidade: body.descricao_oportunidade || '',
+      valor_agregado: body.valor_agregado || '',
+      proximos_passos: body.proximos_passos || '',
+      observacoes_finais: body.observacoes_finais || '',
+    } : {}),
   });
   db.save(data);
   enviarJSON(res, 201, { relatorio: item });
@@ -2333,7 +2418,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
 // O tipo (completo/ficha/ciclagem) é fixo desde a criação — só os campos daquele tipo são atualizados.
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  // a busca abaixo já trava em autor_id === user.id, então um administrador só edita os
+  // "Promotor" que ele mesmo criou (é o único tipo que ele consegue criar — ver POST acima).
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
@@ -2446,6 +2533,41 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
     });
+  } else if (item.tipo === 'promotor') {
+    const erroPromotor = validarRelatorioPromotor(body);
+    if (erroPromotor) return enviarJSON(res, 400, { erro: erroPromotor });
+    Object.assign(item, {
+      agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+      empresa: body.empresa || '', contato: body.contato || '',
+      data_visita: body.data_visita || '',
+      vendedor: body.vendedor || '', promotor: body.promotor || '',
+      motivo_visita: body.motivo_visita || '', processo_atual: body.processo_atual || '',
+      necessidade_informada: body.necessidade_informada || '',
+      o_que_demonstrar: body.o_que_demonstrar || '', ponto_importante_demo: body.ponto_importante_demo || '',
+      duvidas_preocupacoes: body.duvidas_preocupacoes || '', concorrente: body.concorrente || '',
+      o_que_observar: body.o_que_observar || '',
+      objetivo_visita: body.objetivo_visita || '', ponto_principal_observar: body.ponto_principal_observar || '',
+    });
+  } else if (item.tipo === 'devolutivo') {
+    const erroDevolutivo = validarRelatorioDevolutivo(body);
+    if (erroDevolutivo) return enviarJSON(res, 400, { erro: erroDevolutivo });
+    Object.assign(item, {
+      agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+      empresa: body.empresa || '', contato: body.contato || '',
+      data_visita: body.data_visita || '',
+      promotor: body.promotor || '',
+      equipamento_demonstrado: body.equipamento_demonstrado || '',
+      resultado_demonstracao: ['aprovado', 'aprovado_parcial', 'reprovado', 'em_analise'].includes(body.resultado_demonstracao) ? body.resultado_demonstracao : '',
+      feedback_cliente: body.feedback_cliente || '',
+      pontos_positivos: body.pontos_positivos || '', pontos_ajuste: body.pontos_ajuste || '',
+      identificou_oportunidade_adicional: body.identificou_oportunidade_adicional === true,
+      tipo_oportunidade: Array.isArray(body.tipo_oportunidade) ? body.tipo_oportunidade : [],
+      tipo_oportunidade_outro: body.tipo_oportunidade_outro || '',
+      descricao_oportunidade: body.descricao_oportunidade || '',
+      valor_agregado: body.valor_agregado || '',
+      proximos_passos: body.proximos_passos || '',
+      observacoes_finais: body.observacoes_finais || '',
+    });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
       return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
@@ -2471,7 +2593,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // DELETE /api/relatorios-manutencao/:id — o próprio autor pode apagar um relatório que criou
 rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico usa este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
   const relatorioExcluir = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
   if (!relatorioExcluir) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
