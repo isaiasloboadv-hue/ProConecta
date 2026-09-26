@@ -4949,6 +4949,17 @@ function blocoRascunhoManual(statusElId, salvoEm, recuperado) {
     ${recuperado ? `<p style="font-size:12.5px; color:var(--amber, #a66a00);">Rascunho recuperado — havia um preenchimento salvo neste dispositivo de ${salvoEm}.</p>` : ''}
     <p id="${statusElId}" style="font-size:12px; color:var(--green);">${!recuperado && salvoEm ? `Rascunho salvo automaticamente neste dispositivo às ${salvoEm}` : ''}</p>`;
 }
+// força salvar o rascunho agora (além do salvamento automático a cada campo editado) — dá ao
+// usuário uma ação explícita de "salvar" pra ficar tranquilo antes de sair/fechar o app.
+function salvarRascunhoAgora() {
+  if (window._draftSyncAtual) window._draftSyncAtual();
+}
+// sai do formulário sem enviar nada, garantindo que o rascunho fica salvo antes de navegar —
+// não depende só do bubbling do clique até o #main, que só dispara depois desta função rodar.
+function voltarComRascunho() {
+  if (window._draftSyncAtual) window._draftSyncAtual();
+  renderRelatorioManutencao();
+}
 
 // ---------- CRIAR RELATÓRIO (manutenção interna, avulso — sem vínculo com O.S./agenda) ----------
 
@@ -5685,8 +5696,9 @@ function mostrarFormRelatorioManutencao(existente) {
 
     <div class="panel">
       ${blocoRascunhoManual('rm-rascunho-status', rascunho && rascunho.em, recuperado)}
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoCompleto(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="salvarRelatorioManutencao()">Gerar PDF e salvar</button>
       </div>
@@ -6078,8 +6090,9 @@ function mostrarFormRelatorioPreventiva(existente) {
     <div class="panel">
       ${blocoRascunhoManual('rp-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoPreventiva(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPreventiva()">Concluir e enviar termo</button>
       </div>
@@ -6541,8 +6554,9 @@ function mostrarFormRelatorioCorretiva(existente) {
     <div class="panel">
       ${blocoRascunhoManual('rcm-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoCorretiva(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioCorretiva()">Concluir e enviar termo</button>
       </div>
@@ -6971,8 +6985,9 @@ function mostrarFormRelatorioTecnico(existente) {
     <div class="panel">
       ${blocoRascunhoManual('rt-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do relatório é gerado automaticamente para download.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoTecnico(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioTecnico()">Concluir e gerar PDF</button>
       </div>
@@ -7493,8 +7508,9 @@ function mostrarFormRelatorioAceite(existente) {
     <div class="panel">
       ${blocoRascunhoManual('rae-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoAceite(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioAceite()">Concluir e enviar termo</button>
       </div>
@@ -8034,8 +8050,9 @@ async function mostrarFormRelatorioPromotor(existente) {
     <div class="panel">
       ${blocoRascunhoManual('pm-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do briefing é gerado automaticamente para download.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoPromotor(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPromotor()">Concluir e gerar PDF</button>
       </div>
@@ -8331,8 +8348,9 @@ async function mostrarFormRelatorioDevolutivo(existente) {
     <div class="panel">
       ${blocoRascunhoManual('dv-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do devolutivo é gerado automaticamente pra encaminhar ao líder de vendas.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoDevolutivo(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioDevolutivo()">Concluir e gerar PDF</button>
       </div>
@@ -8682,8 +8700,9 @@ async function mostrarFormRelatorioLevantamentoTecnico(existente) {
     <div class="panel">
       ${blocoRascunhoManual('lt-rascunho-status', rascunho && rascunho.em, recuperado)}
       <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do levantamento é gerado automaticamente para download.</p>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoLevantamento(${d.id || 'null'})">Limpar rascunho</button>
         <button class="btn btn-primary btn-sm" onclick="concluirRelatorioLevantamentoTecnico()">Concluir e gerar PDF</button>
       </div>
