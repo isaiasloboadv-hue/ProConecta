@@ -2034,7 +2034,10 @@ async function renderRelatorioCorretiva(item) {
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Relatório técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p></div>
+    <div class="page-head">
+      <button class="btn-outline-sm" onclick="renderAgenda()" style="margin-bottom:10px;">‹ Voltar</button>
+      <h1>Relatório técnico — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Preenchimento presencial no cliente. Campos com * são obrigatórios.</p>
+    </div>
     <div class="panel">
       <h2>Dados do atendimento</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Definidos pelo administrador na abertura desta OS — não podem ser alterados aqui.</p>
@@ -2471,7 +2474,10 @@ async function renderRelatorioSimples(item, exigirSerie) {
   }
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Relatório — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Dados do cliente e do equipamento definidos pelo administrador. Preencha as observações abaixo.</p></div>
+    <div class="page-head">
+      <button class="btn-outline-sm" onclick="renderAgenda()" style="margin-bottom:10px;">‹ Voltar</button>
+      <h1>Relatório — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>Dados do cliente e do equipamento definidos pelo administrador. Preencha as observações abaixo.</p>
+    </div>
     <div class="panel">
       <div class="form-grid">
         <div><label>Empresa</label><input id="rs-empresa" value="${esc(r.empresa)}" disabled></div>
@@ -2577,7 +2583,10 @@ async function renderLaudoTecnico(item) {
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${item.retorno_pendente_tecnico ? 'Relatório de retorno' : 'Laudo Técnico'} — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>${item.retorno_pendente_tecnico ? 'Segundo relatório desta O.S., referente ao retorno.' : 'Preenchimento presencial no cliente.'} Campos com * são obrigatórios.</p></div>
+    <div class="page-head">
+      <button class="btn-outline-sm" onclick="renderAgenda()" style="margin-bottom:10px;">‹ Voltar</button>
+      <h1>${item.retorno_pendente_tecnico ? 'Relatório de retorno' : 'Laudo Técnico'} — ${esc(TIPO_OS_LABEL[item.tipo] || item.tipo)}</h1><p>${item.retorno_pendente_tecnico ? 'Segundo relatório desta O.S., referente ao retorno.' : 'Preenchimento presencial no cliente.'} Campos com * são obrigatórios.</p>
+    </div>
     <div class="panel">
       <h2>Dados do atendimento</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Definidos pelo administrador na abertura desta OS — não podem ser alterados aqui.</p>
@@ -10504,7 +10513,10 @@ function fecharLightbox() {
 function renderFormDefeito(main, prefill) {
   const editando = !!prefill;
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar registro' : 'Adicionar Defeito/Falha'}</h1><p>${editando ? 'Corrija conforme o comentário do administrador e reenvie.' : 'Enviado para aprovação do administrador antes de entrar na biblioteca.'}</p></div>
+    <div class="page-head">
+      <button class="btn-outline-sm" onclick="${editando ? 'renderMeusRegistros()' : "ir('biblioteca-defeitos')"}" style="margin-bottom:10px;">‹ Voltar</button>
+      <h1>${editando ? 'Editar registro' : 'Adicionar Defeito/Falha'}</h1><p>${editando ? 'Corrija conforme o comentário do administrador e reenvie.' : 'Enviado para aprovação do administrador antes de entrar na biblioteca.'}</p>
+    </div>
     ${editando && prefill.comentario_admin ? `<div class="admin-note"><b>Comentário do administrador</b>${esc(prefill.comentario_admin)}</div>` : ''}
     <div class="panel">
       <div class="form-grid">
@@ -10544,7 +10556,10 @@ function renderFormProcedimento(main, prefill) {
   procDraft = prefill && prefill.passos && prefill.passos.length ? JSON.parse(JSON.stringify(prefill.passos)) : [{ texto: '', fotos: [] }];
   fotoDestaqueDraft = prefill ? (prefill.foto_destaque || null) : null;
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar procedimento' : 'Adicionar Manual de Procedimentos'}</h1><p>${editando ? 'Corrija conforme o comentário do administrador e reenvie.' : 'Cada etapa pode ter uma ou mais fotos anexadas.'}</p></div>
+    <div class="page-head">
+      <button class="btn-outline-sm" onclick="${editando ? 'renderMeusRegistros()' : "ir('biblioteca-procedimentos')"}" style="margin-bottom:10px;">‹ Voltar</button>
+      <h1>${editando ? 'Editar procedimento' : 'Adicionar Manual de Procedimentos'}</h1><p>${editando ? 'Corrija conforme o comentário do administrador e reenvie.' : 'Cada etapa pode ter uma ou mais fotos anexadas.'}</p>
+    </div>
     ${editando && prefill.comentario_admin ? `<div class="admin-note"><b>Comentário do administrador</b>${esc(prefill.comentario_admin)}</div>` : ''}
     <div class="panel">
       <div class="form-grid">
