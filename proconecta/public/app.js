@@ -213,6 +213,16 @@ async function fazerLogin() {
   }
 }
 
+// esconde a tela de "carregando..." (só a logo) e mostra o formulário de login — chamada tanto
+// depois de um logout quanto quando descobrimos (ao abrir o app) que não tem sessão salva ou
+// que ela não é mais válida.
+function mostrarTelaLogin() {
+  const splash = document.getElementById('splashView');
+  if (splash) splash.style.display = 'none';
+  document.getElementById('appView').style.display = 'none';
+  document.getElementById('authView').style.display = 'flex';
+}
+
 function sair() {
   TOKEN = null; USER = null; navAbertos = new Set();
   if (sinoTimer) clearInterval(sinoTimer);
@@ -220,15 +230,16 @@ function sair() {
   localStorage.removeItem('pc_token');
   localStorage.removeItem('pc_ultima_pagina');
   salvarTokenSW(null);
-  document.getElementById('appView').style.display = 'none';
-  document.getElementById('authView').style.display = 'flex';
+  mostrarTelaLogin();
   const empresaTag = document.getElementById('empresaTag');
   if (empresaTag) empresaTag.textContent = '';
   carregarEmpresa();
 }
 
 async function tentarSessaoExistente() {
-  if (!TOKEN) return;
+  // sem token salvo, nem vale a pena esperar: mostra o login na hora, em vez de deixar a tela
+  // de "carregando..." parada à toa.
+  if (!TOKEN) { mostrarTelaLogin(); return; }
   try {
     const data = await api('/api/me');
     USER = data.usuario;
@@ -236,6 +247,7 @@ async function tentarSessaoExistente() {
     entrarNoApp();
   } catch (e) {
     TOKEN = null; localStorage.removeItem('pc_token');
+    mostrarTelaLogin();
   }
 }
 
@@ -385,6 +397,8 @@ async function ativarNotificacoesPush() {
 }
 
 function entrarNoApp() {
+  const splash = document.getElementById('splashView');
+  if (splash) splash.style.display = 'none';
   document.getElementById('authView').style.display = 'none';
   document.getElementById('appView').style.display = 'block';
   if (USER.empresa) window._empresa = USER.empresa;

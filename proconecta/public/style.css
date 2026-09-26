@@ -61,7 +61,7 @@ header{
 .btn-logout:hover{background:rgba(255,255,255,0.2);}
 
 /* ---------- AUTH (LOGIN / PRIMEIRO ACESSO) ---------- */
-#authView, #app-screen.auth-mode{
+#authView, #splashView, #app-screen.auth-mode{
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;
   background:
     linear-gradient(180deg, rgba(7,20,40,.88) 0%, rgba(9,30,56,.94) 55%, var(--navy-deep) 100%),
