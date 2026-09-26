@@ -545,6 +545,27 @@ function validarRelatorioDevolutivo(r) {
   return null;
 }
 
+// ---------- Levantamento Técnico (Relatório > Manual > Levantamento Técnico) ----------
+// preenchido pelo técnico numa segunda visita, de engenharia, quando o Devolutivo já sinalizou
+// uma oportunidade adicional (automação/retrofit) — entra no detalhe técnico que quem for orçar o
+// projeto personalizado precisa: processo atual, infraestrutura existente, espaço disponível,
+// escopo proposto. Pode ficar vinculado ao Devolutivo que originou a oportunidade
+// (devolutivo_id) e/ou à O.S. (agenda_id), ou avulso.
+function validarRelatorioLevantamentoTecnico(r) {
+  if (!r || typeof r !== 'object') return 'Dados do levantamento são obrigatórios.';
+  const camposTexto = ['empresa', 'data_levantamento', 'responsavel_tecnico',
+    'tempo_ciclo_atual', 'volume_producao', 'material_peca',
+    'automacao_existente', 'integracao_necessaria', 'espaco_disponivel',
+    'escopo_proposto', 'proximos_passos'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!['viavel', 'viavel_com_ressalvas', 'inviavel', 'precisa_mais_dados'].includes(r.viabilidade_tecnica)) {
+    return 'Marque a viabilidade técnica.';
+  }
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -2258,7 +2279,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : 'completo';
   // os tipos de campo (avulsos, de manutenção interna) continuam só do técnico — só o Promotor
   // (briefing do vendedor) é que o administrador também pode criar.
   if (tipo !== 'promotor' && user.papel === 'administrador') {
@@ -2295,6 +2316,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'devolutivo') {
     const erroDevolutivo = validarRelatorioDevolutivo(body);
     if (erroDevolutivo) return enviarJSON(res, 400, { erro: erroDevolutivo });
+  } else if (tipo === 'levantamento_tecnico') {
+    const erroLevantamento = validarRelatorioLevantamentoTecnico(body);
+    if (erroLevantamento) return enviarJSON(res, 400, { erro: erroLevantamento });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2408,6 +2432,20 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       valor_agregado: body.valor_agregado || '',
       proximos_passos: body.proximos_passos || '',
       observacoes_finais: body.observacoes_finais || '',
+    } : {}),
+    ...(tipo === 'levantamento_tecnico' ? {
+      agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+      devolutivo_id: body.devolutivo_id ? Number(body.devolutivo_id) : null,
+      data_levantamento: body.data_levantamento || '', responsavel_tecnico: body.responsavel_tecnico || '',
+      tempo_ciclo_atual: body.tempo_ciclo_atual || '', volume_producao: body.volume_producao || '',
+      material_peca: body.material_peca || '', tolerancias_qualidade: body.tolerancias_qualidade || '',
+      automacao_existente: body.automacao_existente || '', integracao_necessaria: body.integracao_necessaria || '',
+      espaco_disponivel: body.espaco_disponivel || '', alimentacao_eletrica: body.alimentacao_eletrica || '',
+      requisitos_seguranca: body.requisitos_seguranca || '',
+      escopo_proposto: body.escopo_proposto || '', prazo_decisao: body.prazo_decisao || '',
+      responsavel_decisao: body.responsavel_decisao || '', orcamento_sinalizado: body.orcamento_sinalizado || '',
+      viabilidade_tecnica: ['viavel', 'viavel_com_ressalvas', 'inviavel', 'precisa_mais_dados'].includes(body.viabilidade_tecnica) ? body.viabilidade_tecnica : '',
+      observacoes_tecnicas: body.observacoes_tecnicas || '', proximos_passos: body.proximos_passos || '',
     } : {}),
   });
   db.save(data);
@@ -2567,6 +2605,24 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       valor_agregado: body.valor_agregado || '',
       proximos_passos: body.proximos_passos || '',
       observacoes_finais: body.observacoes_finais || '',
+    });
+  } else if (item.tipo === 'levantamento_tecnico') {
+    const erroLevantamento = validarRelatorioLevantamentoTecnico(body);
+    if (erroLevantamento) return enviarJSON(res, 400, { erro: erroLevantamento });
+    Object.assign(item, {
+      agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+      devolutivo_id: body.devolutivo_id ? Number(body.devolutivo_id) : null,
+      empresa: body.empresa || '', contato: body.contato || '',
+      data_levantamento: body.data_levantamento || '', responsavel_tecnico: body.responsavel_tecnico || '',
+      tempo_ciclo_atual: body.tempo_ciclo_atual || '', volume_producao: body.volume_producao || '',
+      material_peca: body.material_peca || '', tolerancias_qualidade: body.tolerancias_qualidade || '',
+      automacao_existente: body.automacao_existente || '', integracao_necessaria: body.integracao_necessaria || '',
+      espaco_disponivel: body.espaco_disponivel || '', alimentacao_eletrica: body.alimentacao_eletrica || '',
+      requisitos_seguranca: body.requisitos_seguranca || '',
+      escopo_proposto: body.escopo_proposto || '', prazo_decisao: body.prazo_decisao || '',
+      responsavel_decisao: body.responsavel_decisao || '', orcamento_sinalizado: body.orcamento_sinalizado || '',
+      viabilidade_tecnica: ['viavel', 'viavel_com_ressalvas', 'inviavel', 'precisa_mais_dados'].includes(body.viabilidade_tecnica) ? body.viabilidade_tecnica : '',
+      observacoes_tecnicas: body.observacoes_tecnicas || '', proximos_passos: body.proximos_passos || '',
     });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {

@@ -1,9 +1,9 @@
-// teste de ponta a ponta dos relatórios "Promotor" (Briefing Pré-Visita) e "Devolutivo" — os dois
-// tipos novos de relatorios_manutencao criados pro fluxo de Demonstração Técnica: o administrador
-// (vendedor) prepara o Briefing antes da visita, o técnico (promotor em campo) devolve o resultado
-// depois, incluindo a oportunidade adicional (automação/retrofit) que pode virar uma venda de
-// equipamento personalizado. Sobe o server.js de verdade contra um data.json descartável, mesmo
-// padrão de test/dispatcher-modulo.e2e.test.js.
+// teste de ponta a ponta dos três relatórios do fluxo de Demonstração Técnica: "Promotor"
+// (Briefing Pré-Visita, o administrador/vendedor prepara antes da visita), "Devolutivo" (o
+// técnico/promotor devolve o resultado depois, incluindo a oportunidade adicional de
+// automação/retrofit) e "Levantamento Técnico" (segunda visita, de engenharia, vinculado ao
+// Devolutivo que sinalizou a oportunidade). Sobe o server.js de verdade contra um data.json
+// descartável, mesmo padrão de test/dispatcher-modulo.e2e.test.js.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
@@ -48,7 +48,7 @@ async function aguardarServidorSubir(porta) {
   throw new Error('servidor não subiu a tempo');
 }
 
-test('Briefing Pré-Visita (Promotor) e Relatório Devolutivo: papéis, vínculo com O.S. e oportunidade adicional', async () => {
+test('Promotor, Devolutivo e Levantamento Técnico: papéis, vínculo com O.S./Devolutivo e oportunidade adicional', async () => {
   const dbTemp = path.join(os.tmpdir(), `proconecta-teste-promotor-${Date.now()}.json`);
   fs.writeFileSync(dbTemp, JSON.stringify(dados()));
   const porta = 33000 + Math.floor(Math.random() * 900);
@@ -191,10 +191,47 @@ test('Briefing Pré-Visita (Promotor) e Relatório Devolutivo: papéis, vínculo
     });
     assert.equal(promotorPorTecnico.status, 201);
 
+    // ---------- Levantamento Técnico (segunda visita, de engenharia), vinculado ao Devolutivo ----------
+    const levantamentoIncompleto = await fetch(`${base}/api/relatorios-manutencao`, {
+      method: 'POST', headers: authTecnico,
+      body: JSON.stringify({ tipo: 'levantamento_tecnico', empresa: 'Cliente Demo' }),
+    });
+    assert.equal(levantamentoIncompleto.status, 400);
+
+    // administrador NÃO pode criar levantamento técnico (só o Promotor é liberado pra ele)
+    const levantamentoPorAdmin = await fetch(`${base}/api/relatorios-manutencao`, {
+      method: 'POST', headers: authAdmin,
+      body: JSON.stringify({ tipo: 'levantamento_tecnico', empresa: 'Cliente Demo' }),
+    });
+    assert.equal(levantamentoPorAdmin.status, 403);
+
+    const levantamentoResp = await fetch(`${base}/api/relatorios-manutencao`, {
+      method: 'POST', headers: authTecnico,
+      body: JSON.stringify({
+        tipo: 'levantamento_tecnico', agenda_id: 1, devolutivo_id: devolutivo.id,
+        empresa: 'Cliente Demo', contato: 'Fulano', data_levantamento: '2026-10-15',
+        responsavel_tecnico: 'Técnico Promotor',
+        tempo_ciclo_atual: '12s por peça', volume_producao: '800 peças/turno',
+        material_peca: 'Aço inox, 40x40mm',
+        automacao_existente: 'PLC Siemens S7-1200, sem robô',
+        integracao_necessaria: 'Integrar gravação dentro da célula de solda existente',
+        espaco_disponivel: '1,2m x 0,8m ao lado da célula',
+        escopo_proposto: 'Gravador automatizado integrado ao PLC da célula de solda',
+        viabilidade_tecnica: 'viavel_com_ressalvas',
+        proximos_passos: 'Elaborar proposta técnica com cronograma',
+      }),
+    });
+    assert.equal(levantamentoResp.status, 201);
+    const { relatorio: levantamento } = await levantamentoResp.json();
+    assert.equal(levantamento.tipo, 'levantamento_tecnico');
+    assert.equal(levantamento.devolutivo_id, devolutivo.id);
+    assert.equal(levantamento.agenda_id, 1);
+    assert.equal(levantamento.viabilidade_tecnica, 'viavel_com_ressalvas');
+
     // técnico não vê o briefing do administrador na própria lista "meus" (cada um só vê o que
     // criou), e o administrador não vê os relatórios do técnico
     const listaTecnico = await (await fetch(`${base}/api/relatorios-manutencao/meus`, { headers: authTecnico })).json();
-    assert.equal(listaTecnico.relatorios.length, 2);
+    assert.equal(listaTecnico.relatorios.length, 3);
     assert.ok(listaTecnico.relatorios.every((r) => r.autor_id === 2));
     const listaAdminFinal = await (await fetch(`${base}/api/relatorios-manutencao/meus`, { headers: authAdmin })).json();
     assert.equal(listaAdminFinal.relatorios.length, 1);

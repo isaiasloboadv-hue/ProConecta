@@ -4919,6 +4919,7 @@ function tiposRelatorioManual() {
     { tipo: 'aceite_entrega', label: 'Termo de Aceite', fn: 'mostrarFormRelatorioAceite' },
     promotor,
     { tipo: 'devolutivo', label: 'Devolutivo (pós-visita)', fn: 'mostrarFormRelatorioDevolutivo' },
+    { tipo: 'levantamento_tecnico', label: 'Levantamento Técnico', fn: 'mostrarFormRelatorioLevantamentoTecnico' },
   ];
 }
 
@@ -4955,11 +4956,11 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : r.tipo === 'levantamento_tecnico' ? tag('Levantamento Técnico', 'amber') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
-            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
+            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
@@ -4983,6 +4984,9 @@ function descricaoRelatorioManutencao(r) {
   }
   if (r.tipo === 'devolutivo') {
     return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">${esc(r.equipamento_demonstrado)}</span>`;
+  }
+  if (r.tipo === 'levantamento_tecnico') {
+    return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">${esc(r.escopo_proposto)}</span>`;
   }
   return `${esc(r.equipamento)}${r.marca ? ' — ' + esc(r.marca) : ''} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
 }
@@ -5856,6 +5860,7 @@ async function editarRelatorioManutencao(i) {
   else if (r.tipo === 'aceite_entrega') mostrarFormRelatorioAceite(r);
   else if (r.tipo === 'promotor') mostrarFormRelatorioPromotor(r);
   else if (r.tipo === 'devolutivo') mostrarFormRelatorioDevolutivo(r);
+  else if (r.tipo === 'levantamento_tecnico') mostrarFormRelatorioLevantamentoTecnico(r);
   else mostrarFormRelatorioManutencao(r);
 }
 
@@ -8362,6 +8367,325 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// ---------- Levantamento Técnico (Relatório > Manual > Levantamento Técnico) ----------
+// preenchido pelo técnico numa segunda visita, de engenharia, quando o Devolutivo já sinalizou
+// uma oportunidade adicional (automação/retrofit) — entra no detalhe técnico que quem for orçar o
+// projeto personalizado precisa: processo atual, infraestrutura existente, espaço disponível,
+// escopo proposto. Pode ficar vinculado ao Devolutivo que originou a oportunidade e/ou à O.S., ou
+// avulso.
+
+// busca os Devolutivos do próprio técnico que já sinalizaram oportunidade adicional, pra popular
+// o dropdown de vínculo do Levantamento Técnico.
+async function devolutivosComOportunidade() {
+  try {
+    const { relatorios } = await api('/api/relatorios-manutencao/meus');
+    const lista = relatorios.filter((r) => r.tipo === 'devolutivo' && r.identificou_oportunidade_adicional);
+    window._devolutivosOportunidadeCache = lista;
+    return lista;
+  } catch (e) { window._devolutivosOportunidadeCache = []; return []; }
+}
+
+function opcoesDevolutivos(lista, devolutivoIdSelecionado) {
+  return `
+    <option value="">Nenhum — avulso</option>
+    ${lista.map((d) => `<option value="${d.id}" ${Number(devolutivoIdSelecionado) === d.id ? 'selected' : ''}>${esc(d.empresa || 'Cliente')} — ${fmtData(d.criado_em)}</option>`).join('')}`;
+}
+
+function preencherLevantamentoPeloDevolutivo(devolutivoId) {
+  const dv = (window._devolutivosOportunidadeCache || []).find((d) => String(d.id) === String(devolutivoId));
+  const refBox = document.getElementById('lt-oportunidade-ref');
+  if (!dv) { refBox.innerHTML = ''; return; }
+  document.getElementById('lt-empresa').value = dv.empresa || '';
+  document.getElementById('lt-contato').value = dv.contato || '';
+  if (dv.agenda_id) document.getElementById('lt-agenda_id').value = dv.agenda_id;
+  const tipos = (Array.isArray(dv.tipo_oportunidade) ? dv.tipo_oportunidade : []).map((v) => {
+    if (v === 'outro') return dv.tipo_oportunidade_outro || 'Outro';
+    return (OPCOES_TIPO_OPORTUNIDADE.find(([vv]) => vv === v) || [, v])[1];
+  }).join(', ');
+  refBox.innerHTML = `<div class="admin-note"><b>Oportunidade identificada no Devolutivo:</b> ${esc(tipos)}<br>${esc(dv.descricao_oportunidade || '')}</div>`;
+}
+
+let relatorioLevantamentoDraft = null;
+function relatorioLevantamentoPadrao() {
+  return {
+    tipo: 'levantamento_tecnico', agenda_id: null, devolutivo_id: null,
+    empresa: '', contato: '', data_levantamento: '', responsavel_tecnico: USER.nome,
+    tempo_ciclo_atual: '', volume_producao: '', material_peca: '', tolerancias_qualidade: '',
+    automacao_existente: '', integracao_necessaria: '', espaco_disponivel: '',
+    alimentacao_eletrica: '', requisitos_seguranca: '',
+    escopo_proposto: '', prazo_decisao: '', responsavel_decisao: '', orcamento_sinalizado: '',
+    viabilidade_tecnica: '', observacoes_tecnicas: '', proximos_passos: '',
+  };
+}
+
+async function mostrarFormRelatorioLevantamentoTecnico(existente) {
+  relatorioLevantamentoDraft = existente ? JSON.parse(JSON.stringify(existente)) : relatorioLevantamentoPadrao();
+  const d = relatorioLevantamentoDraft;
+  const editando = !!d.id;
+  const [devolutivos, osList] = await Promise.all([devolutivosComOportunidade(), osDemonstracaoTecnica()]);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Levantamento Técnico</h1><p>Preencher numa visita de engenharia, quando o Devolutivo já sinalizou uma oportunidade adicional (automação, retrofit...). Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Identificação</h2>
+      <div class="form-grid">
+        <div><label>Vincular ao Devolutivo que identificou a oportunidade (opcional)</label>
+          <select id="lt-devolutivo_id" onchange="preencherLevantamentoPeloDevolutivo(this.value)">${opcoesDevolutivos(devolutivos, d.devolutivo_id)}</select>
+        </div>
+        <div><label>Vincular a uma O.S. de Demonstração Técnica (opcional)</label>
+          <select id="lt-agenda_id">${opcoesOsDemonstracao(osList, d.agenda_id)}</select>
+        </div>
+        <div id="lt-oportunidade-ref" class="full"></div>
+        <div><label>Cliente*</label><input id="lt-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Data do levantamento*</label><input id="lt-data_levantamento" type="date" value="${esc(d.data_levantamento)}"></div>
+        <div><label>Responsável técnico*</label><input id="lt-responsavel_tecnico" value="${esc(d.responsavel_tecnico)}"></div>
+        <div><label>Contato do cliente</label><input id="lt-contato" value="${esc(d.contato)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Processo atual</h2>
+      <div class="form-grid">
+        <div><label>Tempo de ciclo atual*</label><input id="lt-tempo_ciclo_atual" value="${esc(d.tempo_ciclo_atual)}" placeholder="Ex.: 12s por peça"></div>
+        <div><label>Volume de produção / turno*</label><input id="lt-volume_producao" value="${esc(d.volume_producao)}" placeholder="Ex.: 800 peças/turno"></div>
+        <div><label>Material e dimensões da peça*</label><input id="lt-material_peca" value="${esc(d.material_peca)}"></div>
+      </div>
+      <label>Tolerâncias e requisitos de qualidade</label>
+      <textarea id="lt-tolerancias_qualidade">${esc(d.tolerancias_qualidade)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Infraestrutura existente</h2>
+      <label>Já existe automação? PLC/robô, marca/modelo*</label>
+      <textarea id="lt-automacao_existente">${esc(d.automacao_existente)}</textarea>
+      <label>Como o equipamento precisa se integrar à linha do cliente?*</label>
+      <textarea id="lt-integracao_necessaria">${esc(d.integracao_necessaria)}</textarea>
+      <div class="form-grid">
+        <div><label>Espaço físico disponível (dimensões)*</label><input id="lt-espaco_disponivel" value="${esc(d.espaco_disponivel)}"></div>
+        <div><label>Alimentação elétrica disponível</label><input id="lt-alimentacao_eletrica" value="${esc(d.alimentacao_eletrica)}" placeholder="Ex.: 380V trifásico, 15kW"></div>
+      </div>
+      <label>Requisitos de segurança / normas aplicáveis</label>
+      <textarea id="lt-requisitos_seguranca">${esc(d.requisitos_seguranca)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Escopo do projeto</h2>
+      <label>Descrição do escopo técnico proposto*</label>
+      <textarea id="lt-escopo_proposto">${esc(d.escopo_proposto)}</textarea>
+      <div class="form-grid">
+        <div><label>Prazo de decisão do cliente</label><input id="lt-prazo_decisao" value="${esc(d.prazo_decisao)}"></div>
+        <div><label>Quem decide (nome/cargo)</label><input id="lt-responsavel_decisao" value="${esc(d.responsavel_decisao)}"></div>
+        <div><label>Faixa de orçamento sinalizada</label><input id="lt-orcamento_sinalizado" value="${esc(d.orcamento_sinalizado)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Conclusão</h2>
+      <label>Viabilidade técnica*</label>
+      <select id="lt-viabilidade_tecnica">
+        <option value="" ${!d.viabilidade_tecnica ? 'selected' : ''} disabled>Selecione...</option>
+        <option value="viavel" ${d.viabilidade_tecnica === 'viavel' ? 'selected' : ''}>Viável</option>
+        <option value="viavel_com_ressalvas" ${d.viabilidade_tecnica === 'viavel_com_ressalvas' ? 'selected' : ''}>Viável com ressalvas</option>
+        <option value="inviavel" ${d.viabilidade_tecnica === 'inviavel' ? 'selected' : ''}>Inviável</option>
+        <option value="precisa_mais_dados" ${d.viabilidade_tecnica === 'precisa_mais_dados' ? 'selected' : ''}>Precisa de mais dados</option>
+      </select>
+      <label>Observações técnicas</label>
+      <textarea id="lt-observacoes_tecnicas">${esc(d.observacoes_tecnicas)}</textarea>
+      <label>Próximos passos*</label>
+      <textarea id="lt-proximos_passos" placeholder="Ex.: elaborar proposta técnica, nova visita...">${esc(d.proximos_passos)}</textarea>
+    </div>
+
+    <div class="panel">
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do levantamento é gerado automaticamente para download.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost btn-sm" onclick="renderRelatorioManutencao()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioLevantamentoTecnico()">Concluir e gerar PDF</button>
+      </div>
+    </div>`;
+  if (d.devolutivo_id) preencherLevantamentoPeloDevolutivo(d.devolutivo_id);
+}
+
+async function concluirRelatorioLevantamentoTecnico() {
+  const d = relatorioLevantamentoDraft;
+  const devolutivoSel = document.getElementById('lt-devolutivo_id').value;
+  d.devolutivo_id = devolutivoSel || null;
+  const agendaSel = document.getElementById('lt-agenda_id').value;
+  d.agenda_id = agendaSel || null;
+  d.empresa = document.getElementById('lt-empresa').value;
+  d.data_levantamento = document.getElementById('lt-data_levantamento').value;
+  d.responsavel_tecnico = document.getElementById('lt-responsavel_tecnico').value;
+  d.contato = document.getElementById('lt-contato').value;
+  d.tempo_ciclo_atual = document.getElementById('lt-tempo_ciclo_atual').value;
+  d.volume_producao = document.getElementById('lt-volume_producao').value;
+  d.material_peca = document.getElementById('lt-material_peca').value;
+  d.tolerancias_qualidade = document.getElementById('lt-tolerancias_qualidade').value;
+  d.automacao_existente = document.getElementById('lt-automacao_existente').value;
+  d.integracao_necessaria = document.getElementById('lt-integracao_necessaria').value;
+  d.espaco_disponivel = document.getElementById('lt-espaco_disponivel').value;
+  d.alimentacao_eletrica = document.getElementById('lt-alimentacao_eletrica').value;
+  d.requisitos_seguranca = document.getElementById('lt-requisitos_seguranca').value;
+  d.escopo_proposto = document.getElementById('lt-escopo_proposto').value;
+  d.prazo_decisao = document.getElementById('lt-prazo_decisao').value;
+  d.responsavel_decisao = document.getElementById('lt-responsavel_decisao').value;
+  d.orcamento_sinalizado = document.getElementById('lt-orcamento_sinalizado').value;
+  d.viabilidade_tecnica = document.getElementById('lt-viabilidade_tecnica').value;
+  d.observacoes_tecnicas = document.getElementById('lt-observacoes_tecnicas').value;
+  d.proximos_passos = document.getElementById('lt-proximos_passos').value;
+
+  const obrig = ['empresa', 'data_levantamento', 'responsavel_tecnico', 'tempo_ciclo_atual', 'volume_producao',
+    'material_peca', 'automacao_existente', 'integracao_necessaria', 'espaco_disponivel',
+    'escopo_proposto', 'proximos_passos'];
+  for (const c of obrig) {
+    if (!String(d[c] || '').trim()) return alert('Preencha todos os campos obrigatórios.');
+  }
+  if (!d.viabilidade_tecnica) return alert('Marque a viabilidade técnica.');
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioLevantamentoTecnico(relatorio, logo);
+    window.open(url, '_blank');
+    mostrarToast(d.id ? 'Levantamento atualizado e PDF gerado.' : 'Levantamento salvo e PDF gerado.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+function gerarPdfRelatorioLevantamentoTecnico(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Levantamento Técnico', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 18;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  function paragrafo(label, texto, corBorda, corFundo) {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(label, margem, y); y += 12;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(texto) || '—', largura - 16);
+    const altura = Math.max(20, linhas.length * 12 + 10);
+    if (y + altura > pageH - margem) novaPagina();
+    if (corFundo) { doc.setFillColor(...corFundo); doc.rect(margem, y, largura, altura, 'F'); }
+    doc.setDrawColor(...(corBorda || PDF_COR.line)); doc.setLineWidth(corBorda ? 1.2 : 0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.setTextColor(...PDF_COR.ink);
+    doc.text(linhas, margem + 8, y + 13);
+    y += altura + 12;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold');
+  doc.text('LEVANTAMENTO TÉCNICO', pageW / 2, 410, { align: 'center' });
+  doc.setFontSize(13); doc.setFont(undefined, 'normal');
+  doc.text('ENGENHARIA - LÍDER DE VENDAS', pageW / 2, 434, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  const VIABILIDADE_LABEL = { viavel: 'Viável', viavel_com_ressalvas: 'Viável com ressalvas', inviavel: 'Inviável', precisa_mais_dados: 'Precisa de mais dados' };
+
+  tituloCentro('Identificação');
+  linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Data', valor: fmtData(r.data_levantamento), frac: 0.5 }, { label: 'Responsável técnico', valor: r.responsavel_tecnico, frac: 0.5 }]);
+  linhaCampos([{ label: 'Contato', valor: r.contato, frac: 1 }]);
+  y += 12;
+
+  tituloCentro('Processo atual');
+  linhaCampos([{ label: 'Tempo de ciclo atual', valor: r.tempo_ciclo_atual, frac: 0.5 }, { label: 'Volume de produção / turno', valor: r.volume_producao, frac: 0.5 }]);
+  y += 10;
+  paragrafo('Material e dimensões da peça', r.material_peca);
+  if (r.tolerancias_qualidade) paragrafo('Tolerâncias e requisitos de qualidade', r.tolerancias_qualidade);
+
+  tituloCentro('Infraestrutura existente');
+  paragrafo('Automação já existente (PLC/robô, marca/modelo)', r.automacao_existente);
+  paragrafo('Integração necessária com a linha do cliente', r.integracao_necessaria);
+  linhaCampos([{ label: 'Espaço disponível', valor: r.espaco_disponivel, frac: 0.5 }, { label: 'Alimentação elétrica', valor: r.alimentacao_eletrica, frac: 0.5 }]);
+  y += 10;
+  if (r.requisitos_seguranca) paragrafo('Requisitos de segurança / normas aplicáveis', r.requisitos_seguranca);
+
+  tituloCentro('Escopo do projeto');
+  paragrafo('Descrição do escopo técnico proposto', r.escopo_proposto);
+  linhaCampos([{ label: 'Prazo de decisão', valor: r.prazo_decisao, frac: 0.34 }, { label: 'Quem decide', valor: r.responsavel_decisao, frac: 0.33 }, { label: 'Orçamento sinalizado', valor: r.orcamento_sinalizado, frac: 0.33 }]);
+  y += 12;
+
+  tituloCentro('Conclusão');
+  linhaCampos([{ label: 'Viabilidade técnica', valor: VIABILIDADE_LABEL[r.viabilidade_tecnica] || r.viabilidade_tecnica, frac: 1 }]);
+  y += 10;
+  if (r.observacoes_tecnicas) paragrafo('Observações técnicas', r.observacoes_tecnicas);
+  paragrafo('Próximos passos', r.proximos_passos);
+
+  if (y > pageH - margem - 20) novaPagina();
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), margem, pageH - margem);
+
+  return doc.output('bloburl');
+}
+
 // a listagem (/meus) não traz as fotos, pra não deixar a tela lenta — busca o relatório
 // completo (com fotos) na hora que alguma ação realmente precisa delas, e guarda de volta
 // no cache pra não buscar de novo se a pessoa clicar noutra ação do mesmo relatório.
@@ -8379,7 +8703,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
