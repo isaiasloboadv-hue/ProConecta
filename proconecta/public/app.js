@@ -4911,12 +4911,21 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 window._draftSyncAtual = null;
 (function ligarAutoSalvarRascunho() {
   const main = document.getElementById('main');
-  const disparar = () => { if (window._draftSyncAtual) window._draftSyncAtual(); };
-  main.addEventListener('input', disparar);
+  let esperaDigitacao = null;
+  // protegido com try/catch: se o usuário já saiu do formulário (o #main mudou de conteúdo)
+  // quando esse salvamento roda, os campos que window._draftSyncAtual tenta ler não existem
+  // mais no DOM — sem o try/catch isso estouraria um erro sem efeito nenhum, só ruído.
+  const disparar = () => { try { if (window._draftSyncAtual) window._draftSyncAtual(); } catch (e) {} };
+  // 'input' dispara a cada tecla digitada — salvar (e reescrever fotos/assinatura em base64
+  // junto) a cada letra deixa o formulário pesado à toa. Em vez disso, espera 1s sem digitar
+  // pra só então salvar — continua protegendo contra recarregamento acidental, só que mais leve.
+  main.addEventListener('input', () => {
+    clearTimeout(esperaDigitacao);
+    esperaDigitacao = setTimeout(disparar, 1000);
+  });
+  // 'change' (marcar checkbox, escolher opção) e 'click' (+/x de peça, foto, e-mail, estrela de
+  // satisfação) são esporádicos, não uma tecla atrás da outra — continuam salvando na hora.
   main.addEventListener('change', disparar);
-  // 'click' também, pra pegar na hora ações como +/x de peça, foto, e-mail (que mudam o rascunho
-  // sem disparar input/change) — window._draftSyncAtual só existe enquanto um relatório está
-  // aberto, então isso não tem custo nas telas que não são de relatório.
   main.addEventListener('click', disparar);
 })();
 
