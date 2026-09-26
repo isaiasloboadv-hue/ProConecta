@@ -18,13 +18,29 @@ node server.js
 
 Abra **http://localhost:3000** no navegador.
 
-Contas de teste (senha para todas: `123456`):
+O banco começa **vazio** (sem usuários de exemplo) — veja "Primeiro acesso"
+logo abaixo para criar a conta de administrador inicial.
 
-| Papel | E-mail |
-|---|---|
-| Administrador | admin@proconecta.com.br |
-| Técnico | isaias@proconecta.com.br |
-| Cliente | cliente@abc.com.br |
+## Primeiro acesso (conta de administrador master)
+
+Como o banco começa vazio, ninguém consegue logar até existir ao menos um
+usuário. Pra criar automaticamente uma conta de administrador no primeiro
+boot, defina duas variáveis de ambiente antes de rodar o servidor:
+
+```
+ADMIN_EMAIL="seu@email.com.br" ADMIN_SENHA="uma-senha-forte" node server.js
+```
+
+(no Render, adicione as duas em **Environment**, igual à `DATABASE_URL`). O
+sistema cria essa conta só na primeira vez — depois disso pode remover as
+variáveis sem problema, ou deixar configuradas (elas não recriam a conta se
+o e-mail já existir). Essa conta ("Desenvolvedor") fica marcada como
+**protegida**: nenhum outro administrador consegue editá-la ou excluí-la
+pela tela de Usuários (nem forçando a chamada à API diretamente) — só ela
+mesma pode editar os próprios dados. A partir desse primeiro login, o
+próprio administrador cadastra os demais usuários pela tela **Usuários**
+(convite de primeiro acesso por e-mail — veja "E-mail de convite de
+verdade" abaixo).
 
 ## O que já funciona de verdade
 
@@ -61,9 +77,10 @@ do mesmo jeito.
 
 ## Onde ficam os dados
 
-Tudo fica em `data.json`, criado automaticamente na primeira vez que você roda
-o servidor (com os dados de teste acima). Para começar do zero, apague esse
-arquivo e rode `node server.js` de novo.
+Tudo fica em `data.json`, criado automaticamente (vazio, ou já com a conta
+master se `ADMIN_EMAIL`/`ADMIN_SENHA` estiverem definidas) na primeira vez que
+você roda o servidor. Para começar do zero, apague esse arquivo e rode
+`node server.js` de novo.
 
 ## Estrutura do projeto
 
@@ -72,7 +89,7 @@ proconecta/
 ├── server.js       servidor HTTP e todas as rotas da API
 ├── db.js           acesso ao "banco de dados" (arquivo data.json)
 ├── auth.js         hash de senha e token de sessão
-├── email.js        envio do e-mail de primeiro acesso (simulado por padrão)
+├── email.js        envio de e-mail (convite de acesso, cópia de relatório) — simulado por padrão
 ├── data.json        os dados salvos (gerado automaticamente)
 └── public/          o que o navegador carrega
     ├── index.html
@@ -150,21 +167,92 @@ npm install
 DATABASE_URL="sua-connection-string-aqui" node server.js
 ```
 
-## E-mail de convite de verdade
+## E-mail de verdade (convite de acesso e cópia de relatórios)
 
 Sem configuração, o link de primeiro acesso só aparece na tela do
-administrador e no log do servidor. Para enviar por e-mail de verdade, crie
-uma conta grátis em [resend.com](https://resend.com) e defina as variáveis de
-ambiente antes de rodar o servidor:
+administrador e no log do servidor, e o "enviar por e-mail" do relatório só é
+simulado (registrado no log). Para enviar de verdade usando uma conta Gmail
+ou Hotmail/Outlook comum — sem precisar de domínio próprio — defina as
+variáveis de ambiente antes de rodar o servidor:
 
 ```
-RESEND_API_KEY=sua_chave_aqui
-EMAIL_REMETENTE="Pro Conecta <onboarding@seudominio.com.br>"
+EMAIL_SMTP_USER=seuemail@hotmail.com
+EMAIL_SMTP_SENHA=a_senha_de_app_gerada_abaixo
 APP_URL=https://seu-dominio-em-producao.com.br
 node server.js
 ```
 
+O provedor (Gmail ou Hotmail/Outlook) é adivinhado a partir do domínio do
+`EMAIL_SMTP_USER`; pra usar um domínio diferente (Google Workspace com domínio
+próprio, por exemplo), defina `EMAIL_SMTP_PROVEDOR=gmail` ou `hotmail`
+explicitamente.
+
+**Importante — `EMAIL_SMTP_SENHA` não é a senha normal de login da conta.**
+É uma "senha de app", específica pra esse tipo de acesso, que precisa ser
+gerada separadamente:
+
+- **Gmail**: a conta precisa ter a verificação em duas etapas ativada
+  (myaccount.google.com → Segurança). Depois, em
+  [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
+  crie uma senha de app (qualquer nome, ex: "Pro Conecta") — copie os 16
+  caracteres gerados, sem espaços.
+- **Hotmail/Outlook**: em
+  [account.microsoft.com/security](https://account.microsoft.com/security) →
+  "Opções de segurança avançadas" → "Senhas de aplicativo" → "Criar uma nova
+  senha de aplicativo". Se a conta ainda não tem verificação em duas etapas,
+  o site pede pra ativar primeiro.
+
+Alternativa (mantida por compatibilidade): `RESEND_API_KEY` +
+`EMAIL_REMETENTE`, caso prefira usar o [resend.com](https://resend.com) em
+vez de uma conta Gmail/Hotmail — mas esse exige domínio próprio verificado.
+Se `EMAIL_SMTP_USER` estiver configurado, ele tem prioridade sobre o Resend.
+
 Nenhuma outra mudança é necessária — veja `email.js`.
+
+## Atendimento por chat (IA de 1º nível -> fila -> técnico)
+
+O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
+mandando mensagem no WhatsApp da empresa — os dois caem no mesmo "chamado" e na mesma conversa.
+Um assistente de IA responde primeiro, consultando a Biblioteca de Defeitos/Falhas e
+Procedimentos já aprovada no sistema (nunca inventa solução fora dela — ver `ia.js`); se não
+resolver, o atendimento cai na **Fila de Atendimento** do técnico, que assume a conversa — isso já
+abre uma Ordem de Serviço automaticamente, com os dados do cliente pré-preenchidos. O
+administrador acompanha os números do dia (total, resolvidos pela IA, por técnico, tempo médio)
+no menu **Atendimentos**.
+
+A parte da IA liga sozinha, sem depender do WhatsApp, assim que a variável abaixo existir:
+
+```
+ANTHROPIC_API_KEY=sua_chave_da_api_da_anthropic
+node server.js
+```
+
+- `ANTHROPIC_API_KEY`: crie em [console.anthropic.com](https://console.anthropic.com).
+- `ANTHROPIC_MODEL` (opcional): sobrescreve o modelo padrão usado.
+
+Sem essa variável, o chat dentro do app continua funcionando normalmente — só que sem o primeiro
+atendimento automático: a conversa já cai direto na fila do técnico.
+
+### Canal WhatsApp (opcional, além do chat do app)
+
+Pra também receber mensagens pelo WhatsApp Business e a IA responder por lá (ver `whatsapp.js`),
+defina também:
+
+```
+WHATSAPP_TOKEN=token_de_acesso_do_numero_do_whatsapp_business
+WHATSAPP_PHONE_ID=phone_number_id_do_meta_for_developers
+WHATSAPP_VERIFY_TOKEN=uma_frase_secreta_qualquer_que_voce_inventa
+```
+
+- `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID`: vêm do painel do app em
+  [developers.facebook.com](https://developers.facebook.com), produto WhatsApp → Configuração da
+  API → aba de teste (token temporário) ou, em produção, um token de **System User** permanente.
+- `WHATSAPP_VERIFY_TOKEN`: você inventa qualquer texto — só precisa ser o mesmo valor colocado
+  aqui e no campo "Verify token" quando configurar a URL do webhook no painel da Meta (a URL é
+  `https://seu-dominio/api/whatsapp/webhook`).
+
+Sem essas três variáveis, o webhook do WhatsApp não faz nada — o chat dentro do app funciona
+normalmente do mesmo jeito.
 
 ## Referências do projeto
 
