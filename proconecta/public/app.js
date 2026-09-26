@@ -8023,7 +8023,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
   doc.text('BRIEFING PRÉ-VISITA', pageW / 2, 410, { align: 'center' });
   doc.setFontSize(13); doc.setFont(undefined, 'normal');
-  doc.text('VENDEDOR  →  PROMOTOR', pageW / 2, 434, { align: 'center' });
+  doc.text('VENDEDOR - PROMOTOR', pageW / 2, 434, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
@@ -8311,7 +8311,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
   doc.text('RELATÓRIO DEVOLUTIVO', pageW / 2, 410, { align: 'center' });
   doc.setFontSize(13); doc.setFont(undefined, 'normal');
-  doc.text('PROMOTOR  →  LÍDER DE VENDAS', pageW / 2, 434, { align: 'center' });
+  doc.text('DEMONSTRAÇÃO TÉCNICA - LÍDER DE VENDAS', pageW / 2, 434, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
@@ -8329,6 +8329,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   const RESULTADO_LABEL = { aprovado: 'Aprovado tecnicamente', aprovado_parcial: 'Aprovado parcialmente', reprovado: 'Reprovado', em_analise: 'Em análise pelo cliente' };
   tituloCentro('Resultado da demonstração');
   linhaCampos([{ label: 'Resultado', valor: RESULTADO_LABEL[r.resultado_demonstracao] || r.resultado_demonstracao, frac: 1 }]);
+  y += 10;
   paragrafo('Feedback do cliente', r.feedback_cliente);
   if (r.pontos_positivos) paragrafo('Pontos positivos', r.pontos_positivos);
   if (r.pontos_ajuste) paragrafo('Pontos de ajuste / negativos', r.pontos_ajuste);
@@ -8340,6 +8341,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
       return (OPCOES_TIPO_OPORTUNIDADE.find(([vv]) => vv === v) || [, v])[1];
     }).join(', ');
     linhaCampos([{ label: 'Tipo de oportunidade', valor: tipos, frac: 1 }]);
+    y += 10;
     paragrafo('Necessidade adicional identificada', r.descricao_oportunidade, PDF_COR.green, PDF_COR.greenBg);
     paragrafo('Como isso pode virar uma venda de maior valor', r.valor_agregado, PDF_COR.green, PDF_COR.greenBg);
   } else {
