@@ -218,6 +218,7 @@ function sair() {
   if (sinoTimer) clearInterval(sinoTimer);
   desmontarWidgetChatInterno();
   localStorage.removeItem('pc_token');
+  localStorage.removeItem('pc_ultima_pagina');
   salvarTokenSW(null);
   document.getElementById('appView').style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
@@ -404,7 +405,15 @@ function entrarNoApp() {
     return null;
   })(navDoUsuario());
   const paginaInicial = { administrador: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', estoque: 'fila-estoque' }[USER.papel] || primeiraPaginaPermitida || 'agenda';
-  ir(paginaInicial);
+  // ao recarregar/sincronizar a página (location.reload), volta pro menu onde o usuário estava
+  // em vez de sempre abrir a página inicial do papel — só usa a última página salva se ela
+  // ainda existir no menu deste usuário (evita cair numa página que um menu removido apagou).
+  let paginaAoAbrir = paginaInicial;
+  try {
+    const ultima = localStorage.getItem('pc_ultima_pagina');
+    if (ultima && buscarCaminho(navDoUsuario(), ultima, [])) paginaAoAbrir = ultima;
+  } catch (e) {}
+  ir(paginaAoAbrir);
 }
 
 function initials(nome) {
@@ -726,6 +735,10 @@ async function ir(pagina) {
   clearInterval(_atTecPoll);
   clearInterval(_atPvPoll);
   paginaAtual = pagina;
+  // lembra a última página visitada pra, ao recarregar/sincronizar (location.reload), voltar
+  // pra onde o usuário estava em vez de sempre abrir a página inicial do papel dele (ver uso
+  // em entrarNoApp).
+  try { localStorage.setItem('pc_ultima_pagina', pagina); } catch (e) {}
   const caminho = buscarCaminho(navDoUsuario(), pagina, []);
   if (caminho) caminho.forEach((k) => navAbertos.add(k));
   fecharMenuMobile();
