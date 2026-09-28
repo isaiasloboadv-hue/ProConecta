@@ -149,7 +149,9 @@ function agendaComDetalhes(data, item) {
     finalizado_em: item.finalizado_em || null,
     tecnico_nome: tecnico ? tecnico.nome : null,
     tecnico_setor: tecnico ? tecnico.setor : null,
-    cliente_nome: cliente ? cliente.nome_empresa : null,
+    // Demonstração Técnica sem cliente/equipamento cadastrado (ver POST/PUT /api/agenda) cai
+    // pro texto livre digitado na abertura da O.S.
+    cliente_nome: cliente ? cliente.nome_empresa : (item.cliente_nome_manual || null),
     cliente_contato: cliente ? cliente.contato : null,
     cliente_telefone: cliente ? cliente.telefone : null,
     cliente_email: cliente ? cliente.email : null,
@@ -160,7 +162,7 @@ function agendaComDetalhes(data, item) {
     cliente_cep: cliente ? cliente.cep : null,
     cliente_cidade: cliente ? cliente.cidade : null,
     cliente_estado: cliente ? cliente.estado : null,
-    equipamento_tipo: equipamento ? equipamento.tipo : null,
+    equipamento_tipo: equipamento ? equipamento.tipo : (item.equipamento_manual || null),
     equipamento_modelo: equipamento ? equipamento.modelo : null,
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
     equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
@@ -753,8 +755,13 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador pode criar atividades.' });
   const body = await lerCorpo(req);
+  // Demonstração Técnica é uma visita comercial a um prospect que ainda não é cliente oficial —
+  // não faz sentido exigir cadastro prévio de cliente/equipamento (cadastro é decisão de quem já
+  // fechou negócio). Nome da empresa e equipamento entram como texto livre nesse caso.
+  const ehDemonstracao = body.tipo === 'demonstracao_tecnica';
+  const obrig = ['tecnico_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
+  obrig.push(...(ehDemonstracao ? ['cliente_nome_manual', 'equipamento_manual'] : ['cliente_id', 'equipamento_id']));
   // treinamento online não exige deslocamento até o cliente, então não pede endereço
-  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
   if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
   // corretiva/preventiva usam o Laudo Técnico, que depende da garantia do equipamento
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('garantia');
@@ -765,7 +772,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
   }
   const data = db.load();
-  const equipamentoEscolhido = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
+  const equipamentoEscolhido = ehDemonstracao ? null : tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
@@ -787,8 +794,10 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const item = tenant.criar(data, 'agenda', user.empresa_id, {
     numero_os: numeroOSDigitado || null, // preenchido logo abaixo, depois de saber o id gerado
     tecnico_id: Number(body.tecnico_id),
-    cliente_id: Number(body.cliente_id),
-    equipamento_id: Number(body.equipamento_id),
+    cliente_id: ehDemonstracao ? null : Number(body.cliente_id),
+    equipamento_id: ehDemonstracao ? null : Number(body.equipamento_id),
+    cliente_nome_manual: ehDemonstracao ? String(body.cliente_nome_manual || '').trim() : '',
+    equipamento_manual: ehDemonstracao ? String(body.equipamento_manual || '').trim() : '',
     data_hora_inicio: body.data_hora_inicio,
     data_hora_fim: body.data_hora_fim,
     tipo: body.tipo, // preventiva | corretiva | treinamento
@@ -833,7 +842,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const clienteNovaOS = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
   enviarPush(data, item.tecnico_id, {
     titulo: 'Nova O.S. atribuída',
-    corpo: `${clienteNovaOS ? clienteNovaOS.nome_empresa : 'Novo atendimento'} — ${fmtDataHoraCurta(item.data_hora_inicio)}.`,
+    corpo: `${clienteNovaOS ? clienteNovaOS.nome_empresa : (item.cliente_nome_manual || 'Novo atendimento')} — ${fmtDataHoraCurta(item.data_hora_inicio)}.`,
     url: '/',
   }).catch(() => {});
   enviarJSON(res, 201, { agenda: agendaComDetalhes(data, item) });
@@ -848,7 +857,9 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.finalizada) return enviarJSON(res, 403, { erro: 'Esta O.S. já foi finalizada e não pode mais ser alterada. Abra uma nova O.S. se for necessário um novo atendimento.' });
-  const obrig = ['tecnico_id', 'cliente_id', 'equipamento_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
+  const ehDemonstracao = body.tipo === 'demonstracao_tecnica';
+  const obrig = ['tecnico_id', 'data_hora_inicio', 'data_hora_fim', 'tipo', 'contato', 'telefone', 'email'];
+  obrig.push(...(ehDemonstracao ? ['cliente_nome_manual', 'equipamento_manual'] : ['cliente_id', 'equipamento_id']));
   if (body.tipo !== 'treinamento_online') obrig.push('endereco', 'numero', 'bairro', 'cep', 'cidade', 'estado');
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo)) obrig.push('garantia');
   for (const campo of obrig) {
@@ -857,7 +868,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && body.garantia === 'na' && !String(body.garantia_obs || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Especifique o motivo do "N/A" na garantia.' });
   }
-  const equipamentoEscolhido = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
+  const equipamentoEscolhido = ehDemonstracao ? null : tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
@@ -882,8 +893,10 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   Object.assign(item, {
     numero_os: numeroOSDigitado || item.numero_os || `OS-${String(item.id).padStart(6, '0')}`,
     tecnico_id: Number(body.tecnico_id),
-    cliente_id: Number(body.cliente_id),
-    equipamento_id: Number(body.equipamento_id),
+    cliente_id: ehDemonstracao ? null : Number(body.cliente_id),
+    equipamento_id: ehDemonstracao ? null : Number(body.equipamento_id),
+    cliente_nome_manual: ehDemonstracao ? String(body.cliente_nome_manual || '').trim() : '',
+    equipamento_manual: ehDemonstracao ? String(body.equipamento_manual || '').trim() : '',
     data_hora_inicio: body.data_hora_inicio,
     data_hora_fim: body.data_hora_fim,
     tipo: body.tipo,
@@ -926,7 +939,7 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
       passou_limite: viagens.length > LIMITE_VIAGENS_BONUS_MES,
       viagens: viagens.map((a) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
-        cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || '—',
+        cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || a.cliente_nome_manual || '—',
         data_hora_inicio: a.data_hora_inicio,
         justificativa_limite_viagens: a.justificativa_limite_viagens || '',
       })),

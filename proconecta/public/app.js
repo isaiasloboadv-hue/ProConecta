@@ -1587,7 +1587,8 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <h2>Dados do cliente</h2>
       <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pré-preenchido a partir do cadastro do cliente — ajuste se for diferente para este atendimento. Fica travado para o técnico.</p>
       <div class="form-grid">
-        <div class="full"><label>Empresa (cliente)</label>${campoClienteHTML('na-cliente', clientes, 'Clique para escolher a empresa...', 'preencherClienteNovaAtividade')}</div>
+        <div class="full" id="na-cliente-select-wrap"><label>Empresa (cliente)</label>${campoClienteHTML('na-cliente', clientes, 'Clique para escolher a empresa...', 'preencherClienteNovaAtividade')}</div>
+        <div class="full hidden" id="na-cliente-manual-wrap"><label>Empresa*</label><input id="na-cliente-manual" placeholder="Nome da empresa — ainda não precisa estar cadastrada" value="${agendaItem ? esc(agendaItem.cliente_nome_manual || '') : ''}"></div>
         <div><label>Contato*</label><input id="na-contato" placeholder="Nome do funcionário responsável por receber o técnico" value="${agendaItem ? esc(agendaItem.contato || '') : ''}"></div>
         <div><label>Telefone*</label><input id="na-telefone" value="${agendaItem ? esc(agendaItem.telefone || '') : ''}"></div>
         <div><label>E-mail*</label><input id="na-email" value="${agendaItem ? esc(agendaItem.email || '') : ''}"></div>
@@ -1604,7 +1605,8 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
 
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
-        <div class="full"><label>${t('equipamento', 'Equipamento')}</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
+        <div class="full" id="na-equip-select-wrap"><label>${t('equipamento', 'Equipamento')}</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
+        <div class="full hidden" id="na-equip-manual-wrap"><label>Equipamento*</label><input id="na-equip-manual" placeholder="Ex.: MP5-80P" value="${agendaItem ? esc(agendaItem.equipamento_manual || '') : ''}"></div>
         <div class="full" id="na-problema-wrap"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito...">${agendaItem ? esc(agendaItem.problema || '') : ''}</textarea></div>
       </div>
       <div class="form-grid" id="na-laudo-equip-wrap">
@@ -1763,6 +1765,13 @@ function atualizarTipoNovaAtividade() {
   const ehDemonstracao = tipo === 'demonstracao_tecnica';
   document.getElementById('na-problema-wrap').classList.toggle('hidden', ehDemonstracao);
   document.getElementById('na-sla-section-wrap').classList.toggle('hidden', ehDemonstracao);
+  // prospect ainda não é cliente oficial — em Demonstração Técnica, empresa e equipamento são
+  // texto livre, sem exigir cadastro prévio (evita gerar vários cadastros de quem ainda nem
+  // fechou negócio). Nos outros tipos continua a escolha na lista já cadastrada, como sempre.
+  document.getElementById('na-cliente-select-wrap').classList.toggle('hidden', ehDemonstracao);
+  document.getElementById('na-cliente-manual-wrap').classList.toggle('hidden', !ehDemonstracao);
+  document.getElementById('na-equip-select-wrap').classList.toggle('hidden', ehDemonstracao);
+  document.getElementById('na-equip-manual-wrap').classList.toggle('hidden', !ehDemonstracao);
   // só existe na criação (não na edição — ver mostrarFormNovaAtividade)
   const briefingWrap = document.getElementById('na-briefing-wrap');
   if (briefingWrap) briefingWrap.classList.toggle('hidden', !ehDemonstracao);
@@ -1842,13 +1851,25 @@ function preencherClienteNovaAtividade(sobrescreverContato) {
 }
 
 async function salvarNovaAtividade() {
-  if (!document.getElementById('na-cliente').value) return alert('Escolha uma empresa cadastrada na lista.');
-  const equipId = document.getElementById('na-equip').value;
-  if (!equipId) return alert('Nenhum equipamento disponível para esta empresa.');
   const tipoOS = document.getElementById('na-tipo').value;
-  if (TIPOS_LAUDO_TECNICO.includes(tipoOS)) {
-    const equip = (window._equipamentosCache || []).find((e) => e.id === Number(equipId));
-    if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
+  const ehDemonstracao = tipoOS === 'demonstracao_tecnica';
+  // Demonstração Técnica é uma visita a um prospect que ainda não é cliente oficial — em vez de
+  // escolher da lista de cadastrados, empresa e equipamento entram como texto livre (ver
+  // atualizarTipoNovaAtividade), evitando cadastro pra quem ainda nem fechou negócio.
+  let clienteNomeManual = '', equipamentoManual = '';
+  if (ehDemonstracao) {
+    clienteNomeManual = document.getElementById('na-cliente-manual').value.trim();
+    if (!clienteNomeManual) return alert('Informe o nome da empresa.');
+    equipamentoManual = document.getElementById('na-equip-manual').value.trim();
+    if (!equipamentoManual) return alert('Informe o equipamento a ser demonstrado.');
+  } else {
+    if (!document.getElementById('na-cliente').value) return alert('Escolha uma empresa cadastrada na lista.');
+    const equipId = document.getElementById('na-equip').value;
+    if (!equipId) return alert('Nenhum equipamento disponível para esta empresa.');
+    if (TIPOS_LAUDO_TECNICO.includes(tipoOS)) {
+      const equip = (window._equipamentosCache || []).find((e) => e.id === Number(equipId));
+      if (!equip || !equip.numero_serie) return alert('Este equipamento ainda não tem número de série atrelado. Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.');
+    }
   }
   // "na-sla-ativar" só existe quando a O.S. ainda não tem SLA de nenhuma origem (ver a seção SLA
   // do formulário) — se não existir, é porque o SLA já veio de outro lugar e não deve ser mexido
@@ -1865,8 +1886,10 @@ async function salvarNovaAtividade() {
   const body = {
     numero_os: document.getElementById('na-numero-os').value,
     tecnico_id: document.getElementById('na-tecnico').value,
-    equipamento_id: document.getElementById('na-equip').value,
-    cliente_id: document.getElementById('na-cliente').value,
+    equipamento_id: ehDemonstracao ? '' : document.getElementById('na-equip').value,
+    cliente_id: ehDemonstracao ? '' : document.getElementById('na-cliente').value,
+    cliente_nome_manual: clienteNomeManual,
+    equipamento_manual: equipamentoManual,
     tipo: document.getElementById('na-tipo').value,
     data_hora_inicio: document.getElementById('na-inicio').value,
     data_hora_fim: document.getElementById('na-fim').value,
@@ -1904,7 +1927,7 @@ function lerCamposBriefingNovaOS() {
   const tecnicoSel = document.getElementById('na-tecnico');
   const promotorNome = (tecnicoSel.options[tecnicoSel.selectedIndex] || {}).textContent || '';
   const campos = {
-    empresa: document.getElementById('na-cliente-nome').value,
+    empresa: document.getElementById('na-cliente-manual').value,
     contato: document.getElementById('na-contato').value,
     data_visita: (document.getElementById('na-inicio').value || '').slice(0, 10),
     vendedor: document.getElementById('nb-vendedor').value,
