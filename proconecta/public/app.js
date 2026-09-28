@@ -1684,9 +1684,6 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <div id="na-briefing-wrap" class="hidden">
         <h2>Briefing Pré-Visita — Promotor</h2>
         <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">O técnico designado atua como Promotor nessa visita — esse contexto vai junto com a O.S. pra ele se basear na demonstração. Ao concluir a visita, ele registra o resultado num relatório Devolutivo. Campos com * são obrigatórios.</p>
-        <div class="form-grid">
-          <div class="full"><label>Vendedor*</label><input id="nb-vendedor" value="${esc(USER.nome)}"></div>
-        </div>
         <label>Por que estamos indo ao cliente?*</label>
         <textarea id="nb-motivo_visita" placeholder="Ex.: demonstração de equipamento, gravação de peça..."></textarea>
         <label>Como o cliente faz esse processo hoje?*</label>
@@ -1934,7 +1931,6 @@ function lerCamposBriefingNovaOS() {
     empresa: document.getElementById('na-cliente-manual').value,
     contato: document.getElementById('na-contato').value,
     data_visita: (document.getElementById('na-inicio').value || '').slice(0, 10),
-    vendedor: document.getElementById('nb-vendedor').value,
     promotor: promotorNome,
     motivo_visita: document.getElementById('nb-motivo_visita').value,
     processo_atual: document.getElementById('nb-processo_atual').value,
@@ -1947,7 +1943,7 @@ function lerCamposBriefingNovaOS() {
     objetivo_visita: document.getElementById('nb-objetivo_visita').value,
     ponto_principal_observar: document.getElementById('nb-ponto_principal_observar').value,
   };
-  const obrigatorios = ['vendedor', 'motivo_visita', 'processo_atual', 'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes', 'concorrente', 'o_que_observar', 'objetivo_visita', 'ponto_principal_observar'];
+  const obrigatorios = ['motivo_visita', 'processo_atual', 'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes', 'concorrente', 'o_que_observar', 'objetivo_visita', 'ponto_principal_observar'];
   for (const c of obrigatorios) {
     if (!String(campos[c] || '').trim()) { alert('Preencha todos os campos do Briefing Pré-Visita (Promotor) — role até essa seção.'); return null; }
   }
@@ -8350,7 +8346,7 @@ function relatorioPromotorPadrao() {
   return {
     tipo: 'promotor', agenda_id: null,
     empresa: '', contato: '', data_visita: '',
-    vendedor: USER.nome, promotor: '',
+    promotor: '',
     motivo_visita: '', processo_atual: '', necessidade_informada: '',
     o_que_demonstrar: '', ponto_importante_demo: '',
     duvidas_preocupacoes: '', concorrente: '', o_que_observar: '',
@@ -8377,7 +8373,6 @@ async function mostrarFormRelatorioPromotor(existente) {
         </div>
         <div><label>Cliente*</label><input id="pm-empresa" value="${esc(d.empresa)}"></div>
         <div><label>Data*</label><input id="pm-data_visita" type="date" value="${esc(d.data_visita)}"></div>
-        <div><label>Vendedor*</label><input id="pm-vendedor" value="${esc(d.vendedor)}"></div>
         <div><label>Promotor*</label><input id="pm-promotor" value="${esc(d.promotor)}"></div>
         <div><label>Contato / Cargo</label><input id="pm-contato" value="${esc(d.contato)}"></div>
       </div>
@@ -8456,7 +8451,6 @@ function lerCamposPromotor() {
   d.agenda_id = agendaSel || null;
   d.empresa = document.getElementById('pm-empresa').value;
   d.data_visita = document.getElementById('pm-data_visita').value;
-  d.vendedor = document.getElementById('pm-vendedor').value;
   d.promotor = document.getElementById('pm-promotor').value;
   d.contato = document.getElementById('pm-contato').value;
   d.motivo_visita = document.getElementById('pm-motivo_visita').value;
@@ -8475,7 +8469,7 @@ async function concluirRelatorioPromotor() {
   const d = relatorioPromotorDraft;
   lerCamposPromotor();
 
-  const obrig = ['empresa', 'data_visita', 'vendedor', 'promotor', 'motivo_visita', 'processo_atual',
+  const obrig = ['empresa', 'data_visita', 'promotor', 'motivo_visita', 'processo_atual',
     'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes',
     'concorrente', 'o_que_observar', 'objetivo_visita', 'ponto_principal_observar'];
   for (const c of obrig) {
@@ -8592,7 +8586,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   tituloCentro('1. Identificação');
   linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 1 }]);
   linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Promotor', valor: r.promotor, frac: 0.5 }]);
-  linhaCampos([{ label: 'Vendedor', valor: r.vendedor, frac: 0.5 }, { label: 'Contato / Cargo', valor: r.contato, frac: 0.5 }]);
+  linhaCampos([{ label: 'Contato / Cargo', valor: r.contato, frac: 1 }]);
   y += 12;
 
   tituloCentro('2. Contexto da Oportunidade');

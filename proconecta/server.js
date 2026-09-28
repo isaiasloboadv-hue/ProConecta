@@ -509,7 +509,7 @@ function validarRelatorioAceite(r) {
 // vinculado a uma O.S. de "Demonstração Técnica" (agenda_id) ou avulso, se a O.S. ainda nem existe.
 function validarRelatorioPromotor(r) {
   if (!r || typeof r !== 'object') return 'Dados do briefing são obrigatórios.';
-  const camposTexto = ['empresa', 'data_visita', 'vendedor', 'promotor',
+  const camposTexto = ['empresa', 'data_visita', 'promotor',
     'motivo_visita', 'processo_atual', 'necessidade_informada',
     'o_que_demonstrar', 'ponto_importante_demo',
     'duvidas_preocupacoes', 'concorrente', 'o_que_observar',
