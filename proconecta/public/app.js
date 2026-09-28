@@ -4040,10 +4040,48 @@ async function iniciarDeslocamento(id) {
       const idx = window._agendaCache.findIndex((a) => a.id === id);
       if (idx !== -1) window._agendaCache[idx] = agenda;
     }
+    abrirEscolhaNavegacao(agenda);
     if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
     else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
     else renderAgenda();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// monta o endereço da O.S. no formato que Waze/Google Maps entendem — sem endereço (treinamento
+// online etc., que nunca chama iniciarDeslocamento) não tem o que navegar.
+function enderecoParaNavegacao(a) {
+  return [a.endereco && a.numero ? `${a.endereco}, ${a.numero}` : a.endereco, a.bairro, a.cidade, a.estado, a.cep].filter(Boolean).join(', ');
+}
+// oferece abrir a rota até o cliente assim que o técnico confirma que está saindo — evita ter
+// que copiar o endereço da O.S. e colar manualmente no app de navegação.
+function abrirEscolhaNavegacao(a) {
+  const endereco = enderecoParaNavegacao(a);
+  if (!endereco) return;
+  const enderecoCod = encodeURIComponent(endereco);
+  const urlWaze = `https://waze.com/ul?q=${enderecoCod}&navigate=yes`;
+  const urlMaps = `https://www.google.com/maps/dir/?api=1&destination=${enderecoCod}`;
+  let modal = document.getElementById('modal-navegacao');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-navegacao';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:360px; text-align:center;">
+      <h3>Ir até o cliente</h3>
+      <p>${esc(endereco)}</p>
+      <div class="modal-actions" style="flex-direction:column;">
+        <a class="btn btn-primary" style="justify-content:center;" href="${urlWaze}" target="_blank" rel="noopener" onclick="fecharModalNavegacao()">Abrir no Waze</a>
+        <a class="btn-outline-sm" style="justify-content:center; text-align:center;" href="${urlMaps}" target="_blank" rel="noopener" onclick="fecharModalNavegacao()">Abrir no Google Maps</a>
+        <button class="btn btn-ghost btn-sm" onclick="fecharModalNavegacao()">Agora não</button>
+      </div>
+    </div>`;
+}
+function fecharModalNavegacao() {
+  const modal = document.getElementById('modal-navegacao');
+  if (modal) modal.classList.remove('show');
 }
 
 // botão "Registrar chegada": só depois de iniciar o deslocamento, e antes de poder executar
