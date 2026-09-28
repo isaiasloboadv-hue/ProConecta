@@ -4034,12 +4034,15 @@ function botaoDeslocamento(a) {
 async function iniciarDeslocamento(id) {
   if (!confirm('Confirma que você está saindo agora para este atendimento? O administrador vai ser avisado.')) return;
   try {
-    const { agenda } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
+    const { agenda, origem_retorno } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
     mostrarToast('Deslocamento iniciado — o administrador foi avisado.');
     if (Array.isArray(window._agendaCache)) {
       const idx = window._agendaCache.findIndex((a) => a.id === id);
       if (idx !== -1) window._agendaCache[idx] = agenda;
     }
+    // se não tinha registrado "Iniciar retorno" na O.S. anterior do mesmo dia, o backend já
+    // entendeu esse deslocamento como sendo o retorno dela — atualiza o card/detalhe dela também
+    atualizarAgendaCacheItem(origem_retorno);
     abrirEscolhaNavegacao(agenda);
     if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
     else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
@@ -4089,12 +4092,14 @@ function fecharModalNavegacao() {
 async function confirmarChegada(id) {
   if (!confirm('Confirma que você já chegou no cliente?')) return;
   try {
-    const { agenda } = await api(`/api/agenda/${id}/confirmar-chegada`, { method: 'POST' });
+    const { agenda, origem_retorno } = await api(`/api/agenda/${id}/confirmar-chegada`, { method: 'POST' });
     mostrarToast('Chegada registrada — já pode executar o atendimento.');
     if (Array.isArray(window._agendaCache)) {
       const idx = window._agendaCache.findIndex((a) => a.id === id);
       if (idx !== -1) window._agendaCache[idx] = agenda;
     }
+    // fecha o retorno da O.S. anterior encadeada implicitamente (ver iniciarDeslocamento)
+    atualizarAgendaCacheItem(origem_retorno);
     if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
     else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
     else renderAgenda();

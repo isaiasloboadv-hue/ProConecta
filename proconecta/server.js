@@ -1288,6 +1288,36 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-cliente$/, async (req, res, m) =>
 // fica marcado na linha do tempo da O.S. e notifica o administrador. Se a O.S. estiver com um
 // retorno pendente (peças que exigiram um segundo deslocamento, ou retrabalho), marca o
 // deslocamento DO RETORNO em vez de mexer no deslocamento original, já concluído.
+// se o técnico não registrou "Iniciar retorno" na O.S. anterior do mesmo dia (ex: almoçou no
+// próprio cliente) e foi direto pra próxima O.S. já iniciando o deslocamento dela, o sistema
+// entende que esse deslocamento É o retorno daquela O.S. anterior — evita ter que registrar a
+// mesma viagem duas vezes, uma em cada O.S. Só liga quando ainda não existe nenhum retorno
+// registrado na origem (se o técnico já tinha clicado "Iniciar retorno" antes, sem encadear,
+// isso não é sobrescrito).
+function ligarRetornoImplicito(data, destino) {
+  const dia = (destino.data_hora_inicio || '').slice(0, 10);
+  if (!dia) return null;
+  const origem = tenant.listar(data, 'agenda', destino.empresa_id).find((o) =>
+    o.id !== destino.id && o.tecnico_id === destino.tecnico_id && !o.finalizada &&
+    o.status === 'concluida' && !o.viagem_volta_iniciada_em &&
+    (o.data_hora_inicio || '').slice(0, 10) === dia
+  );
+  if (!origem) return null;
+  origem.viagem_volta_iniciada_em = destino.deslocamento_iniciado_em;
+  origem.viagem_volta_destino_agenda_id = destino.id;
+  return origem;
+}
+// espelho do acima: quando a chegada da O.S. de destino é confirmada, fecha também a chegada do
+// retorno da O.S. de origem que apontava pra ela (encadeamento explícito via "Iniciar retorno" ou
+// implícito via ligarRetornoImplicito — os dois deixam a mesma marca, viagem_volta_destino_agenda_id).
+function completarRetornoImplicito(data, destino) {
+  const origem = tenant.listar(data, 'agenda', destino.empresa_id).find((o) =>
+    o.viagem_volta_destino_agenda_id === destino.id && !o.viagem_volta_chegada_em
+  );
+  if (origem) origem.viagem_volta_chegada_em = destino.chegada_confirmada_em;
+  return origem || null;
+}
+
 rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado inicia o deslocamento.' });
@@ -1296,6 +1326,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
   if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
   if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
   if (item.finalizada) return enviarJSON(res, 400, { erro: 'Esta O.S. já foi finalizada.' });
+  let origemRetorno = null;
   if (item.retorno_pendente_tecnico) {
     if (!item.retorno_confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento do retorno.' });
     if (item.retorno_deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
@@ -1304,6 +1335,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
     if (!item.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Aguarde a confirmação do cliente antes de iniciar o deslocamento.' });
     if (item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Deslocamento já foi marcado como iniciado.' });
     item.deslocamento_iniciado_em = new Date().toISOString();
+    origemRetorno = ligarRetornoImplicito(data, item);
   }
   db.save(data);
   const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
@@ -1315,7 +1347,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-deslocamento$/, async (req, res, m)
       url: '/',
     }).catch(() => {});
   });
-  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item), origem_retorno: origemRetorno ? agendaComDetalhes(data, origemRetorno) : null });
 });
 
 // POST /api/agenda/:id/confirmar-chegada — o técnico avisa que já chegou no cliente (depois do
@@ -1332,6 +1364,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada$/, async (req, res, m) =>
   if (!item.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'Inicie o deslocamento antes de registrar a chegada.' });
   if (item.chegada_confirmada_em) return enviarJSON(res, 400, { erro: 'A chegada já foi registrada.' });
   item.chegada_confirmada_em = new Date().toISOString();
+  const origemRetorno = completarRetornoImplicito(data, item);
   db.save(data);
   const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
   admins.forEach((admin) => {
@@ -1341,7 +1374,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada$/, async (req, res, m) =>
       url: '/',
     }).catch(() => {});
   });
-  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item), origem_retorno: origemRetorno ? agendaComDetalhes(data, origemRetorno) : null });
 });
 
 // POST /api/agenda/:id/iniciar-viagem-volta — o técnico avisa que está saindo do cliente depois
