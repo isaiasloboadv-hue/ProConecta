@@ -3753,8 +3753,11 @@ function timelineOS(a, visita, devolutivo) {
   // treinamento online/atendimento não exige o técnico se deslocar até o cliente — pula
   // direto pro relatório, sem as etapas de deslocamento/chegada
   if (!ehAtendimentoOnline(a)) {
+    // se o deslocamento não foi iniciado manualmente nesta O.S., mas sim porque o técnico seguiu
+    // direto pra cá depois de encerrar outra O.S. do mesmo dia, indica de onde ele veio
+    const origemRetorno = (window._agendaCache || []).find((x) => x.viagem_volta_destino_agenda_id === a.id);
     passos.push(a.deslocamento_iniciado_em
-      ? { label: 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' }
+      ? { label: origemRetorno ? `Técnico iniciou o deslocamento — seguiu direto da O.S. ${esc(numeroOS(origemRetorno))}` : 'Técnico iniciou o deslocamento', data: a.deslocamento_iniciado_em, estado: 'feito' }
       : { label: 'Aguardando deslocamento do técnico', data: null, estado: 'pendente' });
 
     passos.push(a.chegada_confirmada_em
@@ -3789,7 +3792,9 @@ function timelineOS(a, visita, devolutivo) {
       if (a.viagem_volta_chegada_em) {
         passos.push({ label: 'Técnico registrou a chegada do retorno', data: a.viagem_volta_chegada_em, estado: 'feito' });
       } else if (a.viagem_volta_destino_agenda_id) {
-        passos.push({ label: 'Retorno seguiu direto para a próxima O.S.', data: a.viagem_volta_iniciada_em, estado: 'feito' });
+        const destino = (window._agendaCache || []).find((x) => x.id === a.viagem_volta_destino_agenda_id);
+        const destinoLabel = destino ? numeroOS(destino) : `OS-${String(a.viagem_volta_destino_agenda_id).padStart(6, '0')}`;
+        passos.push({ label: `Técnico seguiu direto para a próxima O.S. — ${esc(destinoLabel)}`, data: a.viagem_volta_iniciada_em, estado: 'feito' });
       } else {
         passos.push({ label: 'Aguardando o técnico registrar a chegada do retorno', data: null, estado: 'pendente' });
       }
