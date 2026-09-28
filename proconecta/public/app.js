@@ -5215,6 +5215,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 // qualquer formulário — cada mostrarFormRelatorioX() só registra, em window._draftSyncAtual, a
 // função que sabe ler os próprios campos do DOM pro objeto de rascunho e salvar.
 window._draftSyncAtual = null;
+window._pararAutoSalvarRascunhoPendente = null;
 (function ligarAutoSalvarRascunho() {
   const main = document.getElementById('main');
   let esperaDigitacao = null;
@@ -5233,6 +5234,11 @@ window._draftSyncAtual = null;
   // satisfação) são esporádicos, não uma tecla atrás da outra — continuam salvando na hora.
   main.addEventListener('change', disparar);
   main.addEventListener('click', disparar);
+  // se o usuário digitar o último campo e enviar o relatório em menos de 1s (antes do
+  // autosalvamento "esperar 1s sem digitar" disparar), esse salvamento atrasado ressuscitava o
+  // rascunho no localStorage logo depois de limparRascunhoManual já ter apagado ele — exposto
+  // aqui pra limparRascunhoManual cancelar esse timer pendente junto.
+  window._pararAutoSalvarRascunhoPendente = () => clearTimeout(esperaDigitacao);
 })();
 
 function chaveRascunhoManual(tipo, idExistente) {
@@ -5256,6 +5262,7 @@ function salvarRascunhoManual(tipo, draft, idExistente, statusElId) {
   } catch (e) {}
 }
 function limparRascunhoManual(tipo, idExistente) {
+  if (window._pararAutoSalvarRascunhoPendente) window._pararAutoSalvarRascunhoPendente();
   localStorage.removeItem(chaveRascunhoManual(tipo, idExistente));
 }
 // diz se o rascunho tem algum preenchimento de verdade — abrir um formulário novo (sem digitar
@@ -5324,6 +5331,7 @@ function tiposRelatorioManual() {
     { tipo: 'corretiva', label: 'Corretiva', fn: 'mostrarFormRelatorioCorretiva' },
     { tipo: 'relatorio_tecnico', label: 'Relatório Técnico', fn: 'mostrarFormRelatorioTecnico' },
     { tipo: 'aceite_entrega', label: 'Termo de Aceite', fn: 'mostrarFormRelatorioAceite' },
+    { tipo: 'entrega_teste', label: 'Entrega para Teste', fn: 'mostrarFormRelatorioEntregaTeste' },
     promotor,
     { tipo: 'devolutivo', label: 'Devolutivo (pós-visita)', fn: 'mostrarFormRelatorioDevolutivo' },
     { tipo: 'levantamento_tecnico', label: 'Levantamento Técnico', fn: 'mostrarFormRelatorioLevantamentoTecnico' },
@@ -5382,11 +5390,11 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : r.tipo === 'levantamento_tecnico' ? tag('Levantamento Técnico', 'amber') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'entrega_teste' ? tag('Entrega para Teste', 'amber') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : r.tipo === 'levantamento_tecnico' ? tag('Levantamento Técnico', 'amber') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
-            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
+            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
             <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           </td>
@@ -5404,6 +5412,9 @@ function descricaoRelatorioManutencao(r) {
   }
   if (r.tipo === 'preventiva' || r.tipo === 'corretiva' || r.tipo === 'aceite_entrega') {
     return `${esc(r.modelo_maquina)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
+  }
+  if (r.tipo === 'entrega_teste') {
+    return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">${esc(r.equipamento)} — devolução até ${fmtData(r.data_prevista_devolucao)}</span>`;
   }
   if (r.tipo === 'promotor') {
     return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">Promotor: ${esc(r.promotor)}</span>`;
@@ -6306,6 +6317,7 @@ async function editarRelatorioManutencao(i) {
   else if (r.tipo === 'corretiva') mostrarFormRelatorioCorretiva(r);
   else if (r.tipo === 'relatorio_tecnico') mostrarFormRelatorioTecnico(r);
   else if (r.tipo === 'aceite_entrega') mostrarFormRelatorioAceite(r);
+  else if (r.tipo === 'entrega_teste') mostrarFormRelatorioEntregaTeste(r);
   else if (r.tipo === 'promotor') mostrarFormRelatorioPromotor(r);
   else if (r.tipo === 'devolutivo') mostrarFormRelatorioDevolutivo(r);
   else if (r.tipo === 'levantamento_tecnico') mostrarFormRelatorioLevantamentoTecnico(r);
@@ -8318,6 +8330,368 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// ---------- Relatório > Manual > Entrega para Teste ----------
+// comprovante simples de empréstimo: o cliente fica com o equipamento por um período (padrão
+// uma semana) pra testar antes de decidir a compra. Só pede o essencial — dados do cliente,
+// equipamento, prazo de devolução combinado e a assinatura do cliente confirmando o recebimento.
+let relatorioEntregaTesteDraft = null;
+function relatorioEntregaTestePadrao() {
+  const hoje = new Date();
+  const devolucao = new Date(hoje.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return {
+    tipo: 'entrega_teste',
+    empresa: '', contato: '', email: '',
+    equipamento: '', numero_serie: '',
+    data_entrega: hoje.toISOString().slice(0, 10),
+    data_prevista_devolucao: devolucao.toISOString().slice(0, 10),
+    observacoes: '',
+    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+  };
+}
+
+function textoTermoEntregaTeste() {
+  return `O equipamento acima permanece de propriedade da ${esc(empresaNome())} durante todo o período de teste. O cliente é responsável pela guarda e conservação do equipamento nesse período, devendo devolvê-lo nas mesmas condições em que foi recebido (uso e desgaste normais à parte) até a data prevista de devolução informada acima, salvo acordo de compra firmado antes desse prazo.<br><br>
+    Qualquer dúvida durante o período de teste, entre em contato:<br>
+    <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
+    <b>E-mail:</b> ${empresaEmails().slice(0, 2).join(' / ')}`;
+}
+
+function mostrarFormRelatorioEntregaTeste(existente) {
+  const rascunho = carregarRascunhoManual('entrega_teste', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioEntregaTesteDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioEntregaTestePadrao());
+  const d = relatorioEntregaTesteDraft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Relatório de Entrega para Teste</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Dados do cliente</h2>
+      <div class="form-grid">
+        <div class="full"><label>Empresa*</label><input id="ret-empresa" value="${esc(d.empresa)}"></div>
+        <div><label>Contato*</label><input id="ret-contato" placeholder="Nome de quem está recebendo" value="${esc(d.contato)}"></div>
+        <div><label>E-mail do cliente*</label><input id="ret-email" type="email" placeholder="nome@empresa.com" value="${esc(d.email)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Equipamento e prazo do teste</h2>
+      <div class="form-grid">
+        <div><label>Equipamento*</label><input id="ret-equipamento" placeholder="Ex.: MP5-80P" value="${esc(d.equipamento)}"></div>
+        <div><label>Nº de série</label><input id="ret-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
+        <div><label>Data de entrega*</label><input id="ret-data_entrega" type="date" value="${esc(d.data_entrega)}"></div>
+        <div><label>Data prevista de devolução*</label><input id="ret-data_prevista_devolucao" type="date" value="${esc(d.data_prevista_devolucao)}"></div>
+        <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Termo de empréstimo</h2>
+      <p style="font-size:13.5px; line-height:1.6;">${textoTermoEntregaTeste()}</p>
+    </div>
+
+    <div class="panel">
+      <h2>Observações</h2>
+      <textarea id="ret-observacoes" placeholder="Condições combinadas, acessórios entregues junto, etc. (opcional)">${esc(d.observacoes)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Assinatura do cliente*</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Assinando abaixo, o cliente confirma o recebimento do equipamento nas condições descritas acima.</p>
+      ${blocoAssinaturaEntregaTeste()}
+    </div>
+
+    <div class="panel">
+      ${blocoRascunhoManual('ret-rascunho-status', rascunho && rascunho.em, recuperado)}
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF é gerado automaticamente e o e-mail pro cliente é aberto pronto para envio.</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
+        <button class="btn-outline-sm" onclick="limparRascunhoEntregaTeste(${d.id || 'null'})">Limpar rascunho</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioEntregaTeste()">Concluir e enviar</button>
+      </div>
+    </div>`;
+  montarAssinaturaEntregaTeste();
+  window._draftSyncAtual = () => { lerCamposEntregaTeste(); salvarRascunhoManual('entrega_teste', relatorioEntregaTesteDraft, d.id, 'ret-rascunho-status'); };
+}
+
+async function limparRascunhoEntregaTeste(id) {
+  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  limparRascunhoManual('entrega_teste', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioEntregaTeste(relatorio); }
+  else mostrarFormRelatorioManual('entrega_teste');
+}
+
+function blocoAssinaturaEntregaTeste() {
+  return `
+    <div>
+      <label>Nome de quem assina</label>
+      <input id="ret-assinatura-cliente-nome" placeholder="Nome do cliente" value="${esc(relatorioEntregaTesteDraft.assinatura_cliente_nome || '')}" oninput="relatorioEntregaTesteDraft.assinatura_cliente_nome=this.value;">
+      <canvas id="ret-canvas-cliente" width="600" height="200" style="width:100%; max-width:600px; height:200px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div id="ret-assinatura-cliente-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="ampliarAssinaturaEntregaTeste()">⤢ Ampliar para assinar</button>
+        <button class="btn-outline-sm" onclick="limparAssinaturaEntregaTeste()">Limpar</button>
+      </div>
+    </div>`;
+}
+const assinaturaEstadoEntregaTeste = {};
+function montarAssinaturaEntregaTeste() {
+  const canvas = document.getElementById('ret-canvas-cliente');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  assinaturaEstadoEntregaTeste.temTraco = false;
+  if (relatorioEntregaTesteDraft.assinatura_cliente_img) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); assinaturaEstadoEntregaTeste.temTraco = true; atualizarStatusAssinaturaEntregaTeste(); };
+    img.src = relatorioEntregaTesteDraft.assinatura_cliente_img;
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  let desenhando = false;
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); assinaturaEstadoEntregaTeste.temTraco = true; }
+  function parar() {
+    if (!desenhando) return;
+    desenhando = false;
+    if (assinaturaEstadoEntregaTeste.temTraco) {
+      relatorioEntregaTesteDraft.assinatura_cliente_img = canvas.toDataURL('image/png');
+      atualizarStatusAssinaturaEntregaTeste();
+      if (window._draftSyncAtual) window._draftSyncAtual();
+    }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinaturaEntregaTeste() {
+  const el = document.getElementById('ret-assinatura-cliente-status');
+  if (el) { el.textContent = assinaturaEstadoEntregaTeste.temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = assinaturaEstadoEntregaTeste.temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinaturaEntregaTeste() {
+  const canvas = document.getElementById('ret-canvas-cliente');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  assinaturaEstadoEntregaTeste.temTraco = false;
+  relatorioEntregaTesteDraft.assinatura_cliente_img = null;
+  atualizarStatusAssinaturaEntregaTeste();
+}
+function ampliarAssinaturaEntregaTeste() {
+  let modal = document.getElementById('modal-assinatura');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-assinatura';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Assinar</h3>
+      <p>Desenhe a assinatura com o dedo ou o mouse.</p>
+      <canvas id="modal-canvas" width="900" height="380" style="width:100%; height:260px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-canvas').getContext('2d').clearRect(0,0,900,380)">Limpar</button>
+        <button class="btn btn-primary" onclick="confirmarAssinaturaModalEntregaTeste()">Usar esta assinatura</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-assinatura').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+  const canvas = document.getElementById('modal-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  let desenhando = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar); canvas.addEventListener('mousemove', mover); window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false }); canvas.addEventListener('touchmove', mover, { passive: false }); canvas.addEventListener('touchend', parar);
+}
+function confirmarAssinaturaModalEntregaTeste() {
+  const modalCanvas = document.getElementById('modal-canvas');
+  const destino = document.getElementById('ret-canvas-cliente');
+  const ctxDestino = destino.getContext('2d');
+  ctxDestino.clearRect(0, 0, destino.width, destino.height);
+  ctxDestino.drawImage(modalCanvas, 0, 0, destino.width, destino.height);
+  assinaturaEstadoEntregaTeste.temTraco = true;
+  relatorioEntregaTesteDraft.assinatura_cliente_img = destino.toDataURL('image/png');
+  atualizarStatusAssinaturaEntregaTeste();
+  document.getElementById('modal-assinatura').classList.remove('show');
+}
+
+function lerCamposEntregaTeste() {
+  const d = relatorioEntregaTesteDraft;
+  d.empresa = document.getElementById('ret-empresa').value;
+  d.contato = document.getElementById('ret-contato').value;
+  d.email = document.getElementById('ret-email').value;
+  d.equipamento = document.getElementById('ret-equipamento').value;
+  d.numero_serie = document.getElementById('ret-numero_serie').value;
+  d.data_entrega = document.getElementById('ret-data_entrega').value;
+  d.data_prevista_devolucao = document.getElementById('ret-data_prevista_devolucao').value;
+  d.observacoes = document.getElementById('ret-observacoes').value;
+  d.assinatura_cliente_nome = document.getElementById('ret-assinatura-cliente-nome').value;
+}
+
+async function concluirRelatorioEntregaTeste() {
+  const d = relatorioEntregaTesteDraft;
+  lerCamposEntregaTeste();
+
+  const obrigatorios = ['empresa', 'contato', 'email', 'equipamento', 'data_entrega', 'data_prevista_devolucao'];
+  for (const campo of obrigatorios) {
+    if (!String(d[campo] || '').trim()) return alert('Preencha todos os campos obrigatórios.');
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) return alert('Informe um e-mail válido para o cliente.');
+  if (!d.assinatura_cliente_nome || !d.assinatura_cliente_img) return alert('Colete o nome e a assinatura do cliente.');
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('entrega_teste', d.id);
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioEntregaTeste(relatorio, logo);
+    window.open(url, '_blank');
+    const assunto = encodeURIComponent(`Entrega para Teste — ${d.equipamento}`);
+    const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o comprovante de entrega do equipamento ${d.equipamento} para teste, com devolução prevista para ${fmtData(d.data_prevista_devolucao)}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
+    window.open(`mailto:${d.email.trim()}?subject=${assunto}&body=${corpo}`, '_blank');
+    mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text('Entrega para Teste', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 18;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  function paragrafo(label, texto, corFundo) {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(label, margem, y); y += 12;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(texto) || '—', largura - 16);
+    const altura = Math.max(20, linhas.length * 12 + 10);
+    if (y + altura > pageH - margem) novaPagina();
+    if (corFundo) { doc.setFillColor(...corFundo); doc.rect(margem, y, largura, altura, 'F'); }
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    doc.setTextColor(...PDF_COR.ink);
+    doc.text(linhas, margem + 8, y + 13);
+    y += altura + 12;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold');
+  doc.text('ENTREGA PARA TESTE', pageW / 2, 410, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 434, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Identificação');
+  linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 0.6 }, { label: 'Contato', valor: r.contato, frac: 0.4 }]);
+  linhaCampos([{ label: 'E-mail', valor: r.email, frac: 1 }]);
+  linhaCampos([{ label: 'Equipamento', valor: r.equipamento, frac: 0.6 }, { label: 'Nº de série', valor: r.numero_serie, frac: 0.4 }]);
+  linhaCampos([{ label: 'Data de entrega', valor: fmtData(r.data_entrega), frac: 0.5 }, { label: 'Devolução prevista', valor: fmtData(r.data_prevista_devolucao), frac: 0.5 }]);
+  linhaCampos([{ label: 'Técnico', valor: r.tecnico_nome, frac: 1 }]);
+  y += 12;
+
+  tituloCentro('Termo de empréstimo');
+  paragrafo('Condições do teste', `O equipamento permanece de propriedade da ${empresaNome()} durante o período de teste. O cliente é responsável pela guarda e conservação do equipamento, devendo devolvê-lo nas mesmas condições em que foi recebido (uso e desgaste normais à parte) até a data prevista de devolução, salvo acordo de compra firmado antes desse prazo.`);
+
+  tituloCentro('Observações');
+  paragrafo('Observações', r.observacoes);
+
+  if (y > 560) novaPagina();
+  tituloCentro('Assinatura do cliente');
+  {
+    const wImg = 260, hImg = 90;
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
+    y += 8;
+    try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
+    y += hImg + 12;
+  }
+
+  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem, { align: 'center' });
+
+  return doc.output('bloburl');
+}
+
 // ---------- Briefing Pré-Visita "Promotor" (Relatório > Manual > Promotor) ----------
 // preenchido pelo vendedor (administrador) ANTES da visita de demonstração técnica, pra dar
 // contexto pro promotor (técnico) que vai fazer a demo — espelha o modelo em Excel que o time
@@ -9301,7 +9675,7 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'entrega_teste' ? gerarPdfRelatorioEntregaTeste(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }

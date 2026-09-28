@@ -568,6 +568,22 @@ function validarRelatorioLevantamentoTecnico(r) {
   return null;
 }
 
+// ---------- Entrega para Teste (Relatório > Manual > Entrega para Teste) ----------
+// preenchido pelo técnico quando o cliente fica com o equipamento por um período (ex.: uma
+// semana) pra testar antes de decidir a compra — comprovante simples de empréstimo, com a
+// assinatura do cliente confirmando o recebimento e o prazo combinado de devolução.
+function validarRelatorioEntregaTeste(r) {
+  if (!r || typeof r !== 'object') return 'Dados do relatório são obrigatórios.';
+  const camposTexto = ['empresa', 'contato', 'email', 'equipamento', 'data_entrega', 'data_prevista_devolucao'];
+  for (const c of camposTexto) {
+    if (!r[c] || !String(r[c]).trim()) return `Campo obrigatório faltando: ${c}`;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(r.email).trim())) return 'E-mail do cliente inválido.';
+  if (!r.assinatura_cliente_nome || !String(r.assinatura_cliente_nome).trim()) return 'Informe o nome de quem está assinando pelo cliente.';
+  if (!r.assinatura_cliente_img) return 'Colete a assinatura do cliente.';
+  return null;
+}
+
 // formulário leve: treinamento online (pede nº de série) e demonstração técnica (não pede)
 function validarRelatorioSimples(r, exigirSerie) {
   if (!r || typeof r !== 'object') return 'Dados do atendimento são obrigatórios.';
@@ -2393,7 +2409,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : body.tipo === 'entrega_teste' ? 'entrega_teste' : 'completo';
   // os tipos de campo (avulsos, de manutenção interna) continuam só do técnico — só o Promotor
   // (briefing do vendedor) é que o administrador também pode criar.
   if (tipo !== 'promotor' && user.papel === 'administrador') {
@@ -2433,6 +2449,9 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'levantamento_tecnico') {
     const erroLevantamento = validarRelatorioLevantamentoTecnico(body);
     if (erroLevantamento) return enviarJSON(res, 400, { erro: erroLevantamento });
+  } else if (tipo === 'entrega_teste') {
+    const erroEntregaTeste = validarRelatorioEntregaTeste(body);
+    if (erroEntregaTeste) return enviarJSON(res, 400, { erro: erroEntregaTeste });
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2560,6 +2579,12 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       responsavel_decisao: body.responsavel_decisao || '', orcamento_sinalizado: body.orcamento_sinalizado || '',
       viabilidade_tecnica: ['viavel', 'viavel_com_ressalvas', 'inviavel', 'precisa_mais_dados'].includes(body.viabilidade_tecnica) ? body.viabilidade_tecnica : '',
       observacoes_tecnicas: body.observacoes_tecnicas || '', proximos_passos: body.proximos_passos || '',
+    } : {}),
+    ...(tipo === 'entrega_teste' ? {
+      email: body.email || '',
+      data_entrega: body.data_entrega || '', data_prevista_devolucao: body.data_prevista_devolucao || '',
+      observacoes: body.observacoes || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
     } : {}),
   });
   // Devolutivo é o relatório pós-visita da Demonstração Técnica (ver abrirDiario no front) — marca
@@ -2744,6 +2769,16 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       responsavel_decisao: body.responsavel_decisao || '', orcamento_sinalizado: body.orcamento_sinalizado || '',
       viabilidade_tecnica: ['viavel', 'viavel_com_ressalvas', 'inviavel', 'precisa_mais_dados'].includes(body.viabilidade_tecnica) ? body.viabilidade_tecnica : '',
       observacoes_tecnicas: body.observacoes_tecnicas || '', proximos_passos: body.proximos_passos || '',
+    });
+  } else if (item.tipo === 'entrega_teste') {
+    const erroEntregaTeste = validarRelatorioEntregaTeste(body);
+    if (erroEntregaTeste) return enviarJSON(res, 400, { erro: erroEntregaTeste });
+    Object.assign(item, {
+      empresa: body.empresa || '', contato: body.contato || '', email: body.email || '',
+      equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+      data_entrega: body.data_entrega || '', data_prevista_devolucao: body.data_prevista_devolucao || '',
+      observacoes: body.observacoes || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
     });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
