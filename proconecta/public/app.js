@@ -8895,7 +8895,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
   doc.text('RELATÓRIO DEVOLUTIVO', pageW / 2, 410, { align: 'center' });
   doc.setFontSize(13); doc.setFont(undefined, 'normal');
-  doc.text('DEMONSTRAÇÃO TÉCNICA - LÍDER DE VENDAS', pageW / 2, 434, { align: 'center' });
+  doc.text('DEMONSTRAÇÃO TÉCNICA', pageW / 2, 434, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
