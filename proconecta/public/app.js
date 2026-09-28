@@ -1672,6 +1672,35 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
         </div>
       </div>
 
+      ${!agendaItem ? `
+      <div id="na-briefing-wrap" class="hidden">
+        <h2>Briefing Pré-Visita — Promotor</h2>
+        <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">O técnico designado atua como Promotor nessa visita — esse contexto vai junto com a O.S. pra ele se basear na demonstração. Ao concluir a visita, ele registra o resultado num relatório Devolutivo. Campos com * são obrigatórios.</p>
+        <div class="form-grid">
+          <div class="full"><label>Vendedor*</label><input id="nb-vendedor" value="${esc(USER.nome)}"></div>
+        </div>
+        <label>Por que estamos indo ao cliente?*</label>
+        <textarea id="nb-motivo_visita" placeholder="Ex.: demonstração de equipamento, gravação de peça..."></textarea>
+        <label>Como o cliente faz esse processo hoje?*</label>
+        <textarea id="nb-processo_atual"></textarea>
+        <label>O que o cliente informou que precisa resolver ou melhorar?*</label>
+        <textarea id="nb-necessidade_informada"></textarea>
+        <label>O que vamos demonstrar?*</label>
+        <textarea id="nb-o_que_demonstrar"></textarea>
+        <label>O que é mais importante mostrar nessa demonstração?*</label>
+        <textarea id="nb-ponto_importante_demo"></textarea>
+        <label>Existe alguma dúvida, preocupação ou informação importante já mencionada pelo cliente?*</label>
+        <textarea id="nb-duvidas_preocupacoes"></textarea>
+        <label>Existe concorrente? Se sim, qual?*</label>
+        <textarea id="nb-concorrente"></textarea>
+        <label>O que você quer que o Promotor observe durante a visita?*</label>
+        <textarea id="nb-o_que_observar"></textarea>
+        <label>Objetivo da visita — em uma frase*</label>
+        <textarea id="nb-objetivo_visita"></textarea>
+        <label>Ponto principal a observar*</label>
+        <textarea id="nb-ponto_principal_observar"></textarea>
+      </div>` : ''}
+
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">${agendaItem ? 'Salvar alterações' : 'Salvar Ordem de Serviço'}</button>
         ${agendaItem ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoOS()">Cancelar</button>` : ''}
@@ -1726,6 +1755,9 @@ function atualizarTipoNovaAtividade() {
   const tipo = document.getElementById('na-tipo').value;
   document.getElementById('na-endereco-wrap').classList.toggle('hidden', tipo === 'treinamento_online');
   document.getElementById('na-laudo-equip-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
+  // só existe na criação (não na edição — ver mostrarFormNovaAtividade)
+  const briefingWrap = document.getElementById('na-briefing-wrap');
+  if (briefingWrap) briefingWrap.classList.toggle('hidden', tipo !== 'demonstracao_tecnica');
 }
 
 function atualizarGarantiaNovaAtividade() {
@@ -1846,7 +1878,45 @@ async function salvarNovaAtividade() {
     bonus_viagem: document.getElementById('na-bonus-viagem').checked,
   };
   if (sla_respostas) body.sla_respostas = sla_respostas;
-  await salvarNovaAtividadeExecutar(body);
+  // Demonstração Técnica nova (não na edição, ver mostrarFormNovaAtividade) já nasce com o
+  // briefing do Promotor — evita depender de alguém lembrar de preencher isso depois, separado,
+  // em Relatório > Manual > Promotor.
+  let briefingPromotor = null;
+  if (tipoOS === 'demonstracao_tecnica' && !agendaEmEdicaoId) {
+    briefingPromotor = lerCamposBriefingNovaOS();
+    if (!briefingPromotor) return;
+  }
+  await salvarNovaAtividadeExecutar(body, briefingPromotor);
+}
+
+// lê e valida o Briefing Pré-Visita embutido na Nova O.S. (Demonstração Técnica) — devolve null
+// (já com o alert mostrado) se faltar algum campo obrigatório, senão o objeto pronto pra virar
+// o corpo do POST /api/relatorios-manutencao tipo "promotor" (ver salvarNovaAtividadeExecutar).
+function lerCamposBriefingNovaOS() {
+  const tecnicoSel = document.getElementById('na-tecnico');
+  const promotorNome = (tecnicoSel.options[tecnicoSel.selectedIndex] || {}).textContent || '';
+  const campos = {
+    empresa: document.getElementById('na-cliente-nome').value,
+    contato: document.getElementById('na-contato').value,
+    data_visita: (document.getElementById('na-inicio').value || '').slice(0, 10),
+    vendedor: document.getElementById('nb-vendedor').value,
+    promotor: promotorNome,
+    motivo_visita: document.getElementById('nb-motivo_visita').value,
+    processo_atual: document.getElementById('nb-processo_atual').value,
+    necessidade_informada: document.getElementById('nb-necessidade_informada').value,
+    o_que_demonstrar: document.getElementById('nb-o_que_demonstrar').value,
+    ponto_importante_demo: document.getElementById('nb-ponto_importante_demo').value,
+    duvidas_preocupacoes: document.getElementById('nb-duvidas_preocupacoes').value,
+    concorrente: document.getElementById('nb-concorrente').value,
+    o_que_observar: document.getElementById('nb-o_que_observar').value,
+    objetivo_visita: document.getElementById('nb-objetivo_visita').value,
+    ponto_principal_observar: document.getElementById('nb-ponto_principal_observar').value,
+  };
+  const obrigatorios = ['vendedor', 'motivo_visita', 'processo_atual', 'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes', 'concorrente', 'o_que_observar', 'objetivo_visita', 'ponto_principal_observar'];
+  for (const c of obrigatorios) {
+    if (!String(campos[c] || '').trim()) { alert('Preencha todos os campos do Briefing Pré-Visita (Promotor) — role até essa seção.'); return null; }
+  }
+  return campos;
 }
 
 function atualizarSlaNovaAtividade() {
@@ -1929,7 +1999,7 @@ function somarDiasUteis(data, dias) {
 
 // separado de salvarNovaAtividade só pra poder chamar de novo, com a justificativa preenchida,
 // sem duplicar a leitura dos campos do formulário — ver o catch abaixo (precisa_justificativa)
-async function salvarNovaAtividadeExecutar(body) {
+async function salvarNovaAtividadeExecutar(body, briefingPromotor) {
   try {
     if (agendaEmEdicaoId) {
       await api(`/api/agenda/${agendaEmEdicaoId}`, { method: 'PUT', body });
@@ -1937,6 +2007,14 @@ async function salvarNovaAtividadeExecutar(body) {
       mostrarToast('Ordem de serviço atualizada.');
     } else {
       const { agenda: novaOS } = await api('/api/agenda', { method: 'POST', body });
+      if (briefingPromotor) {
+        try {
+          await api('/api/relatorios-manutencao', { method: 'POST', body: { ...briefingPromotor, tipo: 'promotor', agenda_id: novaOS.id } });
+        } catch (e) {
+          // a O.S. já foi criada — não desfaz por causa disso, só avisa pra preencher manualmente
+          alert('O.S. criada, mas houve um erro ao salvar o briefing pro Promotor: ' + e.message + ' — preencha manualmente em Relatório > Manual > Promotor, vinculando a esta O.S.');
+        }
+      }
       if (window._origemSolicitacaoId) {
         const origemId = window._origemSolicitacaoId;
         window._origemSolicitacaoId = null;
@@ -1953,7 +2031,7 @@ async function salvarNovaAtividadeExecutar(body) {
     if (e.corpo && e.corpo.precisa_justificativa) {
       const justificativa = prompt(e.message);
       if (justificativa && justificativa.trim()) {
-        return salvarNovaAtividadeExecutar({ ...body, justificativa_limite_viagens: justificativa.trim() });
+        return salvarNovaAtividadeExecutar({ ...body, justificativa_limite_viagens: justificativa.trim() }, briefingPromotor);
       }
       return;
     }
@@ -1967,7 +2045,9 @@ function abrirDiario(agendaId) {
   if (TIPOS_LAUDO_TECNICO.includes(item.tipo)) return renderLaudoTecnico(item);
   if (TIPOS_TERMO_ACEITE.includes(item.tipo)) return renderRelatorioCorretiva(item);
   if (item.tipo === 'treinamento_online') return renderRelatorioSimples(item, true);
-  if (item.tipo === 'demonstracao_tecnica') return renderRelatorioSimples(item, false);
+  // Demonstração Técnica: o relatório pós-visita do técnico (na função Promotor) é o Devolutivo
+  // — já vinculado a esta O.S. e pré-preenchido com o que ela já tem (ver devolutivoPadraoDaOS).
+  if (item.tipo === 'demonstracao_tecnica') return mostrarFormRelatorioDevolutivo(devolutivoPadraoDaOS(item));
   document.getElementById('diario-form').innerHTML = `
     <div class="panel"><div class="panel-head">Diário técnico — atividade #${agendaId}</div>
       <div class="form-grid">
@@ -8364,6 +8444,20 @@ function relatorioDevolutivoPadrao() {
 }
 
 const OPCOES_TIPO_OPORTUNIDADE = [['automacao', 'Automação'], ['retrofit', 'Retrofit'], ['equipamento_personalizado', 'Equipamento personalizado'], ['outro', 'Outro']];
+
+// pré-preenche o Devolutivo com o que a própria O.S. de Demonstração Técnica já tem — mesmo
+// mapeamento de campos do preencherDevolutivoPelaOS (escolha manual do vínculo), só que já
+// aplicado de cara, porque aqui a O.S. de origem é a que o técnico está mesmo abrindo (ver abrirDiario).
+function devolutivoPadraoDaOS(item) {
+  const d = relatorioDevolutivoPadrao();
+  d.agenda_id = item.id;
+  d.empresa = item.cliente_nome || '';
+  d.data_visita = (item.data_hora_inicio || '').slice(0, 10);
+  d.contato = item.contato || item.cliente_contato || '';
+  if (item.tecnico_nome) d.promotor = item.tecnico_nome;
+  if (item.equipamento_tipo) d.equipamento_demonstrado = [item.equipamento_tipo, item.equipamento_modelo].filter(Boolean).join(' ');
+  return d;
+}
 
 async function mostrarFormRelatorioDevolutivo(existente) {
   const rascunho = carregarRascunhoManual('devolutivo', existente && existente.id);
