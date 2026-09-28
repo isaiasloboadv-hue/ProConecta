@@ -306,6 +306,9 @@ function migrar(data) {
     if (a.retorno_confirmado_cliente_em === undefined) a.retorno_confirmado_cliente_em = null;
     if (a.retorno_deslocamento_iniciado_em === undefined) a.retorno_deslocamento_iniciado_em = null;
     if (a.retorno_chegada_confirmada_em === undefined) a.retorno_chegada_confirmada_em = null;
+    if (a.viagem_volta_iniciada_em === undefined) a.viagem_volta_iniciada_em = null;
+    if (a.viagem_volta_chegada_em === undefined) a.viagem_volta_chegada_em = null;
+    if (a.viagem_volta_destino_agenda_id === undefined) a.viagem_volta_destino_agenda_id = null;
     if (a.orcamento_aprovado_em === undefined) {
       // se o relatório já aprovado tinha peças fornecidas, mas esse controle de orçamento
       // ainda não existia, considera que o orçamento já foi tratado por fora do sistema —

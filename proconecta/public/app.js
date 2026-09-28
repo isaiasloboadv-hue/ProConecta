@@ -4118,6 +4118,83 @@ async function registrarChegadaRetorno(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
+// ---------- VIAGEM DE VOLTA (retorno pra empresa/hotel após o relatório) ----------
+// botão "Iniciar retorno"/"Registrar chegada" da viagem de volta: aparece depois que o técnico
+// já enviou o relatório da visita (status "concluida"), só pra tipos com deslocamento de
+// verdade. Só registra os horários por enquanto — serve de base pro futuro cálculo de tempo
+// total em trânsito, ainda não pedido.
+function botaoViagemVolta(a) {
+  if (a.tecnico_id !== USER.id || a.finalizada || ehAtendimentoOnline(a)) return '';
+  if (a.status !== 'concluida') return '';
+  if (a.viagem_volta_chegada_em) return '';
+  if (a.viagem_volta_iniciada_em) {
+    // seguiu direto pra outra O.S. — o retorno "termina" quando aquela O.S. começa o dela
+    // própria; não tem chegada de volta pra registrar aqui
+    if (a.viagem_volta_destino_agenda_id) return '';
+    return `<button class="btn-outline-sm" onclick="registrarChegadaVolta(${a.id})" style="margin-right:6px;">📍 Registrar chegada</button>`;
+  }
+  return `<button class="btn-outline-sm" onclick="iniciarViagemVolta(${a.id})" style="margin-right:6px;">↩ Iniciar retorno</button>`;
+}
+
+// procura outra O.S. do mesmo técnico no mesmo dia, ainda não iniciada, pra oferecer seguir
+// direto pra ela em vez de voltar pra empresa/hotel
+function proximaOSMesmoDia(a) {
+  if (!Array.isArray(window._agendaCache)) return null;
+  const dia = (a.data_hora_inicio || '').slice(0, 10);
+  if (!dia) return null;
+  return window._agendaCache.find((x) =>
+    x.id !== a.id && x.tecnico_id === a.tecnico_id && !ehAtendimentoOnline(x) && !x.finalizada &&
+    x.status !== 'concluida' && x.confirmado_cliente_em && !x.deslocamento_iniciado_em &&
+    (x.data_hora_inicio || '').slice(0, 10) === dia
+  ) || null;
+}
+function atualizarAgendaCacheItem(agenda) {
+  if (!agenda || !Array.isArray(window._agendaCache)) return;
+  const idx = window._agendaCache.findIndex((x) => x.id === agenda.id);
+  if (idx !== -1) window._agendaCache[idx] = agenda;
+}
+function abrirDetalheOSAposAcao(id) {
+  if (paginaAtual === 'calendario-tecnico') abrirDetalheOSCalendarioTecnico(id);
+  else if (paginaAtual === 'agenda' && minhaAgendaDetalheId === id) abrirDetalheOSMinhaAgenda(id);
+  else renderAgenda();
+}
+async function iniciarViagemVolta(id) {
+  const a = (window._agendaCache || []).find((x) => x.id === id);
+  if (!a) return;
+  const proxima = proximaOSMesmoDia(a);
+  let proximaOsId = null;
+  if (proxima) {
+    const seguir = confirm(`${TIPO_OS_LABEL[proxima.tipo] || 'O.S.'} identificada (${numeroOS(proxima)}) — deseja seguir direto ao destino?`);
+    if (seguir) proximaOsId = proxima.id;
+  } else if (!confirm('Confirma que você está iniciando o retorno agora?')) {
+    return;
+  }
+  try {
+    const { agenda, proxima_os } = await api(`/api/agenda/${id}/iniciar-viagem-volta`, {
+      method: 'POST',
+      body: proximaOsId ? { proxima_os_id: proximaOsId } : {},
+    });
+    atualizarAgendaCacheItem(agenda);
+    if (proxima_os) {
+      atualizarAgendaCacheItem(proxima_os);
+      mostrarToast('Seguindo direto pra próxima O.S. — deslocamento dela já foi iniciado.');
+      abrirEscolhaNavegacao(proxima_os);
+    } else {
+      mostrarToast('Retorno iniciado.');
+    }
+    abrirDetalheOSAposAcao(id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function registrarChegadaVolta(id) {
+  if (!confirm('Confirma que você já chegou?')) return;
+  try {
+    const { agenda } = await api(`/api/agenda/${id}/confirmar-chegada-volta`, { method: 'POST' });
+    atualizarAgendaCacheItem(agenda);
+    mostrarToast('Chegada registrada.');
+    abrirDetalheOSAposAcao(id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
 // ---------- BIBLIOTECA: ACESSAR ----------
 async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
   let registros = [];
@@ -10706,11 +10783,11 @@ function acoesOSCalendarioTecnico(a, visita) {
     return `${botaoDeslocamento(a)}${botaoExec}`;
   }
   if (a.visita_id && a.visita_status === 'aprovado') {
-    return botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
+    return botaoViagemVolta(a) + botaoDeslocamento(a) + (a.visita_solicitacao_reabertura && a.visita_solicitacao_reabertura.status === 'pendente'
       ? `<span class="tag tag-amber">Reabertura solicitada</span>`
       : `<button class="btn-outline-sm" onclick="solicitarReaberturaVisita(${a.visita_id})">Solicitar reabertura</button>`);
   }
-  return `<span style="font-size:11.5px; color:var(--ink-soft);">Em análise — aguardando aprovação do administrador.</span>`;
+  return `${botaoViagemVolta(a)}<span style="font-size:11.5px; color:var(--ink-soft);">Em análise — aguardando aprovação do administrador.</span>`;
 }
 
 // ---------- RANKING DE TÉCNICOS ----------

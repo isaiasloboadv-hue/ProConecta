@@ -834,6 +834,9 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     retorno_confirmado_cliente_em: null,
     retorno_deslocamento_iniciado_em: null,
     retorno_chegada_confirmada_em: null,
+    viagem_volta_iniciada_em: null,
+    viagem_volta_chegada_em: null,
+    viagem_volta_destino_agenda_id: null,
     bonus_viagem: bonusViagem,
     justificativa_limite_viagens: justificativaLimiteViagens,
   });
@@ -1338,6 +1341,65 @@ rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada$/, async (req, res, m) =>
       url: '/',
     }).catch(() => {});
   });
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/iniciar-viagem-volta — o técnico avisa que está saindo do cliente depois
+// de já ter enviado o relatório da visita (status "concluida"). Serve de base pro futuro cálculo
+// de tempo total em deslocamento (ida + volta) — por enquanto só registra o horário.
+// Se vier junto o id de outra O.S. do mesmo técnico no mesmo dia (proxima_os_id), o técnico está
+// seguindo direto pra ela em vez de voltar pra empresa/hotel: marca essa segunda O.S. como se o
+// deslocamento dela já tivesse sido iniciado agora (evita ter que abrir o card dela e clicar de
+// novo em "Iniciar deslocamento" — ver iniciarDeslocamento/abrirEscolhaNavegacao no front).
+rota('POST', /^\/api\/agenda\/(\d+)\/iniciar-viagem-volta$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado registra a viagem de volta.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
+  if (item.status !== 'concluida') return enviarJSON(res, 400, { erro: 'Envie o relatório desta visita antes de iniciar a viagem de volta.' });
+  if (item.viagem_volta_iniciada_em) return enviarJSON(res, 400, { erro: 'A viagem de volta já foi marcada como iniciada.' });
+  let proximaOS = null;
+  if (body.proxima_os_id) {
+    proximaOS = tenant.buscar(data, 'agenda', Number(body.proxima_os_id), user.empresa_id);
+    if (!proximaOS || proximaOS.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'A próxima O.S. informada não é sua ou não existe.' });
+    if (!proximaOS.confirmado_cliente_em) return enviarJSON(res, 400, { erro: 'Essa O.S. ainda não tem a confirmação do cliente — não dá pra seguir direto pra ela.' });
+    if (proximaOS.deslocamento_iniciado_em) return enviarJSON(res, 400, { erro: 'O deslocamento dessa O.S. já tinha sido iniciado.' });
+  }
+  const agora = new Date().toISOString();
+  item.viagem_volta_iniciada_em = agora;
+  item.viagem_volta_destino_agenda_id = proximaOS ? proximaOS.id : null;
+  if (proximaOS) proximaOS.deslocamento_iniciado_em = agora;
+  db.save(data);
+  const admins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
+  admins.forEach((admin) => {
+    enviarPush(data, admin.id, {
+      titulo: 'Técnico iniciou o retorno',
+      corpo: proximaOS
+        ? `${user.nome} saiu de ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')} direto pra ${proximaOS.numero_os || 'OS-' + String(proximaOS.id).padStart(6, '0')}.`
+        : `${user.nome} iniciou a viagem de volta da O.S. ${item.numero_os || 'OS-' + String(item.id).padStart(6, '0')}.`,
+      url: '/',
+    }).catch(() => {});
+  });
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item), proxima_os: proximaOS ? agendaComDetalhes(data, proximaOS) : null });
+});
+
+// POST /api/agenda/:id/confirmar-chegada-volta — o técnico avisa que já chegou (na empresa, hotel
+// etc.) depois da viagem de volta. Só registra o horário — não precisa de mais detalhe agora,
+// serve de base pro futuro menu de cálculo de tempo em trânsito.
+rota('POST', /^\/api\/agenda\/(\d+)\/confirmar-chegada-volta$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico designado registra a chegada.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  if (item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta ordem de serviço não é sua.' });
+  if (!item.viagem_volta_iniciada_em) return enviarJSON(res, 400, { erro: 'Inicie a viagem de volta antes de registrar a chegada.' });
+  if (item.viagem_volta_chegada_em) return enviarJSON(res, 400, { erro: 'A chegada já foi registrada.' });
+  item.viagem_volta_chegada_em = new Date().toISOString();
+  db.save(data);
   enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
 });
 
@@ -2461,6 +2523,13 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       observacoes_tecnicas: body.observacoes_tecnicas || '', proximos_passos: body.proximos_passos || '',
     } : {}),
   });
+  // Devolutivo é o relatório pós-visita da Demonstração Técnica (ver abrirDiario no front) — marca
+  // a O.S. como concluída igual o envio de visita marca pras demais (corretiva/preventiva/
+  // atendimento/treinamento_online), pra "Iniciar retorno" (viagem de volta) poder aparecer.
+  if (tipo === 'devolutivo' && item.agenda_id) {
+    const agendaVinculada = tenant.buscar(data, 'agenda', item.agenda_id, user.empresa_id);
+    if (agendaVinculada && !agendaVinculada.finalizada) agendaVinculada.status = 'concluida';
+  }
   db.save(data);
   enviarJSON(res, 201, { relatorio: item });
 });
@@ -3292,6 +3361,9 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     retorno_confirmado_cliente_em: null,
     retorno_deslocamento_iniciado_em: null,
     retorno_chegada_confirmada_em: null,
+    viagem_volta_iniciada_em: null,
+    viagem_volta_chegada_em: null,
+    viagem_volta_destino_agenda_id: null,
     origem_chamado_id: chamado.id,
     // fluxo de pós-venda/reparo — nasce em "em_atendimento" (ainda no chat com o técnico);
     // ver seção "pós-venda / setor reparo" mais abaixo
