@@ -1200,7 +1200,7 @@ document.addEventListener('click', (e) => {
 // ---------- AGENDA ----------
 let minhaAgendaDetalheId = null;
 async function carregarAgendaComVisitas() {
-  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda'), api('/api/visitas')]);
+  const [{ agenda }, { visitas }, { relatorios }] = await Promise.all([api('/api/agenda'), api('/api/visitas'), api('/api/relatorios-manutencao/meus?todas=1')]);
   window._agendaCache = agenda;
   window._visitasPorAgenda = {};
   window._visitasRetornoPorAgenda = {};
@@ -1208,6 +1208,10 @@ async function carregarAgendaComVisitas() {
     if ((v.rodada || 1) === 1) window._visitasPorAgenda[v.agenda_id] = v;
     else window._visitasRetornoPorAgenda[v.agenda_id] = v;
   });
+  // Devolutivo (relatório pós-visita da Demonstração Técnica) não usa /api/visitas — sem isso a
+  // linha do tempo e o card ficam achando que o técnico nunca enviou o relatório
+  window._devolutivosPorAgenda = {};
+  relatorios.filter((r) => r.tipo === 'devolutivo' && r.agenda_id).forEach((r) => { window._devolutivosPorAgenda[r.agenda_id] = r; });
 }
 
 // filtro Ativos/Finalizados reaproveitado em toda tela de cards de O.S. — o padrão é sempre
@@ -3738,7 +3742,7 @@ function timelineOSAtendimento(a) {
   return renderizarTimelineOS(passos);
 }
 
-function timelineOS(a, visita) {
+function timelineOS(a, visita, devolutivo) {
   if (a.tipo === 'atendimento' && a.fase_atendimento) return timelineOSAtendimento(a);
   const passos = [{ label: 'Ordem de serviço aberta', data: a.criado_em, estado: 'feito' }];
 
@@ -3758,8 +3762,11 @@ function timelineOS(a, visita) {
       : { label: 'Aguardando chegada do técnico', data: null, estado: 'pendente' });
   }
 
-  passos.push(visita
-    ? { label: 'Relatório preenchido e enviado para análise', data: visita.criado_em, estado: 'feito' }
+  // Devolutivo (relatório pós-visita da Demonstração Técnica) não usa /api/visitas — passa pelo
+  // mesmo passo "relatório enviado" que os demais tipos, só que sem fila de aprovação (ver
+  // POST /api/relatorios-manutencao: salva direto, sem gestor aprovar)
+  passos.push((visita || devolutivo)
+    ? { label: 'Relatório preenchido e enviado para análise', data: visita ? visita.criado_em : devolutivo.criado_em, estado: 'feito' }
     : { label: 'Aguardando o técnico preencher o relatório', data: null, estado: 'pendente' });
 
   if (visita && visita.status_aprovacao === 'reprovado') {
@@ -3767,9 +3774,27 @@ function timelineOS(a, visita) {
     return renderizarTimelineOS(passos);
   }
 
-  passos.push(visita && visita.status_aprovacao === 'aprovado'
-    ? { label: 'Aprovado pelo gestor', data: visita.data_aprovacao, estado: 'feito' }
+  passos.push((visita && visita.status_aprovacao === 'aprovado') || devolutivo
+    ? { label: 'Aprovado pelo gestor', data: visita ? visita.data_aprovacao : devolutivo.criado_em, estado: 'feito' }
     : { label: 'Aguardando aprovação do gestor', data: null, estado: 'pendente' });
+
+  // viagem de volta (retorno pra empresa/hotel): só existe depois que o relatório foi enviado, e
+  // só pra tipos que realmente têm deslocamento (ver botaoViagemVolta)
+  if ((visita || devolutivo) && !ehAtendimentoOnline(a)) {
+    passos.push(a.viagem_volta_iniciada_em
+      ? { label: 'Técnico iniciou o retorno', data: a.viagem_volta_iniciada_em, estado: 'feito' }
+      : { label: 'Aguardando o técnico iniciar o retorno', data: null, estado: 'pendente' });
+
+    if (a.viagem_volta_iniciada_em) {
+      if (a.viagem_volta_chegada_em) {
+        passos.push({ label: 'Técnico registrou a chegada do retorno', data: a.viagem_volta_chegada_em, estado: 'feito' });
+      } else if (a.viagem_volta_destino_agenda_id) {
+        passos.push({ label: 'Retorno seguiu direto para a próxima O.S.', data: a.viagem_volta_iniciada_em, estado: 'feito' });
+      } else {
+        passos.push({ label: 'Aguardando o técnico registrar a chegada do retorno', data: null, estado: 'pendente' });
+      }
+    }
+  }
 
   // orçamento: só aparece quando o relatório tem peças fornecidas
   if (a.visita_tem_pecas) {
@@ -3829,6 +3854,7 @@ function renderizarTimelineOS(passos) {
 
 // detalhe completo de uma O.S.: dados do atendimento + relatório enviado (se houver) + linha do tempo
 function detalheCompletoOS(a, visita) {
+  const devolutivo = (window._devolutivosPorAgenda || {})[a.id];
   return `
     <div class="kv"><b>Empresa:</b> ${esc(a.cliente_nome || '—')} <span class="sep">·</span> <b>Contato:</b> ${esc(a.contato || a.cliente_contato || '—')} <span class="sep">·</span> <b>Telefone:</b> ${esc(a.telefone || a.cliente_telefone || '—')}</div>
     <div class="kv"><b>E-mail:</b> ${esc(a.email || a.cliente_email || '—')} <span class="sep">·</span> <b>Setor:</b> ${esc(a.setor_cliente || a.cliente_setor || '—')}</div>
@@ -3842,13 +3868,27 @@ function detalheCompletoOS(a, visita) {
         ${detalheRelatorioVisita(visita)}
         ${visita.laudo && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfLaudoAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
         ${visita.relatorio_simples && visita.status_aprovacao === 'aprovado' ? `<div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfRelatorioSimplesAprovado(${a.id})">Gerar relatório (PDF)</button></div>` : ''}
+      </div>` : devolutivo ? `
+      <div class="os-relatorio-box">
+        <div class="os-relatorio-box-titulo">Relatório (Devolutivo) enviado pelo técnico</div>
+        <div class="kv">Enviado em ${fmtDataHora(devolutivo.criado_em)}. Este tipo de O.S. não passa por fila de aprovação do gestor.</div>
+        <div style="margin-top:14px;"><button class="btn btn-primary btn-sm" onclick="baixarPdfDevolutivo(${devolutivo.id})">Gerar relatório (PDF)</button></div>
       </div>` : `<div class="admin-note" style="margin-top:14px;">${a.tipo === 'atendimento' ? 'Ainda não há relatório — acompanhe o andamento na linha do tempo abaixo.' : 'O técnico ainda não executou esta O.S. — nenhum relatório enviado até o momento.'}</div>`}
     ${a.visita_retorno_id ? `
       <div class="os-relatorio-box" style="margin-top:14px;">
         <div class="os-relatorio-box-titulo">Relatório de retorno enviado pelo técnico</div>
         ${detalheRelatorioVisita((window._visitasRetornoPorAgenda || {})[a.id] || {})}
       </div>` : ''}
-    ${timelineOS(a, visita)}`;
+    ${timelineOS(a, visita, devolutivo)}`;
+}
+
+async function baixarPdfDevolutivo(id) {
+  try {
+    const { relatorio } = await api(`/api/relatorios-manutencao/${id}`);
+    const logo = await carregarLogoDataUri();
+    const url = gerarPdfRelatorioDevolutivo(relatorio, logo);
+    window.open(url, '_blank');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
 async function baixarPdfLaudoAprovado(agendaId) {
@@ -10596,7 +10636,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
 // não aparecem aqui.
 
 async function renderCalendarioTecnico() {
-  const [{ agenda }, { visitas }] = await Promise.all([api('/api/agenda?todas=1'), api('/api/visitas?todas=1')]);
+  const [{ agenda }, { visitas }, { relatorios }] = await Promise.all([api('/api/agenda?todas=1'), api('/api/visitas?todas=1'), api('/api/relatorios-manutencao/meus?todas=1')]);
   window._agendaCache = agenda;
   window._visitasPorAgenda = {};
   window._visitasRetornoPorAgenda = {};
@@ -10604,6 +10644,8 @@ async function renderCalendarioTecnico() {
     if ((v.rodada || 1) === 1) window._visitasPorAgenda[v.agenda_id] = v;
     else window._visitasRetornoPorAgenda[v.agenda_id] = v;
   });
+  window._devolutivosPorAgenda = {};
+  relatorios.filter((r) => r.tipo === 'devolutivo' && r.agenda_id).forEach((r) => { window._devolutivosPorAgenda[r.agenda_id] = r; });
   renderAgendaCalendarioTecnico();
 }
 

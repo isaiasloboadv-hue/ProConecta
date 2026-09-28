@@ -2315,11 +2315,17 @@ rota('POST', /^\/api\/chat-interno\/(\d+)\/mensagens$/, async (req, res, m) => {
 rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   // administrador entra aqui só pra ver os briefings "Promotor" que ele mesmo criou — o filtro
-  // por autor_id logo abaixo já garante que ele não vê relatório de outra pessoa.
+  // por autor_id logo abaixo já garante que ele não vê relatório de outra pessoa. Com ?todas=1 o
+  // administrador vê os relatórios de todo mundo (mesmo uso do ?todas=1 de /api/agenda), pra
+  // telas como a linha do tempo da O.S. conseguirem mostrar o relatório de qualquer técnico.
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  const { query } = url.parse(req.url, true);
   const data = db.load();
-  const lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id)
-    .filter((r) => r.autor_id === user.id)
+  let lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id);
+  if (!(user.papel === 'administrador' && query.todas === '1')) {
+    lista = lista.filter((r) => r.autor_id === user.id);
+  }
+  lista = lista
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
     .map((r) => { const { fotos, ...resto } = r; return resto; });
   enviarJSON(res, 200, { relatorios: lista });
