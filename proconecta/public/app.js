@@ -1605,7 +1605,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
         <div class="full"><label>${t('equipamento', 'Equipamento')}</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
-        <div class="full"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito...">${agendaItem ? esc(agendaItem.problema || '') : ''}</textarea></div>
+        <div class="full" id="na-problema-wrap"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito...">${agendaItem ? esc(agendaItem.problema || '') : ''}</textarea></div>
       </div>
       <div class="form-grid" id="na-laudo-equip-wrap">
         <div><label>Número de série</label><input id="na-numero-serie" disabled></div>
@@ -1622,6 +1622,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
         <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
       </div>
 
+      <div id="na-sla-section-wrap">
       ${(() => {
         // se a O.S. já tem um SLA definido (veio de uma Solicitação de Atendimento, ou o técnico/
         // pós-venda já respondeu ao encaminhar), só mostra — não deixa reescrever por aqui. Senão
@@ -1653,6 +1654,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
           </div>`).join('')}
       </div>`;
       })()}
+      </div>
 
       <h2>Data e horário</h2>
       <div class="form-grid">
@@ -1755,9 +1757,15 @@ function atualizarTipoNovaAtividade() {
   const tipo = document.getElementById('na-tipo').value;
   document.getElementById('na-endereco-wrap').classList.toggle('hidden', tipo === 'treinamento_online');
   document.getElementById('na-laudo-equip-wrap').classList.toggle('hidden', !TIPOS_LAUDO_TECNICO.includes(tipo));
+  // Demonstração Técnica é uma visita comercial agendada, não um chamado de reparo — sem
+  // problema relatado a descrever e sem SLA de prioridade a definir (isso é coisa de
+  // corretiva/preventiva/atendimento). O que ela precisa é do briefing pro Promotor (ver abaixo).
+  const ehDemonstracao = tipo === 'demonstracao_tecnica';
+  document.getElementById('na-problema-wrap').classList.toggle('hidden', ehDemonstracao);
+  document.getElementById('na-sla-section-wrap').classList.toggle('hidden', ehDemonstracao);
   // só existe na criação (não na edição — ver mostrarFormNovaAtividade)
   const briefingWrap = document.getElementById('na-briefing-wrap');
-  if (briefingWrap) briefingWrap.classList.toggle('hidden', tipo !== 'demonstracao_tecnica');
+  if (briefingWrap) briefingWrap.classList.toggle('hidden', !ehDemonstracao);
 }
 
 function atualizarGarantiaNovaAtividade() {
