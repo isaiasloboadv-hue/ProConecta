@@ -738,6 +738,87 @@ rota('POST', /^\/api\/convite\/([a-f0-9]+)\/ativar$/, async (req, res, m) => {
   enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
 });
 
+// ---------- link público do relatório "Entrega para Teste" ----------
+// o técnico às vezes não está mais presencialmente com o cliente pra colher a assinatura na hora
+// — em vez de exigir login do cliente (que nem tem conta no sistema), o relatório carrega um
+// token de acesso próprio (token_publico, gerado na criação, mesmo padrão do convite) que abre
+// um link direto pro formulário, sem senha. Tanto o técnico (autenticado, rotas de
+// /api/relatorios-manutencao normais) quanto o cliente (aqui, via token) podem salvar o que já
+// preencheram a qualquer momento — cada lado continua de onde o outro parou, no mesmo registro.
+function buscarEntregaTestePorToken(data, token) {
+  return data.relatorios_manutencao.find((r) => r.tipo === 'entrega_teste' && r.token_publico === token) || null;
+}
+// só os campos que o formulário público precisa — nunca autor_id/tecnico_email/empresa_id etc.
+// hidrata a assinatura (guardada à parte, ver extrairFotosProfundo) de volta pro base64 de
+// verdade, senão o cliente só vê a referência `{__foto_ref}` no lugar da própria assinatura.
+async function entregaTestePublica(r) {
+  const { id, empresa, contato, email, equipamento, numero_serie, data_entrega, data_prevista_devolucao,
+    observacoes, assinatura_cliente_nome, assinatura_cliente_img, status_preenchimento, tecnico_nome } = r;
+  return {
+    id, empresa, contato, email, equipamento, numero_serie, data_entrega, data_prevista_devolucao,
+    observacoes, assinatura_cliente_nome, status_preenchimento, tecnico_nome,
+    assinatura_cliente_img: await hidratarFotosProfundo(assinatura_cliente_img),
+  };
+}
+
+// GET /api/entregas/:token — pública: carrega o que já foi preenchido até agora (por qualquer um
+// dos dois lados) pra continuar de onde parou
+rota('GET', /^\/api\/entregas\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const item = buscarEntregaTestePorToken(data, m[1]);
+  if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  enviarJSON(res, 200, { relatorio: await entregaTestePublica(item) });
+});
+
+// PUT /api/entregas/:token — pública: salva o preenchimento parcial (sem exigir todos os campos
+// nem a assinatura ainda) — tanto faz se é o cliente terminando o que o técnico começou, ou o
+// contrário. Uma vez concluído (assinado), o link vira só-leitura pra não sobrescrever a assinatura.
+rota('PUT', /^\/api\/entregas\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const item = buscarEntregaTestePorToken(data, m[1]);
+  if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  if (item.status_preenchimento === 'concluido') return enviarJSON(res, 409, { erro: 'Este comprovante já foi assinado e concluído.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req));
+  Object.assign(item, {
+    empresa: body.empresa || '', contato: body.contato || '', email: body.email || '',
+    equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+    data_entrega: body.data_entrega || '', data_prevista_devolucao: body.data_prevista_devolucao || '',
+    observacoes: body.observacoes || '',
+    assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { relatorio: await entregaTestePublica(item) });
+});
+
+// POST /api/entregas/:token/concluir — pública: envio final, com a mesma validação completa que
+// o técnico teria que passar se preenchesse tudo sozinho (todos os campos + assinatura do
+// cliente) — avisa o técnico responsável por push assim que o cliente concluir.
+rota('POST', /^\/api\/entregas\/([a-f0-9]+)\/concluir$/, async (req, res, m) => {
+  const data = db.load();
+  const item = buscarEntregaTestePorToken(data, m[1]);
+  if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  if (item.status_preenchimento === 'concluido') return enviarJSON(res, 409, { erro: 'Este comprovante já foi assinado e concluído.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const erro = validarRelatorioEntregaTeste(body);
+  if (erro) return enviarJSON(res, 400, { erro });
+  Object.assign(item, {
+    empresa: body.empresa || '', contato: body.contato || '', email: body.email || '',
+    equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
+    data_entrega: body.data_entrega || '', data_prevista_devolucao: body.data_prevista_devolucao || '',
+    observacoes: body.observacoes || '',
+    assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+    status_preenchimento: 'concluido',
+    concluido_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarPush(data, item.autor_id, {
+    titulo: 'Cliente concluiu a Entrega para Teste',
+    corpo: `${item.empresa || 'Cliente'} preencheu e assinou o comprovante de "${item.equipamento || 'equipamento'}".`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { relatorio: await entregaTestePublica(item) });
+});
+
 // GET /api/agenda?todas=1 — o técnico normalmente só vê a própria agenda ("Minha agenda"); o
 // parâmetro "todas" libera pra ele ver as O.S. de todos os técnicos (usado no menu Calendário),
 // só pra consulta — quem pode executar continua sendo decidido no front pelo tecnico_id.
@@ -2450,8 +2531,13 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     const erroLevantamento = validarRelatorioLevantamentoTecnico(body);
     if (erroLevantamento) return enviarJSON(res, 400, { erro: erroLevantamento });
   } else if (tipo === 'entrega_teste') {
-    const erroEntregaTeste = validarRelatorioEntregaTeste(body);
-    if (erroEntregaTeste) return enviarJSON(res, 400, { erro: erroEntregaTeste });
+    // rascunho: o técnico quer só salvar o que já tem e gerar o link pro cliente continuar —
+    // a validação completa (todos os campos + assinatura) só roda no envio final, seja pelo
+    // próprio técnico (aqui, sem rascunho) ou pelo cliente via link público (ver /api/entregas).
+    if (!body.rascunho) {
+      const erroEntregaTeste = validarRelatorioEntregaTeste(body);
+      if (erroEntregaTeste) return enviarJSON(res, 400, { erro: erroEntregaTeste });
+    }
   } else if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {
     return enviarJSON(res, 400, { erro: 'Empresa e equipamento são obrigatórios.' });
   }
@@ -2585,6 +2671,11 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       data_entrega: body.data_entrega || '', data_prevista_devolucao: body.data_prevista_devolucao || '',
       observacoes: body.observacoes || '',
       assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      // token que abre o link público (sem login) — o cliente usa pra preencher/continuar/
+      // assinar de longe, de qualquer dispositivo (ver rotas /api/entregas/:token mais abaixo)
+      token_publico: gerarTokenConvite(),
+      status_preenchimento: body.rascunho ? 'aguardando' : 'concluido',
+      concluido_em: body.rascunho ? null : new Date().toISOString(),
     } : {}),
   });
   // Devolutivo é o relatório pós-visita da Demonstração Técnica (ver abrirDiario no front) — marca
@@ -2771,14 +2862,19 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       observacoes_tecnicas: body.observacoes_tecnicas || '', proximos_passos: body.proximos_passos || '',
     });
   } else if (item.tipo === 'entrega_teste') {
-    const erroEntregaTeste = validarRelatorioEntregaTeste(body);
-    if (erroEntregaTeste) return enviarJSON(res, 400, { erro: erroEntregaTeste });
+    if (!body.rascunho) {
+      const erroEntregaTeste = validarRelatorioEntregaTeste(body);
+      if (erroEntregaTeste) return enviarJSON(res, 400, { erro: erroEntregaTeste });
+    }
+    if (!item.token_publico) item.token_publico = gerarTokenConvite();
     Object.assign(item, {
       empresa: body.empresa || '', contato: body.contato || '', email: body.email || '',
       equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
       data_entrega: body.data_entrega || '', data_prevista_devolucao: body.data_prevista_devolucao || '',
       observacoes: body.observacoes || '',
       assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      status_preenchimento: body.rascunho ? 'aguardando' : 'concluido',
+      concluido_em: body.rascunho ? item.concluido_em : new Date().toISOString(),
     });
   } else {
     if (!String(body.empresa || '').trim() || !String(body.equipamento || '').trim()) {

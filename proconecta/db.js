@@ -186,6 +186,15 @@ function migrar(data) {
   if (!data.chamados) data.chamados = [];
   if (data.chamados_rr_index === undefined) data.chamados_rr_index = 0;
   if (!data.relatorios_manutencao) data.relatorios_manutencao = [];
+  // Entrega para Teste ganhou um link público (token_publico) pro cliente preencher/assinar sem
+  // login — relatórios desse tipo criados antes disso existir ficam sem o token; carimba um
+  // agora e considera já concluídos (não tem como saber se estavam esperando o cliente ou não, e
+  // reabrir o link de um relatório antigo sem controle nenhum seria pior do que só deixar como está).
+  data.relatorios_manutencao.filter((r) => r.tipo === 'entrega_teste').forEach((r) => {
+    if (!r.token_publico) r.token_publico = gerarTokenConvite();
+    if (!r.status_preenchimento) r.status_preenchimento = 'concluido';
+    if (r.concluido_em === undefined) r.concluido_em = r.status_preenchimento === 'concluido' ? (r.criado_em || null) : null;
+  });
   if (!data.mensagens_internas) data.mensagens_internas = [];
   if (!data.solicitacoes_rh) data.solicitacoes_rh = [];
   if (!data._seq.solicitacoes_rh) data._seq.solicitacoes_rh = 1;

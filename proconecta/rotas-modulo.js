@@ -11,7 +11,7 @@
 
 // /api/whatsapp/webhook é chamado pelos servidores da Meta direto, sem Bearer token — a
 // verificação lá é o hub.verify_token da própria Meta (ver whatsapp.js), não o login do sistema.
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp'];
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],

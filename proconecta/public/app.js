@@ -5390,7 +5390,7 @@ async function renderRelatorioManutencao() {
         <tr>
           <td data-label="Data">${fmtData(r.criado_em)}</td>
           <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'entrega_teste' ? tag('Entrega para Teste', 'amber') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : r.tipo === 'levantamento_tecnico' ? tag('Levantamento Técnico', 'amber') : tag('Completo', 'green')}</td>
+          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'entrega_teste' ? tag(r.status_preenchimento === 'concluido' ? 'Entrega para Teste' : 'Entrega · Aguardando cliente', r.status_preenchimento === 'concluido' ? 'green' : 'amber') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : r.tipo === 'levantamento_tecnico' ? tag('Levantamento Técnico', 'amber') : tag('Completo', 'green')}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
             ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
@@ -8367,6 +8367,13 @@ function mostrarFormRelatorioEntregaTeste(existente) {
     <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Relatório de Entrega para Teste</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
 
     <div class="panel">
+      <h2>Link para o cliente preencher</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Não precisa estar presencialmente com o cliente: salve o que já souber e mande o link — ele preenche (ou completa) o que faltar e assina pelo celular dele, sem precisar de login. Você também pode continuar de onde ele parou, e vice-versa.</p>
+      <div id="ret-link-area">${blocoLinkEntregaTeste(d)}</div>
+      <button class="btn-outline-sm" style="margin-top:10px;" onclick="gerarLinkEntregaTeste()">${d.token_publico ? 'Salvar e atualizar link' : 'Salvar e gerar link para o cliente'}</button>
+    </div>
+
+    <div class="panel">
       <h2>Dados do cliente</h2>
       <div class="form-grid">
         <div class="full"><label>Empresa*</label><input id="ret-empresa" value="${esc(d.empresa)}"></div>
@@ -8414,6 +8421,47 @@ function mostrarFormRelatorioEntregaTeste(existente) {
     </div>`;
   montarAssinaturaEntregaTeste();
   window._draftSyncAtual = () => { lerCamposEntregaTeste(); salvarRascunhoManual('entrega_teste', relatorioEntregaTesteDraft, d.id, 'ret-rascunho-status'); };
+}
+
+function linkPublicoEntregaTeste(token) {
+  return `${window.location.origin}/entrega-publico.html?token=${token}`;
+}
+function blocoLinkEntregaTeste(d) {
+  if (!d.token_publico) return `<p style="font-size:13px; color:var(--ink-soft);">Nenhum link gerado ainda — salve pelo menos a empresa abaixo pra gerar um.</p>`;
+  const link = linkPublicoEntregaTeste(d.token_publico);
+  const status = d.status_preenchimento === 'concluido'
+    ? `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Concluído e assinado</span>`
+    : `<span class="tag tag-amber">Aguardando preenchimento</span>`;
+  return `
+    <div style="margin-bottom:8px;">${status}</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input readonly value="${esc(link)}" style="flex:1; min-width:220px;" onclick="this.select()">
+      <button class="btn-outline-sm" onclick="copiarLinkEntregaTeste('${esc(link)}')">Copiar link</button>
+      <a class="btn-outline-sm" href="https://wa.me/?text=${encodeURIComponent('Segue o link para preencher e assinar a entrega do equipamento para teste: ' + link)}" target="_blank" rel="noopener">Enviar no WhatsApp</a>
+    </div>`;
+}
+async function copiarLinkEntregaTeste(link) {
+  try { await navigator.clipboard.writeText(link); mostrarToast('Link copiado.'); }
+  catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o link manualmente.'); }
+}
+// salva o que já foi preenchido (sem exigir os campos todos nem a assinatura — rascunho: true no
+// corpo pula a validação completa, ver POST/PUT /api/relatorios-manutencao) e (re)gera o link
+// público — pode ser chamado tanto num relatório novo quanto num já existente, quantas vezes
+// precisar, até o cliente concluir.
+async function gerarLinkEntregaTeste() {
+  const d = relatorioEntregaTesteDraft;
+  lerCamposEntregaTeste();
+  if (!String(d.empresa || '').trim()) return alert('Informe ao menos a empresa antes de gerar o link.');
+  try {
+    const idAntes = d.id;
+    const body = { ...d, rascunho: true };
+    const { relatorio } = idAntes
+      ? await api(`/api/relatorios-manutencao/${idAntes}`, { method: 'PUT', body })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body });
+    limparRascunhoManual('entrega_teste', idAntes);
+    mostrarToast(idAntes ? 'Link atualizado.' : 'Link gerado — copie e envie pro cliente.');
+    mostrarFormRelatorioEntregaTeste(relatorio);
+  } catch (e) { alert('Erro ao gerar o link: ' + e.message); }
 }
 
 async function limparRascunhoEntregaTeste(id) {
