@@ -1672,7 +1672,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
 
       <h2>Técnico designado</h2>
       <div class="form-grid">
-        <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
+        <div class="full"><label>Técnico</label><select id="na-tecnico" onchange="atualizarTecnicoDaVez()">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
         <div class="full" style="display:flex; align-items:center; gap:8px;">
           <input type="checkbox" id="na-bonus-viagem" style="width:auto;" ${agendaItem && agendaItem.bonus_viagem ? 'checked' : ''} onchange="alternarBonusViagem()">
           <label for="na-bonus-viagem" style="margin:0; text-transform:none; font-weight:600;">💰 Conta bônus de viagem (R$200/diária) — limite de 7 diárias por técnico/mês</label>
@@ -1684,6 +1684,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
             <div><label>Dia previsto de retorno/finalização</label><input type="date" id="na-viagem-fim" value="${agendaItem && agendaItem.viagem_dia_fim_previsto ? agendaItem.viagem_dia_fim_previsto : ''}" onchange="atualizarPreviewBonusViagem()"></div>
           </div>
           <div id="na-viagem-dias-preview" style="font-size:13px; font-weight:700; color:var(--navy);"></div>
+          <div id="na-tecnico-vez-hint" style="font-size:12.5px; margin-top:8px;"></div>
         </div>
       </div>
 
@@ -1756,6 +1757,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
   }
   atualizarTipoNovaAtividade();
   atualizarGarantiaNovaAtividade();
+  if (agendaItem && agendaItem.bonus_viagem) atualizarPreviewBonusViagem();
 }
 
 function cancelarEdicaoOS() {
@@ -2002,6 +2004,9 @@ function alternarBonusViagem() {
     if (inicioEl && !inicioEl.value) inicioEl.value = (document.getElementById('na-inicio').value || '').slice(0, 10);
     if (fimEl && !fimEl.value) fimEl.value = (document.getElementById('na-fim').value || document.getElementById('na-inicio').value || '').slice(0, 10);
     atualizarPreviewBonusViagem();
+  } else {
+    const hint = document.getElementById('na-tecnico-vez-hint');
+    if (hint) hint.innerHTML = '';
   }
 }
 
@@ -2017,6 +2022,34 @@ function atualizarPreviewBonusViagem() {
   if (dias < 1) { alvo.textContent = 'O dia de retorno não pode ser antes do dia de início.'; alvo.style.color = 'var(--red)'; return; }
   alvo.style.color = 'var(--navy)';
   alvo.textContent = `${dias} diária${dias > 1 ? 's' : ''} de bônus = R$ ${dias * 200}`;
+  atualizarTecnicoDaVez();
+}
+
+// rodízio de viagens: avisa quem é o "técnico da vez" (quem está há mais tempo sem uma viagem
+// com bônus) e, se esse período coincidir com outra O.S. que ele já tem marcada, mostra o aviso
+// de conflito — sem bloquear nada aqui, é só informativo pro administrador decidir; quem trava
+// de verdade (pedindo justificativa) é o servidor, na hora de salvar.
+async function atualizarTecnicoDaVez() {
+  const hint = document.getElementById('na-tecnico-vez-hint');
+  if (!hint) return;
+  const inicio = (document.getElementById('na-viagem-inicio') || {}).value;
+  const fim = (document.getElementById('na-viagem-fim') || {}).value;
+  if (!inicio || !fim) { hint.innerHTML = ''; return; }
+  try {
+    const qs = new URLSearchParams({ inicio, fim });
+    if (agendaEmEdicaoId) qs.set('excluir_id', agendaEmEdicaoId);
+    const resp = await api(`/api/agenda/tecnico-da-vez?${qs.toString()}`);
+    if (!resp.tecnico_da_vez_id) { hint.innerHTML = ''; return; }
+    const tecnicoEscolhidoId = Number(document.getElementById('na-tecnico').value);
+    const foraDeOrdem = tecnicoEscolhidoId !== resp.tecnico_da_vez_id;
+    let html = `<span style="color:var(--ink-soft);">👉 Técnico da vez no rodízio de viagens: <b style="color:var(--navy);">${esc(resp.tecnico_da_vez_nome)}</b></span>`;
+    if (resp.conflito) {
+      html += `<div style="color:var(--amber); margin-top:4px;">⚠️ ${esc(resp.tecnico_da_vez_nome)} já tem a O.S. ${esc(resp.conflito.numero_os)} marcada de ${fmtData(resp.conflito.inicio)} a ${fmtData(resp.conflito.fim)} — por isso escolher outro técnico não precisa de justificativa.</div>`;
+    } else if (foraDeOrdem) {
+      html += `<div style="color:var(--red); margin-top:4px;">Escolher um técnico diferente do da vez vai pedir uma justificativa ao salvar.</div>`;
+    }
+    hint.innerHTML = html;
+  } catch (e) { hint.innerHTML = ''; }
 }
 
 // recalcula a cada pergunta respondida (não precisa esperar terminar o questionário) — dá só

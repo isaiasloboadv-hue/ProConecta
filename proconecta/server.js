@@ -140,6 +140,71 @@ function contarDiariasBonusMes(data, empresaId, tecnicoId, dataIso, excluirId) {
     .reduce((soma, a) => soma + diasBonusViagem(a.viagem_dia_inicio, a.viagem_dia_fim_previsto), 0);
 }
 
+// rodízio justo de viagens: o "técnico da vez" é quem está há mais tempo sem uma O.S. com bônus
+// de viagem (quem nunca viajou vem primeiro entre si). Só conta O.S. com bonus_viagem — uma O.S.
+// sem viagem não muda a vez de ninguém.
+function tecnicoDaVez(data, empresaId, excluirId) {
+  const tecnicos = tenant.listar(data, 'usuarios', empresaId).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  if (!tecnicos.length) return null;
+  const ultimaViagemPorTecnico = {};
+  for (const a of tenant.listar(data, 'agenda', empresaId)) {
+    if (a.id === excluirId || !a.bonus_viagem) continue;
+    const atual = ultimaViagemPorTecnico[a.tecnico_id];
+    if (!atual || (a.criado_em || '') > atual) ultimaViagemPorTecnico[a.tecnico_id] = a.criado_em || '';
+  }
+  const ordenados = [...tecnicos].sort((a, b) => {
+    const da = ultimaViagemPorTecnico[a.id] || ''; // nunca viajou = string vazia, vem primeiro
+    const db = ultimaViagemPorTecnico[b.id] || '';
+    if (da !== db) return da.localeCompare(db);
+    return a.nome.localeCompare(b.nome); // empate (ex.: os dois nunca viajaram) — desempata por nome, só pra ter uma ordem estável
+  });
+  return ordenados[0];
+}
+
+// o técnico "da vez" pode já ter outra O.S. marcada nos dias da nova viagem — olha o período
+// inteiro de deslocamento de cada O.S. dele quando ela também tiver bônus de viagem (fica fora
+// da base o dia inteiro), senão só o dia do próprio atendimento.
+function conflitoDeAgendaTecnico(data, empresaId, tecnicoId, diaInicio, diaFim, excluirId) {
+  const inicioTs = new Date(`${diaInicio}T00:00:00`).getTime();
+  const fimTs = new Date(`${diaFim}T23:59:59`).getTime();
+  if (isNaN(inicioTs) || isNaN(fimTs)) return null;
+  const doTecnico = tenant.listar(data, 'agenda', empresaId).filter((a) => a.id !== excluirId && a.tecnico_id === tecnicoId && !a.finalizada);
+  for (const a of doTecnico) {
+    const oIni = a.bonus_viagem && a.viagem_dia_inicio ? a.viagem_dia_inicio : String(a.data_hora_inicio || '').slice(0, 10);
+    const oFim = a.bonus_viagem && a.viagem_dia_fim_previsto ? a.viagem_dia_fim_previsto : String(a.data_hora_fim || a.data_hora_inicio || '').slice(0, 10);
+    if (!oIni || !oFim) continue;
+    const oIniTs = new Date(`${oIni}T00:00:00`).getTime();
+    const oFimTs = new Date(`${oFim}T23:59:59`).getTime();
+    if (isNaN(oIniTs) || isNaN(oFimTs)) continue;
+    if (oIniTs <= fimTs && oFimTs >= inicioTs) {
+      return { id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`, inicio: oIni, fim: oFim };
+    }
+  }
+  return null;
+}
+
+// reúne os dois motivos que exigem justificativa do administrador antes de salvar uma O.S. com
+// bônus de viagem: (1) esse técnico já passou do limite de diárias no mês, (2) esse técnico não é
+// quem está na vez do rodízio de viagens — a não ser que quem está na vez já tenha outra O.S.
+// marcada nesse período (conflito), caso em que pular a vez dele já é justificativa suficiente,
+// sem precisar de texto. Devolve null se nenhum dos dois motivos se aplica.
+function motivoExigeJustificativaViagem(data, empresaId, tecnicoId, dataHoraInicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, excluirId) {
+  const motivos = [];
+  const jaTem = contarDiariasBonusMes(data, empresaId, tecnicoId, dataHoraInicio, excluirId);
+  if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
+    motivos.push(`este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES})`);
+  }
+  const vez = tecnicoDaVez(data, empresaId, excluirId);
+  if (vez && vez.id !== tecnicoId) {
+    const conflitoDaVez = conflitoDeAgendaTecnico(data, empresaId, vez.id, viagemDiaInicio, viagemDiaFimPrevisto, excluirId);
+    if (!conflitoDaVez) {
+      motivos.push(`pelo rodízio de viagens quem está na vez é ${vez.nome}, não este técnico`);
+    }
+  }
+  if (!motivos.length) return null;
+  return `Justifique pra continuar — ${motivos.join(' — ')}.`;
+}
+
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
 function agendaComDetalhes(data, item) {
   const tecnico = data.usuarios.find((u) => u.id === item.tecnico_id && u.empresa_id === item.empresa_id);
@@ -860,6 +925,21 @@ rota('GET', /^\/api\/agenda\/proximo-numero$/, async (req, res) => {
   enviarJSON(res, 200, { numero: `OS-${String(data._seq.agenda).padStart(6, '0')}` });
 });
 
+// GET /api/agenda/tecnico-da-vez?inicio=&fim=&excluir_id= — pro formulário de Nova O.S. sugerir
+// quem é o próximo do rodízio de viagens (ver tecnicoDaVez) e avisar, sem bloquear nada, se esse
+// técnico já tem outra O.S. marcada dentro do período informado (ver conflitoDeAgendaTecnico).
+rota('GET', /^\/api\/agenda\/tecnico-da-vez$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cria ordens de serviço.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const excluirId = query.excluir_id ? Number(query.excluir_id) : null;
+  const tecnico = tecnicoDaVez(data, user.empresa_id, excluirId);
+  if (!tecnico) return enviarJSON(res, 200, { tecnico_da_vez_id: null, tecnico_da_vez_nome: null, conflito: null });
+  const conflito = (query.inicio && query.fim) ? conflitoDeAgendaTecnico(data, user.empresa_id, tecnico.id, query.inicio, query.fim, excluirId) : null;
+  enviarJSON(res, 200, { tecnico_da_vez_id: tecnico.id, tecnico_da_vez_nome: tecnico.nome, conflito });
+});
+
 // POST /api/agenda  (administrador cria atividade)
 rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -905,11 +985,11 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     if (diasNovaViagem < 1) {
       return enviarJSON(res, 400, { erro: 'O dia previsto de retorno não pode ser antes do dia de início do deslocamento.' });
     }
-    const jaTem = contarDiariasBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, null);
-    if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
+    const motivo = motivoExigeJustificativaViagem(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, null);
+    if (motivo) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
-        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
+        return enviarJSON(res, 400, { erro: motivo, precisa_justificativa: true });
       }
     }
   }
@@ -1019,11 +1099,11 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     if (diasNovaViagem < 1) {
       return enviarJSON(res, 400, { erro: 'O dia previsto de retorno não pode ser antes do dia de início do deslocamento.' });
     }
-    const jaTem = contarDiariasBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, item.id);
-    if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
+    const motivo = motivoExigeJustificativaViagem(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, item.id);
+    if (motivo) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || item.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
-        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
+        return enviarJSON(res, 400, { erro: motivo, precisa_justificativa: true });
       }
     }
   }
