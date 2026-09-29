@@ -5356,16 +5356,127 @@ function mostrarFormRelatorioManual(tipo) {
   else main.insertAdjacentHTML('afterbegin', seletorHtml);
 }
 
+// mapa completo tipo→rótulo (cobre TODOS os tipos que podem existir nos dados, não só os que
+// tiposRelatorioManual() deixa o papel atual criar) — usado no filtro "Tipo" do admin.
+const TIPOS_RELATORIO_MANUT_LABEL = {
+  completo: 'Completo', ficha: 'Ficha', ciclagem: 'Ciclagem', preventiva: 'Preventiva',
+  corretiva: 'Corretiva', relatorio_tecnico: 'Relatório Técnico', aceite_entrega: 'Termo de Aceite',
+  entrega_teste: 'Entrega para Teste', promotor: 'Promotor', devolutivo: 'Devolutivo',
+  levantamento_tecnico: 'Levantamento Técnico',
+};
+
+function tagTipoRelatorioManut(r) {
+  if (r.tipo === 'ficha') return tag('Ficha', 'blue');
+  if (r.tipo === 'ciclagem') return tag('Ciclagem', 'purple');
+  if (r.tipo === 'preventiva') return tag('Preventiva', 'amber');
+  if (r.tipo === 'corretiva') return tag('Corretiva', 'orange');
+  if (r.tipo === 'relatorio_tecnico') return tag('Relatório Técnico', 'purple');
+  if (r.tipo === 'aceite_entrega') return tag('Termo de Aceite', 'blue');
+  if (r.tipo === 'entrega_teste') return tag(r.status_preenchimento === 'concluido' ? 'Entrega para Teste' : 'Entrega · Aguardando cliente', r.status_preenchimento === 'concluido' ? 'green' : 'amber');
+  if (r.tipo === 'promotor') return tag('Promotor', 'blue');
+  if (r.tipo === 'devolutivo') return tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple');
+  if (r.tipo === 'levantamento_tecnico') return tag('Levantamento Técnico', 'amber');
+  return tag('Completo', 'green');
+}
+
+// filtro do admin (Tipo/Técnico/Empresa/O.S./Período/busca livre) — cada relatório é confrontado
+// contra o estado atual de window._relatoriosManutFiltro.
+function relatorioManutPassaFiltro(r, f) {
+  if (f.tipo && r.tipo !== f.tipo) return false;
+  if (f.tecnico && r.autor_nome !== f.tecnico) return false;
+  if (f.empresa && r.empresa !== f.empresa) return false;
+  if (f.os && r.numero_os !== f.os) return false;
+  if (f.periodo) {
+    if (!r.criado_em) return false;
+    const dt = new Date(r.criado_em);
+    if (isNaN(dt)) return false;
+    const agora = new Date();
+    if (f.periodo === 'dia') {
+      if (dt.toDateString() !== agora.toDateString()) return false;
+    } else if (f.periodo === 'semana') {
+      const limite = new Date(agora); limite.setDate(agora.getDate() - 7);
+      if (dt < limite || dt > agora) return false;
+    } else if (f.periodo === 'mes') {
+      if (dt.getFullYear() !== agora.getFullYear() || dt.getMonth() !== agora.getMonth()) return false;
+    }
+  }
+  if (f.busca && f.busca.trim()) {
+    const termo = f.busca.trim().toLowerCase();
+    const texto = [r.empresa, r.autor_nome, TIPOS_RELATORIO_MANUT_LABEL[r.tipo] || r.tipo, r.equipamento, r.numero_os, r.contato, r.modelo_maquina, r.equipamento_demonstrado, r.escopo_proposto, r.promotor]
+      .filter(Boolean).join(' ').toLowerCase();
+    if (!texto.includes(termo)) return false;
+  }
+  return true;
+}
+
+// só as linhas da tabela (não a página inteira) — separado pra poder redesenhar em resposta à
+// busca livre sem recriar o <input>, senão o cursor/foco pula fora a cada tecla digitada.
+function linhasRelatorioManut() {
+  const relatorios = window._relatoriosManutCache || [];
+  const f = window._relatoriosManutFiltro || {};
+  const filtrados = relatorios.map((r, i) => ({ r, i })).filter(({ r }) => relatorioManutPassaFiltro(r, f));
+  if (!filtrados.length) {
+    if (relatorios.length) return `<tr><td colspan="4" class="empty">Nenhum relatório encontrado com esses filtros.</td></tr>`;
+    return rascunhosNovosPendentes().length ? '' : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`;
+  }
+  return filtrados.map(({ r, i }) => `
+    <tr>
+      <td data-label="Data">${fmtData(r.criado_em)}</td>
+      <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
+      <td data-label="Tipo">${tagTipoRelatorioManut(r)}</td>
+      <td class="td-acoes">
+        <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
+        ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
+        ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+        <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
+        <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+      </td>
+    </tr>`).join('');
+}
+
+function atualizarFiltroRelatorioManut(campo, valor) {
+  window._relatoriosManutFiltro = window._relatoriosManutFiltro || {};
+  window._relatoriosManutFiltro[campo] = valor;
+  if (campo === 'busca') {
+    const tbody = document.getElementById('rf-linhas');
+    if (tbody) tbody.innerHTML = linhasRelatorioManut();
+  } else {
+    desenharRelatorioManutencao();
+  }
+}
+
+function limparFiltrosRelatorioManut() {
+  window._relatoriosManutFiltro = { tipo: '', tecnico: '', empresa: '', os: '', periodo: '', busca: '' };
+  desenharRelatorioManutencao();
+}
+
 async function renderRelatorioManutencao() {
-  const { relatorios } = await api('/api/relatorios-manutencao/meus');
+  // administrador vê o relatório de todo mundo (qualquer tipo), com filtro de busca; o técnico
+  // continua vendo só os que ele mesmo criou, sem os filtros (não faz sentido filtrar por
+  // técnico/empresa numa lista que já é só dele).
+  const { relatorios } = await api('/api/relatorios-manutencao/meus' + (USER.papel === 'administrador' ? '?todas=1' : ''));
   window._relatoriosManutCache = relatorios;
+  window._relatoriosManutFiltro = { tipo: '', tecnico: '', empresa: '', os: '', periodo: '', busca: '' };
+  desenharRelatorioManutencao();
+}
+
+function desenharRelatorioManutencao() {
+  const relatorios = window._relatoriosManutCache || [];
+  const f = window._relatoriosManutFiltro || {};
   // rascunhos ainda não enviados (salvos só neste dispositivo) — mostrados junto na lista,
   // marcados como "Rascunho", pra ficar claro que falta concluir e dar como retomar/descartar.
   const pendentes = rascunhosNovosPendentes();
   const main = document.getElementById('main');
+  const podeFiltrar = USER.papel === 'administrador';
+
+  const tiposPresentes = [...new Set(relatorios.map((r) => r.tipo))].sort((a, b) => (TIPOS_RELATORIO_MANUT_LABEL[a] || a).localeCompare(TIPOS_RELATORIO_MANUT_LABEL[b] || b));
+  const tecnicosPresentes = [...new Set(relatorios.map((r) => r.autor_nome).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const empresasPresentes = [...new Set(relatorios.map((r) => r.empresa).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const osPresentes = [...new Set(relatorios.map((r) => r.numero_os).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Relatório</h1><p>A maioria é avulsa (sem vínculo com O.S.); o Promotor e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.</p></div>
+      <div><h1>Relatório</h1><p>${podeFiltrar ? 'Relatórios de todos os técnicos, de qualquer tipo. Use os filtros abaixo pra encontrar um específico.' : 'A maioria é avulsa (sem vínculo com O.S.); o Promotor e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.'}</p></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">Manual</button>
         ${USER.papel === 'suporte' ? `
@@ -5374,31 +5485,58 @@ async function renderRelatorioManutencao() {
         ` : ''}
       </div>
     </div>
+    ${podeFiltrar ? `
+    <div class="filtros-row">
+      <div class="field"><label>Tipo</label>
+        <select id="rf-tipo" onchange="atualizarFiltroRelatorioManut('tipo', this.value)">
+          <option value="">Todos os tipos</option>
+          ${tiposPresentes.map((tp) => `<option value="${esc(tp)}" ${f.tipo === tp ? 'selected' : ''}>${esc(TIPOS_RELATORIO_MANUT_LABEL[tp] || tp)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Técnico</label>
+        <select id="rf-tecnico" onchange="atualizarFiltroRelatorioManut('tecnico', this.value)">
+          <option value="">Todos os técnicos</option>
+          ${tecnicosPresentes.map((n) => `<option value="${esc(n)}" ${f.tecnico === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Empresa</label>
+        <select id="rf-empresa" onchange="atualizarFiltroRelatorioManut('empresa', this.value)">
+          <option value="">Todas as empresas</option>
+          ${empresasPresentes.map((n) => `<option value="${esc(n)}" ${f.empresa === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>O.S.</label>
+        <select id="rf-os" onchange="atualizarFiltroRelatorioManut('os', this.value)">
+          <option value="">Todas as O.S.</option>
+          ${osPresentes.map((n) => `<option value="${esc(n)}" ${f.os === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Período</label>
+        <select id="rf-periodo" onchange="atualizarFiltroRelatorioManut('periodo', this.value)">
+          <option value="">Qualquer data</option>
+          <option value="dia" ${f.periodo === 'dia' ? 'selected' : ''}>Hoje</option>
+          <option value="semana" ${f.periodo === 'semana' ? 'selected' : ''}>Últimos 7 dias</option>
+          <option value="mes" ${f.periodo === 'mes' ? 'selected' : ''}>Este mês</option>
+        </select>
+      </div>
+      <div class="field"><label>Buscar</label><input id="rf-busca" value="${esc(f.busca || '')}" placeholder="empresa, técnico, equipamento, O.S..." oninput="atualizarFiltroRelatorioManut('busca', this.value)"></div>
+      <button class="btn-outline-sm" style="align-self:flex-end;" onclick="limparFiltrosRelatorioManut()">Limpar filtros</button>
+    </div>` : ''}
     <div class="panel"><table>
-      <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
-      ${pendentes.map((p) => `
-        <tr style="background:var(--amber-bg);">
-          <td data-label="Data">${p.salvoEmISO ? fmtData(p.salvoEmISO) : `Salvo às ${esc(p.em)}`}</td>
-          <td data-label="Descrição">${descricaoRelatorioManutencao(p.draft)}</td>
-          <td data-label="Tipo">${tag('Rascunho · ' + p.label, 'amber')}</td>
-          <td class="td-acoes">
-            <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual('${p.tipo}')">Continuar</button>
-            <button class="btn-outline-sm" onclick="descartarRascunhoPendente('${p.tipo}')" style="color:var(--red); border-color:var(--red);">Descartar</button>
-          </td>
-        </tr>`).join('')}
-      ${relatorios.length ? relatorios.map((r, i) => `
-        <tr>
-          <td data-label="Data">${fmtData(r.criado_em)}</td>
-          <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
-          <td data-label="Tipo">${r.tipo === 'ficha' ? tag('Ficha', 'blue') : r.tipo === 'ciclagem' ? tag('Ciclagem', 'purple') : r.tipo === 'preventiva' ? tag('Preventiva', 'amber') : r.tipo === 'corretiva' ? tag('Corretiva', 'orange') : r.tipo === 'relatorio_tecnico' ? tag('Relatório Técnico', 'purple') : r.tipo === 'aceite_entrega' ? tag('Termo de Aceite', 'blue') : r.tipo === 'entrega_teste' ? tag(r.status_preenchimento === 'concluido' ? 'Entrega para Teste' : 'Entrega · Aguardando cliente', r.status_preenchimento === 'concluido' ? 'green' : 'amber') : r.tipo === 'promotor' ? tag('Promotor', 'blue') : r.tipo === 'devolutivo' ? tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple') : r.tipo === 'levantamento_tecnico' ? tag('Levantamento Técnico', 'amber') : tag('Completo', 'green')}</td>
-          <td class="td-acoes">
-            <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
-            ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-            ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
-            <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
-            <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
-          </td>
-        </tr>`).join('') : (pendentes.length ? '' : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`)}
+      <tbody>
+        <tr><th>Data</th><th>Descrição</th><th>Tipo</th><th></th></tr>
+        ${pendentes.map((p) => `
+          <tr style="background:var(--amber-bg);">
+            <td data-label="Data">${p.salvoEmISO ? fmtData(p.salvoEmISO) : `Salvo às ${esc(p.em)}`}</td>
+            <td data-label="Descrição">${descricaoRelatorioManutencao(p.draft)}</td>
+            <td data-label="Tipo">${tag('Rascunho · ' + p.label, 'amber')}</td>
+            <td class="td-acoes">
+              <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual('${p.tipo}')">Continuar</button>
+              <button class="btn-outline-sm" onclick="descartarRascunhoPendente('${p.tipo}')" style="color:var(--red); border-color:var(--red);">Descartar</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+      <tbody id="rf-linhas">${linhasRelatorioManut()}</tbody>
     </table></div>`;
 }
 

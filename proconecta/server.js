@@ -2422,9 +2422,17 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   if (!(user.papel === 'administrador' && query.todas === '1')) {
     lista = lista.filter((r) => r.autor_id === user.id);
   }
+  const agendaDaEmpresa = tenant.listar(data, 'agenda', user.empresa_id);
   lista = lista
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''))
-    .map((r) => { const { fotos, ...resto } = r; return resto; });
+    .map((r) => {
+      const { fotos, ...resto } = r;
+      if (r.agenda_id) {
+        const os = agendaDaEmpresa.find((a) => a.id === r.agenda_id);
+        if (os) resto.numero_os = os.numero_os || `OS-${String(os.id).padStart(6, '0')}`;
+      }
+      return resto;
+    });
   enviarJSON(res, 200, { relatorios: lista });
 });
 
@@ -2433,7 +2441,9 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
-  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
+  // administrador vê/reabre o relatório de qualquer técnico (tela "Relatório" com filtro por
+  // todo mundo); o técnico continua só vendo os que ele mesmo criou.
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
@@ -2689,16 +2699,15 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   enviarJSON(res, 201, { relatorio: item });
 });
 
-// PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou.
+// PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou; o
+// administrador também edita o de qualquer técnico (tela "Relatório" com filtro por todo mundo).
 // O tipo (completo/ficha/ciclagem) é fixo desde a criação — só os campos daquele tipo são atualizados.
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  // a busca abaixo já trava em autor_id === user.id, então um administrador só edita os
-  // "Promotor" que ele mesmo criou (é o único tipo que ele consegue criar — ver POST acima).
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const data = db.load();
-  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   if (item.tipo === 'ficha') {
@@ -2898,12 +2907,13 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { relatorio: item });
 });
 
-// DELETE /api/relatorios-manutencao/:id — o próprio autor pode apagar um relatório que criou
+// DELETE /api/relatorios-manutencao/:id — o próprio autor pode apagar um relatório que criou;
+// o administrador também apaga o de qualquer técnico.
 rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
-  const relatorioExcluir = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.autor_id === user.id && r.empresa_id === user.empresa_id);
+  const relatorioExcluir = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
   if (!relatorioExcluir) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   data.relatorios_manutencao = data.relatorios_manutencao.filter((r) => r.id !== relatorioExcluir.id);
   db.save(data);
