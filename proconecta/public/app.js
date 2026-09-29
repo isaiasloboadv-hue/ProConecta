@@ -13427,12 +13427,11 @@ function mostrarModalSucesso(mensagem) {
     </div>`;
 }
 
+// mostrarToast fica só como o nome usado nos ~96 pontos de confirmação espalhados pelo
+// sistema — todo mundo passou a usar o mesmo modal de sucesso (fundo branco, ícone verde,
+// botão azul "Ok"), em vez do toast pequeno que sumia sozinho no canto da tela.
 function mostrarToast(texto) {
-  const toast = document.getElementById('toast');
-  toast.textContent = texto;
-  toast.classList.add('show');
-  clearTimeout(window._toastTimer);
-  window._toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+  mostrarModalSucesso(texto);
 }
 
 // ---------- Técnicos: acompanhamento de viagens/bônus + solicitações de RH ----------
