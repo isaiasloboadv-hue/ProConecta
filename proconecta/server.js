@@ -1150,9 +1150,10 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
 // GET /api/tecnicos/viagens?mes=AAAA-MM — acompanhamento do bônus de viagem por técnico: quantas
 // diárias cada um somou no mês (1 por dia corrido entre o início do deslocamento e a chegada de
 // volta, ver diasBonusViagem), o valor total (R$200 por diária), quantas viagens (O.S. em-loco)
-// não somaram bônus (nem toda região paga), e quantas vezes ele foi escolhido fora da ordem do
-// rodízio (fora_de_ordem_viagem, ver motivoExigeJustificativaViagem — toda escolha fora de ordem
-// já exige justificativa antes de a O.S. poder ser salva).
+// não somaram bônus (nem toda região paga), e quantas precisaram de justificativa do
+// administrador (com_justificativa — seja por passar do limite de diárias, seja por ser escolha
+// fora da ordem do rodízio, ver motivoExigeJustificativaViagem; qualquer uma das duas já bloqueia
+// a O.S. de ser salva sem justificativa, por isso as duas contam junto pro selo vermelho).
 rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha o bônus de viagem.' });
@@ -1176,7 +1177,7 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
       dias_total: diasTotal,
       valor_total: diasTotal * VALOR_BONUS_VIAGEM,
       passou_limite: diasTotal > LIMITE_VIAGENS_BONUS_MES,
-      fora_de_ordem: viagens.filter((a) => a.fora_de_ordem_viagem).length,
+      com_justificativa: viagens.filter((a) => a.justificativa_limite_viagens).length,
       viagens: viagensComDias.map(({ item: a, dias }) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
         cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || a.cliente_nome_manual || '—',
