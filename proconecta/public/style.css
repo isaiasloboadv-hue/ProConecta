@@ -282,6 +282,7 @@ textarea{resize:vertical;min-height:64px;}
 .tag-amber{background:var(--amber-bg);color:var(--amber);}
 .tag-orange{background:var(--orange-bg);color:var(--orange);}
 .tag-purple{background:var(--purple-bg);color:var(--purple);}
+.tag-gray{background:#EEF1F6;color:var(--ink-soft);}
 .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;}
 .badge-pendente{background:var(--amber-bg);color:var(--amber);}
 .badge-aprovado{background:var(--green-bg);color:var(--green);}

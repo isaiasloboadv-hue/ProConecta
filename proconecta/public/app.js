@@ -13586,10 +13586,9 @@ async function carregarAcompanhamento() {
           <td data-label="Viagens">${t.quantidade}</td>
           <td data-label="Diárias">${t.dias_total}${t.passou_limite ? ` ${tag(`acima do limite (${limite})`, 'falha')}` : ''}</td>
           <td data-label="Bônus (R$)">R$ ${t.valor_total}</td>
-          <td>${t.quantidade ? `<button class="btn-outline-sm" onclick="mostrarDetalheViagens(${t.tecnico_id})">Ver viagens</button>` : ''}</td>
+          <td>${(t.quantidade || t.quantidade_sem_bonus) ? `<button class="btn-outline-sm" onclick="abrirDetalheViagensTecnico(${t.tecnico_id})">Ver viagens</button>` : ''}</td>
         </tr>`).join('')}
-    </table></div>
-    <div id="acomp-detalhe"></div>` : `<p class="empty">Nenhum técnico com viagens de bônus neste mês.</p>`;
+    </table></div>` : `<p class="empty">Nenhum técnico com viagens de bônus neste mês.</p>`;
 }
 
 // gráfico horizontal: duas barras por técnico — viagens que somam bônus de diária e viagens
@@ -13614,7 +13613,7 @@ function graficoViagensHTML(tecnicos) {
       </div>
       <div class="viagens-chart">
         ${tecnicos.map((t) => `
-          <div class="viagens-chart-row ${t.quantidade ? 'clicavel' : ''}" ${t.quantidade ? `onclick="mostrarDetalheViagens(${t.tecnico_id})" title="Ver as O.S. de ${esc(t.tecnico_nome)}"` : ''}>
+          <div class="viagens-chart-row ${(t.quantidade || t.quantidade_sem_bonus) ? 'clicavel' : ''}" ${(t.quantidade || t.quantidade_sem_bonus) ? `onclick="abrirDetalheViagensTecnico(${t.tecnico_id})" title="Ver as O.S. de ${esc(t.tecnico_nome)}"` : ''}>
             <div class="viagens-chart-nome" title="${esc(t.tecnico_nome)}">${esc(t.tecnico_nome)}</div>
             <div class="viagens-chart-bars">
               <div class="viagens-chart-bar-wrap">
@@ -13630,24 +13629,43 @@ function graficoViagensHTML(tecnicos) {
     </div>`;
 }
 
-function mostrarDetalheViagens(tecnicoId) {
+// tela separada com as O.S. do técnico no mês, juntando as que somam bônus e as que não somam
+// numa lista só — cada linha marcada com a mesma cor do gráfico (azul = bônus, cinza = sem
+// bônus), pra não ficar tudo empilhado numa página só nem esconder as O.S. sem bônus que o
+// gráfico já conta na segunda barra.
+function abrirDetalheViagensTecnico(tecnicoId) {
   const resp = window._acompanhamentoCache || {};
   const t = (resp.tecnicos || []).find((x) => x.tecnico_id === tecnicoId);
-  const alvo = document.getElementById('acomp-detalhe');
-  if (!t || !alvo) return;
-  alvo.innerHTML = `
-    <div class="panel"><div class="panel-head">Viagens de ${esc(t.tecnico_nome)}</div><table>
-      <tr><th>O.S.</th><th>Cliente</th><th>Período</th><th>Diárias</th><th>Justificativa</th></tr>
-      ${t.viagens.map((v) => `
-        <tr>
-          <td data-label="O.S.">${esc(v.numero_os)}</td>
-          <td data-label="Cliente">${esc(v.cliente_nome)}</td>
-          <td data-label="Período">${v.viagem_dia_inicio && v.viagem_dia_fim_previsto ? `${fmtData(v.viagem_dia_inicio)} – ${fmtData(v.viagem_dia_fim_previsto)}` : fmtData(v.data_hora_inicio)}</td>
-          <td data-label="Diárias">${v.dias}</td>
-          <td data-label="Justificativa">${v.fora_de_ordem_viagem ? `${tag('fora da ordem', 'falha')} ` : ''}${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}</td>
-        </tr>`).join('')}
-    </table></div>`;
-  alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const main = document.getElementById('main');
+  if (!t || !main) return;
+  const itens = [
+    ...t.viagens.map((v) => ({ ...v, categoria: 'bonus' })),
+    ...t.viagens_sem_bonus.map((v) => ({ ...v, categoria: 'sem-bonus' })),
+  ].sort((a, b) => (a.data_hora_inicio || '').localeCompare(b.data_hora_inicio || ''));
+  const [ano, mesNum] = (resp.mes || '').split('-');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Viagens de ${esc(t.tecnico_nome)}</h1><p>${mesNum && ano ? `${mesNum}/${ano} — ` : ''}${t.viagens.length} com bônus de diária, ${t.viagens_sem_bonus.length} sem bônus</p></div>
+      <button class="btn-outline-sm" onclick="renderTecnicosAcompanhamento()">‹ Voltar</button>
+    </div>
+    <div class="panel">
+      <div class="viagens-chart-legenda">
+        <span><i class="viagens-chart-dot bonus"></i> Com bônus de diária</span>
+        <span><i class="viagens-chart-dot sem-bonus"></i> Sem bônus</span>
+      </div>
+      ${itens.length ? `<table>
+        <tr><th>Tipo</th><th>O.S.</th><th>Cliente</th><th>Data</th><th>Diárias</th><th>Justificativa</th></tr>
+        ${itens.map((v) => `
+          <tr>
+            <td data-label="Tipo">${v.categoria === 'bonus' ? tag('Com bônus', 'blue') : tag('Sem bônus', 'gray')}</td>
+            <td data-label="O.S.">${esc(v.numero_os)}</td>
+            <td data-label="Cliente">${esc(v.cliente_nome)}</td>
+            <td data-label="Data">${v.categoria === 'bonus' && v.viagem_dia_inicio && v.viagem_dia_fim_previsto ? `${fmtData(v.viagem_dia_inicio)} – ${fmtData(v.viagem_dia_fim_previsto)}` : fmtData(v.data_hora_inicio)}</td>
+            <td data-label="Diárias">${v.categoria === 'bonus' ? v.dias : '—'}</td>
+            <td data-label="Justificativa">${v.categoria === 'bonus' ? `${v.fora_de_ordem_viagem ? `${tag('fora da ordem', 'falha')} ` : ''}${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}` : '—'}</td>
+          </tr>`).join('')}
+      </table>` : `<p class="empty">Nenhuma O.S. deste técnico neste mês.</p>`}
+    </div>`;
 }
 
 let solicitacoesRHFiltroTipo = '';

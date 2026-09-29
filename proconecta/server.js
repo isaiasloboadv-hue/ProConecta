@@ -1187,6 +1187,15 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
         fora_de_ordem_viagem: !!a.fora_de_ordem_viagem,
         justificativa_limite_viagens: a.justificativa_limite_viagens || '',
       })),
+      // O.S. em-loco do mês que NÃO somaram bônus — mostradas junto na tela de detalhe do
+      // técnico, separadas por cor da que soma bônus (ver quantidade_sem_bonus acima)
+      viagens_sem_bonus: doTecnicoNoMes.filter((a) => a.categoria === 'inloco' && !a.bonus_viagem)
+        .sort((x, y) => (x.data_hora_inicio || '').localeCompare(y.data_hora_inicio || ''))
+        .map((a) => ({
+          id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
+          cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || a.cliente_nome_manual || '—',
+          data_hora_inicio: a.data_hora_inicio,
+        })),
     };
   }).sort((a, b) => b.dias_total - a.dias_total);
   enviarJSON(res, 200, { mes, limite: LIMITE_VIAGENS_BONUS_MES, valor_bonus: VALOR_BONUS_VIAGEM, tecnicos: porTecnico });
