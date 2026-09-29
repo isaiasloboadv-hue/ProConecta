@@ -982,7 +982,7 @@ async function salvarAdministradorPlataforma(adminId) {
 }
 
 async function excluirAdministradorPlataforma(adminId) {
-  if (!confirm('Excluir este administrador? Se for o único da empresa, ninguém mais vai conseguir logar nela até criar outro.')) return;
+  if (!(await mostrarConfirmacao('Excluir este administrador? Se for o único da empresa, ninguém mais vai conseguir logar nela até criar outro.'))) return;
   try {
     await api(`/api/plataforma/administradores/${adminId}`, { method: 'DELETE' });
     mostrarToast('Administrador excluído.');
@@ -2457,8 +2457,8 @@ function atualizarRascunho(semLerCampos) {
   } catch (e) {}
 }
 
-function limparRelatorio(agendaId) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+async function limparRelatorio(agendaId) {
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   localStorage.removeItem(chaveRascunho(agendaId));
   renderRelatorioCorretiva(relatorioAgendaAtual);
 }
@@ -3004,8 +3004,8 @@ function atualizarRascunhoLaudo(semLerCampos) {
   } catch (e) {}
 }
 
-function limparLaudo(agendaId) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+async function limparLaudo(agendaId) {
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   localStorage.removeItem(chaveRascunhoLaudo(agendaId, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico));
   renderLaudoTecnico(laudoAgendaAtual);
 }
@@ -3627,7 +3627,7 @@ function acoesOS(a, visita) {
 }
 
 async function finalizarOS(id) {
-  if (!confirm('Confirma que a empresa já deu o retorno concordando com o serviço prestado? Depois de finalizada, esta O.S. não pode mais ser alterada — um novo atendimento vai precisar de uma O.S. nova.')) return;
+  if (!(await mostrarConfirmacao('Confirma que a empresa já deu o retorno concordando com o serviço prestado? Depois de finalizada, esta O.S. não pode mais ser alterada — um novo atendimento vai precisar de uma O.S. nova.'))) return;
   try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST' }); mostrarToast('O.S. finalizada.'); voltarListaOS(); }
   catch (e) { alert('Erro ao finalizar: ' + e.message); }
 }
@@ -3635,7 +3635,7 @@ async function finalizarOS(id) {
 // escape hatch: o administrador pode finalizar direto quando julgar necessário, pulando
 // orçamento/retorno do técnico/feedback do cliente/prazo de 1 dia — usado com moderação
 async function finalizarForcadoOS(id) {
-  if (!confirm('Isso finaliza a O.S. pulando as etapas pendentes (orçamento, retorno do técnico, feedback do cliente, prazo de 1 dia). Confirma que quer finalizar assim mesmo?')) return;
+  if (!(await mostrarConfirmacao('Isso finaliza a O.S. pulando as etapas pendentes (orçamento, retorno do técnico, feedback do cliente, prazo de 1 dia). Confirma que quer finalizar assim mesmo?'))) return;
   try { await api(`/api/agenda/${id}/finalizar`, { method: 'POST', body: { forcar: true } }); mostrarToast('O.S. finalizada — etapas puladas.'); voltarListaOS(); }
   catch (e) { alert('Erro ao finalizar: ' + e.message); }
 }
@@ -3643,7 +3643,7 @@ async function finalizarForcadoOS(id) {
 // 2ª etapa da linha do tempo: o admin confirma que o cliente já aceitou o agendamento —
 // libera o técnico pra iniciar o deslocamento e executar a O.S. (ficam bloqueados até aqui)
 async function confirmarClienteOS(id) {
-  if (!confirm('Confirma que o cliente já aceitou este agendamento? Isso libera o técnico para iniciar o deslocamento e executar a O.S.')) return;
+  if (!(await mostrarConfirmacao('Confirma que o cliente já aceitou este agendamento? Isso libera o técnico para iniciar o deslocamento e executar a O.S.'))) return;
   try { await api(`/api/agenda/${id}/confirmar-cliente`, { method: 'POST' }); mostrarToast('Cliente confirmado — o técnico já pode prosseguir.'); voltarListaOS(); }
   catch (e) { alert('Erro ao confirmar: ' + e.message); }
 }
@@ -3651,7 +3651,7 @@ async function confirmarClienteOS(id) {
 // passo entre a aprovação do relatório e a finalização da O.S.: o admin registra que o
 // cliente aprovou o serviço ("Cliente OK") — só depois disso o botão Finalizar O.S. libera
 async function registrarFeedbackOS(id) {
-  if (!confirm('Confirma que o cliente aprovou o serviço prestado?')) return;
+  if (!(await mostrarConfirmacao('Confirma que o cliente aprovou o serviço prestado?'))) return;
   try { await api(`/api/agenda/${id}/registrar-feedback`, { method: 'POST' }); mostrarToast('Feedback do cliente registrado.'); voltarListaOS(); }
   catch (e) { alert('Erro ao registrar feedback: ' + e.message); }
 }
@@ -3660,13 +3660,13 @@ async function registrarFeedbackOS(id) {
 // seguir — se o técnico também marcou necessidade de retorno, libera pra ele enviar um
 // segundo relatório antes de chegar na etapa de feedback do cliente
 async function orcamentoAprovadoOS(id) {
-  if (!confirm('Confirma que o orçamento das peças fornecidas foi aprovado?')) return;
+  if (!(await mostrarConfirmacao('Confirma que o orçamento das peças fornecidas foi aprovado?'))) return;
   try { await api(`/api/agenda/${id}/orcamento-aprovado`, { method: 'POST' }); mostrarToast('Orçamento aprovado.'); voltarListaOS(); }
   catch (e) { alert('Erro ao aprovar orçamento: ' + e.message); }
 }
 
 async function orcamentoReprovadoOS(id) {
-  if (!confirm('Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada, sem mais serviço a fazer.')) return;
+  if (!(await mostrarConfirmacao('Confirma que o cliente não aprovou o orçamento? A O.S. será finalizada, sem mais serviço a fazer.'))) return;
   try { await api(`/api/agenda/${id}/orcamento-reprovado`, { method: 'POST' }); mostrarToast('Orçamento reprovado — O.S. finalizada.'); voltarListaOS(); }
   catch (e) { alert('Erro ao reprovar orçamento: ' + e.message); }
 }
@@ -3674,7 +3674,7 @@ async function orcamentoReprovadoOS(id) {
 // feedback negativo do cliente: precisa de um retorno do técnico (ex.: novo treinamento) —
 // marca a O.S. como retrabalho e libera pro técnico enviar um segundo relatório
 async function retrabalhoOS(id) {
-  if (!confirm('Confirma que o cliente deu um feedback negativo e precisa de um retorno do técnico? Isso marca a O.S. como retrabalho.')) return;
+  if (!(await mostrarConfirmacao('Confirma que o cliente deu um feedback negativo e precisa de um retorno do técnico? Isso marca a O.S. como retrabalho.'))) return;
   try { await api(`/api/agenda/${id}/retrabalho`, { method: 'POST' }); mostrarToast('Retrabalho registrado — o técnico foi avisado.'); voltarListaOS(); }
   catch (e) { alert('Erro ao registrar retrabalho: ' + e.message); }
 }
@@ -3683,7 +3683,7 @@ async function retrabalhoOS(id) {
 // novo deslocamento, ou retrabalho por feedback negativo) — libera o técnico pra iniciar o
 // deslocamento do retorno
 async function confirmarClienteRetornoOS(id) {
-  if (!confirm('Confirma que o cliente já aceitou o retorno do técnico? Isso libera o técnico para iniciar o deslocamento do retorno.')) return;
+  if (!(await mostrarConfirmacao('Confirma que o cliente já aceitou o retorno do técnico? Isso libera o técnico para iniciar o deslocamento do retorno.'))) return;
   try { await api(`/api/agenda/${id}/retorno/confirmar-cliente`, { method: 'POST' }); mostrarToast('Cliente confirmado — o técnico já pode prosseguir com o retorno.'); voltarListaOS(); }
   catch (e) { alert('Erro ao confirmar: ' + e.message); }
 }
@@ -3724,7 +3724,7 @@ function editarOS(id) {
 }
 
 async function excluirOS(id) {
-  if (!confirm('Excluir esta Ordem de Serviço? O relatório e o registro de biblioteca vinculados (se houver) também serão excluídos. Esta ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir esta Ordem de Serviço? O relatório e o registro de biblioteca vinculados (se houver) também serão excluídos. Esta ação não pode ser desfeita.'))) return;
   try {
     await api(`/api/agenda/${id}`, { method: 'DELETE' });
     mostrarToast('Ordem de serviço excluída.');
@@ -4098,7 +4098,7 @@ async function sugerirEdicaoVisita(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 async function reabrirVisita(id) {
-  if (!confirm('Reabrir este relatório? Ele volta para a fila de aprovação e o técnico pode editá-lo novamente.')) return;
+  if (!(await mostrarConfirmacao('Reabrir este relatório? Ele volta para a fila de aprovação e o técnico pode editá-lo novamente.'))) return;
   try { await api(`/api/visitas/${id}/reabrir`, { method: 'POST' }); mostrarToast('Relatório reaberto.'); voltarListaOS(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
@@ -4107,7 +4107,7 @@ async function recusarReabertura(id) {
   catch (e) { alert('Erro: ' + e.message); }
 }
 async function excluirVisita(id) {
-  if (!confirm('Excluir este relatório definitivamente? Se ele já tiver entrado na biblioteca, o caso também é removido. Essa ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir este relatório definitivamente? Se ele já tiver entrado na biblioteca, o caso também é removido. Essa ação não pode ser desfeita.'))) return;
   try { await api(`/api/visitas/${id}`, { method: 'DELETE' }); mostrarToast('Relatório excluído.'); voltarListaOS(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
@@ -4146,7 +4146,7 @@ function botaoDeslocamento(a) {
 }
 
 async function iniciarDeslocamento(id) {
-  if (!confirm('Confirma que você está saindo agora para este atendimento? O administrador vai ser avisado.')) return;
+  if (!(await mostrarConfirmacao('Confirma que você está saindo agora para este atendimento? O administrador vai ser avisado.'))) return;
   try {
     const { agenda, origem_retorno } = await api(`/api/agenda/${id}/iniciar-deslocamento`, { method: 'POST' });
     mostrarToast('Deslocamento iniciado — o administrador foi avisado.');
@@ -4204,7 +4204,7 @@ function fecharModalNavegacao() {
 // botão "Registrar chegada": só depois de iniciar o deslocamento, e antes de poder executar
 // (preencher o relatório) — mesmo padrão do registrarChegadaRetorno, pro primeiro deslocamento
 async function confirmarChegada(id) {
-  if (!confirm('Confirma que você já chegou no cliente?')) return;
+  if (!(await mostrarConfirmacao('Confirma que você já chegou no cliente?'))) return;
   try {
     const { agenda, origem_retorno } = await api(`/api/agenda/${id}/confirmar-chegada`, { method: 'POST' });
     mostrarToast('Chegada registrada — já pode executar o atendimento.');
@@ -4223,7 +4223,7 @@ async function confirmarChegada(id) {
 // botão "Registrar chegada" do retorno: só depois de iniciar o deslocamento do retorno, e antes
 // de poder enviar o relatório de retorno
 async function registrarChegadaRetorno(id) {
-  if (!confirm('Confirma que você já chegou no cliente para o retorno?')) return;
+  if (!(await mostrarConfirmacao('Confirma que você já chegou no cliente para o retorno?'))) return;
   try {
     const { agenda } = await api(`/api/agenda/${id}/retorno/confirmar-chegada`, { method: 'POST' });
     mostrarToast('Chegada registrada — já pode preencher o relatório de retorno.');
@@ -4283,9 +4283,9 @@ async function iniciarViagemVolta(id) {
   const proxima = proximaOSMesmoDia(a);
   let proximaOsId = null;
   if (proxima) {
-    const seguir = confirm(`${TIPO_OS_LABEL[proxima.tipo] || 'O.S.'} identificada (${numeroOS(proxima)}) — deseja seguir direto ao destino?`);
+    const seguir = await mostrarConfirmacao(`${TIPO_OS_LABEL[proxima.tipo] || 'O.S.'} identificada (${numeroOS(proxima)}) — deseja seguir direto ao destino?`);
     if (seguir) proximaOsId = proxima.id;
-  } else if (!confirm('Confirma que você está iniciando o retorno agora?')) {
+  } else if (!(await mostrarConfirmacao('Confirma que você está iniciando o retorno agora?'))) {
     return;
   }
   try {
@@ -4305,7 +4305,7 @@ async function iniciarViagemVolta(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 async function registrarChegadaVolta(id) {
-  if (!confirm('Confirma que você já chegou?')) return;
+  if (!(await mostrarConfirmacao('Confirma que você já chegou?'))) return;
   try {
     const { agenda } = await api(`/api/agenda/${id}/confirmar-chegada-volta`, { method: 'POST' });
     atualizarAgendaCacheItem(agenda);
@@ -4436,7 +4436,7 @@ async function solicitarEdicaoBiblioteca(tipo, i) {
 async function excluirRegistroBiblioteca(tipo, i) {
   const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
   if (!r) return;
-  if (!confirm(`Excluir "${r.titulo}" definitivamente? Essa ação não pode ser desfeita.`)) return;
+  if (!(await mostrarConfirmacao(`Excluir "${r.titulo}" definitivamente? Essa ação não pode ser desfeita.`))) return;
   try {
     await api(`/api/registros/${r.id}`, { method: 'DELETE' });
     mostrarToast('Registro excluído.');
@@ -5363,8 +5363,8 @@ function rascunhosNovosPendentes() {
     })
     .filter((p) => p && rascunhoTemConteudo(p.draft));
 }
-function descartarRascunhoPendente(tipo) {
-  if (!confirm('Descartar este rascunho? O preenchimento salvo neste dispositivo será apagado.')) return;
+async function descartarRascunhoPendente(tipo) {
+  if (!(await mostrarConfirmacao('Descartar este rascunho? O preenchimento salvo neste dispositivo será apagado.'))) return;
   limparRascunhoManual(tipo, null);
   renderRelatorioManutencao();
 }
@@ -6298,7 +6298,7 @@ function mostrarFormRelatorioManutencao(existente) {
 }
 
 async function limparRascunhoCompleto(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('completo', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioManutencao(relatorio); }
   else mostrarFormRelatorioManual('completo');
@@ -6698,7 +6698,7 @@ function mostrarFormRelatorioPreventiva(existente) {
 }
 
 async function limparRascunhoPreventiva(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('preventiva', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioPreventiva(relatorio); }
   else mostrarFormRelatorioManual('preventiva');
@@ -6764,10 +6764,10 @@ function removerPecaPreventiva(i) { relatorioPreventivaDraft.pecas.splice(i, 1);
 // o modelo da máquina escolhido decide o check-list e o conjunto de fotos deste termo (ver
 // EQUIPAMENTOS_PREVENTIVA) — "Outro" libera um campo de texto e começa com o check-list em
 // branco e o conjunto de fotos genérico, pra equipamentos fora da lista.
-function selecionarModeloPreventiva(nome) {
+async function selecionarModeloPreventiva(nome) {
   const d = relatorioPreventivaDraft;
   const jaTemDados = d.checklist.some((c) => c.item || c.resposta) || d.fotos.some((b) => b.fotos.length);
-  if (jaTemDados && !confirm('Trocar o modelo da máquina vai substituir o check-list e as fotos atuais. Continuar?')) {
+  if (jaTemDados && !(await mostrarConfirmacao('Trocar o modelo da máquina vai substituir o check-list e as fotos atuais. Continuar?'))) {
     document.getElementById('rp-modelo_maquina').value = d.modelo_maquina || '';
     return;
   }
@@ -7161,7 +7161,7 @@ function mostrarFormRelatorioCorretiva(existente) {
 }
 
 async function limparRascunhoCorretiva(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('corretiva', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioCorretiva(relatorio); }
   else mostrarFormRelatorioManual('corretiva');
@@ -7199,10 +7199,10 @@ function removerPecaCorretiva(i) { relatorioCorretivaDraft.pecas.splice(i, 1); r
 // o modelo da máquina escolhido decide o conjunto de fotos deste termo — reaproveita as mesmas
 // fotos por equipamento do Preventiva (EQUIPAMENTOS_PREVENTIVA), já que o conjunto de fotos não
 // depende do tipo de relatório, só do equipamento atendido. Corretiva não tem check-list.
-function selecionarModeloCorretiva(nome) {
+async function selecionarModeloCorretiva(nome) {
   const d = relatorioCorretivaDraft;
   const jaTemFotos = d.fotos.some((b) => b.fotos.length);
-  if (jaTemFotos && !confirm('Trocar o modelo da máquina vai substituir as fotos atuais. Continuar?')) {
+  if (jaTemFotos && !(await mostrarConfirmacao('Trocar o modelo da máquina vai substituir as fotos atuais. Continuar?'))) {
     document.getElementById('rcm-modelo_maquina').value = d.modelo_maquina || '';
     return;
   }
@@ -7588,7 +7588,7 @@ function mostrarFormRelatorioTecnico(existente) {
 }
 
 async function limparRascunhoTecnico(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('relatorio_tecnico', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioTecnico(relatorio); }
   else mostrarFormRelatorioManual('relatorio_tecnico');
@@ -8114,7 +8114,7 @@ function mostrarFormRelatorioAceite(existente) {
 }
 
 async function limparRascunhoAceite(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('aceite_entrega', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioAceite(relatorio); }
   else mostrarFormRelatorioManual('aceite_entrega');
@@ -8675,7 +8675,7 @@ async function gerarLinkEntregaTeste() {
 }
 
 async function limparRascunhoEntregaTeste(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('entrega_teste', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioEntregaTeste(relatorio); }
   else mostrarFormRelatorioManual('entrega_teste');
@@ -9071,7 +9071,7 @@ function preencherPromotorPelaOS(agendaId) {
 }
 
 async function limparRascunhoPromotor(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('promotor', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioPromotor(relatorio); }
   else mostrarFormRelatorioManual('promotor');
@@ -9385,7 +9385,7 @@ function preencherDevolutivoPelaOS(agendaId) {
 }
 
 async function limparRascunhoDevolutivo(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('devolutivo', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioDevolutivo(relatorio); }
   else mostrarFormRelatorioManual('devolutivo');
@@ -9724,7 +9724,7 @@ async function mostrarFormRelatorioLevantamentoTecnico(existente) {
 }
 
 async function limparRascunhoLevantamento(id) {
-  if (!confirm('Limpar todo o formulário e apagar o rascunho salvo?')) return;
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   limparRascunhoManual('levantamento_tecnico', id);
   if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioLevantamentoTecnico(relatorio); }
   else mostrarFormRelatorioManual('levantamento_tecnico');
@@ -10916,7 +10916,7 @@ async function baixarWordRelatorioManutencao(i) {
 }
 
 async function excluirRelatorioManutencao(id) {
-  if (!confirm('Excluir este relatório do seu histórico? Essa ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir este relatório do seu histórico? Essa ação não pode ser desfeita.'))) return;
   try {
     await api(`/api/relatorios-manutencao/${id}`, { method: 'DELETE' });
     renderRelatorioManutencao();
@@ -11807,7 +11807,7 @@ async function confirmarSugestao(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 async function excluirRegistroFila(id) {
-  if (!confirm('Excluir este registro definitivamente? Essa ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir este registro definitivamente? Essa ação não pode ser desfeita.'))) return;
   try {
     await api(`/api/registros/${id}`, { method: 'DELETE' });
     mostrarToast('Registro excluído.');
@@ -11912,7 +11912,7 @@ async function salvarCliente() {
 }
 
 async function excluirCliente(id) {
-  if (!confirm('Excluir este cliente? Esta ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir este cliente? Esta ação não pode ser desfeita.'))) return;
   try {
     await api(`/api/clientes/${id}`, { method: 'DELETE' });
     mostrarToast('Cliente excluído.');
@@ -12019,7 +12019,7 @@ async function salvarEquipamentoCatalogo() {
 }
 
 async function excluirEquipamento(id) {
-  if (!confirm('Excluir este equipamento? Esta ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir este equipamento? Esta ação não pode ser desfeita.'))) return;
   try {
     await api(`/api/equipamentos/${id}`, { method: 'DELETE' });
     mostrarToast('Equipamento excluído.');
@@ -12311,7 +12311,7 @@ async function salvarUsuario() {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 async function excluirUsuario(id) {
-  if (!confirm('Excluir este usuário? Esta ação não pode ser desfeita.')) return;
+  if (!(await mostrarConfirmacao('Excluir este usuário? Esta ação não pode ser desfeita.'))) return;
   try {
     await api(`/api/usuarios/${id}`, { method: 'DELETE' });
     mostrarToast('Usuário excluído.');
@@ -12637,7 +12637,7 @@ async function enviarMensagemAtendimentoTecnico() {
 }
 
 async function encerrarAtendimento(agendaId) {
-  if (!confirm('Confirma que o problema foi resolvido direto pelo chat? A O.S. será finalizada, sem passar pelo pós-venda.')) return;
+  if (!(await mostrarConfirmacao('Confirma que o problema foi resolvido direto pelo chat? A O.S. será finalizada, sem passar pelo pós-venda.'))) return;
   try {
     await api(`/api/agenda/${agendaId}/encerrar-atendimento`, { method: 'POST' });
     mostrarToast('Atendimento encerrado.');
@@ -13073,7 +13073,7 @@ async function posVendaDecisao(id, aprovado) {
     msgConfirm = 'Confirma que o cliente aprovou o orçamento? O administrador será avisado pra criar a O.S. de visita técnica.';
     msgToast = 'Aprovado — administrador avisado pra criar a O.S. de visita técnica.';
   }
-  if (!confirm(msgConfirm)) return;
+  if (!(await mostrarConfirmacao(msgConfirm))) return;
   try { await api(`/api/agenda/${id}/pos-venda/decisao`, { method: 'POST', body: { aprovado } }); mostrarToast(msgToast); renderFilaPosVenda(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
@@ -13273,7 +13273,7 @@ async function estoqueConfirmarChegada(id) {
 }
 
 async function estoqueConfirmarSaida(id) {
-  if (!confirm('Confirma que saiu rumo ao cliente? A O.S. será finalizada.')) return;
+  if (!(await mostrarConfirmacao('Confirma que saiu rumo ao cliente? A O.S. será finalizada.'))) return;
   try { await api(`/api/agenda/${id}/estoque/confirmar-saida`, { method: 'POST' }); mostrarToast('Saída confirmada — O.S. finalizada.'); renderFilaEstoque(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
@@ -13508,6 +13508,36 @@ function mostrarToast(texto) {
   mostrarModalSucesso(texto);
 }
 
+// substitui o confirm() nativo do navegador (janelinha cinza sem estilo nenhum) nos ~40 pontos
+// que pedem "tem certeza?" antes de uma ação — mesmo padrão visual do modal de sucesso (fundo
+// branco, título em azul-marinho, botão azul), mas sem o ícone de check (aqui é uma pergunta,
+// não uma confirmação de algo já feito) e com um segundo botão pra cancelar. Devolve uma Promise
+// com true/false, então todo chamador precisa de "await" (confirm() nativo era síncrono).
+function mostrarConfirmacao(mensagem) {
+  return new Promise((resolve) => {
+    let modal = document.getElementById('modal-confirmacao');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'modal-confirmacao';
+      modal.className = 'modal-overlay';
+      document.body.appendChild(modal);
+    }
+    modal.classList.add('show');
+    const fechar = (resultado) => { modal.classList.remove('show'); resolve(resultado); };
+    modal.innerHTML = `
+      <div class="modal-card" style="max-width:400px;">
+        <h3>Confirmar</h3>
+        <p>${esc(mensagem)}</p>
+        <div style="display:flex; gap:10px; margin-top:18px;">
+          <button class="btn-outline-sm" style="flex:1; justify-content:center;">Cancelar</button>
+          <button class="btn btn-primary" style="flex:1; justify-content:center;">Confirmar</button>
+        </div>
+      </div>`;
+    modal.querySelector('.btn-outline-sm').onclick = () => fechar(false);
+    modal.querySelector('.btn-primary').onclick = () => fechar(true);
+  });
+}
+
 // ---------- Técnicos: acompanhamento de viagens/bônus + solicitações de RH ----------
 // bônus de R$200 por diária de viagem (marcado manualmente pelo administrador na O.S. — nem
 // toda região paga), com limite de 7 diárias por técnico/mês antes de exigir justificativa (ver
@@ -13730,7 +13760,7 @@ async function carregarMinhasSolicitacoesRH() {
 }
 
 async function cancelarSolicitacaoRH(id) {
-  if (!confirm('Cancelar esse pedido?')) return;
+  if (!(await mostrarConfirmacao('Cancelar esse pedido?'))) return;
   try { await api(`/api/solicitacoes-rh/${id}`, { method: 'DELETE' }); mostrarToast('Pedido cancelado.'); renderSolicitacoesRH(); }
   catch (e) { alert('Erro: ' + e.message); }
 }
