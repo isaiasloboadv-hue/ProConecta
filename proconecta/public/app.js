@@ -13614,7 +13614,7 @@ function graficoViagensHTML(tecnicos) {
       </div>
       <div class="viagens-chart">
         ${tecnicos.map((t) => `
-          <div class="viagens-chart-row">
+          <div class="viagens-chart-row ${t.quantidade ? 'clicavel' : ''}" ${t.quantidade ? `onclick="mostrarDetalheViagens(${t.tecnico_id})" title="Ver as O.S. de ${esc(t.tecnico_nome)}"` : ''}>
             <div class="viagens-chart-nome" title="${esc(t.tecnico_nome)}">${esc(t.tecnico_nome)}</div>
             <div class="viagens-chart-bars">
               <div class="viagens-chart-bar-wrap">
@@ -13647,6 +13647,7 @@ function mostrarDetalheViagens(tecnicoId) {
           <td data-label="Justificativa">${v.fora_de_ordem_viagem ? `${tag('fora da ordem', 'falha')} ` : ''}${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}</td>
         </tr>`).join('')}
     </table></div>`;
+  alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 let solicitacoesRHFiltroTipo = '';

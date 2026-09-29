@@ -171,7 +171,9 @@ main{flex:1;padding:30px 36px 60px;max-width:1600px;}
 .viagens-chart-dot.sem-bonus{background:#C7D2E0;}
 .viagens-chart-dot.fora-ordem{background:var(--red);border-radius:50%;}
 .viagens-chart{display:flex;flex-direction:column;gap:14px;}
-.viagens-chart-row{display:flex;align-items:center;gap:12px;}
+.viagens-chart-row{display:flex;align-items:center;gap:12px;border-radius:10px;padding:4px 6px;margin:-4px -6px;transition:background .15s;}
+.viagens-chart-row.clicavel{cursor:pointer;}
+.viagens-chart-row.clicavel:hover{background:var(--blue-pale);}
 .viagens-chart-nome{width:130px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .viagens-chart-bars{flex:1;display:flex;flex-direction:column;gap:5px;}
 .viagens-chart-bar-wrap{position:relative;background:var(--blue-pale-2);border-radius:6px;height:22px;display:flex;align-items:center;}
