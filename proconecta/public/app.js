@@ -504,8 +504,7 @@ const MENUS_LABEL_POR_PAPEL = {
   },
   administrador: {
     'agenda': 'Agenda geral',
-    'painel-atendimentos': 'Atendimentos',
-    'solicitacao-atendimento': 'Solicitação de Atendimento',
+    'chat-admin': 'Chat',
     'aprovacoes-visitas': 'Ordem de Serviço',
     'relatorio-manutencao': 'Relatório',
     'biblioteca': 'Biblioteca',
@@ -555,8 +554,9 @@ const NAV = {
   ],
   administrador: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
-    { key: 'painel-atendimentos', modulo: 'os_chamados', label: 'Atendimentos', page: 'painel-atendimentos' },
-    { key: 'solicitacao-atendimento', modulo: 'os_chamados', label: 'Solicitação de Atendimento', page: 'fila-solicitacao-atendimento' },
+    // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
+    // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
+    { key: 'chat-admin', modulo: 'os_chamados', label: 'Chat', page: 'chat-admin' },
     { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
     // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
@@ -645,8 +645,7 @@ const ICONE_MENU = {
   'calendario-tecnico': '🗓️',
   biblioteca: '📚',
   'fila-reparo': '🔧',
-  'painel-atendimentos': '📊',
-  'solicitacao-atendimento': '🆘',
+  'chat-admin': '💬',
   'aprovacoes-visitas': '🧾',
   clientes: '🏢',
   equipamentos: '⚙️',
@@ -748,6 +747,7 @@ async function ir(pagina) {
   clearInterval(_atClientePoll);
   clearInterval(_atTecPoll);
   clearInterval(_atPvPoll);
+  clearInterval(_atAdminPoll);
   paginaAtual = pagina;
   // lembra a última página visitada pra, ao recarregar/sincronizar (location.reload), voltar
   // pra onde o usuário estava em vez de sempre abrir a página inicial do papel dele (ver uso
@@ -781,11 +781,10 @@ async function ir(pagina) {
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
     if (pagina === 'fila-atendimento') return renderFilaAtendimento();
-    if (pagina === 'painel-atendimentos') return renderPainelAtendimentos();
+    if (pagina === 'chat-admin') return renderChatAdmin();
     if (pagina === 'fila-pos-venda') return renderFilaPosVenda();
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
-    if (pagina === 'fila-solicitacao-atendimento') return renderFilaSolicitacaoAtendimento();
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
@@ -2051,7 +2050,7 @@ async function salvarNovaAtividadeExecutar(body, briefingPromotor) {
         window._origemSolicitacaoId = null;
         await api(`/api/agenda/${origemId}/finalizar-solicitacao`, { method: 'POST', body: { nova_os_id: novaOS.id } });
         mostrarToast('O.S. criada — atendimento original encerrado.');
-        return ir('fila-solicitacao-atendimento');
+        return ir('chat-admin');
       }
     }
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
@@ -12653,21 +12652,277 @@ async function assumirAtendimento(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
-// ---------- atendimento por chat: painel do administrador ----------
+// ---------- atendimento por chat: menu "Chat" do administrador ----------
+// unifica o que antes eram "Atendimentos" (só estatísticas) e "Solicitação de Atendimento" —
+// os dois vêm do mesmo chat por trás (chamados), então viram um painel só com 4 áreas: os
+// atendimentos em si (fila aguardando + em andamento), a solicitação de visita técnica (motivo
+// "técnico vai até o cliente"), a fila que a IA está tratando, e os técnicos atendendo agora.
+// O administrador pode visualizar qualquer conversa sem interferir e, se quiser, assumir — do
+// técnico ou da IA — exatamente como um técnico assumiria (ver abrirPreviewAtendimentoAdmin).
 
-async function renderPainelAtendimentos() {
-  const stats = await api('/api/chamados/stats');
+async function renderChatAdmin() {
+  const [stats, { chamados }, { usuarios }, { agenda }] = await Promise.all([
+    api('/api/chamados/stats'),
+    api('/api/chamados'),
+    api('/api/usuarios'),
+    api('/api/agenda/fila-solicitacao-atendimento'),
+  ]);
+  window._agendaCache = agenda; // usado por abrirCriarOSDeSolicitacao (Solicitação de Atendimento)
+
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
+  const aguardando = chamados.filter((c) => c.status === 'aguardando_tecnico');
+  const filaIa = chamados.filter((c) => c.status === 'ia');
+  const emAtendimento = chamados.filter((c) => c.status === 'convertido_os');
+  window._chatAdminEmAtendimento = emAtendimento; // reaproveitado pelo modal do técnico (seção "Em andamento")
+
+  const contagemPorTecnico = {};
+  emAtendimento.forEach((c) => { contagemPorTecnico[c.tecnico_id] = (contagemPorTecnico[c.tecnico_id] || 0) + 1; });
+  const tecnicosOrdenados = [...tecnicos].sort((a, b) => (contagemPorTecnico[b.id] || 0) - (contagemPorTecnico[a.id] || 0));
+
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Atendimentos</h1><p>Atendimento por chat de hoje — IA de 1º nível e fila de técnicos.</p></div>
-    <div class="atendimento-stats-grid">
-      <div class="stat-tile"><div class="stat-valor">${stats.total}</div><div class="stat-label">Total hoje</div></div>
-      <div class="stat-tile"><div class="stat-valor">${stats.resolvidos_ia}</div><div class="stat-label">Resolvidos pela IA</div></div>
-      <div class="stat-tile"><div class="stat-valor">${stats.tecnico}</div><div class="stat-label">Técnico</div></div>
-      <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_ia || '—'}</div><div class="stat-label">Tempo médio IA</div></div>
-      <div class="stat-tile"><div class="stat-valor">${stats.tempo_medio_tecnico || '—'}</div><div class="stat-label">Tempo médio técnico</div></div>
-      <div class="stat-tile"><div class="stat-valor">${stats.aguardando}</div><div class="stat-label">Aguardando</div></div>
+    <div class="page-head"><h1>Chat</h1><p>Atendimentos e solicitação de visita técnica — os dois vêm do mesmo chat com o cliente.</p></div>
+    <div class="chat-admin-grid">
+      <div class="panel chat-admin-atendimentos">
+        <h2>Atendimentos</h2>
+        <div class="atendimento-stats-grid">
+          <div class="stat-tile"><div class="stat-valor">${stats.total}</div><div class="stat-label">Total hoje</div></div>
+          <div class="stat-tile"><div class="stat-valor">${stats.resolvidos_ia}</div><div class="stat-label">Resolvidos pela IA</div></div>
+          <div class="stat-tile"><div class="stat-valor">${stats.tecnico}</div><div class="stat-label">Técnico</div></div>
+          <div class="stat-tile"><div class="stat-valor">${stats.aguardando}</div><div class="stat-label">Aguardando</div></div>
+        </div>
+        <h3 style="margin-top:18px;">Aguardando técnico (${aguardando.length})</h3>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">Ninguém assumiu ainda — você também pode receber, igual um técnico.</p>
+        <div class="atendimento-grid">
+          ${aguardando.length ? aguardando.map((c) => cardAtendimentoAdmin(c)).join('') : '<p class="empty">Nenhum atendimento na fila agora.</p>'}
+        </div>
+        <h3 style="margin-top:18px;">Em atendimento (${emAtendimento.length})</h3>
+        <div class="atendimento-grid">
+          ${emAtendimento.length ? emAtendimento.map((c) => cardAtendimentoAdmin(c)).join('') : '<p class="empty">Nenhum atendimento em andamento com técnico agora.</p>'}
+        </div>
+      </div>
+      <div class="panel chat-admin-solicitacao">
+        <h2>Solicitação de Atendimento</h2>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">Orçamentos aprovados pra visita técnica — crie a O.S. de verdade pra agendar o técnico.</p>
+        <div class="atendimento-grid">
+          ${agenda.length ? agenda.map((a) => cardSolicitacaoAtendimento(a)).join('') : '<p class="empty">Nenhuma solicitação de atendimento pendente agora.</p>'}
+        </div>
+      </div>
+      <div class="panel chat-admin-ia">
+        <h2>Fila da IA (${filaIa.length})</h2>
+        <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-8px;">Atendimentos que a assistente automática está tratando agora.</p>
+        <div class="chat-admin-lista">
+          ${filaIa.length ? filaIa.map((c) => linhaAtendimentoIaAdmin(c)).join('') : '<p class="empty">A IA não está com nenhum atendimento agora.</p>'}
+        </div>
+      </div>
+      <div class="panel chat-admin-tecnicos">
+        <h2>Técnicos atendendo</h2>
+        <div class="chat-admin-lista">
+          ${tecnicosOrdenados.length ? tecnicosOrdenados.map((t) => linhaTecnicoAdmin(t, contagemPorTecnico[t.id] || 0)).join('') : '<p class="empty">Nenhum técnico cadastrado ainda.</p>'}
+        </div>
+      </div>
+    </div>
+    <div id="form-nova-atividade"></div>`;
+}
+
+function cardAtendimentoAdmin(c) {
+  const resumo = c.resumo_ia || c.primeira_mensagem_cliente || '';
+  return `
+    <div class="atendimento-card ${c.prioridade === 'alta' ? 'atendimento-urgente' : ''}" onclick="abrirPreviewAtendimentoAdmin(${c.id})">
+      <div class="atendimento-card-topo">
+        <span class="atendimento-numero">ATENDIMENTO #${c.id}</span>
+        ${c.prioridade === 'alta' ? '<span class="tag tag-falha">ALTA</span>' : ''}
+        ${tagSla(c)}
+      </div>
+      <div class="atendimento-cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</div>
+      ${c.equipamento_tipo ? `<div class="atendimento-equip">${esc(c.equipamento_tipo)}${c.equipamento_modelo ? ' — ' + esc(c.equipamento_modelo) : ''}</div>` : ''}
+      ${resumo ? `<div class="atendimento-resumo">${esc(resumo.slice(0, 140))}</div>` : ''}
+      ${c.tecnico_nome ? `<div class="atendimento-status">${tag('Técnico: ' + c.tecnico_nome, 'green')}</div>` : ''}
     </div>`;
+}
+
+function linhaAtendimentoIaAdmin(c) {
+  const resumo = c.resumo_ia || c.primeira_mensagem_cliente || '';
+  return `
+    <div class="chat-admin-linha" onclick="abrirPreviewAtendimentoAdmin(${c.id})">
+      <div style="display:flex; justify-content:space-between; gap:6px; align-items:center;">
+        <b style="font-size:13px;">#${c.id} · ${esc(c.cliente_nome || 'Cliente não identificado')}</b>
+        ${tagSla(c)}
+      </div>
+      ${resumo ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:3px;">${esc(resumo.slice(0, 90))}</div>` : ''}
+    </div>`;
+}
+
+function linhaTecnicoAdmin(t, contagem) {
+  return `
+    <div class="chat-admin-linha" style="display:flex; justify-content:space-between; align-items:center;" onclick="abrirModalTecnicoAdmin(${t.id}, '${esc(t.nome).replace(/'/g, "\\'")}')">
+      <span style="font-weight:700;">${esc(t.nome)}</span>
+      <span class="tag ${contagem ? 'tag-green' : 'tag-blue'}">${contagem} em atendimento</span>
+    </div>`;
+}
+
+// modal do técnico: conversas em andamento + histórico (abre por cima da tela do Chat, sem
+// perder o estado dos filtros/painéis de trás)
+let _tecnicoAdminAtual = null;
+
+function abrirModalTecnicoAdmin(tecnicoId, tecnicoNome) {
+  _tecnicoAdminAtual = { id: tecnicoId, nome: tecnicoNome };
+  let modal = document.getElementById('modal-tecnico-admin');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-tecnico-admin';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  const emAndamento = (window._chatAdminEmAtendimento || []).filter((c) => c.tecnico_id === tecnicoId);
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:640px; max-height:88vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <h3>${esc(tecnicoNome)}</h3>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-tecnico-admin').classList.remove('show')">Fechar</button>
+      </div>
+      <h4 style="margin:14px 0 6px; font-size:12.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em;">Em andamento (${emAndamento.length})</h4>
+      <div class="atendimento-grid">
+        ${emAndamento.length ? emAndamento.map((c) => cardAtendimentoAdmin(c)).join('') : '<p class="empty">Nenhum atendimento em andamento.</p>'}
+      </div>
+      <h4 style="margin:20px 0 6px; font-size:12.5px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em;">Histórico</h4>
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:10px;">
+        <label style="font-size:13px;">De<br><input type="date" id="hist-adm-tec-de"></label>
+        <label style="font-size:13px;">Até<br><input type="date" id="hist-adm-tec-ate"></label>
+        <button class="btn btn-primary btn-sm" onclick="carregarHistoricoTecnicoAdmin()">Filtrar</button>
+      </div>
+      <div id="hist-adm-tec-lista"><p class="empty">Escolha um período (ou deixe em branco pra ver tudo) e clique em Filtrar.</p></div>
+    </div>`;
+}
+
+async function carregarHistoricoTecnicoAdmin() {
+  if (!_tecnicoAdminAtual) return;
+  const de = document.getElementById('hist-adm-tec-de')?.value || '';
+  const ate = document.getElementById('hist-adm-tec-ate')?.value || '';
+  const qs = new URLSearchParams({ status: 'encerrado', tecnico_id: String(_tecnicoAdminAtual.id) });
+  if (de) qs.set('de', de);
+  if (ate) qs.set('ate', ate);
+  const { chamados } = await api(`/api/chamados?${qs.toString()}`);
+  const alvo = document.getElementById('hist-adm-tec-lista');
+  if (!alvo) return;
+  alvo.innerHTML = chamados.length ? `
+    <table>
+      <tr><th>Data</th><th>Cliente</th><th></th></tr>
+      ${chamados.map((c) => `<tr><td data-label="Data">${fmtData(c.criado_em)}</td><td data-label="Cliente">${esc(c.cliente_nome || 'Cliente não identificado')}</td><td><button class="btn-outline-sm" onclick="abrirPreviewAtendimentoAdmin(${c.id})">Ver conversa</button></td></tr>`).join('')}
+    </table>` : `<p class="empty">Nenhum atendimento encerrado ${de || ate ? 'nesse período' : 'ainda'}.</p>`;
+}
+
+// preview do atendimento (do técnico ou da IA): abre em modo só-leitura, sem interferir na
+// conversa; se o administrador quiser, um botão "Assumir atendimento" transfere pra ele (mesma
+// rota que o técnico usa) e o modal vira um chat normal, liberando o campo de resposta.
+let _modalAtendimentoChamado = null;
+let _atAdminPoll = null;
+
+function visaoModalAtendimentoAdmin(c) {
+  return (c.tecnico_id === USER.id && c.status !== 'encerrado') ? 'tecnico' : 'admin';
+}
+
+async function abrirPreviewAtendimentoAdmin(id) {
+  clearInterval(_atAdminPoll);
+  const { chamado } = await api(`/api/chamados/${id}`);
+  _modalAtendimentoChamado = chamado;
+  let modal = document.getElementById('modal-atendimento-admin');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-atendimento-admin';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  desenharModalAtendimentoAdmin();
+  if (chamado.status !== 'encerrado') _atAdminPoll = setInterval(atualizarModalAtendimentoAdmin, 4000);
+}
+
+function fecharModalAtendimentoAdmin(atualizarPainel) {
+  clearInterval(_atAdminPoll);
+  const modal = document.getElementById('modal-atendimento-admin');
+  if (modal) modal.classList.remove('show');
+  _modalAtendimentoChamado = null;
+  if (atualizarPainel) renderChatAdmin();
+}
+
+function desenharModalAtendimentoAdmin() {
+  const c = _modalAtendimentoChamado;
+  if (!c) return;
+  const modal = document.getElementById('modal-atendimento-admin');
+  if (!modal) return;
+  const jaAssumidoPorMim = c.tecnico_id === USER.id && c.status !== 'encerrado';
+  const podeAssumir = c.status !== 'encerrado' && !jaAssumidoPorMim;
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:640px; max-height:88vh; overflow-y:auto; display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <h3 style="margin-bottom:2px;">Atendimento #${c.id} ${tagSla(c)}</h3>
+          <p style="margin-bottom:6px;">${esc(c.cliente_nome || 'Cliente não identificado')}${c.equipamento_tipo ? ' — ' + esc(c.equipamento_tipo) : ''}</p>
+          ${origemAtendimentoAdmin(c)}
+        </div>
+        <button class="btn-outline-sm" onclick="fecharModalAtendimentoAdmin(true)">Fechar</button>
+      </div>
+      <div class="panel chat-panel" style="margin-top:12px; padding:0;">
+        <div class="chat-mensagens" id="modal-at-mensagens"></div>
+        ${jaAssumidoPorMim ? `
+          <div class="chat-compositor">
+            <textarea id="modal-at-texto" placeholder="Digite sua mensagem..." rows="2" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAtendimentoAdmin();}"></textarea>
+            <button class="btn btn-primary btn-sm" onclick="enviarMensagemAtendimentoAdmin()">Enviar</button>
+          </div>` : podeAssumir ? `
+          <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <p class="empty" style="margin:0;">Você está vendo essa conversa sem interferir.</p>
+            <button class="btn btn-primary btn-sm" onclick="assumirAtendimentoAdmin(${c.id})">Assumir atendimento</button>
+          </div>` : '<p class="empty" style="margin-top:10px;">Atendimento encerrado — somente leitura.</p>'}
+      </div>
+    </div>`;
+  renderMensagensChat('modal-at-mensagens', c.mensagens, visaoModalAtendimentoAdmin(c));
+}
+
+function origemAtendimentoAdmin(c) {
+  if (c.status === 'encerrado') return c.resolvido_por === 'ia' ? tag('Encerrado pela IA', 'green') : tag('Encerrado', 'green');
+  if (c.status === 'ia') return tag('Sendo atendido pela IA', 'blue');
+  if (c.status === 'aguardando_tecnico') return tag('Aguardando técnico', 'amber');
+  if (c.status === 'convertido_os') return tag(`Em atendimento — ${esc(c.tecnico_nome || 'técnico')}`, 'green');
+  return tag(c.status, 'blue');
+}
+
+async function atualizarModalAtendimentoAdmin() {
+  if (!_modalAtendimentoChamado) return;
+  try {
+    const { chamado } = await api(`/api/chamados/${_modalAtendimentoChamado.id}`);
+    const statusMudou = chamado.status !== _modalAtendimentoChamado.status;
+    _modalAtendimentoChamado = chamado;
+    if (statusMudou) desenharModalAtendimentoAdmin();
+    else renderMensagensChat('modal-at-mensagens', chamado.mensagens, visaoModalAtendimentoAdmin(chamado));
+    if (chamado.status === 'encerrado') clearInterval(_atAdminPoll);
+  } catch (e) { /* silencioso */ }
+}
+
+async function enviarMensagemAtendimentoAdmin() {
+  const campo = document.getElementById('modal-at-texto');
+  if (!campo) return;
+  const texto = campo.value.trim();
+  if (!texto || !_modalAtendimentoChamado) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    const { chamado } = await api(`/api/chamados/${_modalAtendimentoChamado.id}/mensagens`, { method: 'POST', body: { texto } });
+    _modalAtendimentoChamado = chamado;
+    renderMensagensChat('modal-at-mensagens', chamado.mensagens, visaoModalAtendimentoAdmin(chamado));
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
+}
+
+async function assumirAtendimentoAdmin(id) {
+  try {
+    await api(`/api/chamados/${id}/assumir`, { method: 'POST', body: {} });
+    mostrarToast('Atendimento assumido — uma Ordem de Serviço foi aberta.');
+    const { chamado } = await api(`/api/chamados/${id}`);
+    _modalAtendimentoChamado = chamado;
+    desenharModalAtendimentoAdmin();
+    if (!_atAdminPoll) _atAdminPoll = setInterval(atualizarModalAtendimentoAdmin, 4000);
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- pós-venda / setor reparo ----------
@@ -13126,20 +13381,9 @@ function renderMensagensInternas(mensagens) {
 
 // ---------- administrador: Solicitação de Atendimento (motivo "técnico vai até o cliente") ----------
 // depois que o pós-venda aprova o orçamento nesse caminho, o admin precisa criar uma O.S. de
-// verdade (visita técnica) pra agendar o técnico — essa tela reúne os pedidos e pré-preenche o
-// formulário padrão de Nova Ordem de Serviço com os dados do atendimento original.
-
-async function renderFilaSolicitacaoAtendimento() {
-  const { agenda } = await api('/api/agenda/fila-solicitacao-atendimento');
-  window._agendaCache = agenda;
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="page-head"><h1>Solicitação de Atendimento</h1><p>Orçamentos aprovados pra visita técnica — crie a O.S. de verdade pra agendar o técnico.</p></div>
-    <div class="atendimento-grid">
-      ${agenda.length ? agenda.map((a) => cardSolicitacaoAtendimento(a)).join('') : '<p class="empty">Nenhuma solicitação de atendimento pendente agora.</p>'}
-    </div>
-    <div id="form-nova-atividade"></div>`;
-}
+// verdade (visita técnica) pra agendar o técnico — esse painel (dentro do menu "Chat", ver
+// renderChatAdmin) reúne os pedidos e pré-preenche o formulário padrão de Nova Ordem de Serviço
+// com os dados do atendimento original.
 
 function cardSolicitacaoAtendimento(a) {
   return `
@@ -13150,8 +13394,8 @@ function cardSolicitacaoAtendimento(a) {
       ${a.problema ? `<div class="atendimento-resumo">${esc(a.problema.slice(0, 140))}</div>` : ''}
       <div class="atendimento-status">${tag('Orçamento aprovado — aguardando O.S.', 'orange')}</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-        ${a.origem_chamado_id ? `<button class="btn-outline-sm" onclick="abrirHistoricoAtendimentoAdmin(${a.origem_chamado_id})">💬 Ver atendimento</button>` : ''}
-        <button class="btn btn-primary btn-sm" onclick="abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button>
+        ${a.origem_chamado_id ? `<button class="btn-outline-sm" onclick="event.stopPropagation(); abrirPreviewAtendimentoAdmin(${a.origem_chamado_id})">💬 Ver atendimento</button>` : ''}
+        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); abrirCriarOSDeSolicitacao(${a.id})">Criar O.S. de visita técnica</button>
       </div>
     </div>`;
 }
@@ -13161,23 +13405,6 @@ function abrirCriarOSDeSolicitacao(id) {
   if (!item) return;
   mostrarFormNovaAtividade(null, item);
   document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth' });
-}
-
-// histórico do atendimento por chat, só leitura — o administrador confere a conversa antes de
-// criar a O.S. de visita técnica (ver o que já foi discutido com o cliente e o técnico)
-async function abrirHistoricoAtendimentoAdmin(chamadoId) {
-  const { chamado } = await api(`/api/chamados/${chamadoId}`);
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Atendimento #${chamado.id} ${tagSla(chamado)}</h1><p>${esc(chamado.cliente_nome || 'Cliente não identificado')}${chamado.equipamento_tipo ? ' — ' + esc(chamado.equipamento_tipo) : ''}</p></div>
-      <button class="btn-outline-sm" onclick="ir('fila-solicitacao-atendimento')">‹ Voltar</button>
-    </div>
-    <div class="panel chat-panel">
-      <div class="chat-mensagens" id="at-mensagens"></div>
-      <p class="empty" style="margin-top:10px;">Histórico da conversa — somente leitura.</p>
-    </div>`;
-  renderMensagensChat('at-mensagens', chamado.mensagens, 'admin');
 }
 
 // ---------- toast ----------

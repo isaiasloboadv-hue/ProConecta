@@ -3369,7 +3369,9 @@ rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
 // GET /api/chamados — fila (técnico/administrador). ?fila=1 lista quem tá esperando um técnico
 // (qualquer técnico pode assumir); ?encerrados=1 (+ ?de=&ate= opcionais) é o histórico do
 // próprio técnico, só carregado sob demanda; sem nenhum dos dois, lista os ativos que o próprio
-// técnico já assumiu (administrador sempre vê tudo).
+// técnico já assumiu (administrador sempre vê tudo, e ainda pode filtrar por ?status= e
+// ?tecnico_id= — usado pela tela "Chat" do administrador pra abrir o painel de um técnico
+// específico, incluindo o histórico dele com ?status=encerrado&tecnico_id=).
 rota('GET', /^\/api\/chamados$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
@@ -3379,6 +3381,11 @@ rota('GET', /^\/api\/chamados$/, async (req, res) => {
   let lista;
   if (user.papel === 'administrador') {
     lista = query.status ? chamadosDaEmpresa.filter((c) => c.status === query.status) : chamadosDaEmpresa.filter((c) => c.status !== 'encerrado');
+    // tela "Chat" do administrador: além do painel geral (sem filtro), usa isso pra abrir o
+    // histórico/atendimentos de um técnico específico (modal "técnicos atendendo").
+    if (query.tecnico_id) lista = lista.filter((c) => c.tecnico_id === Number(query.tecnico_id));
+    if (query.de) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) >= query.de);
+    if (query.ate) lista = lista.filter((c) => (c.criado_em || '').slice(0, 10) <= query.ate);
   } else if (query.fila === '1') {
     lista = chamadosDaEmpresa.filter((c) => c.status === 'aguardando_tecnico' && !c.tecnico_id);
   } else if (query.encerrados === '1') {
@@ -3480,6 +3487,11 @@ rota('POST', /^\/api\/chamados\/(\d+)\/mensagens$/, async (req, res, m) => {
 // POST /api/chamados/:id/assumir — técnico assume o atendimento; vira Ordem de Serviço na hora
 // (pré-preenchida com os dados do cliente já cadastrados), pra admin/técnico completarem o
 // agendamento depois se precisar de visita.
+// O administrador, além disso, pode assumir de qualquer estado não encerrado — inclusive
+// tirando um atendimento que já está com a IA (status "ia") ou com outro técnico (status
+// "convertido_os"), igual à tela "Chat" descreve (ver abrirPreviewAtendimentoAdmin no front).
+// O técnico continua só podendo pegar da fila (status "aguardando_tecnico"), nunca tomar de
+// outro técnico.
 rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador assumem atendimentos.' });
@@ -3487,8 +3499,24 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   const data = db.load();
   const chamado = tenant.buscar(data, 'chamados', Number(m[1]), user.empresa_id);
   if (!chamado) return enviarJSON(res, 404, { erro: 'Atendimento não encontrado.' });
-  if (chamado.status !== 'aguardando_tecnico') return enviarJSON(res, 400, { erro: 'Este atendimento não está aguardando um técnico.' });
+  const estadosQuePodemSerAssumidos = user.papel === 'administrador' ? ['aguardando_tecnico', 'ia', 'convertido_os'] : ['aguardando_tecnico'];
+  if (!estadosQuePodemSerAssumidos.includes(chamado.status)) return enviarJSON(res, 400, { erro: 'Este atendimento não está disponível pra assumir.' });
   if (!chamado.cliente_id) return enviarJSON(res, 400, { erro: 'Este atendimento não tem um cliente identificado no cadastro — não é possível abrir uma O.S. a partir dele.' });
+
+  // administrador tomando de outro técnico: já existe O.S. aberta pro chamado — só transfere
+  // a titularidade (chamado + O.S.), sem duplicar o agendamento.
+  if (chamado.status === 'convertido_os' && chamado.os_id) {
+    const osExistente = tenant.buscar(data, 'agenda', chamado.os_id, user.empresa_id);
+    const tecnicoAnterior = data.usuarios.find((u) => u.id === chamado.tecnico_id && u.empresa_id === user.empresa_id);
+    const agora = new Date().toISOString();
+    if (osExistente) { osExistente.tecnico_id = user.id; osExistente.tecnico_chat_id = user.id; }
+    chamado.tecnico_id = user.id;
+    chamado.assumido_em = agora;
+    chamado.lida_cliente = false;
+    await db.salvarMensagemChamado(chamado.id, { autor: 'sistema', texto: `${user.nome} assumiu o atendimento${tecnicoAnterior ? ` de ${tecnicoAnterior.nome}` : ''} — O.S. ${osExistente ? (osExistente.numero_os || `OS-${String(osExistente.id).padStart(6, '0')}`) : ''} transferida.`, criado_em: agora });
+    db.save(data);
+    return enviarJSON(res, 200, { chamado: await chamadoComMensagens(data, chamado), agenda: osExistente ? agendaComDetalhes(data, osExistente) : null });
+  }
 
   const cliente = data.clientes.find((c) => c.id === chamado.cliente_id && c.empresa_id === chamado.empresa_id);
   const equipamentoDoChamado = chamado.equipamento_id ? data.equipamentos.find((e) => e.id === chamado.equipamento_id && e.cliente_id === chamado.cliente_id && e.empresa_id === chamado.empresa_id) : null;
