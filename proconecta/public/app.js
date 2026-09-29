@@ -585,6 +585,7 @@ const NAV = {
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     { key: 'tecnicos-rh', modulo: 'os_chamados', label: 'Técnicos', children: [
       { key: 'acompanhamento', label: 'Acompanhamento de viagens', page: 'tecnicos-acompanhamento' },
+      { key: 'escala-folga', label: 'Escala de Folga', page: 'escala-folga' },
       { key: 'solicitacoes', label: 'Solicitações', page: 'tecnicos-solicitacoes' },
     ]},
     // esqueleto dos módulos novos — sem tela de verdade ainda, só prova que o pipeline de
@@ -790,6 +791,7 @@ async function ir(pagina) {
     if (pagina === 'fila-estoque') return renderFilaEstoque();
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
     if (pagina === 'minhas-viagens') return renderMinhasViagens();
+    if (pagina === 'escala-folga') return renderEscalaFolga();
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
@@ -1668,15 +1670,19 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <h2>Data e horário</h2>
       <div class="form-grid">
         <div>
-          <label>Início</label><input type="datetime-local" id="na-inicio" value="${agendaItem ? (agendaItem.data_hora_inicio || '').slice(0, 16) : ''}">
+          <label>Início</label><input type="datetime-local" id="na-inicio" value="${agendaItem ? (agendaItem.data_hora_inicio || '').slice(0, 16) : ''}" onchange="atualizarEscalaTecnico()">
           <div id="na-sla-sugestao"></div>
         </div>
-        <div><label>Fim previsto</label><input type="datetime-local" id="na-fim" value="${agendaItem ? (agendaItem.data_hora_fim || '').slice(0, 16) : ''}"></div>
+        <div><label>Fim previsto</label><input type="datetime-local" id="na-fim" value="${agendaItem ? (agendaItem.data_hora_fim || '').slice(0, 16) : ''}" onchange="atualizarEscalaTecnico()"></div>
       </div>
 
       <h2>Técnico designado</h2>
       <div class="form-grid">
-        <div class="full"><label>Técnico</label><select id="na-tecnico" onchange="atualizarTecnicoDaVez()">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
+        <div class="full">
+          <label>Técnico</label>
+          <select id="na-tecnico" onchange="atualizarTecnicoDaVez(); atualizarEscalaTecnico();">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select>
+          <div id="na-escala-hint" style="font-size:12.5px; margin-top:6px;"></div>
+        </div>
         <div class="full" style="display:flex; align-items:center; gap:8px;">
           <input type="checkbox" id="na-bonus-viagem" style="width:auto;" ${agendaItem && agendaItem.bonus_viagem ? 'checked' : ''} onchange="alternarBonusViagem()">
           <label for="na-bonus-viagem" style="margin:0; text-transform:none; font-weight:600;">💰 Conta bônus de viagem (R$200/diária) — limite de 7 diárias por técnico/mês</label>
@@ -1684,8 +1690,8 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
         <div class="full ${agendaItem && agendaItem.bonus_viagem ? '' : 'hidden'}" id="na-viagem-datas-wrap">
           <p style="color:var(--ink-soft); font-size:12.5px; margin:-4px 0 8px;">Conta 1 diária por dia corrido entre o início do deslocamento e a chegada de volta, inclusive as duas pontas (ex.: sai e volta no mesmo dia = 1 diária; sai 1 dia antes = 2; sai 1 dia antes e só volta 1 dia depois do atendimento = 3).</p>
           <div class="form-grid">
-            <div><label>Dia de início do deslocamento</label><input type="date" id="na-viagem-inicio" value="${agendaItem && agendaItem.viagem_dia_inicio ? agendaItem.viagem_dia_inicio : ''}" onchange="atualizarPreviewBonusViagem()"></div>
-            <div><label>Dia previsto de retorno/finalização</label><input type="date" id="na-viagem-fim" value="${agendaItem && agendaItem.viagem_dia_fim_previsto ? agendaItem.viagem_dia_fim_previsto : ''}" onchange="atualizarPreviewBonusViagem()"></div>
+            <div><label>Dia de início do deslocamento</label><input type="date" id="na-viagem-inicio" value="${agendaItem && agendaItem.viagem_dia_inicio ? agendaItem.viagem_dia_inicio : ''}" onchange="atualizarPreviewBonusViagem(); atualizarEscalaTecnico();"></div>
+            <div><label>Dia previsto de retorno/finalização</label><input type="date" id="na-viagem-fim" value="${agendaItem && agendaItem.viagem_dia_fim_previsto ? agendaItem.viagem_dia_fim_previsto : ''}" onchange="atualizarPreviewBonusViagem(); atualizarEscalaTecnico();"></div>
           </div>
           <div id="na-viagem-dias-preview" style="font-size:13px; font-weight:700; color:var(--navy);"></div>
           <div id="na-tecnico-vez-hint" style="font-size:12.5px; margin-top:8px;"></div>
@@ -2012,6 +2018,7 @@ function alternarBonusViagem() {
     const hint = document.getElementById('na-tecnico-vez-hint');
     if (hint) hint.innerHTML = '';
   }
+  atualizarEscalaTecnico();
 }
 
 // mesma conta que o servidor faz (diasBonusViagem) — só pra mostrar uma prévia antes de salvar;
@@ -2053,6 +2060,36 @@ async function atualizarTecnicoDaVez() {
       html += `<div style="color:var(--red); margin-top:4px;">Escolher um técnico diferente do da vez vai pedir uma justificativa ao salvar.</div>`;
     }
     hint.innerHTML = html;
+  } catch (e) { hint.innerHTML = ''; }
+}
+
+// avisa em tempo real se o técnico escolhido está de férias/DSR/banco de horas no período da
+// O.S. (ver GET /api/agenda/escala-conflito e a Escala de Folga) — usa o intervalo da viagem
+// quando o bônus de viagem está marcado, senão o próprio início/fim da O.S. Só avisa; quem
+// bloqueia (férias) ou exige justificativa (DSR/banco de horas) de verdade é o servidor, ao salvar.
+async function atualizarEscalaTecnico() {
+  const hint = document.getElementById('na-escala-hint');
+  if (!hint) return;
+  const tecnicoId = (document.getElementById('na-tecnico') || {}).value;
+  const bonusViagem = (document.getElementById('na-bonus-viagem') || {}).checked;
+  let inicio, fim;
+  if (bonusViagem) {
+    inicio = (document.getElementById('na-viagem-inicio') || {}).value;
+    fim = (document.getElementById('na-viagem-fim') || {}).value;
+  } else {
+    inicio = ((document.getElementById('na-inicio') || {}).value || '').slice(0, 10);
+    fim = ((document.getElementById('na-fim') || {}).value || '').slice(0, 10) || inicio;
+  }
+  if (!tecnicoId || !inicio || !fim) { hint.innerHTML = ''; return; }
+  try {
+    const resp = await api(`/api/agenda/escala-conflito?${new URLSearchParams({ tecnico_id: tecnicoId, inicio, fim })}`);
+    if (resp.bloqueado) {
+      hint.innerHTML = `<span style="color:var(--red); font-weight:700;">🚫 ${esc(resp.motivo)}</span>`;
+    } else if (resp.motivo) {
+      hint.innerHTML = `<span style="color:var(--red);">⚠️ ${esc(resp.motivo)} Escolher esse técnico assim mesmo vai pedir uma justificativa ao salvar.</span>`;
+    } else {
+      hint.innerHTML = '';
+    }
   } catch (e) { hint.innerHTML = ''; }
 }
 
@@ -2134,12 +2171,15 @@ async function salvarNovaAtividadeExecutar(body, briefingPromotor) {
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
     else renderAgenda();
   } catch (e) {
-    // técnico já bateu o limite de 7 diárias de bônus no mês — pede a justificativa e tenta
-    // salvar de novo com ela, em vez de simplesmente barrar o administrador
+    // dois motivos pedem justificativa antes de salvar, em vez de simplesmente barrar o
+    // administrador: o técnico já bateu o limite de diárias de bônus (ou foi escolhido fora da
+    // ordem do rodízio) — motivo_escala ausente — ou está de DSR/banco de horas na escala de
+    // folga (motivo_escala: true, ver checarEscalaAntesDeSalvar no servidor).
     if (e.corpo && e.corpo.precisa_justificativa) {
-      const justificativa = prompt(e.message);
-      if (justificativa && justificativa.trim()) {
-        return salvarNovaAtividadeExecutar({ ...body, justificativa_limite_viagens: justificativa.trim() }, briefingPromotor);
+      const campo = e.corpo.motivo_escala ? 'justificativa_escala_conflito' : 'justificativa_limite_viagens';
+      const justificativa = await mostrarPrompt(e.message);
+      if (justificativa) {
+        return salvarNovaAtividadeExecutar({ ...body, [campo]: justificativa }, briefingPromotor);
       }
       return;
     }
@@ -3940,6 +3980,7 @@ function detalheCompletoOS(a, visita) {
     <div class="kv"><b>Equipamento:</b> ${esc(a.equipamento_tipo || '—')} — ${esc(a.equipamento_modelo || '—')}${a.equipamento_serie ? ' (' + esc(a.equipamento_serie) + ')' : ''}</div>
     <div class="kv"><b>Problema relatado / serviço:</b> ${esc(a.problema || '—')}</div>
     <div class="kv"><b>Técnico designado:</b> ${esc(a.tecnico_nome || '—')} <span class="sep">·</span> <b>Início previsto:</b> ${fmtData(a.data_hora_inicio)} <span class="sep">·</span> <b>Fim previsto:</b> ${fmtData(a.data_hora_fim)}</div>
+    ${a.escala_conflito_tipo ? `<div class="kv">${tag(a.escala_conflito_tipo === 'dsr' ? 'DSR na data' : 'banco de horas na data', 'falha')} ${esc(a.justificativa_escala_conflito || '')}</div>` : ''}
     ${visita ? `
       <div class="os-relatorio-box">
         <div class="os-relatorio-box-titulo">Relatório enviado pelo técnico</div>
@@ -13542,6 +13583,42 @@ function mostrarConfirmacao(mensagem) {
   });
 }
 
+// substitui o prompt() nativo do navegador nos pontos em que o administrador precisa digitar uma
+// justificativa (ex.: escolher um técnico fora da ordem do rodízio, ou de férias/DSR/banco de
+// horas) — mesmo padrão visual de mostrarConfirmacao, com uma caixa de texto no lugar da
+// pergunta de sim/não. Devolve uma Promise com o texto digitado (trim) ou null se cancelou/deixou
+// em branco, então todo chamador precisa de "await".
+function mostrarPrompt(mensagem) {
+  return new Promise((resolve) => {
+    let modal = document.getElementById('modal-prompt');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'modal-prompt';
+      modal.className = 'modal-overlay';
+      document.body.appendChild(modal);
+    }
+    modal.classList.add('show');
+    const fechar = (resultado) => { modal.classList.remove('show'); resolve(resultado); };
+    modal.innerHTML = `
+      <div class="modal-card" style="max-width:420px;">
+        <h3>Justificativa</h3>
+        <p>${esc(mensagem)}</p>
+        <textarea id="modal-prompt-texto" placeholder="Explique o motivo..." style="min-height:80px;" autofocus></textarea>
+        <div style="display:flex; gap:10px; margin-top:14px;">
+          <button class="btn-outline-sm" style="flex:1; justify-content:center;">Cancelar</button>
+          <button class="btn btn-primary" style="flex:1; justify-content:center;">Confirmar</button>
+        </div>
+      </div>`;
+    const campo = modal.querySelector('#modal-prompt-texto');
+    campo.focus();
+    modal.querySelector('.btn-outline-sm').onclick = () => fechar(null);
+    modal.querySelector('.btn-primary').onclick = () => {
+      const texto = campo.value.trim();
+      fechar(texto || null);
+    };
+  });
+}
+
 // ---------- Técnicos: acompanhamento de viagens/bônus + solicitações de RH ----------
 // bônus de R$200 por diária de viagem (marcado manualmente pelo administrador na O.S. — nem
 // toda região paga), com limite de 7 diárias por técnico/mês antes de exigir justificativa (ver
@@ -13695,6 +13772,269 @@ function abrirDetalheViagensTecnico(tecnicoId) {
 async function abrirOSDeViagem(id) {
   if (!(window._agendaCache || []).some((a) => a.id === id)) await carregarAgendaComVisitas();
   abrirDetalheOS(id);
+}
+
+// ---------- Escala de Folga: feriados + DSR/banco de horas/home office/férias da equipe ----------
+// tela em duas colunas: a lista de toda a equipe (técnicos + administradores) à esquerda, e um
+// mini calendário à direita — sem ninguém selecionado, mostra só os feriados; ao clicar num nome,
+// passa a mostrar as marcações daquela pessoa também, e os dias viram clicáveis pro administrador
+// marcar/limpar. O bloqueio de verdade (férias) e o pedido de justificativa (DSR/banco de horas)
+// acontecem no POST/PUT /api/agenda — isso aqui é só o cadastro da escala em si.
+const LABEL_ESCALA_FOLGA_FRONT = { dsr: 'DSR', banco_horas: 'Compensação de banco de horas', home_office: 'Home office', ferias: 'Férias' };
+const LABEL_ABRANGENCIA_FERIADO = { nacional: 'Nacional', estadual: 'Estadual', municipal: 'Municipal' };
+
+// mesmo desenho (círculo + dois olhos + sorriso) nas duas cores — DSR em amarelo, banco de horas
+// em azul — pra ficarem visualmente pareados em vez de misturar emoji nativo com ícone customizado.
+function iconeCarinhaFeliz(cor) {
+  return `<svg width="18" height="18" viewBox="0 0 24 24" style="vertical-align:middle;">
+    <circle cx="12" cy="12" r="11" fill="${cor}"/>
+    <circle cx="8.5" cy="10" r="1.4" fill="#3a2a00"/>
+    <circle cx="15.5" cy="10" r="1.4" fill="#3a2a00"/>
+    <path d="M7 14.5 Q12 19 17 14.5" stroke="#3a2a00" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  </svg>`;
+}
+function iconeEscala(tipo) {
+  if (tipo === 'dsr') return iconeCarinhaFeliz('#F5A623');
+  if (tipo === 'banco_horas') return iconeCarinhaFeliz('#1467D6');
+  if (tipo === 'home_office') return '🏠';
+  if (tipo === 'ferias') return '🏖️';
+  return '';
+}
+
+// "AAAA-MM" -> lista de dias do grid (null nos espaços vazios antes do dia 1, pra alinhar com o
+// dia da semana) — usa o construtor local (ano, mêsIndex, dia), sem passar por string ISO, então
+// não tem risco de fuso horário empurrar o dia 1 pro mês errado.
+function diasDoGridEscala(anoMes) {
+  const [ano, mes] = anoMes.split('-').map(Number);
+  const primeiroDia = new Date(ano, mes - 1, 1);
+  const ultimoDia = new Date(ano, mes, 0);
+  const dias = [];
+  for (let i = 0; i < primeiroDia.getDay(); i++) dias.push(null);
+  for (let d = 1; d <= ultimoDia.getDate(); d++) dias.push(`${ano}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  return dias;
+}
+
+let escalaFolgaMesAtual = new Date().toISOString().slice(0, 7);
+let escalaFolgaPessoaId = null;
+
+async function renderEscalaFolga() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Escala de Folga</h1><p>DSR, compensação de banco de horas, home office e férias da equipe — clique num nome pra ver e marcar os dias dele.</p></div>
+      <input type="month" id="escala-mes" value="${escalaFolgaMesAtual}" onchange="mudarMesEscalaFolga()">
+    </div>
+    <div class="escala-folga-layout">
+      <div class="panel" id="escala-lista-wrap"><div class="empty">Carregando...</div></div>
+      <div class="panel" id="escala-calendario-wrap"><div class="empty">Carregando...</div></div>
+    </div>
+    <div class="panel" id="escala-feriados-wrap"></div>`;
+  await carregarEscalaFolga();
+}
+
+function mudarMesEscalaFolga() {
+  escalaFolgaMesAtual = document.getElementById('escala-mes').value;
+  carregarEscalaFolga();
+}
+
+async function carregarEscalaFolga() {
+  const ano = escalaFolgaMesAtual.slice(0, 4);
+  const [{ usuarios }, { feriados }, { escalas }] = await Promise.all([
+    api('/api/usuarios'),
+    api(`/api/feriados?ano=${ano}`),
+    api(`/api/escala-folgas?mes=${escalaFolgaMesAtual}`),
+  ]);
+  const equipe = usuarios.filter((u) => ['suporte', 'administrador'].includes(u.papel) && u.status === 'ativo')
+    .sort((a, b) => a.nome.localeCompare(b.nome));
+  window._escalaFolgaCache = { usuarios: equipe, feriados, escalas };
+  renderListaEquipeEscala();
+  renderMiniCalendarioEscala();
+  renderFeriadosEscala();
+}
+
+function renderListaEquipeEscala() {
+  const alvo = document.getElementById('escala-lista-wrap');
+  if (!alvo) return;
+  const { usuarios, escalas } = window._escalaFolgaCache;
+  const hojeISO = new Date().toISOString().slice(0, 10);
+  const ehMesAtual = escalaFolgaMesAtual === hojeISO.slice(0, 7);
+  alvo.innerHTML = `
+    <div class="panel-head">Equipe</div>
+    <div class="escala-lista">
+      ${usuarios.map((u) => {
+        const deHoje = ehMesAtual ? escalas.find((e) => e.usuario_id === u.id && e.data === hojeISO) : null;
+        return `
+        <button class="escala-pessoa ${escalaFolgaPessoaId === u.id ? 'ativo' : ''}" onclick="selecionarPessoaEscala(${u.id})">
+          <span>${esc(u.nome)}${u.papel === 'administrador' ? ` <span style="color:var(--ink-soft); font-weight:400; font-size:11.5px;">(admin)</span>` : ''}</span>
+          ${deHoje ? `<span title="${esc(LABEL_ESCALA_FOLGA_FRONT[deHoje.tipo])} hoje">${iconeEscala(deHoje.tipo)}</span>` : ''}
+        </button>`;
+      }).join('')}
+    </div>`;
+}
+
+function selecionarPessoaEscala(usuarioId) {
+  escalaFolgaPessoaId = escalaFolgaPessoaId === usuarioId ? null : usuarioId;
+  renderListaEquipeEscala();
+  renderMiniCalendarioEscala();
+}
+
+function renderMiniCalendarioEscala() {
+  const alvo = document.getElementById('escala-calendario-wrap');
+  if (!alvo) return;
+  const { usuarios, feriados, escalas } = window._escalaFolgaCache;
+  const pessoa = usuarios.find((u) => u.id === escalaFolgaPessoaId);
+  const dias = diasDoGridEscala(escalaFolgaMesAtual);
+  const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+  alvo.innerHTML = `
+    <div class="panel-head">${pessoa ? `Escala de ${esc(pessoa.nome)}` : 'Feriados do mês'}</div>
+    ${!pessoa ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Clique num nome na lista pra ver e marcar as folgas da pessoa.</p>` : ''}
+    <div class="escala-cal-legenda">
+      <span>${iconeCarinhaFeliz('#F5A623')} DSR</span>
+      <span>${iconeCarinhaFeliz('#1467D6')} Banco de horas</span>
+      <span>🏠 Home office</span>
+      <span>🏖️ Férias</span>
+      <span class="escala-cal-legenda-feriado">Feriado</span>
+    </div>
+    <div class="escala-cal-grid">
+      ${DIAS_SEMANA.map((d) => `<div class="escala-cal-cabecalho">${d}</div>`).join('')}
+      ${dias.map((diaISO) => {
+        if (!diaISO) return `<div class="escala-cal-dia vazio"></div>`;
+        const diaNum = Number(diaISO.slice(8, 10));
+        const feriadosDoDia = feriados.filter((f) => f.data === diaISO);
+        const escalaDoDia = pessoa ? escalas.find((e) => e.usuario_id === pessoa.id && e.data === diaISO) : null;
+        return `
+          <div class="escala-cal-dia ${feriadosDoDia.length ? 'feriado' : ''} ${pessoa ? 'clicavel' : ''}" ${pessoa ? `onclick="clicarDiaEscala('${diaISO}')"` : ''} ${feriadosDoDia.length ? `title="${esc(feriadosDoDia.map((f) => f.nome).join(', '))}"` : ''}>
+            <span class="escala-cal-dia-num">${diaNum}</span>
+            ${escalaDoDia ? `<span class="escala-cal-dia-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaDoDia.tipo])}">${iconeEscala(escalaDoDia.tipo)}</span>` : ''}
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function fecharModalEscalaDia() {
+  const modal = document.getElementById('modal-escala-dia');
+  if (modal) modal.classList.remove('show');
+}
+
+function clicarDiaEscala(diaISO) {
+  if (!escalaFolgaPessoaId) return;
+  const { usuarios, escalas } = window._escalaFolgaCache;
+  const pessoa = usuarios.find((u) => u.id === escalaFolgaPessoaId);
+  if (!pessoa) return;
+  const existente = escalas.find((e) => e.usuario_id === escalaFolgaPessoaId && e.data === diaISO);
+  let modal = document.getElementById('modal-escala-dia');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-escala-dia';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:380px;">
+      <h3>${esc(pessoa.nome)} — ${fmtData(diaISO)}</h3>
+      <p>O que marcar nesse dia?</p>
+      <div class="escala-opcoes">
+        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'dsr')">${iconeCarinhaFeliz('#F5A623')} DSR</button>
+        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'banco_horas')">${iconeCarinhaFeliz('#1467D6')} Banco de horas</button>
+        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'home_office')">🏠 Home office</button>
+        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'ferias')">🏖️ Férias</button>
+      </div>
+      ${existente ? `<button class="btn-outline-sm" style="width:100%; margin-top:10px; color:var(--red); border-color:var(--red);" onclick="limparEscalaDia(${existente.id})">Limpar marcação</button>` : ''}
+      <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="fecharModalEscalaDia()">Cancelar</button>
+    </div>`;
+}
+
+async function definirEscalaDia(diaISO, tipo) {
+  try {
+    await api('/api/escala-folgas', { method: 'POST', body: { usuario_id: escalaFolgaPessoaId, data: diaISO, tipo } });
+    fecharModalEscalaDia();
+    mostrarToast('Escala atualizada.');
+    await carregarEscalaFolga();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function limparEscalaDia(id) {
+  try {
+    await api(`/api/escala-folgas/${id}`, { method: 'DELETE' });
+    fecharModalEscalaDia();
+    mostrarToast('Marcação removida.');
+    await carregarEscalaFolga();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+function renderFeriadosEscala() {
+  const alvo = document.getElementById('escala-feriados-wrap');
+  if (!alvo) return;
+  const { feriados } = window._escalaFolgaCache;
+  alvo.innerHTML = `
+    <div class="panel-head">
+      <span>Feriados de ${esc(escalaFolgaMesAtual.slice(0, 4))}</span>
+      <button class="btn-outline-sm" onclick="abrirModalFeriado()">+ Cadastrar feriado</button>
+    </div>
+    ${feriados.length ? `
+      <div class="escala-feriados-lista">
+        ${feriados.map((f) => `
+          <div class="escala-feriado-item">
+            <span><b>${fmtData(f.data)}</b> — ${esc(f.nome)} ${tag(LABEL_ABRANGENCIA_FERIADO[f.abrangencia] || f.abrangencia, 'blue')}</span>
+            <button class="btn-outline-sm" onclick="excluirFeriado(${f.id})">Excluir</button>
+          </div>`).join('')}
+      </div>` : `<p class="empty">Nenhum feriado cadastrado para este ano ainda.</p>`}`;
+}
+
+function fecharModalFeriado() {
+  const modal = document.getElementById('modal-feriado');
+  if (modal) modal.classList.remove('show');
+}
+
+function abrirModalFeriado() {
+  let modal = document.getElementById('modal-feriado');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-feriado';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:400px;">
+      <h3>Cadastrar feriado</h3>
+      <div class="field"><label>Data</label><input type="date" id="feriado-data"></div>
+      <div class="field"><label>Nome</label><input id="feriado-nome" placeholder="Ex.: Aniversário da cidade"></div>
+      <div class="field"><label>Abrangência</label>
+        <select id="feriado-abrangencia">
+          <option value="nacional">Nacional</option>
+          <option value="estadual">Estadual</option>
+          <option value="municipal">Municipal</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button class="btn-outline-sm" style="flex:1; justify-content:center;" onclick="fecharModalFeriado()">Cancelar</button>
+        <button class="btn btn-primary" style="flex:1; justify-content:center;" onclick="salvarFeriado()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+async function salvarFeriado() {
+  const dataFeriado = document.getElementById('feriado-data').value;
+  const nome = document.getElementById('feriado-nome').value.trim();
+  const abrangencia = document.getElementById('feriado-abrangencia').value;
+  if (!dataFeriado || !nome) return alert('Informe a data e o nome do feriado.');
+  try {
+    await api('/api/feriados', { method: 'POST', body: { data: dataFeriado, nome, abrangencia } });
+    fecharModalFeriado();
+    mostrarToast('Feriado cadastrado.');
+    await carregarEscalaFolga();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function excluirFeriado(id) {
+  if (!(await mostrarConfirmacao('Excluir este feriado?'))) return;
+  try {
+    await api(`/api/feriados/${id}`, { method: 'DELETE' });
+    mostrarToast('Feriado excluído.');
+    await carregarEscalaFolga();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 let solicitacoesRHFiltroTipo = '';

@@ -72,13 +72,15 @@ function seed() {
     empresas: [],
     mensagens_internas: [],
     solicitacoes_rh: [],
+    feriados: [],
+    escala_folgas: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
     versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -198,6 +200,13 @@ function migrar(data) {
   if (!data.mensagens_internas) data.mensagens_internas = [];
   if (!data.solicitacoes_rh) data.solicitacoes_rh = [];
   if (!data._seq.solicitacoes_rh) data._seq.solicitacoes_rh = 1;
+  // escala de folga: feriados (nacional/estadual/municipal, cadastrados pelo administrador — o
+  // sistema não vem com nenhum pré-cadastrado, pra nunca arriscar uma data errada) e os dias
+  // marcados de cada usuário (DSR, compensação de banco de horas, home office, férias).
+  if (!data.feriados) data.feriados = [];
+  if (!data._seq.feriados) data._seq.feriados = 1;
+  if (!data.escala_folgas) data.escala_folgas = [];
+  if (!data._seq.escala_folgas) data._seq.escala_folgas = 1;
   // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
   if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];
@@ -208,7 +217,7 @@ function migrar(data) {
   sincronizarEmpresaPadrao(data);
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
-  for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao, data.solicitacoes_rh, data.mensagens_internas]) {
+  for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao, data.solicitacoes_rh, data.mensagens_internas, data.feriados, data.escala_folgas]) {
     for (const item of lista) {
       if (item.empresa_id === undefined) item.empresa_id = 1;
     }
@@ -364,6 +373,10 @@ function migrar(data) {
     // em server.js) — O.S. antigas, de antes desse controle existir, não têm como saber, então
     // entram como false (não conta pro selo do painel de acompanhamento).
     if (a.fora_de_ordem_viagem === undefined) a.fora_de_ordem_viagem = false;
+    // conflito com a escala de folga (DSR ou compensação de banco de horas do técnico no dia da
+    // O.S. — férias bloqueia direto, não chega a salvar) — ver conflitoEscalaTecnico em server.js
+    if (a.escala_conflito_tipo === undefined) a.escala_conflito_tipo = null;
+    if (a.justificativa_escala_conflito === undefined) a.justificativa_escala_conflito = '';
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;

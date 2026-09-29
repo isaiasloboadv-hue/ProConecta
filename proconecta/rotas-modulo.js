@@ -22,6 +22,8 @@ const PREFIXO_MODULO = [
   ['/api/relatorios-manutencao', 'os_chamados'],
   ['/api/tecnicos', 'os_chamados'],
   ['/api/tecnico', 'os_chamados'],
+  ['/api/feriados', 'os_chamados'],
+  ['/api/escala-folgas', 'os_chamados'],
   ['/api/registros', 'biblioteca'],
   ['/api/crm', 'crm'],
   ['/api/agendamento', 'agendamento'],

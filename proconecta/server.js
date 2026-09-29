@@ -183,6 +183,41 @@ function conflitoDeAgendaTecnico(data, empresaId, tecnicoId, diaInicio, diaFim, 
   return null;
 }
 
+// o técnico escolhido pode estar de férias, DSR ou compensando banco de horas nos dias da O.S. —
+// mesma lógica de período do conflitoDeAgendaTecnico acima (usa o intervalo de viagem quando a
+// própria O.S. também tiver bônus de viagem, senão só o dia do atendimento). Devolve a marcação
+// da escala de folga (ver /api/escala-folgas) se houver alguma nesse período, senão null.
+function conflitoEscalaTecnico(data, empresaId, tecnicoId, diaInicio, diaFim) {
+  const inicioTs = new Date(`${diaInicio}T00:00:00`).getTime();
+  const fimTs = new Date(`${diaFim}T23:59:59`).getTime();
+  if (isNaN(inicioTs) || isNaN(fimTs)) return null;
+  const escalas = tenant.listar(data, 'escala_folgas', empresaId).filter((e) => e.usuario_id === tecnicoId);
+  for (const e of escalas) {
+    const ts = new Date(`${e.data}T12:00:00`).getTime();
+    if (ts >= inicioTs && ts <= fimTs) return e;
+  }
+  return null;
+}
+
+const LABEL_ESCALA_FOLGA = { dsr: 'DSR (descanso semanal remunerado)', banco_horas: 'compensação de banco de horas' };
+
+// checa a escala de folga do técnico escolhido nos dias da O.S. — férias bloqueia direto (sem
+// opção de justificar); DSR e banco de horas exigem justificativa; home office não bloqueia nem
+// pede nada, é só informativo. Devolve { bloqueado, motivo, tipo } — motivo != null quando algo
+// precisa de resposta do administrador (bloqueio ou pedido de justificativa).
+function checarEscalaAntesDeSalvar(data, empresaId, tecnicoId, diaInicioOS, diaFimOS) {
+  const conflito = conflitoEscalaTecnico(data, empresaId, tecnicoId, diaInicioOS, diaFimOS);
+  if (!conflito) return { bloqueado: false, motivo: null, tipo: null };
+  if (conflito.tipo === 'ferias') {
+    return { bloqueado: true, motivo: 'Este técnico está de férias nesse período — escolha outro técnico ou outra data.', tipo: 'ferias' };
+  }
+  if (conflito.tipo === 'dsr' || conflito.tipo === 'banco_horas') {
+    const dataFmt = String(conflito.data || '').split('-').reverse().join('/');
+    return { bloqueado: false, motivo: `Justifique pra continuar — este técnico está de ${LABEL_ESCALA_FOLGA[conflito.tipo]} em ${dataFmt}.`, tipo: conflito.tipo };
+  }
+  return { bloqueado: false, motivo: null, tipo: null }; // home_office — só informativo
+}
+
 // reúne os dois motivos que exigem justificativa do administrador antes de salvar uma O.S. com
 // bônus de viagem: (1) esse técnico já passou do limite de diárias no mês, (2) esse técnico não é
 // quem está na vez do rodízio de viagens — a não ser que quem está na vez já tenha outra O.S.
@@ -943,6 +978,20 @@ rota('GET', /^\/api\/agenda\/tecnico-da-vez$/, async (req, res) => {
   enviarJSON(res, 200, { tecnico_da_vez_id: tecnico.id, tecnico_da_vez_nome: tecnico.nome, conflito });
 });
 
+// GET /api/agenda/escala-conflito?tecnico_id=&inicio=&fim= — pro formulário de Nova O.S. avisar
+// em tempo real se o técnico escolhido está de férias/DSR/banco de horas no período (ver
+// checarEscalaAntesDeSalvar) — o bloqueio/exigência de justificativa de verdade é sempre no
+// POST/PUT, isso aqui é só pra mostrar o aviso antes de tentar salvar.
+rota('GET', /^\/api\/agenda\/escala-conflito$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cria ordens de serviço.' });
+  const { query } = url.parse(req.url, true);
+  if (!query.tecnico_id || !query.inicio || !query.fim) return enviarJSON(res, 200, { bloqueado: false, motivo: null, tipo: null });
+  const data = db.load();
+  const resultado = checarEscalaAntesDeSalvar(data, user.empresa_id, Number(query.tecnico_id), query.inicio, query.fim);
+  enviarJSON(res, 200, resultado);
+});
+
 // POST /api/agenda  (administrador cria atividade)
 rota('POST', /^\/api\/agenda$/, async (req, res) => {
   const user = usuarioAutenticado(req);
@@ -998,6 +1047,21 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
       }
     }
   }
+  // escala de folga: o técnico escolhido pode estar de férias/DSR/banco de horas nos dias da O.S.
+  // (não só nas com bônus de viagem — qualquer O.S. checa a escala dele)
+  const diaInicioOS = bonusViagem && viagemDiaInicio ? viagemDiaInicio : String(body.data_hora_inicio || '').slice(0, 10);
+  const diaFimOS = bonusViagem && viagemDiaFimPrevisto ? viagemDiaFimPrevisto : String(body.data_hora_fim || body.data_hora_inicio || '').slice(0, 10);
+  const escalaCheck = checarEscalaAntesDeSalvar(data, user.empresa_id, Number(body.tecnico_id), diaInicioOS, diaFimOS);
+  let justificativaEscalaConflito = '';
+  if (escalaCheck.bloqueado) {
+    return enviarJSON(res, 400, { erro: escalaCheck.motivo });
+  }
+  if (escalaCheck.motivo) {
+    justificativaEscalaConflito = String(body.justificativa_escala_conflito || '').trim();
+    if (!justificativaEscalaConflito) {
+      return enviarJSON(res, 400, { erro: escalaCheck.motivo, precisa_justificativa: true, motivo_escala: true });
+    }
+  }
   const item = tenant.criar(data, 'agenda', user.empresa_id, {
     numero_os: numeroOSDigitado || null, // preenchido logo abaixo, depois de saber o id gerado
     tecnico_id: Number(body.tecnico_id),
@@ -1049,6 +1113,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     viagem_dia_fim_previsto: bonusViagem ? viagemDiaFimPrevisto : '',
     justificativa_limite_viagens: justificativaLimiteViagens,
     fora_de_ordem_viagem: bonusViagem ? foraDeOrdemViagem : false,
+    escala_conflito_tipo: escalaCheck.tipo,
+    justificativa_escala_conflito: justificativaEscalaConflito,
   });
   if (!item.numero_os) item.numero_os = `OS-${String(item.id).padStart(6, '0')}`;
   db.save(data);
@@ -1115,6 +1181,20 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
       }
     }
   }
+  // escala de folga: o técnico escolhido pode estar de férias/DSR/banco de horas nos dias da O.S.
+  const diaInicioOS = bonusViagem && viagemDiaInicio ? viagemDiaInicio : String(body.data_hora_inicio || '').slice(0, 10);
+  const diaFimOS = bonusViagem && viagemDiaFimPrevisto ? viagemDiaFimPrevisto : String(body.data_hora_fim || body.data_hora_inicio || '').slice(0, 10);
+  const escalaCheck = checarEscalaAntesDeSalvar(data, user.empresa_id, Number(body.tecnico_id), diaInicioOS, diaFimOS);
+  let justificativaEscalaConflito = '';
+  if (escalaCheck.bloqueado) {
+    return enviarJSON(res, 400, { erro: escalaCheck.motivo });
+  }
+  if (escalaCheck.motivo) {
+    justificativaEscalaConflito = String(body.justificativa_escala_conflito || item.justificativa_escala_conflito || '').trim();
+    if (!justificativaEscalaConflito) {
+      return enviarJSON(res, 400, { erro: escalaCheck.motivo, precisa_justificativa: true, motivo_escala: true });
+    }
+  }
   // se o técnico designado mudou, ele ainda não viu essa atribuição — reabre a notificação
   const trocouTecnico = Number(body.tecnico_id) !== item.tecnico_id;
   Object.assign(item, {
@@ -1141,6 +1221,8 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     viagem_dia_fim_previsto: bonusViagem ? viagemDiaFimPrevisto : '',
     justificativa_limite_viagens: bonusViagem ? justificativaLimiteViagens : '',
     fora_de_ordem_viagem: bonusViagem ? foraDeOrdemViagem : false,
+    escala_conflito_tipo: escalaCheck.tipo,
+    justificativa_escala_conflito: justificativaEscalaConflito,
   });
   if (trocouTecnico) item.lida_tecnico = false;
   db.save(data);
@@ -1179,7 +1261,7 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
       dias_total: diasTotal,
       valor_total: diasTotal * VALOR_BONUS_VIAGEM,
       passou_limite: diasTotal > LIMITE_VIAGENS_BONUS_MES,
-      com_justificativa: viagens.filter((a) => a.justificativa_limite_viagens).length,
+      com_justificativa: viagens.filter((a) => a.justificativa_limite_viagens || a.escala_conflito_tipo).length,
       viagens: viagensComDias.map(({ item: a, dias }) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
         cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || a.cliente_nome_manual || '—',
@@ -1189,6 +1271,8 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
         dias,
         fora_de_ordem_viagem: !!a.fora_de_ordem_viagem,
         justificativa_limite_viagens: a.justificativa_limite_viagens || '',
+        escala_conflito_tipo: a.escala_conflito_tipo || null,
+        justificativa_escala_conflito: a.justificativa_escala_conflito || '',
       })),
       // O.S. em-loco do mês que NÃO somaram bônus — mostradas junto na tela de detalhe do
       // técnico, separadas por cor da que soma bônus (ver quantidade_sem_bonus acima)
@@ -1202,6 +1286,121 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
     };
   }).sort((a, b) => b.dias_total - a.dias_total);
   enviarJSON(res, 200, { mes, limite: LIMITE_VIAGENS_BONUS_MES, valor_bonus: VALOR_BONUS_VIAGEM, tecnicos: porTecnico });
+});
+
+// ---------- escala de folga (feriados + DSR, compensação de banco de horas, home office, férias) ----------
+// diferente das solicitações de RH logo abaixo (um pedido do técnico, com aprovação): aqui é o
+// administrador que marca direto no calendário de cada um da equipe (inclusive ele mesmo) — não
+// tem fluxo de aprovação, é a escala de fato. Usado tanto pro mini calendário quanto pra checar
+// conflito ao montar uma O.S. (ver conflitoEscalaTecnico, POST/PUT /api/agenda).
+const TIPOS_ESCALA_FOLGA = ['dsr', 'banco_horas', 'home_office', 'ferias'];
+const ABRANGENCIAS_FERIADO = ['nacional', 'estadual', 'municipal'];
+
+// entrada de escala (se houver) de um usuário num dia — null se está disponível normalmente
+function escalaDoDia(data, empresaId, usuarioId, diaISO) {
+  return tenant.listar(data, 'escala_folgas', empresaId).find((e) => e.usuario_id === usuarioId && e.data === diaISO) || null;
+}
+
+// GET /api/feriados?ano=AAAA — feriados cadastrados (nacional/estadual/municipal); qualquer um
+// da empresa pode ver (é só o pano de fundo do calendário), só o administrador cadastra/exclui.
+// O sistema não vem com nenhum feriado pré-cadastrado — o administrador quem informa as datas
+// certas (inclusive os feriados municipais de sua cidade), pra nunca arriscar uma data errada.
+rota('GET', /^\/api\/feriados$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'feriados', user.empresa_id);
+  if (query.ano) lista = lista.filter((f) => String(f.data || '').slice(0, 4) === String(query.ano));
+  lista = lista.sort((a, b) => (a.data || '').localeCompare(b.data || ''));
+  enviarJSON(res, 200, { feriados: lista });
+});
+
+// POST /api/feriados
+rota('POST', /^\/api\/feriados$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra feriados.' });
+  const body = await lerCorpo(req);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data do feriado.' });
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do feriado.' });
+  if (!ABRANGENCIAS_FERIADO.includes(body.abrangencia)) return enviarJSON(res, 400, { erro: 'Abrangência inválida.' });
+  const data = db.load();
+  if (tenant.listar(data, 'feriados', user.empresa_id).some((f) => f.data === body.data && f.abrangencia === body.abrangencia)) {
+    return enviarJSON(res, 400, { erro: 'Já existe um feriado dessa abrangência cadastrado nessa data.' });
+  }
+  const item = tenant.criar(data, 'feriados', user.empresa_id, {
+    data: body.data, nome: String(body.nome).trim(), abrangencia: body.abrangencia, criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { feriado: item });
+});
+
+// DELETE /api/feriados/:id
+rota('DELETE', /^\/api\/feriados\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui feriados.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'feriados', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Feriado não encontrado.' });
+  data.feriados = data.feriados.filter((f) => f.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/escala-folgas?mes=AAAA-MM — todas as marcações da equipe inteira nesse mês, de uma
+// vez (a lista da esquerda usa isso pra mostrar o ícone de hoje de cada um; ao clicar num nome,
+// o front filtra por usuario_id no que já veio, sem precisar de outra chamada).
+rota('GET', /^\/api\/escala-folgas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha a escala de folga.' });
+  const { query } = url.parse(req.url, true);
+  const mes = query.mes || new Date().toISOString().slice(0, 7);
+  const data = db.load();
+  const lista = tenant.listar(data, 'escala_folgas', user.empresa_id)
+    .filter((e) => String(e.data || '').slice(0, 7) === mes)
+    .map((e) => ({ ...e, usuario_nome: (data.usuarios.find((u) => u.id === e.usuario_id && u.empresa_id === user.empresa_id) || {}).nome || '—' }));
+  enviarJSON(res, 200, { mes, escalas: lista });
+});
+
+// POST /api/escala-folgas — administrador marca um dia de alguém da equipe (substitui se já
+// houver marcação nesse dia — um dia só tem um tipo por pessoa)
+rota('POST', /^\/api\/escala-folgas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador define a escala de folga.' });
+  const body = await lerCorpo(req);
+  if (!TIPOS_ESCALA_FOLGA.includes(body.tipo)) return enviarJSON(res, 400, { erro: 'Tipo inválido.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data.' });
+  const data = db.load();
+  const usuarioAlvo = tenant.buscar(data, 'usuarios', Number(body.usuario_id), user.empresa_id);
+  if (!usuarioAlvo || !['suporte', 'administrador'].includes(usuarioAlvo.papel)) {
+    return enviarJSON(res, 404, { erro: 'Usuário não encontrado na equipe.' });
+  }
+  const existente = data.escala_folgas.find((e) => e.usuario_id === usuarioAlvo.id && e.data === body.data && e.empresa_id === user.empresa_id);
+  if (existente) {
+    existente.tipo = body.tipo;
+    existente.definido_por = user.id;
+    existente.atualizado_em = new Date().toISOString();
+    db.save(data);
+    return enviarJSON(res, 200, { escala: existente });
+  }
+  const item = tenant.criar(data, 'escala_folgas', user.empresa_id, {
+    usuario_id: usuarioAlvo.id, data: body.data, tipo: body.tipo,
+    definido_por: user.id, criado_em: new Date().toISOString(), atualizado_em: null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { escala: item });
+});
+
+// DELETE /api/escala-folgas/:id — limpa uma marcação
+rota('DELETE', /^\/api\/escala-folgas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador altera a escala de folga.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'escala_folgas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Marcação não encontrada.' });
+  data.escala_folgas = data.escala_folgas.filter((e) => e.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // ---------- solicitações de RH do técnico (folga, banco de horas, férias, home office) ----------
