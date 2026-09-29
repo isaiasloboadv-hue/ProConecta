@@ -350,10 +350,15 @@ function migrar(data) {
       a.fase_atendimento = 'em_atendimento';
       if (!a.tecnico_chat_id) a.tecnico_chat_id = a.tecnico_id;
     }
-    // bônus de viagem (R$200) — o administrador marca na O.S. quando ela dá direito ao bônus
-    // (nem toda região paga); conta pro limite de 7 viagens com bônus por técnico/mês (ver
-    // contarViagensBonusMes em server.js)
+    // bônus de viagem (R$200/diária) — o administrador marca na O.S. quando ela dá direito ao
+    // bônus (nem toda região paga) e informa o dia de início do deslocamento e o dia previsto de
+    // retorno; conta 1 diária por dia corrido entre os dois, contra o limite de 7 diárias por
+    // técnico/mês (ver diasBonusViagem/contarDiariasBonusMes em server.js). O.S. antigas que já
+    // tinham bonus_viagem marcado (de quando era só 1 bônus fixo por O.S., sem diária) ganham
+    // início = fim = o dia do atendimento, preservando o valor de 1 diária que já valiam.
     if (a.bonus_viagem === undefined) a.bonus_viagem = false;
+    if (a.viagem_dia_inicio === undefined) a.viagem_dia_inicio = a.bonus_viagem ? String(a.data_hora_inicio || '').slice(0, 10) : '';
+    if (a.viagem_dia_fim_previsto === undefined) a.viagem_dia_fim_previsto = a.bonus_viagem ? String(a.data_hora_inicio || '').slice(0, 10) : '';
     if (a.justificativa_limite_viagens === undefined) a.justificativa_limite_viagens = '';
   }
   for (const e of data.equipamentos) {

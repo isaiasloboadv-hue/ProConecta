@@ -113,19 +113,31 @@ function papelGerenciavelPorAdmin(admin, papelAlvo) {
   return false;
 }
 
-// bônus de viagem (R$200) — nem toda O.S. dá direito (depende da região), então o administrador
-// marca isso manualmente ao abrir/editar a O.S. Acima de 7 viagens com bônus no mês, o técnico
-// precisaria se deslocar demais — o administrador tem que justificar antes de atribuir mais uma.
+// bônus de viagem (R$200/diária) — nem toda O.S. dá direito (depende da região), então o
+// administrador marca isso manualmente ao abrir/editar a O.S. e informa o dia em que o técnico
+// precisa começar a se deslocar e o dia previsto de retorno; o bônus conta 1 diária por dia
+// corrido entre esses dois, inclusive (ex.: sai e volta no mesmo dia = 1 diária; sai um dia
+// antes = 2; sai um dia antes e só volta um dia depois do atendimento = 3). Acima de 7 diárias
+// somadas no mês, o administrador tem que justificar antes de atribuir mais uma.
 const LIMITE_VIAGENS_BONUS_MES = 7;
 const VALOR_BONUS_VIAGEM = 200;
-function contarViagensBonusMes(data, empresaId, tecnicoId, dataIso, excluirId) {
+
+// diferença em dias corridos entre o início do deslocamento e a chegada de volta, inclusive as
+// duas pontas — "AAAA-MM-DD" simples, sem hora (a hora do atendimento em si não importa aqui,
+// só em que dia o técnico precisou estar na estrada).
+function diasBonusViagem(diaInicio, diaFim) {
+  if (!diaInicio || !diaFim) return 0;
+  const ini = new Date(`${diaInicio}T00:00:00`);
+  const fim = new Date(`${diaFim}T00:00:00`);
+  if (isNaN(ini) || isNaN(fim) || fim < ini) return 0;
+  return Math.round((fim - ini) / 86400000) + 1;
+}
+
+function contarDiariasBonusMes(data, empresaId, tecnicoId, dataIso, excluirId) {
   const mesAno = String(dataIso || '').slice(0, 7); // "AAAA-MM"
-  return tenant.listar(data, 'agenda', empresaId).filter((a) =>
-    a.id !== excluirId &&
-    a.tecnico_id === tecnicoId &&
-    a.bonus_viagem &&
-    String(a.data_hora_inicio || '').slice(0, 7) === mesAno
-  ).length;
+  return tenant.listar(data, 'agenda', empresaId)
+    .filter((a) => a.id !== excluirId && a.tecnico_id === tecnicoId && a.bonus_viagem && String(a.data_hora_inicio || '').slice(0, 7) === mesAno)
+    .reduce((soma, a) => soma + diasBonusViagem(a.viagem_dia_inicio, a.viagem_dia_fim_previsto), 0);
 }
 
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
@@ -147,6 +159,7 @@ function agendaComDetalhes(data, item) {
     visita_retorno_id: visitaRetorno ? visitaRetorno.id : null,
     finalizada: item.finalizada || false,
     finalizado_em: item.finalizado_em || null,
+    dias_bonus_viagem: item.bonus_viagem ? diasBonusViagem(item.viagem_dia_inicio, item.viagem_dia_fim_previsto) : 0,
     tecnico_nome: tecnico ? tecnico.nome : null,
     tecnico_setor: tecnico ? tecnico.setor : null,
     // Demonstração Técnica sem cliente/equipamento cadastrado (ver POST/PUT /api/agenda) cai
@@ -879,12 +892,24 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   }
   const bonusViagem = !!body.bonus_viagem;
   let justificativaLimiteViagens = '';
+  let viagemDiaInicio = '';
+  let viagemDiaFimPrevisto = '';
+  let diasNovaViagem = 0;
   if (bonusViagem) {
-    const jaTem = contarViagensBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, null);
-    if (jaTem >= LIMITE_VIAGENS_BONUS_MES) {
+    viagemDiaInicio = String(body.viagem_dia_inicio || '').trim();
+    viagemDiaFimPrevisto = String(body.viagem_dia_fim_previsto || '').trim();
+    if (!viagemDiaInicio || !viagemDiaFimPrevisto) {
+      return enviarJSON(res, 400, { erro: 'Informe o dia de início do deslocamento e o dia previsto de retorno pra contar o bônus de viagem.' });
+    }
+    diasNovaViagem = diasBonusViagem(viagemDiaInicio, viagemDiaFimPrevisto);
+    if (diasNovaViagem < 1) {
+      return enviarJSON(res, 400, { erro: 'O dia previsto de retorno não pode ser antes do dia de início do deslocamento.' });
+    }
+    const jaTem = contarDiariasBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, null);
+    if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
-        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} viagens com bônus neste mês (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
+        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
       }
     }
   }
@@ -935,6 +960,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     viagem_volta_chegada_em: null,
     viagem_volta_destino_agenda_id: null,
     bonus_viagem: bonusViagem,
+    viagem_dia_inicio: bonusViagem ? viagemDiaInicio : '',
+    viagem_dia_fim_previsto: bonusViagem ? viagemDiaFimPrevisto : '',
     justificativa_limite_viagens: justificativaLimiteViagens,
   });
   if (!item.numero_os) item.numero_os = `OS-${String(item.id).padStart(6, '0')}`;
@@ -979,12 +1006,24 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   }
   const bonusViagem = !!body.bonus_viagem;
   let justificativaLimiteViagens = '';
+  let viagemDiaInicio = '';
+  let viagemDiaFimPrevisto = '';
+  let diasNovaViagem = 0;
   if (bonusViagem) {
-    const jaTem = contarViagensBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, item.id);
-    if (jaTem >= LIMITE_VIAGENS_BONUS_MES) {
+    viagemDiaInicio = String(body.viagem_dia_inicio || '').trim();
+    viagemDiaFimPrevisto = String(body.viagem_dia_fim_previsto || '').trim();
+    if (!viagemDiaInicio || !viagemDiaFimPrevisto) {
+      return enviarJSON(res, 400, { erro: 'Informe o dia de início do deslocamento e o dia previsto de retorno pra contar o bônus de viagem.' });
+    }
+    diasNovaViagem = diasBonusViagem(viagemDiaInicio, viagemDiaFimPrevisto);
+    if (diasNovaViagem < 1) {
+      return enviarJSON(res, 400, { erro: 'O dia previsto de retorno não pode ser antes do dia de início do deslocamento.' });
+    }
+    const jaTem = contarDiariasBonusMes(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, item.id);
+    if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || item.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
-        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} viagens com bônus neste mês (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
+        return enviarJSON(res, 400, { erro: `Este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES}). Justifique pra continuar.`, precisa_justificativa: true });
       }
     }
   }
@@ -1010,6 +1049,8 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     // fica preservado — não é reescrito por aqui. Só entra se a O.S. ainda não tinha SLA nenhum.
     ...(item.sla_nivel === null ? (slaDoBody(body, equipamentoEscolhido) || {}) : {}),
     bonus_viagem: bonusViagem,
+    viagem_dia_inicio: bonusViagem ? viagemDiaInicio : '',
+    viagem_dia_fim_previsto: bonusViagem ? viagemDiaFimPrevisto : '',
     justificativa_limite_viagens: bonusViagem ? justificativaLimiteViagens : '',
   });
   if (trocouTecnico) item.lida_tecnico = false;
@@ -1018,8 +1059,9 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
 });
 
 // GET /api/tecnicos/viagens?mes=AAAA-MM — acompanhamento do bônus de viagem por técnico: quantas
-// O.S. com bônus cada um tem no mês, o valor total (R$200 cada) e quais passaram do limite de 7
-// (com a justificativa que o administrador deu ao atribuir).
+// diárias cada um somou no mês (1 por dia corrido entre o início do deslocamento e a chegada de
+// volta, ver diasBonusViagem), o valor total (R$200 por diária) e quem passou do limite de 7
+// diárias (com a justificativa que o administrador deu ao atribuir).
 rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha o bônus de viagem.' });
@@ -1031,20 +1073,26 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
     const viagens = tenant.listar(data, 'agenda', user.empresa_id)
       .filter((a) => a.tecnico_id === t.id && a.bonus_viagem && String(a.data_hora_inicio || '').slice(0, 7) === mes)
       .sort((x, y) => (x.data_hora_inicio || '').localeCompare(y.data_hora_inicio || ''));
+    const viagensComDias = viagens.map((a) => ({ item: a, dias: diasBonusViagem(a.viagem_dia_inicio, a.viagem_dia_fim_previsto) }));
+    const diasTotal = viagensComDias.reduce((soma, v) => soma + v.dias, 0);
     return {
       tecnico_id: t.id,
       tecnico_nome: t.nome,
       quantidade: viagens.length,
-      valor_total: viagens.length * VALOR_BONUS_VIAGEM,
-      passou_limite: viagens.length > LIMITE_VIAGENS_BONUS_MES,
-      viagens: viagens.map((a) => ({
+      dias_total: diasTotal,
+      valor_total: diasTotal * VALOR_BONUS_VIAGEM,
+      passou_limite: diasTotal > LIMITE_VIAGENS_BONUS_MES,
+      viagens: viagensComDias.map(({ item: a, dias }) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
         cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || a.cliente_nome_manual || '—',
         data_hora_inicio: a.data_hora_inicio,
+        viagem_dia_inicio: a.viagem_dia_inicio || '',
+        viagem_dia_fim_previsto: a.viagem_dia_fim_previsto || '',
+        dias,
         justificativa_limite_viagens: a.justificativa_limite_viagens || '',
       })),
     };
-  }).sort((a, b) => b.quantidade - a.quantidade);
+  }).sort((a, b) => b.dias_total - a.dias_total);
   enviarJSON(res, 200, { mes, limite: LIMITE_VIAGENS_BONUS_MES, valor_bonus: VALOR_BONUS_VIAGEM, tecnicos: porTecnico });
 });
 

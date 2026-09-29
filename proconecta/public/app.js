@@ -1674,8 +1674,16 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <div class="form-grid">
         <div class="full"><label>Técnico</label><select id="na-tecnico">${tecnicos.map((t) => `<option value="${t.id}" ${agendaItem && agendaItem.tecnico_id === t.id ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
         <div class="full" style="display:flex; align-items:center; gap:8px;">
-          <input type="checkbox" id="na-bonus-viagem" style="width:auto;" ${agendaItem && agendaItem.bonus_viagem ? 'checked' : ''}>
-          <label for="na-bonus-viagem" style="margin:0; text-transform:none; font-weight:600;">💰 Conta bônus de viagem (R$200) — limite de 7 por técnico/mês</label>
+          <input type="checkbox" id="na-bonus-viagem" style="width:auto;" ${agendaItem && agendaItem.bonus_viagem ? 'checked' : ''} onchange="alternarBonusViagem()">
+          <label for="na-bonus-viagem" style="margin:0; text-transform:none; font-weight:600;">💰 Conta bônus de viagem (R$200/diária) — limite de 7 diárias por técnico/mês</label>
+        </div>
+        <div class="full ${agendaItem && agendaItem.bonus_viagem ? '' : 'hidden'}" id="na-viagem-datas-wrap">
+          <p style="color:var(--ink-soft); font-size:12.5px; margin:-4px 0 8px;">Conta 1 diária por dia corrido entre o início do deslocamento e a chegada de volta, inclusive as duas pontas (ex.: sai e volta no mesmo dia = 1 diária; sai 1 dia antes = 2; sai 1 dia antes e só volta 1 dia depois do atendimento = 3).</p>
+          <div class="form-grid">
+            <div><label>Dia de início do deslocamento</label><input type="date" id="na-viagem-inicio" value="${agendaItem && agendaItem.viagem_dia_inicio ? agendaItem.viagem_dia_inicio : ''}" onchange="atualizarPreviewBonusViagem()"></div>
+            <div><label>Dia previsto de retorno/finalização</label><input type="date" id="na-viagem-fim" value="${agendaItem && agendaItem.viagem_dia_fim_previsto ? agendaItem.viagem_dia_fim_previsto : ''}" onchange="atualizarPreviewBonusViagem()"></div>
+          </div>
+          <div id="na-viagem-dias-preview" style="font-size:13px; font-weight:700; color:var(--navy);"></div>
         </div>
       </div>
 
@@ -1907,6 +1915,8 @@ async function salvarNovaAtividade() {
     garantia: (document.querySelector('input[name="na-garantia"]:checked') || {}).value || '',
     garantia_obs: document.getElementById('na-garantia-obs').value,
     bonus_viagem: document.getElementById('na-bonus-viagem').checked,
+    viagem_dia_inicio: document.getElementById('na-bonus-viagem').checked ? document.getElementById('na-viagem-inicio').value : '',
+    viagem_dia_fim_previsto: document.getElementById('na-bonus-viagem').checked ? document.getElementById('na-viagem-fim').value : '',
   };
   if (sla_respostas) body.sla_respostas = sla_respostas;
   // Demonstração Técnica nova (não na edição, ver mostrarFormNovaAtividade) já nasce com o
@@ -1977,6 +1987,37 @@ const NIVEIS_SLA_LOCAL = [
   { max: 26, nivel: 'alto', label: 'Alto', dias_visita_tecnica: 4 },
   { max: Infinity, nivel: 'critico', label: 'Crítico', dias_visita_tecnica: 2 },
 ];
+
+// bônus de viagem: mostra/esconde os campos de data só quando o checkbox é marcado, já
+// pré-preenchendo com a data do atendimento (Início/Fim) pra cobrir o caso mais comum — sai e
+// volta no mesmo dia — sem o administrador precisar digitar de novo.
+function alternarBonusViagem() {
+  const marcado = document.getElementById('na-bonus-viagem').checked;
+  const wrap = document.getElementById('na-viagem-datas-wrap');
+  if (!wrap) return;
+  wrap.classList.toggle('hidden', !marcado);
+  if (marcado) {
+    const inicioEl = document.getElementById('na-viagem-inicio');
+    const fimEl = document.getElementById('na-viagem-fim');
+    if (inicioEl && !inicioEl.value) inicioEl.value = (document.getElementById('na-inicio').value || '').slice(0, 10);
+    if (fimEl && !fimEl.value) fimEl.value = (document.getElementById('na-fim').value || document.getElementById('na-inicio').value || '').slice(0, 10);
+    atualizarPreviewBonusViagem();
+  }
+}
+
+// mesma conta que o servidor faz (diasBonusViagem) — só pra mostrar uma prévia antes de salvar;
+// quem vale mesmo é o cálculo do servidor.
+function atualizarPreviewBonusViagem() {
+  const alvo = document.getElementById('na-viagem-dias-preview');
+  if (!alvo) return;
+  const inicio = document.getElementById('na-viagem-inicio').value;
+  const fim = document.getElementById('na-viagem-fim').value;
+  if (!inicio || !fim) { alvo.textContent = ''; return; }
+  const dias = Math.round((new Date(`${fim}T00:00:00`) - new Date(`${inicio}T00:00:00`)) / 86400000) + 1;
+  if (dias < 1) { alvo.textContent = 'O dia de retorno não pode ser antes do dia de início.'; alvo.style.color = 'var(--red)'; return; }
+  alvo.style.color = 'var(--navy)';
+  alvo.textContent = `${dias} diária${dias > 1 ? 's' : ''} de bônus = R$ ${dias * 200}`;
+}
 
 // recalcula a cada pergunta respondida (não precisa esperar terminar o questionário) — dá só
 // uma sugestão de prazo com base no que já foi preenchido até agora; a decisão do dia e horário
@@ -2056,7 +2097,7 @@ async function salvarNovaAtividadeExecutar(body, briefingPromotor) {
     if (paginaAtual === 'aprovacoes-visitas') renderAprovacoesVisitas();
     else renderAgenda();
   } catch (e) {
-    // técnico já bateu o limite de 7 viagens com bônus no mês — pede a justificativa e tenta
+    // técnico já bateu o limite de 7 diárias de bônus no mês — pede a justificativa e tenta
     // salvar de novo com ela, em vez de simplesmente barrar o administrador
     if (e.corpo && e.corpo.precisa_justificativa) {
       const justificativa = prompt(e.message);
@@ -13435,10 +13476,10 @@ function mostrarToast(texto) {
 }
 
 // ---------- Técnicos: acompanhamento de viagens/bônus + solicitações de RH ----------
-// bônus de R$200 por viagem (marcado manualmente pelo administrador na O.S. — nem toda região
-// paga), com limite de 7 por técnico/mês antes de exigir justificativa (ver POST/PUT /api/agenda
-// no servidor). Solicitações de RH (folga, banco de horas, férias, home office) seguem o mesmo
-// padrão de pedido -> aprovação já usado no resto do sistema.
+// bônus de R$200 por diária de viagem (marcado manualmente pelo administrador na O.S. — nem
+// toda região paga), com limite de 7 diárias por técnico/mês antes de exigir justificativa (ver
+// POST/PUT /api/agenda no servidor). Solicitações de RH (folga, banco de horas, férias, home
+// office) seguem o mesmo padrão de pedido -> aprovação já usado no resto do sistema.
 
 const LABEL_SOLICITACAO_RH_FRONT = { folga: 'Folga', banco_horas: 'Banco de horas', ferias: 'Férias', home_office: 'Home office' };
 
@@ -13454,7 +13495,7 @@ async function renderTecnicosAcompanhamento() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Acompanhamento de viagens</h1><p>Bônus de R$200 por viagem — limite de 7 por técnico/mês antes de precisar de justificativa.</p></div>
+      <div><h1>Acompanhamento de viagens</h1><p>Bônus de R$200 por diária de viagem — limite de 7 diárias por técnico/mês antes de precisar de justificativa.</p></div>
       <input type="month" id="acomp-mes" value="${acompanhamentoMes}" onchange="mudarMesAcompanhamento()">
     </div>
     <div id="acomp-lista"><div class="empty">Carregando...</div></div>`;
@@ -13474,11 +13515,12 @@ async function carregarAcompanhamento() {
   if (!alvo) return;
   alvo.innerHTML = tecnicos.length ? `
     <div class="panel"><table>
-      <tr><th>Técnico</th><th>Viagens</th><th>Bônus (R$)</th><th></th></tr>
+      <tr><th>Técnico</th><th>Viagens</th><th>Diárias</th><th>Bônus (R$)</th><th></th></tr>
       ${tecnicos.map((t) => `
         <tr>
           <td data-label="Técnico">${esc(t.tecnico_nome)}</td>
-          <td data-label="Viagens">${t.quantidade}${t.passou_limite ? ` ${tag(`acima do limite (${limite})`, 'falha')}` : ''}</td>
+          <td data-label="Viagens">${t.quantidade}</td>
+          <td data-label="Diárias">${t.dias_total}${t.passou_limite ? ` ${tag(`acima do limite (${limite})`, 'falha')}` : ''}</td>
           <td data-label="Bônus (R$)">R$ ${t.valor_total}</td>
           <td>${t.quantidade ? `<button class="btn-outline-sm" onclick="mostrarDetalheViagens(${t.tecnico_id})">Ver viagens</button>` : ''}</td>
         </tr>`).join('')}
@@ -13493,12 +13535,13 @@ function mostrarDetalheViagens(tecnicoId) {
   if (!t || !alvo) return;
   alvo.innerHTML = `
     <div class="panel"><div class="panel-head">Viagens de ${esc(t.tecnico_nome)}</div><table>
-      <tr><th>O.S.</th><th>Cliente</th><th>Data</th><th>Justificativa</th></tr>
+      <tr><th>O.S.</th><th>Cliente</th><th>Período</th><th>Diárias</th><th>Justificativa</th></tr>
       ${t.viagens.map((v) => `
         <tr>
           <td data-label="O.S.">${esc(v.numero_os)}</td>
           <td data-label="Cliente">${esc(v.cliente_nome)}</td>
-          <td data-label="Data">${fmtData(v.data_hora_inicio)}</td>
+          <td data-label="Período">${v.viagem_dia_inicio && v.viagem_dia_fim_previsto ? `${fmtData(v.viagem_dia_inicio)} – ${fmtData(v.viagem_dia_fim_previsto)}` : fmtData(v.data_hora_inicio)}</td>
+          <td data-label="Diárias">${v.dias}</td>
           <td data-label="Justificativa">${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}</td>
         </tr>`).join('')}
     </table></div>`;
