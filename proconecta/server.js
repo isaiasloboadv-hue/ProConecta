@@ -1156,11 +1156,13 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
 // a O.S. de ser salva sem justificativa, por isso as duas contam junto pro selo vermelho).
 rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha o bônus de viagem.' });
+  if (!exigirPapel(user, ['administrador', 'suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();
-  const tecnicos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  // o técnico só acompanha as próprias viagens — o administrador acompanha o time todo
+  let tecnicos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  if (user.papel === 'suporte') tecnicos = tecnicos.filter((u) => u.id === user.id);
   const agendaDaEmpresa = tenant.listar(data, 'agenda', user.empresa_id);
   const porTecnico = tecnicos.map((t) => {
     const doTecnicoNoMes = agendaDaEmpresa.filter((a) => a.tecnico_id === t.id && String(a.data_hora_inicio || '').slice(0, 7) === mes);

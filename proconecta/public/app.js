@@ -499,6 +499,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'calendario-tecnico': 'Calendário',
     'biblioteca': 'Biblioteca',
     'fila-reparo': 'Setor Reparo',
+    'minhas-viagens': 'Minhas viagens',
     'solicitacoes-rh': 'Solicitações',
     'chat-interno': 'Mensagens',
   },
@@ -550,6 +551,7 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'fila-reparo', modulo: 'os_chamados', label: 'Setor Reparo', page: 'fila-reparo' },
+    { key: 'minhas-viagens', modulo: 'os_chamados', label: 'Minhas viagens', page: 'minhas-viagens' },
     { key: 'solicitacoes-rh', modulo: 'os_chamados', label: 'Solicitações', page: 'solicitacoes-rh' },
   ],
   administrador: [
@@ -654,6 +656,7 @@ const ICONE_MENU = {
   'fila-pos-venda': '💰',
   'fila-estoque': '📦',
   'tecnicos-rh': '🧑‍🔧',
+  'minhas-viagens': '✈️',
   'solicitacoes-rh': '🙋',
 };
 
@@ -786,6 +789,7 @@ async function ir(pagina) {
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
+    if (pagina === 'minhas-viagens') return renderMinhasViagens();
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
@@ -13565,6 +13569,20 @@ async function renderTecnicosAcompanhamento() {
   await carregarAcompanhamento();
 }
 
+// mesma tela do acompanhamento, mas pro próprio técnico — o servidor já devolve só a linha dele
+// em /api/tecnicos/viagens quando quem pede é suporte (ver rota no server.js), então reaproveita
+// o mesmo gráfico/lista do admin; só o botão de abrir a O.S. fica de fora (ver abrirDetalheViagensTecnico).
+async function renderMinhasViagens() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Minhas viagens</h1><p>Bônus de R$200 por diária de viagem — limite de 7 diárias/mês antes de precisar de justificativa.</p></div>
+      <input type="month" id="acomp-mes" value="${acompanhamentoMes}" onchange="mudarMesAcompanhamento()">
+    </div>
+    <div id="acomp-lista"><div class="empty">Carregando...</div></div>`;
+  await carregarAcompanhamento();
+}
+
 function mudarMesAcompanhamento() {
   acompanhamentoMes = document.getElementById('acomp-mes').value;
   carregarAcompanhamento();
@@ -13644,10 +13662,11 @@ function abrirDetalheViagensTecnico(tecnicoId) {
     ...t.viagens_sem_bonus.map((v) => ({ ...v, categoria: 'sem-bonus' })),
   ].sort((a, b) => (a.data_hora_inicio || '').localeCompare(b.data_hora_inicio || ''));
   const [ano, mesNum] = (resp.mes || '').split('-');
+  const souAdmin = USER.papel === 'administrador';
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Viagens de ${esc(t.tecnico_nome)}</h1><p>${mesNum && ano ? `${mesNum}/${ano} — ` : ''}${t.viagens.length} com bônus de diária, ${t.viagens_sem_bonus.length} sem bônus</p></div>
-      <button class="btn-outline-sm" onclick="renderTecnicosAcompanhamento()">‹ Voltar</button>
+      <button class="btn-outline-sm" onclick="${souAdmin ? 'renderTecnicosAcompanhamento()' : 'renderMinhasViagens()'}">‹ Voltar</button>
     </div>
     <div class="panel">
       <div class="viagens-chart-legenda">
@@ -13655,7 +13674,7 @@ function abrirDetalheViagensTecnico(tecnicoId) {
         <span><i class="viagens-chart-dot sem-bonus"></i> Sem bônus</span>
       </div>
       ${itens.length ? `<table>
-        <tr><th>Tipo</th><th>O.S.</th><th>Cliente</th><th>Data</th><th>Diárias</th><th>Justificativa</th></tr>
+        <tr><th>Tipo</th><th>O.S.</th><th>Cliente</th><th>Data</th><th>Diárias</th><th>Justificativa</th>${souAdmin ? '<th></th>' : ''}</tr>
         ${itens.map((v) => `
           <tr>
             <td data-label="Tipo">${v.categoria === 'bonus' ? tag('Com bônus', 'blue') : tag('Sem bônus', 'gray')}</td>
@@ -13664,9 +13683,18 @@ function abrirDetalheViagensTecnico(tecnicoId) {
             <td data-label="Data">${v.categoria === 'bonus' && v.viagem_dia_inicio && v.viagem_dia_fim_previsto ? `${fmtData(v.viagem_dia_inicio)} – ${fmtData(v.viagem_dia_fim_previsto)}` : fmtData(v.data_hora_inicio)}</td>
             <td data-label="Diárias">${v.categoria === 'bonus' ? v.dias : '—'}</td>
             <td data-label="Justificativa">${v.categoria === 'bonus' ? `${v.justificativa_limite_viagens ? `${tag(v.fora_de_ordem_viagem ? 'fora da ordem' : 'acima do limite', 'falha')} ${esc(v.justificativa_limite_viagens)}` : '—'}` : '—'}</td>
+            ${souAdmin ? `<td><button class="btn-outline-sm" onclick="abrirOSDeViagem(${v.id})">Abrir O.S.</button></td>` : ''}
           </tr>`).join('')}
       </table>` : `<p class="empty">Nenhuma O.S. deste técnico neste mês.</p>`}
     </div>`;
+}
+
+// abre a O.S. na tela de detalhe do admin (abrirDetalheOS) a partir da lista de viagens — recarrega
+// agenda/visitas se o cache ainda não tiver essa O.S. (quem chegou direto no Acompanhamento de
+// viagens sem passar pela Ordem de Serviço antes não teria esses caches prontos).
+async function abrirOSDeViagem(id) {
+  if (!(window._agendaCache || []).some((a) => a.id === id)) await carregarAgendaComVisitas();
+  abrirDetalheOS(id);
 }
 
 let solicitacoesRHFiltroTipo = '';
