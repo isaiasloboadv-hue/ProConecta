@@ -13852,6 +13852,15 @@ async function carregarEscalaFolga() {
   renderFeriadosEscala();
 }
 
+// marcação que vale pro usuário num dia: a dele mesmo, ou — se ele não tiver uma marcação própria
+// nesse dia — a coletiva (usuario_id null, ver "Geral" na lista). A individual sempre prevalece,
+// é uma exceção deliberada à regra coletiva pra essa pessoa.
+function escalaEfetivaDoDia(escalas, usuarioId, diaISO) {
+  return escalas.find((e) => e.usuario_id === usuarioId && e.data === diaISO)
+    || escalas.find((e) => e.usuario_id === null && e.data === diaISO)
+    || null;
+}
+
 function renderListaEquipeEscala() {
   const alvo = document.getElementById('escala-lista-wrap');
   if (!alvo) return;
@@ -13861,12 +13870,16 @@ function renderListaEquipeEscala() {
   alvo.innerHTML = `
     <div class="panel-head">Equipe</div>
     <div class="escala-lista">
+      <button class="escala-pessoa escala-pessoa-geral ${escalaFolgaPessoaId === 'geral' ? 'ativo' : ''}" onclick="selecionarPessoaEscala('geral')">
+        <span>👥 Geral <span style="color:var(--ink-soft); font-weight:400; font-size:11.5px;">(folga coletiva)</span></span>
+      </button>
+      <div class="escala-lista-divisor"></div>
       ${usuarios.map((u) => {
-        const deHoje = ehMesAtual ? escalas.find((e) => e.usuario_id === u.id && e.data === hojeISO) : null;
+        const deHoje = ehMesAtual ? escalaEfetivaDoDia(escalas, u.id, hojeISO) : null;
         return `
         <button class="escala-pessoa ${escalaFolgaPessoaId === u.id ? 'ativo' : ''}" onclick="selecionarPessoaEscala(${u.id})">
           <span>${esc(u.nome)}${u.papel === 'administrador' ? ` <span style="color:var(--ink-soft); font-weight:400; font-size:11.5px;">(admin)</span>` : ''}</span>
-          ${deHoje ? `<span title="${esc(LABEL_ESCALA_FOLGA_FRONT[deHoje.tipo])} hoje">${iconeEscala(deHoje.tipo)}</span>` : ''}
+          ${deHoje ? `<span title="${esc(LABEL_ESCALA_FOLGA_FRONT[deHoje.tipo])} hoje${deHoje.usuario_id === null ? ' (coletiva)' : ''}">${iconeEscala(deHoje.tipo)}</span>` : ''}
         </button>`;
       }).join('')}
     </div>`;
@@ -13882,12 +13895,15 @@ function renderMiniCalendarioEscala() {
   const alvo = document.getElementById('escala-calendario-wrap');
   if (!alvo) return;
   const { usuarios, feriados, escalas } = window._escalaFolgaCache;
-  const pessoa = usuarios.find((u) => u.id === escalaFolgaPessoaId);
+  const ehGeral = escalaFolgaPessoaId === 'geral';
+  const pessoa = ehGeral ? null : usuarios.find((u) => u.id === escalaFolgaPessoaId);
+  const selecionado = ehGeral || !!pessoa;
   const dias = diasDoGridEscala(escalaFolgaMesAtual);
   const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
   alvo.innerHTML = `
-    <div class="panel-head">${pessoa ? `Escala de ${esc(pessoa.nome)}` : 'Feriados do mês'}</div>
-    ${!pessoa ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Clique num nome na lista pra ver e marcar as folgas da pessoa.</p>` : ''}
+    <div class="panel-head">${ehGeral ? 'Folga coletiva (todo mundo)' : pessoa ? `Escala de ${esc(pessoa.nome)}` : 'Feriados do mês'}</div>
+    ${!selecionado ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Clique em "Geral" pra marcar uma folga coletiva (ex.: DSR de fim de semana pra equipe inteira), ou num nome pra ver e marcar os dias de alguém.</p>` : ''}
+    ${pessoa ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Dias com marcação em cinza mais claro vêm de uma folga coletiva — escolher outro tipo aqui cria uma exceção só pra ${esc(pessoa.nome)}.</p>` : ''}
     <div class="escala-cal-legenda">
       <span>${iconeCarinhaFeliz('#F5A623')} DSR</span>
       <span>${iconeCarinhaFeliz('#1467D6')} Banco de horas</span>
@@ -13901,11 +13917,14 @@ function renderMiniCalendarioEscala() {
         if (!diaISO) return `<div class="escala-cal-dia vazio"></div>`;
         const diaNum = Number(diaISO.slice(8, 10));
         const feriadosDoDia = feriados.filter((f) => f.data === diaISO);
-        const escalaDoDia = pessoa ? escalas.find((e) => e.usuario_id === pessoa.id && e.data === diaISO) : null;
+        const escalaDoDia = ehGeral
+          ? escalas.find((e) => e.usuario_id === null && e.data === diaISO)
+          : (pessoa ? escalaEfetivaDoDia(escalas, pessoa.id, diaISO) : null);
+        const ehColetiva = escalaDoDia && escalaDoDia.usuario_id === null;
         return `
-          <div class="escala-cal-dia ${feriadosDoDia.length ? 'feriado' : ''} ${pessoa ? 'clicavel' : ''}" ${pessoa ? `onclick="clicarDiaEscala('${diaISO}')"` : ''} ${feriadosDoDia.length ? `title="${esc(feriadosDoDia.map((f) => f.nome).join(', '))}"` : ''}>
+          <div class="escala-cal-dia ${feriadosDoDia.length ? 'feriado' : ''} ${selecionado ? 'clicavel' : ''} ${ehColetiva && !ehGeral ? 'coletiva' : ''}" ${selecionado ? `onclick="clicarDiaEscala('${diaISO}')"` : ''} ${feriadosDoDia.length ? `title="${esc(feriadosDoDia.map((f) => f.nome).join(', '))}"` : ''}>
             <span class="escala-cal-dia-num">${diaNum}</span>
-            ${escalaDoDia ? `<span class="escala-cal-dia-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaDoDia.tipo])}">${iconeEscala(escalaDoDia.tipo)}</span>` : ''}
+            ${escalaDoDia ? `<span class="escala-cal-dia-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaDoDia.tipo])}${ehColetiva ? ' (coletiva)' : ''}">${iconeEscala(escalaDoDia.tipo)}</span>` : ''}
           </div>`;
       }).join('')}
     </div>`;
@@ -13917,11 +13936,17 @@ function fecharModalEscalaDia() {
 }
 
 function clicarDiaEscala(diaISO) {
-  if (!escalaFolgaPessoaId) return;
+  if (escalaFolgaPessoaId == null) return;
+  const ehGeral = escalaFolgaPessoaId === 'geral';
   const { usuarios, escalas } = window._escalaFolgaCache;
-  const pessoa = usuarios.find((u) => u.id === escalaFolgaPessoaId);
-  if (!pessoa) return;
-  const existente = escalas.find((e) => e.usuario_id === escalaFolgaPessoaId && e.data === diaISO);
+  const pessoa = ehGeral ? null : usuarios.find((u) => u.id === escalaFolgaPessoaId);
+  if (!ehGeral && !pessoa) return;
+  const coletivaDoDia = escalas.find((e) => e.usuario_id === null && e.data === diaISO);
+  const individualDoDia = ehGeral ? null : escalas.find((e) => e.usuario_id === escalaFolgaPessoaId && e.data === diaISO);
+  // só oferece "Limpar" pro que pertence à própria seleção — limpar a coletiva enquanto vê uma
+  // pessoa apagaria a folga de todo mundo por engano; limpar a individual enquanto vê "Geral"
+  // não existe (a individual pertence só àquela pessoa)
+  const existenteParaLimpar = ehGeral ? coletivaDoDia : individualDoDia;
   let modal = document.getElementById('modal-escala-dia');
   if (!modal) {
     modal = document.createElement('div');
@@ -13932,24 +13957,29 @@ function clicarDiaEscala(diaISO) {
   modal.classList.add('show');
   modal.innerHTML = `
     <div class="modal-card" style="max-width:380px;">
-      <h3>${esc(pessoa.nome)} — ${fmtData(diaISO)}</h3>
+      <h3>${ehGeral ? 'Todo mundo' : esc(pessoa.nome)} — ${fmtData(diaISO)}</h3>
       <p>O que marcar nesse dia?</p>
+      ${!ehGeral && coletivaDoDia && !individualDoDia ? `<p style="color:var(--amber); font-size:12.5px;">Esse dia já é folga coletiva (${esc(LABEL_ESCALA_FOLGA_FRONT[coletivaDoDia.tipo])}). Escolher um tipo aqui cria uma exceção só pra ${esc(pessoa.nome)}.</p>` : ''}
       <div class="escala-opcoes">
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'dsr')">${iconeCarinhaFeliz('#F5A623')} DSR</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'banco_horas')">${iconeCarinhaFeliz('#1467D6')} Banco de horas</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'home_office')">🏠 Home office</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'ferias')">🏖️ Férias</button>
       </div>
-      ${existente ? `<button class="btn-outline-sm" style="width:100%; margin-top:10px; color:var(--red); border-color:var(--red);" onclick="limparEscalaDia(${existente.id})">Limpar marcação</button>` : ''}
+      ${existenteParaLimpar ? `<button class="btn-outline-sm" style="width:100%; margin-top:10px; color:var(--red); border-color:var(--red);" onclick="limparEscalaDia(${existenteParaLimpar.id})">Limpar marcação${ehGeral ? ' coletiva' : ''}</button>` : ''}
       <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="fecharModalEscalaDia()">Cancelar</button>
     </div>`;
 }
 
 async function definirEscalaDia(diaISO, tipo) {
+  const ehGeral = escalaFolgaPessoaId === 'geral';
   try {
-    await api('/api/escala-folgas', { method: 'POST', body: { usuario_id: escalaFolgaPessoaId, data: diaISO, tipo } });
+    await api('/api/escala-folgas', {
+      method: 'POST',
+      body: ehGeral ? { coletiva: true, data: diaISO, tipo } : { usuario_id: escalaFolgaPessoaId, data: diaISO, tipo },
+    });
     fecharModalEscalaDia();
-    mostrarToast('Escala atualizada.');
+    mostrarToast(ehGeral ? 'Folga coletiva atualizada.' : 'Escala atualizada.');
     await carregarEscalaFolga();
   } catch (e) { alert('Erro: ' + e.message); }
 }

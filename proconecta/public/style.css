@@ -192,6 +192,8 @@ main{flex:1;padding:30px 36px 60px;max-width:1600px;}
 .escala-pessoa{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:none;border:1.5px solid transparent;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer;transition:.15s;}
 .escala-pessoa:hover{background:var(--blue-pale-2);}
 .escala-pessoa.ativo{background:var(--blue-pale);border-color:var(--blue);color:var(--navy);}
+.escala-pessoa-geral{font-weight:700;}
+.escala-lista-divisor{height:1px;background:var(--line);margin:6px 2px;}
 .escala-cal-legenda{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;font-size:12px;color:var(--ink-soft);}
 .escala-cal-legenda span{display:flex;align-items:center;gap:5px;}
 .escala-cal-legenda-feriado{padding:2px 8px;border-radius:5px;background:#FDE8E5;color:#B3453A;font-weight:600;}
@@ -200,6 +202,8 @@ main{flex:1;padding:30px 36px 60px;max-width:1600px;}
 .escala-cal-dia{position:relative;aspect-ratio:1;border-radius:9px;background:var(--blue-pale-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px;}
 .escala-cal-dia.vazio{background:none;}
 .escala-cal-dia.feriado{background:#FDE8E5;}
+.escala-cal-dia.coletiva{background:#E4E9F1;}
+.escala-cal-dia.coletiva.feriado{background:#F6DEDC;}
 .escala-cal-dia.clicavel{cursor:pointer;transition:.15s;}
 .escala-cal-dia.clicavel:hover{outline:2px solid var(--blue);outline-offset:-2px;}
 .escala-cal-dia-num{font-size:12.5px;font-weight:700;color:var(--ink);}

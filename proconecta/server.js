@@ -187,11 +187,23 @@ function conflitoDeAgendaTecnico(data, empresaId, tecnicoId, diaInicio, diaFim, 
 // mesma lógica de período do conflitoDeAgendaTecnico acima (usa o intervalo de viagem quando a
 // própria O.S. também tiver bônus de viagem, senão só o dia do atendimento). Devolve a marcação
 // da escala de folga (ver /api/escala-folgas) se houver alguma nesse período, senão null.
+// marcações que valem pra esse técnico num dia: as dele mesmo (usuario_id = ele) mais as
+// coletivas (usuario_id = null, ver POST /api/escala-folgas com { coletiva: true }, ex.: DSR de
+// fim de semana pra equipe inteira) — quando os dois existem no mesmo dia, a individual
+// prevalece (é uma exceção deliberada à regra coletiva pra essa pessoa).
+function escalasEfetivasTecnico(data, empresaId, tecnicoId) {
+  const todas = tenant.listar(data, 'escala_folgas', empresaId);
+  const individuais = todas.filter((e) => e.usuario_id === tecnicoId);
+  const datasComExcecao = new Set(individuais.map((e) => e.data));
+  const coletivas = todas.filter((e) => e.usuario_id === null && !datasComExcecao.has(e.data));
+  return [...individuais, ...coletivas];
+}
+
 function conflitoEscalaTecnico(data, empresaId, tecnicoId, diaInicio, diaFim) {
   const inicioTs = new Date(`${diaInicio}T00:00:00`).getTime();
   const fimTs = new Date(`${diaFim}T23:59:59`).getTime();
   if (isNaN(inicioTs) || isNaN(fimTs)) return null;
-  const escalas = tenant.listar(data, 'escala_folgas', empresaId).filter((e) => e.usuario_id === tecnicoId);
+  const escalas = escalasEfetivasTecnico(data, empresaId, tecnicoId);
   for (const e of escalas) {
     const ts = new Date(`${e.data}T12:00:00`).getTime();
     if (ts >= inicioTs && ts <= fimTs) return e;
@@ -1296,11 +1308,6 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
 const TIPOS_ESCALA_FOLGA = ['dsr', 'banco_horas', 'home_office', 'ferias'];
 const ABRANGENCIAS_FERIADO = ['nacional', 'estadual', 'municipal'];
 
-// entrada de escala (se houver) de um usuário num dia — null se está disponível normalmente
-function escalaDoDia(data, empresaId, usuarioId, diaISO) {
-  return tenant.listar(data, 'escala_folgas', empresaId).find((e) => e.usuario_id === usuarioId && e.data === diaISO) || null;
-}
-
 // GET /api/feriados?ano=AAAA — feriados cadastrados (nacional/estadual/municipal); qualquer um
 // da empresa pode ver (é só o pano de fundo do calendário), só o administrador cadastra/exclui.
 // O sistema não vem com nenhum feriado pré-cadastrado — o administrador quem informa as datas
@@ -1358,12 +1365,15 @@ rota('GET', /^\/api\/escala-folgas$/, async (req, res) => {
   const data = db.load();
   const lista = tenant.listar(data, 'escala_folgas', user.empresa_id)
     .filter((e) => String(e.data || '').slice(0, 7) === mes)
-    .map((e) => ({ ...e, usuario_nome: (data.usuarios.find((u) => u.id === e.usuario_id && u.empresa_id === user.empresa_id) || {}).nome || '—' }));
+    .map((e) => ({ ...e, usuario_nome: e.usuario_id === null ? 'Geral (coletiva)' : ((data.usuarios.find((u) => u.id === e.usuario_id && u.empresa_id === user.empresa_id) || {}).nome || '—') }));
   enviarJSON(res, 200, { mes, escalas: lista });
 });
 
 // POST /api/escala-folgas — administrador marca um dia de alguém da equipe (substitui se já
-// houver marcação nesse dia — um dia só tem um tipo por pessoa)
+// houver marcação nesse dia — um dia só tem um tipo por pessoa), ou marca uma folga coletiva
+// (body.coletiva: true, sem usuario_id) que vale pra equipe inteira — ex.: DSR de fim de semana
+// pra todo mundo de uma vez, sem precisar marcar pessoa por pessoa. Uma marcação individual no
+// mesmo dia continua tendo prioridade sobre a coletiva pra essa pessoa (ver escalasEfetivasTecnico).
 rota('POST', /^\/api\/escala-folgas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador define a escala de folga.' });
@@ -1371,11 +1381,15 @@ rota('POST', /^\/api\/escala-folgas$/, async (req, res) => {
   if (!TIPOS_ESCALA_FOLGA.includes(body.tipo)) return enviarJSON(res, 400, { erro: 'Tipo inválido.' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data.' });
   const data = db.load();
-  const usuarioAlvo = tenant.buscar(data, 'usuarios', Number(body.usuario_id), user.empresa_id);
-  if (!usuarioAlvo || !['suporte', 'administrador'].includes(usuarioAlvo.papel)) {
-    return enviarJSON(res, 404, { erro: 'Usuário não encontrado na equipe.' });
+  let usuarioAlvoId = null;
+  if (!body.coletiva) {
+    const usuarioAlvo = tenant.buscar(data, 'usuarios', Number(body.usuario_id), user.empresa_id);
+    if (!usuarioAlvo || !['suporte', 'administrador'].includes(usuarioAlvo.papel)) {
+      return enviarJSON(res, 404, { erro: 'Usuário não encontrado na equipe.' });
+    }
+    usuarioAlvoId = usuarioAlvo.id;
   }
-  const existente = data.escala_folgas.find((e) => e.usuario_id === usuarioAlvo.id && e.data === body.data && e.empresa_id === user.empresa_id);
+  const existente = data.escala_folgas.find((e) => e.usuario_id === usuarioAlvoId && e.data === body.data && e.empresa_id === user.empresa_id);
   if (existente) {
     existente.tipo = body.tipo;
     existente.definido_por = user.id;
@@ -1384,7 +1398,7 @@ rota('POST', /^\/api\/escala-folgas$/, async (req, res) => {
     return enviarJSON(res, 200, { escala: existente });
   }
   const item = tenant.criar(data, 'escala_folgas', user.empresa_id, {
-    usuario_id: usuarioAlvo.id, data: body.data, tipo: body.tipo,
+    usuario_id: usuarioAlvoId, data: body.data, tipo: body.tipo,
     definido_por: user.id, criado_em: new Date().toISOString(), atualizado_em: null,
   });
   db.save(data);
