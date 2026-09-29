@@ -13577,6 +13577,7 @@ async function carregarAcompanhamento() {
   const alvo = document.getElementById('acomp-lista');
   if (!alvo) return;
   alvo.innerHTML = tecnicos.length ? `
+    ${graficoViagensHTML(tecnicos)}
     <div class="panel"><table>
       <tr><th>Técnico</th><th>Viagens</th><th>Diárias</th><th>Bônus (R$)</th><th></th></tr>
       ${tecnicos.map((t) => `
@@ -13589,6 +13590,44 @@ async function carregarAcompanhamento() {
         </tr>`).join('')}
     </table></div>
     <div id="acomp-detalhe"></div>` : `<p class="empty">Nenhum técnico com viagens de bônus neste mês.</p>`;
+}
+
+// gráfico horizontal: duas barras por técnico — viagens que somam bônus de diária e viagens
+// (O.S. em-loco) que não somam. Dentro da barra de bônus, um selo vermelho mostra quantas vezes
+// esse técnico foi escolhido fora da ordem do rodízio (ver fora_de_ordem_viagem no servidor —
+// toda escolha assim já exigiu justificativa do administrador pra O.S. poder ser criada).
+function barraViagemHTML(valor, maiorValor, classe) {
+  if (!valor) return ''; // sem barra nenhuma quando é 0 — só a trilha clara do wrap aparece
+  const pct = Math.max(4, (valor / maiorValor) * 100);
+  return `<div class="viagens-chart-bar ${classe}" style="width:${pct}%;"><span class="viagens-chart-valor">${valor}</span></div>`;
+}
+
+function graficoViagensHTML(tecnicos) {
+  const maiorValor = Math.max(1, ...tecnicos.map((t) => Math.max(t.quantidade, t.quantidade_sem_bonus)));
+  return `
+    <div class="panel">
+      <div class="panel-head">Viagens por técnico</div>
+      <div class="viagens-chart-legenda">
+        <span><i class="viagens-chart-dot bonus"></i> Com bônus de diária</span>
+        <span><i class="viagens-chart-dot sem-bonus"></i> Sem bônus</span>
+        <span><i class="viagens-chart-dot fora-ordem"></i> Selo = vezes escolhido fora da ordem do rodízio</span>
+      </div>
+      <div class="viagens-chart">
+        ${tecnicos.map((t) => `
+          <div class="viagens-chart-row">
+            <div class="viagens-chart-nome" title="${esc(t.tecnico_nome)}">${esc(t.tecnico_nome)}</div>
+            <div class="viagens-chart-bars">
+              <div class="viagens-chart-bar-wrap">
+                ${barraViagemHTML(t.quantidade, maiorValor, 'bonus')}
+                ${t.fora_de_ordem ? `<span class="viagens-chart-selo" title="Escolhido fora da ordem do rodízio ${t.fora_de_ordem}x neste mês">${t.fora_de_ordem}</span>` : ''}
+              </div>
+              <div class="viagens-chart-bar-wrap">
+                ${barraViagemHTML(t.quantidade_sem_bonus, maiorValor, 'sem-bonus')}
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
 }
 
 function mostrarDetalheViagens(tecnicoId) {
@@ -13605,7 +13644,7 @@ function mostrarDetalheViagens(tecnicoId) {
           <td data-label="Cliente">${esc(v.cliente_nome)}</td>
           <td data-label="Período">${v.viagem_dia_inicio && v.viagem_dia_fim_previsto ? `${fmtData(v.viagem_dia_inicio)} – ${fmtData(v.viagem_dia_fim_previsto)}` : fmtData(v.data_hora_inicio)}</td>
           <td data-label="Diárias">${v.dias}</td>
-          <td data-label="Justificativa">${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}</td>
+          <td data-label="Justificativa">${v.fora_de_ordem_viagem ? `${tag('fora da ordem', 'falha')} ` : ''}${v.justificativa_limite_viagens ? esc(v.justificativa_limite_viagens) : '—'}</td>
         </tr>`).join('')}
     </table></div>`;
 }

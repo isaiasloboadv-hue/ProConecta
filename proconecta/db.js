@@ -360,6 +360,10 @@ function migrar(data) {
     if (a.viagem_dia_inicio === undefined) a.viagem_dia_inicio = a.bonus_viagem ? String(a.data_hora_inicio || '').slice(0, 10) : '';
     if (a.viagem_dia_fim_previsto === undefined) a.viagem_dia_fim_previsto = a.bonus_viagem ? String(a.data_hora_inicio || '').slice(0, 10) : '';
     if (a.justificativa_limite_viagens === undefined) a.justificativa_limite_viagens = '';
+    // marca se essa viagem foi escolhida fora da ordem do rodízio (ver motivoExigeJustificativaViagem
+    // em server.js) — O.S. antigas, de antes desse controle existir, não têm como saber, então
+    // entram como false (não conta pro selo do painel de acompanhamento).
+    if (a.fora_de_ordem_viagem === undefined) a.fora_de_ordem_viagem = false;
   }
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;

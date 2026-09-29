@@ -187,9 +187,12 @@ function conflitoDeAgendaTecnico(data, empresaId, tecnicoId, diaInicio, diaFim, 
 // bônus de viagem: (1) esse técnico já passou do limite de diárias no mês, (2) esse técnico não é
 // quem está na vez do rodízio de viagens — a não ser que quem está na vez já tenha outra O.S.
 // marcada nesse período (conflito), caso em que pular a vez dele já é justificativa suficiente,
-// sem precisar de texto. Devolve null se nenhum dos dois motivos se aplica.
+// sem precisar de texto. Devolve { motivo: null, foraDeOrdem: false } se nenhum dos dois motivos
+// se aplica. foraDeOrdem (motivo 2, sozinho) fica salvo na O.S. em fora_de_ordem_viagem, pro
+// painel de acompanhamento contar quantas vezes cada técnico foi escolhido fora da vez.
 function motivoExigeJustificativaViagem(data, empresaId, tecnicoId, dataHoraInicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, excluirId) {
   const motivos = [];
+  let foraDeOrdem = false;
   const jaTem = contarDiariasBonusMes(data, empresaId, tecnicoId, dataHoraInicio, excluirId);
   if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
     motivos.push(`este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES})`);
@@ -199,10 +202,10 @@ function motivoExigeJustificativaViagem(data, empresaId, tecnicoId, dataHoraInic
     const conflitoDaVez = conflitoDeAgendaTecnico(data, empresaId, vez.id, viagemDiaInicio, viagemDiaFimPrevisto, excluirId);
     if (!conflitoDaVez) {
       motivos.push(`pelo rodízio de viagens quem está na vez é ${vez.nome}, não este técnico`);
+      foraDeOrdem = true;
     }
   }
-  if (!motivos.length) return null;
-  return `Justifique pra continuar — ${motivos.join(' — ')}.`;
+  return { motivo: motivos.length ? `Justifique pra continuar — ${motivos.join(' — ')}.` : null, foraDeOrdem };
 }
 
 // junta dados de exibição (nome do técnico/cliente/equipamento) numa agenda
@@ -975,6 +978,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   let viagemDiaInicio = '';
   let viagemDiaFimPrevisto = '';
   let diasNovaViagem = 0;
+  let foraDeOrdemViagem = false;
   if (bonusViagem) {
     viagemDiaInicio = String(body.viagem_dia_inicio || '').trim();
     viagemDiaFimPrevisto = String(body.viagem_dia_fim_previsto || '').trim();
@@ -985,7 +989,8 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     if (diasNovaViagem < 1) {
       return enviarJSON(res, 400, { erro: 'O dia previsto de retorno não pode ser antes do dia de início do deslocamento.' });
     }
-    const motivo = motivoExigeJustificativaViagem(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, null);
+    const { motivo, foraDeOrdem } = motivoExigeJustificativaViagem(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, null);
+    foraDeOrdemViagem = foraDeOrdem;
     if (motivo) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
@@ -1043,6 +1048,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     viagem_dia_inicio: bonusViagem ? viagemDiaInicio : '',
     viagem_dia_fim_previsto: bonusViagem ? viagemDiaFimPrevisto : '',
     justificativa_limite_viagens: justificativaLimiteViagens,
+    fora_de_ordem_viagem: bonusViagem ? foraDeOrdemViagem : false,
   });
   if (!item.numero_os) item.numero_os = `OS-${String(item.id).padStart(6, '0')}`;
   db.save(data);
@@ -1089,6 +1095,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   let viagemDiaInicio = '';
   let viagemDiaFimPrevisto = '';
   let diasNovaViagem = 0;
+  let foraDeOrdemViagem = false;
   if (bonusViagem) {
     viagemDiaInicio = String(body.viagem_dia_inicio || '').trim();
     viagemDiaFimPrevisto = String(body.viagem_dia_fim_previsto || '').trim();
@@ -1099,7 +1106,8 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     if (diasNovaViagem < 1) {
       return enviarJSON(res, 400, { erro: 'O dia previsto de retorno não pode ser antes do dia de início do deslocamento.' });
     }
-    const motivo = motivoExigeJustificativaViagem(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, item.id);
+    const { motivo, foraDeOrdem } = motivoExigeJustificativaViagem(data, user.empresa_id, Number(body.tecnico_id), body.data_hora_inicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, item.id);
+    foraDeOrdemViagem = foraDeOrdem;
     if (motivo) {
       justificativaLimiteViagens = String(body.justificativa_limite_viagens || item.justificativa_limite_viagens || '').trim();
       if (!justificativaLimiteViagens) {
@@ -1132,6 +1140,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
     viagem_dia_inicio: bonusViagem ? viagemDiaInicio : '',
     viagem_dia_fim_previsto: bonusViagem ? viagemDiaFimPrevisto : '',
     justificativa_limite_viagens: bonusViagem ? justificativaLimiteViagens : '',
+    fora_de_ordem_viagem: bonusViagem ? foraDeOrdemViagem : false,
   });
   if (trocouTecnico) item.lida_tecnico = false;
   db.save(data);
@@ -1140,8 +1149,10 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
 
 // GET /api/tecnicos/viagens?mes=AAAA-MM — acompanhamento do bônus de viagem por técnico: quantas
 // diárias cada um somou no mês (1 por dia corrido entre o início do deslocamento e a chegada de
-// volta, ver diasBonusViagem), o valor total (R$200 por diária) e quem passou do limite de 7
-// diárias (com a justificativa que o administrador deu ao atribuir).
+// volta, ver diasBonusViagem), o valor total (R$200 por diária), quantas viagens (O.S. em-loco)
+// não somaram bônus (nem toda região paga), e quantas vezes ele foi escolhido fora da ordem do
+// rodízio (fora_de_ordem_viagem, ver motivoExigeJustificativaViagem — toda escolha fora de ordem
+// já exige justificativa antes de a O.S. poder ser salva).
 rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha o bônus de viagem.' });
@@ -1149,19 +1160,23 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();
   const tecnicos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  const agendaDaEmpresa = tenant.listar(data, 'agenda', user.empresa_id);
   const porTecnico = tecnicos.map((t) => {
-    const viagens = tenant.listar(data, 'agenda', user.empresa_id)
-      .filter((a) => a.tecnico_id === t.id && a.bonus_viagem && String(a.data_hora_inicio || '').slice(0, 7) === mes)
-      .sort((x, y) => (x.data_hora_inicio || '').localeCompare(y.data_hora_inicio || ''));
+    const doTecnicoNoMes = agendaDaEmpresa.filter((a) => a.tecnico_id === t.id && String(a.data_hora_inicio || '').slice(0, 7) === mes);
+    const viagens = doTecnicoNoMes.filter((a) => a.bonus_viagem).sort((x, y) => (x.data_hora_inicio || '').localeCompare(y.data_hora_inicio || ''));
     const viagensComDias = viagens.map((a) => ({ item: a, dias: diasBonusViagem(a.viagem_dia_inicio, a.viagem_dia_fim_previsto) }));
     const diasTotal = viagensComDias.reduce((soma, v) => soma + v.dias, 0);
+    // "viagem" que não somou bônus: O.S. em-loco (exige deslocamento) sem bônus marcado
+    const quantidadeSemBonus = doTecnicoNoMes.filter((a) => a.categoria === 'inloco' && !a.bonus_viagem).length;
     return {
       tecnico_id: t.id,
       tecnico_nome: t.nome,
       quantidade: viagens.length,
+      quantidade_sem_bonus: quantidadeSemBonus,
       dias_total: diasTotal,
       valor_total: diasTotal * VALOR_BONUS_VIAGEM,
       passou_limite: diasTotal > LIMITE_VIAGENS_BONUS_MES,
+      fora_de_ordem: viagens.filter((a) => a.fora_de_ordem_viagem).length,
       viagens: viagensComDias.map(({ item: a, dias }) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
         cliente_nome: (data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id) || {}).nome_empresa || a.cliente_nome_manual || '—',
@@ -1169,6 +1184,7 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
         viagem_dia_inicio: a.viagem_dia_inicio || '',
         viagem_dia_fim_previsto: a.viagem_dia_fim_previsto || '',
         dias,
+        fora_de_ordem_viagem: !!a.fora_de_ordem_viagem,
         justificativa_limite_viagens: a.justificativa_limite_viagens || '',
       })),
     };
