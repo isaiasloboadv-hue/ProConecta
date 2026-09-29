@@ -5324,7 +5324,6 @@ function voltarComRascunho() {
 // técnica); o técnico vê todos, incluindo o "Devolutivo" que ele preenche depois da visita.
 function tiposRelatorioManual() {
   const promotor = { tipo: 'promotor', label: 'Promotor (Briefing Pré-Visita)', fn: 'mostrarFormRelatorioPromotor' };
-  if (USER.papel === 'administrador') return [promotor];
   return [
     { tipo: 'completo', label: 'Completo', fn: 'mostrarFormRelatorioManutencao' },
     { tipo: 'preventiva', label: 'Preventiva', fn: 'mostrarFormRelatorioPreventiva' },

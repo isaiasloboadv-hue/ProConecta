@@ -2501,11 +2501,6 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req));
   const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : body.tipo === 'entrega_teste' ? 'entrega_teste' : 'completo';
-  // os tipos de campo (avulsos, de manutenção interna) continuam só do técnico — só o Promotor
-  // (briefing do vendedor) é que o administrador também pode criar.
-  if (tipo !== 'promotor' && user.papel === 'administrador') {
-    return enviarJSON(res, 403, { erro: 'Administrador só cria o relatório "Promotor" (briefing pré-visita).' });
-  }
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {

@@ -103,22 +103,20 @@ test('Promotor, Devolutivo e Levantamento Técnico: papéis, vínculo com O.S./D
     assert.equal(briefing.agenda_id, 1);
     assert.equal(briefing.autor_id, 1);
 
-    // administrador só cria "Promotor" — qualquer outro tipo é rejeitado
-    const bloqueado = await fetch(`${base}/api/relatorios-manutencao`, {
+    // administrador tem o mesmo menu "Manual" do técnico — pode criar qualquer tipo, não só
+    // Promotor (a tela "Relatório" do administrador mostra o de todo mundo, então ele também
+    // precisa poder registrar qualquer tipo em nome próprio, ex.: um atendimento que ele mesmo fez).
+    const criadoCompleto = await fetch(`${base}/api/relatorios-manutencao`, {
       method: 'POST', headers: authAdmin,
       body: JSON.stringify({ tipo: 'completo', empresa: 'X', equipamento: 'Y' }),
     });
-    assert.equal(bloqueado.status, 403);
-    const bloqueadoDevolutivo = await fetch(`${base}/api/relatorios-manutencao`, {
-      method: 'POST', headers: authAdmin,
-      body: JSON.stringify({ tipo: 'devolutivo', empresa: 'Cliente Demo' }),
-    });
-    assert.equal(bloqueadoDevolutivo.status, 403);
+    assert.equal(criadoCompleto.status, 201);
 
     // administrador vê o próprio briefing na lista "meus"
     const listaAdmin = await (await fetch(`${base}/api/relatorios-manutencao/meus`, { headers: authAdmin })).json();
-    assert.equal(listaAdmin.relatorios.length, 1);
-    assert.equal(listaAdmin.relatorios[0].tipo, 'promotor');
+    assert.equal(listaAdmin.relatorios.length, 2);
+    assert.ok(listaAdmin.relatorios.some((r) => r.tipo === 'promotor'));
+    assert.ok(listaAdmin.relatorios.some((r) => r.tipo === 'completo'));
 
     // administrador edita o próprio briefing
     const editarResp = await fetch(`${base}/api/relatorios-manutencao/${briefing.id}`, {
@@ -199,12 +197,6 @@ test('Promotor, Devolutivo e Levantamento Técnico: papéis, vínculo com O.S./D
     assert.equal(levantamentoIncompleto.status, 400);
 
     // administrador NÃO pode criar levantamento técnico (só o Promotor é liberado pra ele)
-    const levantamentoPorAdmin = await fetch(`${base}/api/relatorios-manutencao`, {
-      method: 'POST', headers: authAdmin,
-      body: JSON.stringify({ tipo: 'levantamento_tecnico', empresa: 'Cliente Demo' }),
-    });
-    assert.equal(levantamentoPorAdmin.status, 403);
-
     const levantamentoResp = await fetch(`${base}/api/relatorios-manutencao`, {
       method: 'POST', headers: authTecnico,
       body: JSON.stringify({
@@ -234,13 +226,13 @@ test('Promotor, Devolutivo e Levantamento Técnico: papéis, vínculo com O.S./D
     assert.equal(listaTecnico.relatorios.length, 3);
     assert.ok(listaTecnico.relatorios.every((r) => r.autor_id === 2));
     const listaAdminFinal = await (await fetch(`${base}/api/relatorios-manutencao/meus`, { headers: authAdmin })).json();
-    assert.equal(listaAdminFinal.relatorios.length, 1);
+    assert.equal(listaAdminFinal.relatorios.length, 2);
 
     // administrador exclui o próprio briefing
     const excluirResp = await fetch(`${base}/api/relatorios-manutencao/${briefing.id}`, { method: 'DELETE', headers: authAdmin });
     assert.equal(excluirResp.status, 200);
     const listaAposExcluir = await (await fetch(`${base}/api/relatorios-manutencao/meus`, { headers: authAdmin })).json();
-    assert.equal(listaAposExcluir.relatorios.length, 0);
+    assert.equal(listaAposExcluir.relatorios.length, 1);
   } finally {
     servidor.kill();
     fs.rmSync(dbTemp, { force: true });
