@@ -378,39 +378,84 @@ function horarioBrasiliaParaData(dataHoraLocal) {
   return new Date(`${m[1]}T${m[2]}:00-03:00`);
 }
 
-// lembrete do dia do atendimento: pra cada O.S. de hoje que já passou do horário marcado e
-// o técnico ainda não avisou que está a caminho, manda um push uma única vez (lembrete_deslocamento_enviado
-// evita repetir). Não é um cron de verdade — só funciona enquanto o processo do servidor
-// estiver de pé; num plano que "dorme" por inatividade isso pode não disparar.
-async function verificarLembretesDeslocamento() {
+// lembretes de deslocamento/chegada: cada etapa em que o técnico precisa tocar num botão (sair
+// pro atendimento, chegar no cliente, sair/chegar no retorno pendente da mesma O.S., sair/chegar
+// na viagem de volta pra empresa/hotel) manda um push A CADA CICLO enquanto o botão certo não é
+// tocado — constante até o técnico executar, não só uma vez (um lembrete que passa despercebido
+// não pode ficar esquecido pro resto do dia). Não é um cron de verdade — só funciona enquanto o
+// processo do servidor estiver de pé; num plano que "dorme" por inatividade isso pode não disparar.
+async function verificarLembretesRecorrentes() {
   try {
     const data = db.load();
     const agora = new Date();
     // "hoje" também precisa ser o dia em Brasília, não em UTC — perto da meia-noite os dois
     // calendários divergem (ex: 22h de Brasília já é o dia seguinte em UTC)
     const hojeISO = new Date(agora.getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    let mudou = false;
     for (const item of data.agenda) {
-      if (item.finalizada || item.deslocamento_iniciado_em || item.lembrete_deslocamento_enviado) continue;
-      // categoria 'online' não tem deslocamento nenhum (inclusive o "atendimento" criado sozinho
-      // quando o técnico assume o chat, com data_hora_inicio = o instante em que assumiu — não é
-      // uma visita agendada de verdade) — só faz sentido lembrar de ir pra quem é visita presencial
-      if (item.categoria !== 'inloco') continue;
-      if (!item.data_hora_inicio || !item.data_hora_inicio.startsWith(hojeISO)) continue;
-      const horario = horarioBrasiliaParaData(item.data_hora_inicio);
-      if (!horario || agora < horario) continue; // só lembra a partir do horário marcado
-      const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
-      await enviarPush(data, item.tecnico_id, {
-        titulo: 'Atendimento hoje',
-        corpo: `Não esqueça: ${cliente ? cliente.nome_empresa : 'seu atendimento'} hoje (${fmtDataHoraCurta(item.data_hora_inicio)}). Toque pra marcar "Iniciar deslocamento".`,
-        url: '/',
-      });
-      item.lembrete_deslocamento_enviado = true;
-      mudou = true;
+      if (item.finalizada) continue;
+
+      // 1) sair pro atendimento — só depois do horário marcado, só visita presencial (categoria
+      // 'online' — treinamento online e o "atendimento" nascido de assumir um chamado do chat —
+      // não tem deslocamento nenhum), e só quando o cliente já confirmou (antes disso o botão
+      // "Iniciar deslocamento" nem aparece pro técnico apertar, ver botaoDeslocamento no front)
+      if (item.categoria === 'inloco' && !item.retorno_pendente_tecnico && item.status !== 'concluida'
+          && item.confirmado_cliente_em && !item.deslocamento_iniciado_em
+          && item.data_hora_inicio && item.data_hora_inicio.startsWith(hojeISO)) {
+        const horario = horarioBrasiliaParaData(item.data_hora_inicio);
+        if (horario && agora >= horario) {
+          const cliente = data.clientes.find((c) => c.id === item.cliente_id && c.empresa_id === item.empresa_id);
+          await enviarPush(data, item.tecnico_id, {
+            titulo: 'Atendimento hoje',
+            corpo: `Não esqueça: ${cliente ? cliente.nome_empresa : 'seu atendimento'} hoje (${fmtDataHoraCurta(item.data_hora_inicio)}). Toque pra marcar "Iniciar deslocamento".`,
+            url: '/',
+          });
+        }
+      }
+      // 2) chegou no cliente?
+      if (item.deslocamento_iniciado_em && !item.chegada_confirmada_em) {
+        await enviarPush(data, item.tecnico_id, {
+          titulo: 'Chegou no cliente?',
+          corpo: 'Toque em "Registrar chegada" assim que chegar, pra liberar o atendimento.',
+          url: '/',
+        });
+      }
+      // 3) retorno pendente da mesma O.S. — sair de novo
+      if (item.retorno_pendente_tecnico && item.retorno_confirmado_cliente_em && !item.retorno_deslocamento_iniciado_em) {
+        await enviarPush(data, item.tecnico_id, {
+          titulo: 'Retorno pendente',
+          corpo: 'Toque em "Iniciar deslocamento" assim que sair pro retorno.',
+          url: '/',
+        });
+      }
+      // 4) retorno — chegou de novo?
+      if (item.retorno_deslocamento_iniciado_em && !item.retorno_chegada_confirmada_em) {
+        await enviarPush(data, item.tecnico_id, {
+          titulo: 'Chegou no cliente (retorno)?',
+          corpo: 'Toque em "Registrar chegada" assim que chegar.',
+          url: '/',
+        });
+      }
+      // 5) viagem de volta pra empresa/hotel — só depois do relatório enviado (status "concluida")
+      if (item.categoria === 'inloco' && item.status === 'concluida' && !item.viagem_volta_chegada_em) {
+        if (!item.viagem_volta_iniciada_em) {
+          await enviarPush(data, item.tecnico_id, {
+            titulo: 'Iniciar retorno',
+            corpo: 'Toque em "Iniciar retorno" assim que sair do cliente.',
+            url: '/',
+          });
+        } else if (!item.viagem_volta_destino_agenda_id) {
+          // seguiu direto pra outra O.S. (viagem_volta_destino_agenda_id) — não tem chegada de
+          // volta pra cobrar aqui, o "retorno" dela termina quando a próxima O.S. começa a dela
+          await enviarPush(data, item.tecnico_id, {
+            titulo: 'Chegou de volta?',
+            corpo: 'Toque em "Registrar chegada" da viagem de volta assim que chegar.',
+            url: '/',
+          });
+        }
+      }
     }
-    if (mudou) db.save(data);
   } catch (e) {
-    console.error('[lembrete] erro ao verificar deslocamentos:', e.message);
+    console.error('[lembrete] erro ao verificar pendências:', e.message);
   }
 }
 
@@ -1113,7 +1158,6 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
     lida_tecnico: false,
     deslocamento_iniciado_em: null,
     chegada_confirmada_em: null,
-    lembrete_deslocamento_enviado: false,
     confirmado_cliente_em: null,
     feedback_cliente_em: null,
     orcamento_aprovado_em: null,
@@ -4098,7 +4142,6 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
     lida_tecnico: true,
     deslocamento_iniciado_em: null,
     chegada_confirmada_em: null,
-    lembrete_deslocamento_enviado: false,
     // o cliente já pediu o atendimento pelo chat — não faz sentido pedir confirmação de novo
     confirmado_cliente_em: agora.toISOString(),
     feedback_cliente_em: null,
@@ -4830,8 +4873,8 @@ server.listen(PORT, () => {
 
 db.pronto.then(() => {
   console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
-  verificarLembretesDeslocamento();
-  setInterval(verificarLembretesDeslocamento, 15 * 60 * 1000);
+  verificarLembretesRecorrentes();
+  setInterval(verificarLembretesRecorrentes, 5 * 60 * 1000);
   migrarFotosParaTabelaSeparada().catch((e) => console.error('[fotos] erro na migração:', e.message));
 });
 

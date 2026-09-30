@@ -302,7 +302,6 @@ function migrar(data) {
       const jaAvancou = a.finalizada || visitaDoItem;
       a.chegada_confirmada_em = jaAvancou ? (a.deslocamento_iniciado_em || a.criado_em || new Date().toISOString()) : null;
     }
-    if (a.lembrete_deslocamento_enviado === undefined) a.lembrete_deslocamento_enviado = false;
     if (a.confirmado_cliente_em === undefined) {
       // O.S. que já tinham avançado (deslocamento, relatório ou já finalizadas) antes desse
       // controle existir claramente já passaram do aceite do cliente na prática — não faz
