@@ -1256,7 +1256,6 @@ let minhaAgendaFiltro = 'ativos';
 async function renderAgenda() {
   if (USER.papel === 'administrador') {
     await carregarAgendaComVisitas();
-    await carregarTecnicosParaCalendario();
     return renderAgendaCalendario();
   }
   minhaAgendaDetalheId = null;
@@ -1325,23 +1324,11 @@ function dataISOLocal(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// roster de técnicos ativos pra calcular, dia a dia, quem está disponível (ver
-// desenharGradeCalendario) — o time em si não muda por mês, então busca uma vez só por
-// visita à tela (a escala do mês em exibição é cacheada à parte, em garantirEscalaMesCalendarioTecnico,
-// reaproveitada aqui porque o administrador já tem acesso à mesma rota GET /api/escala-folgas).
-window._tecnicosCalendarioCache = [];
-async function carregarTecnicosParaCalendario() {
-  try {
-    const { usuarios } = await api('/api/usuarios');
-    window._tecnicosCalendarioCache = usuarios.filter((u) => u.papel === 'suporte' && u.status === 'ativo');
-  } catch (e) { window._tecnicosCalendarioCache = []; }
-}
-
 async function renderAgendaCalendario() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total — tag verde mostra quem está disponível pra alocar naquele dia</p></div>
+      <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total — tag verde mostra quem NÃO está disponível naquele dia (folga individual/compensação/home office/férias)</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -1399,8 +1386,9 @@ function desenharGradeCalendario() {
     contagemPorDia[dia] = (contagemPorDia[dia] || 0) + 1;
   });
 
-  const tecnicos = window._tecnicosCalendarioCache || [];
   const escalas = window._escalaCalTecnicoCache || [];
+  const escalasPorDia = {};
+  escalas.forEach((e) => { (escalasPorDia[e.data] = escalasPorDia[e.data] || []).push(e); });
 
   const inicioSemana = new Date(calAno, calMes, 1).getDay();
   const diasNoMes = new Date(calAno, calMes + 1, 0).getDate();
@@ -1423,19 +1411,20 @@ function desenharGradeCalendario() {
       if (iso === hojeISO) classes.push('hoje');
       if (iso === calDiaSelecionado) classes.push('selecionado');
 
-      // disponível = sem marcação de escala nesse dia (nem individual, nem folga coletiva) — quem
-      // está de folga/férias/banco de horas/home office não entra na lista, é quem sobra que pode
-      // ser alocado numa O.S. nova. Corta em 3 tags visíveis + "+N" pra não estourar a célula.
-      const disponiveis = tecnicos.filter((t) => !escalaEfetivaDoDia(escalas, t.id, iso));
-      const tagsVisiveis = disponiveis.slice(0, 3);
-      const tagsExtra = disponiveis.length - tagsVisiveis.length;
+      // só marcação INDIVIDUAL vira tag (folga/banco de horas/home office/férias de uma pessoa
+      // específica) — folga coletiva (ex.: DSR de fim de semana pra equipe inteira) não gera tag
+      // nenhuma, porque já é sabido que ninguém trabalha nesses dias; listar todo mundo pelo nome
+      // ali seria só poluição visual. Corta em 3 tags visíveis + "+N" pra não estourar a célula.
+      const indisponiveis = (escalasPorDia[iso] || []).filter((e) => e.usuario_id !== null);
+      const tagsVisiveis = indisponiveis.slice(0, 3);
+      const tagsExtra = indisponiveis.length - tagsVisiveis.length;
 
       return `<div class="${classes.join(' ')}" onclick="selecionarDiaCalendario('${iso}')">
         <div class="cal-day-topo">
           <span class="cal-day-num">${data.getDate()}</span>
           ${qtd ? `<span class="cal-day-badge">${qtd}</span>` : ''}
         </div>
-        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((t) => `<span class="cal-day-tag cal-day-tag-disponivel">${esc(t.nome)}</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
+        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((e) => `<span class="cal-day-tag cal-day-tag-indisponivel" title="${esc(LABEL_ESCALA_FOLGA_FRONT[e.tipo])}">${esc(e.usuario_nome)} (${LETRA_ESCALA_FOLGA_FRONT[e.tipo]})</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
       </div>`;
     }).join('');
 }
@@ -11469,15 +11458,12 @@ function desenharGradeCalendarioTecnico() {
       // mesma regra de escalaEfetivaDoDia usada na tela do administrador)
       const escalaPropria = escalaEfetivaDoDia(escalas, USER.id, iso);
 
-      // tags verdes dos colegas: uma "Todos" pra folga coletiva (se houver) + uma por colega com
-      // marcação individual nesse dia — o técnico logado não aparece aqui de novo (já tem o ícone
-      // acima). Corta em 2 tags visíveis + "+N" pra não estourar a altura da célula.
+      // tags verdes só dos colegas com marcação INDIVIDUAL nesse dia — o técnico logado não
+      // aparece aqui de novo (já tem o ícone acima), e folga coletiva não vira tag nenhuma (já é
+      // sabido que ninguém trabalha nesse dia, listar todo mundo pelo nome seria poluição visual;
+      // mesma regra usada na Agenda geral do administrador). Corta em 2 tags + "+N".
       const escalasDoDia = escalasPorDia[iso] || [];
-      const tagsColegas = [];
-      const coletivaDoDia = escalasDoDia.find((e) => e.usuario_id === null);
-      if (coletivaDoDia) tagsColegas.push(`Todos: ${LABEL_ESCALA_FOLGA_FRONT[coletivaDoDia.tipo]}`);
-      escalasDoDia.filter((e) => e.usuario_id !== null && e.usuario_id !== USER.id)
-        .forEach((e) => tagsColegas.push(`${e.usuario_nome}: ${LABEL_ESCALA_FOLGA_FRONT[e.tipo]}`));
+      const tagsColegas = escalasDoDia.filter((e) => e.usuario_id !== null && e.usuario_id !== USER.id);
       const tagsVisiveis = tagsColegas.slice(0, 2);
       const tagsExtra = tagsColegas.length - tagsVisiveis.length;
 
@@ -11489,7 +11475,7 @@ function desenharGradeCalendarioTecnico() {
             ${qtd ? `<span class="cal-day-badge">${qtd}</span>` : ''}
           </span>
         </div>
-        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((t) => `<span class="cal-day-tag">${esc(t)}</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
+        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((e) => `<span class="cal-day-tag" title="${esc(LABEL_ESCALA_FOLGA_FRONT[e.tipo])}">${esc(e.usuario_nome)} (${LETRA_ESCALA_FOLGA_FRONT[e.tipo]})</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
       </div>`;
     }).join('');
 }
@@ -13940,6 +13926,9 @@ async function abrirOSDeViagem(id) {
 // marcar/limpar. O bloqueio de verdade (férias) e o pedido de justificativa (DSR/banco de horas)
 // acontecem no POST/PUT /api/agenda — isso aqui é só o cadastro da escala em si.
 const LABEL_ESCALA_FOLGA_FRONT = { dsr: 'DSR', banco_horas: 'Compensação de banco de horas', home_office: 'Home office', ferias: 'Férias' };
+// inicial usada nas tags compactas dos calendários (admin e técnico) — uma letra só, ao lado do
+// nome, pra caber numa tag pequena sem precisar escrever o tipo inteiro.
+const LETRA_ESCALA_FOLGA_FRONT = { dsr: 'D', banco_horas: 'B', home_office: 'H', ferias: 'F' };
 const LABEL_ABRANGENCIA_FERIADO = { nacional: 'Nacional', estadual: 'Estadual', municipal: 'Municipal' };
 
 // mesmo desenho (círculo + dois olhos + sorriso) nas duas cores — DSR em amarelo, banco de horas
