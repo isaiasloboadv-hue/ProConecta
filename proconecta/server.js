@@ -1356,10 +1356,12 @@ rota('DELETE', /^\/api\/feriados\/(\d+)$/, async (req, res, m) => {
 
 // GET /api/escala-folgas?mes=AAAA-MM — todas as marcações da equipe inteira nesse mês, de uma
 // vez (a lista da esquerda usa isso pra mostrar o ícone de hoje de cada um; ao clicar num nome,
-// o front filtra por usuario_id no que já veio, sem precisar de outra chamada).
+// o front filtra por usuario_id no que já veio, sem precisar de outra chamada). O técnico também
+// lê essa rota (só leitura — marcar/limpar continua exclusivo do administrador, ver POST/DELETE
+// abaixo) pro próprio Calendário mostrar a escala dele e a dos colegas.
 rota('GET', /^\/api\/escala-folgas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador acompanha a escala de folga.' });
+  if (!exigirPapel(user, ['administrador', 'suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();

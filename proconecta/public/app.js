@@ -11312,7 +11312,9 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
 // não aparecem aqui.
 
 async function renderCalendarioTecnico() {
-  const [{ agenda }, { visitas }, { relatorios }] = await Promise.all([api('/api/agenda?todas=1'), api('/api/visitas?todas=1'), api('/api/relatorios-manutencao/meus?todas=1')]);
+  const [{ agenda }, { visitas }, { relatorios }, { feriados }] = await Promise.all([
+    api('/api/agenda?todas=1'), api('/api/visitas?todas=1'), api('/api/relatorios-manutencao/meus?todas=1'), api('/api/feriados'),
+  ]);
   window._agendaCache = agenda;
   window._visitasPorAgenda = {};
   window._visitasRetornoPorAgenda = {};
@@ -11322,15 +11324,32 @@ async function renderCalendarioTecnico() {
   });
   window._devolutivosPorAgenda = {};
   relatorios.filter((r) => r.tipo === 'devolutivo' && r.agenda_id).forEach((r) => { window._devolutivosPorAgenda[r.agenda_id] = r; });
-  renderAgendaCalendarioTecnico();
+  window._feriadosCacheTecnico = feriados;
+  await renderAgendaCalendarioTecnico();
 }
 
 let calTecnicoFiltro = 'ativos';
+// escala de folga (própria + colegas) do mês em exibição no Calendário do técnico — ver
+// garantirEscalaMesCalendarioTecnico. Só leitura aqui (marcar/limpar continua exclusivo do
+// administrador, na Escala de Folga); o técnico só sugere, via long-press num dia (ver
+// abrirSugestaoEscalaTecnico), que vira uma solicitação normal em Solicitações.
+let escalaCalTecnicoMes = null;
+window._escalaCalTecnicoCache = [];
 
-function renderAgendaCalendarioTecnico() {
+async function garantirEscalaMesCalendarioTecnico() {
+  const mesId = `${calAno}-${String(calMes + 1).padStart(2, '0')}`;
+  if (escalaCalTecnicoMes === mesId) return;
+  try {
+    const { escalas } = await api(`/api/escala-folgas?mes=${mesId}`);
+    window._escalaCalTecnicoCache = escalas;
+    escalaCalTecnicoMes = mesId;
+  } catch (e) { window._escalaCalTecnicoCache = []; }
+}
+
+async function renderAgendaCalendarioTecnico() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Calendário</h1><p>${(window._agendaCache || []).length} O.S. de todos os técnicos — você pode abrir e visualizar qualquer uma, mas só executa as que estiverem designadas a você</p></div>
+    <div class="page-head"><h1>Calendário</h1><p>${(window._agendaCache || []).length} O.S. de todos os técnicos — você pode abrir e visualizar qualquer uma, mas só executa as que estiverem designadas a você. Segure o dedo (ou clique e segure) num dia pra sugerir folga, compensação ou home office.</p></div>
     <div class="panel">
       <div class="cal-head">
         <div class="cal-nav">
@@ -11346,7 +11365,9 @@ function renderAgendaCalendarioTecnico() {
       <div class="cal-grid" id="cal-grid"></div>
     </div>
   `;
+  await garantirEscalaMesCalendarioTecnico();
   desenharGradeCalendarioTecnico();
+  configurarLongPressCalendarioTecnico();
 }
 
 function alternarFiltroCalendarioTecnico(valor) {
@@ -11354,18 +11375,20 @@ function alternarFiltroCalendarioTecnico(valor) {
   desenharGradeCalendarioTecnico();
 }
 
-function mudarMesCalendarioTecnico(delta) {
+async function mudarMesCalendarioTecnico(delta) {
   calMes += delta;
   if (calMes < 0) { calMes = 11; calAno--; }
   if (calMes > 11) { calMes = 0; calAno++; }
+  await garantirEscalaMesCalendarioTecnico();
   desenharGradeCalendarioTecnico();
 }
 
-function irParaHojeCalendarioTecnico() {
+async function irParaHojeCalendarioTecnico() {
   const hoje = new Date();
   calAno = hoje.getFullYear();
   calMes = hoje.getMonth();
   calDiaSelecionado = dataISOLocal(hoje);
+  await garantirEscalaMesCalendarioTecnico();
   desenharGradeCalendarioTecnico();
 }
 
@@ -11381,6 +11404,13 @@ function desenharGradeCalendarioTecnico() {
     if (!dia) return;
     contagemPorDia[dia] = (contagemPorDia[dia] || 0) + 1;
   });
+
+  const escalas = window._escalaCalTecnicoCache || [];
+  const feriados = window._feriadosCacheTecnico || [];
+  const escalasPorDia = {};
+  escalas.forEach((e) => { (escalasPorDia[e.data] = escalasPorDia[e.data] || []).push(e); });
+  const feriadosPorDia = {};
+  feriados.forEach((f) => { (feriadosPorDia[f.data] = feriadosPorDia[f.data] || []).push(f); });
 
   const inicioSemana = new Date(calAno, calMes, 1).getDay();
   const diasNoMes = new Date(calAno, calMes + 1, 0).getDate();
@@ -11402,11 +11432,106 @@ function desenharGradeCalendarioTecnico() {
       if (data.getMonth() !== calMes) classes.push('fora-mes');
       if (iso === hojeISO) classes.push('hoje');
       if (iso === calDiaSelecionado) classes.push('selecionado');
-      return `<div class="${classes.join(' ')}" onclick="selecionarDiaCalendarioTecnico('${iso}')">
+      const feriadosDoDia = feriadosPorDia[iso] || [];
+      if (feriadosDoDia.length) classes.push('feriado');
+
+      // ícone da própria escala do técnico logado (individual tem prioridade sobre a coletiva,
+      // mesma regra de escalaEfetivaDoDia usada na tela do administrador)
+      const escalaPropria = escalaEfetivaDoDia(escalas, USER.id, iso);
+
+      // tags verdes dos colegas: uma "Todos" pra folga coletiva (se houver) + uma por colega com
+      // marcação individual nesse dia — o técnico logado não aparece aqui de novo (já tem o ícone
+      // acima). Corta em 2 tags visíveis + "+N" pra não estourar a altura da célula.
+      const escalasDoDia = escalasPorDia[iso] || [];
+      const tagsColegas = [];
+      const coletivaDoDia = escalasDoDia.find((e) => e.usuario_id === null);
+      if (coletivaDoDia) tagsColegas.push(`Todos: ${LABEL_ESCALA_FOLGA_FRONT[coletivaDoDia.tipo]}`);
+      escalasDoDia.filter((e) => e.usuario_id !== null && e.usuario_id !== USER.id)
+        .forEach((e) => tagsColegas.push(`${e.usuario_nome}: ${LABEL_ESCALA_FOLGA_FRONT[e.tipo]}`));
+      const tagsVisiveis = tagsColegas.slice(0, 2);
+      const tagsExtra = tagsColegas.length - tagsVisiveis.length;
+
+      return `<div class="${classes.join(' ')}" data-dia="${iso}" onclick="selecionarDiaCalendarioTecnico('${iso}')" ${feriadosDoDia.length ? `title="${esc(feriadosDoDia.map((f) => f.nome).join(', '))}"` : ''}>
         <div class="cal-day-num">${data.getDate()}</div>
+        ${escalaPropria ? `<span class="cal-day-escala-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaPropria.tipo])}${escalaPropria.usuario_id === null ? ' (coletiva)' : ''}">${iconeEscala(escalaPropria.tipo)}</span>` : ''}
+        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((t) => `<span class="cal-day-tag">${esc(t)}</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
         ${qtd ? `<div class="cal-day-badge">${qtd}</div>` : ''}
       </div>`;
     }).join('');
+}
+
+// segurar o dedo (ou o botão do mouse) num dia do calendário abre a sugestão de folga/compensação/
+// home office (ver abrirSugestaoEscalaTecnico) — usa Pointer Events com delegação no próprio
+// #cal-grid (o elemento sobrevive a troca de mês/filtro, só o innerHTML muda), então os listeners
+// só precisam ser presos uma vez, na primeira renderização da tela.
+let calTecnicoLongPressTimer = null;
+let calTecnicoLongPressInicio = null;
+const CAL_TECNICO_LONGPRESS_MS = 550;
+const CAL_TECNICO_LONGPRESS_TOLERANCIA_PX = 10;
+
+function configurarLongPressCalendarioTecnico() {
+  const grid = document.getElementById('cal-grid');
+  if (!grid || grid._longPressConfigurado) return;
+  grid._longPressConfigurado = true;
+  const limparTimer = () => {
+    if (calTecnicoLongPressTimer) { clearTimeout(calTecnicoLongPressTimer); calTecnicoLongPressTimer = null; }
+    calTecnicoLongPressInicio = null;
+  };
+  grid.addEventListener('pointerdown', (ev) => {
+    const dia = ev.target.closest('.cal-day');
+    if (!dia) return;
+    calTecnicoLongPressInicio = { x: ev.clientX, y: ev.clientY };
+    calTecnicoLongPressTimer = setTimeout(() => {
+      calTecnicoLongPressTimer = null;
+      abrirSugestaoEscalaTecnico(dia.dataset.dia);
+    }, CAL_TECNICO_LONGPRESS_MS);
+  });
+  grid.addEventListener('pointermove', (ev) => {
+    if (!calTecnicoLongPressInicio) return;
+    const dx = ev.clientX - calTecnicoLongPressInicio.x;
+    const dy = ev.clientY - calTecnicoLongPressInicio.y;
+    if (Math.sqrt(dx * dx + dy * dy) > CAL_TECNICO_LONGPRESS_TOLERANCIA_PX) limparTimer();
+  });
+  grid.addEventListener('pointerup', limparTimer);
+  grid.addEventListener('pointerleave', limparTimer);
+  grid.addEventListener('pointercancel', limparTimer);
+}
+
+// opções de sugestão do técnico: folga, compensação de banco de horas ou home office — férias fica
+// de fora de propósito (pedido explícito do usuário; férias já tem fluxo próprio, mais formal).
+const OPCOES_SUGESTAO_ESCALA_TECNICO = [
+  { tipo: 'folga', label: 'Folga' },
+  { tipo: 'banco_horas', label: 'Compensação de banco de horas' },
+  { tipo: 'home_office', label: 'Home office' },
+];
+
+function abrirSugestaoEscalaTecnico(iso) {
+  if (!iso) return;
+  let modal = document.getElementById('modal-sugestao-escala');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-sugestao-escala';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const dataFormatada = new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:400px;">
+      <h3>Sugerir para ${esc(dataFormatada)}</h3>
+      <p>O que você quer pedir pra esse dia? Isso abre uma solicitação em Solicitações, pro administrador aprovar.</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:14px;">
+        ${OPCOES_SUGESTAO_ESCALA_TECNICO.map((o) => `<button class="btn-outline-sm" style="justify-content:center;" onclick="sugerirEscalaTecnico('${iso}', '${o.tipo}')">${esc(o.label)}</button>`).join('')}
+      </div>
+      <button class="btn-outline-sm" style="width:100%; justify-content:center; margin-top:14px;" onclick="document.getElementById('modal-sugestao-escala').classList.remove('show')">Cancelar</button>
+    </div>`;
+}
+
+async function sugerirEscalaTecnico(iso, tipo) {
+  const modal = document.getElementById('modal-sugestao-escala');
+  if (modal) modal.classList.remove('show');
+  window._sugestaoEscalaPreenchimento = { tipo, data: iso };
+  await ir('solicitacoes-rh');
 }
 
 function selecionarDiaCalendarioTecnico(iso) {
@@ -14162,6 +14287,16 @@ async function renderSolicitacoesRH() {
       <button class="btn btn-primary btn-sm" onclick="enviarSolicitacaoRH()">Enviar pedido</button>
     </div>
     <div id="srh-lista"><div class="empty">Carregando...</div></div>`;
+  // vem de um long-press no Calendário (ver abrirSugestaoEscalaTecnico) — pré-preenche o
+  // formulário com o tipo e o dia sugeridos, só falta o técnico digitar o motivo e enviar.
+  if (window._sugestaoEscalaPreenchimento) {
+    const { tipo, data } = window._sugestaoEscalaPreenchimento;
+    window._sugestaoEscalaPreenchimento = null;
+    document.getElementById('srh-tipo').value = tipo;
+    document.getElementById('srh-data-inicio').value = data;
+    atualizarFormSolicitacaoRH();
+    document.getElementById('srh-motivo').focus();
+  }
   await carregarMinhasSolicitacoesRH();
 }
 
