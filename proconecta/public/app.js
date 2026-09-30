@@ -3999,6 +3999,7 @@ function detalheCompletoOS(a, visita) {
     <div class="kv"><b>Equipamento:</b> ${esc(a.equipamento_tipo || '—')} — ${esc(a.equipamento_modelo || '—')}${a.equipamento_serie ? ' (' + esc(a.equipamento_serie) + ')' : ''}</div>
     <div class="kv"><b>Problema relatado / serviço:</b> ${esc(a.problema || '—')}</div>
     <div class="kv"><b>Técnico designado:</b> ${esc(a.tecnico_nome || '—')} <span class="sep">·</span> <b>Início previsto:</b> ${fmtData(a.data_hora_inicio)} <span class="sep">·</span> <b>Fim previsto:</b> ${fmtData(a.data_hora_fim)}</div>
+    ${a.criado_por_nome ? `<div class="kv"><b>Aberta por:</b> ${esc(a.criado_por_nome)}</div>` : ''}
     ${a.escala_conflito_tipo ? `<div class="kv">${tag(a.escala_conflito_tipo === 'dsr' ? 'DSR na data' : 'banco de horas na data', 'falha')} ${esc(a.justificativa_escala_conflito || '')}</div>` : ''}
     ${visita ? `
       <div class="os-relatorio-box">

@@ -295,6 +295,10 @@ function agendaComDetalhes(data, item) {
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
     equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
     os_criada_numero: osCriada ? (osCriada.numero_os || `OS-${String(osCriada.id).padStart(6, '0')}`) : null,
+    // quem abriu a O.S. — normalmente o administrador, mas O.S. nascida de um atendimento do chat
+    // assumido direto pelo técnico (ver POST /api/chamados/:id/assumir) tem o próprio técnico aqui.
+    // null em O.S. antiga, de antes desse campo existir.
+    criado_por_nome: item.criado_por ? ((data.usuarios.find((u) => u.id === item.criado_por && u.empresa_id === item.empresa_id) || {}).nome || null) : null,
   };
 }
 
@@ -1076,6 +1080,7 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   }
   const item = tenant.criar(data, 'agenda', user.empresa_id, {
     numero_os: numeroOSDigitado || null, // preenchido logo abaixo, depois de saber o id gerado
+    criado_por: user.id,
     tecnico_id: Number(body.tecnico_id),
     cliente_id: ehDemonstracao ? null : Number(body.cliente_id),
     equipamento_id: ehDemonstracao ? null : Number(body.equipamento_id),
@@ -4008,6 +4013,7 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   const inicioISO = agora.toISOString().slice(0, 16);
   const fimISO = new Date(agora.getTime() + 60 * 60000).toISOString().slice(0, 16);
   const osItem = tenant.criar(data, 'agenda', user.empresa_id, {
+    criado_por: user.id,
     tecnico_id: user.id,
     cliente_id: chamado.cliente_id,
     equipamento_id: equipamentoDoChamado ? equipamentoDoChamado.id : null,
