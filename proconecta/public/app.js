@@ -512,7 +512,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
     'usuarios': 'Usuários',
-    'tecnicos-rh': 'Técnicos',
+    'equipe': 'Equipe',
     'chat-interno': 'Mensagens',
   },
   cliente: {
@@ -583,11 +583,9 @@ const NAV = {
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
-    { key: 'tecnicos-rh', modulo: 'os_chamados', label: 'Técnicos', children: [
-      { key: 'acompanhamento', label: 'Acompanhamento de viagens', page: 'tecnicos-acompanhamento' },
-      { key: 'escala-folga', label: 'Escala de Folga', page: 'escala-folga' },
-      { key: 'solicitacoes', label: 'Solicitações', page: 'tecnicos-solicitacoes' },
-    ]},
+    // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
+    // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
+    { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
     // esqueleto dos módulos novos — sem tela de verdade ainda, só prova que o pipeline de
     // ativação funciona ponta a ponta (ver renderModuloEmBreve). Só aparece se a empresa tiver
     // contratado o módulo (moduloAtivoNoMenu, igual qualquer outro item com `modulo`).
@@ -656,7 +654,7 @@ const ICONE_MENU = {
   chamados: '💬',
   'fila-pos-venda': '💰',
   'fila-estoque': '📦',
-  'tecnicos-rh': '🧑‍🔧',
+  'equipe': '👥',
   'minhas-viagens': '✈️',
   'solicitacoes-rh': '🙋',
 };
@@ -789,6 +787,7 @@ async function ir(pagina) {
     if (pagina === 'fila-pos-venda') return renderFilaPosVenda();
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
+    if (pagina === 'equipe') return renderEquipe();
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
     if (pagina === 'minhas-viagens') return renderMinhasViagens();
     if (pagina === 'escala-folga') return renderEscalaFolga();
@@ -13795,6 +13794,59 @@ function tagStatusSolicitacaoRH(status) {
   return tag('Pendente', 'amber');
 }
 
+// ---------- Equipe (admin): painel com um widget de cada tela que antes vivia num submenu
+// separado ("Técnicos" com Acompanhamento de viagens / Escala de Folga / Solicitações) — cada
+// widget mostra um número rápido e leva pra tela cheia do assunto ao clicar.
+async function renderEquipe() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Equipe</h1><p>Viagens, escala de folga e solicitações dos técnicos, num só lugar.</p></div>
+    <div class="equipe-grid" id="equipe-grid">
+      <div class="equipe-card"><div class="empty">Carregando...</div></div>
+      <div class="equipe-card"><div class="empty">Carregando...</div></div>
+      <div class="equipe-card"><div class="empty">Carregando...</div></div>
+    </div>`;
+
+  const hojeISO = dataISOLocal(new Date());
+  const mesAtual = hojeISO.slice(0, 7);
+  const [solicitacoesResp, escalasResp, tecnicosResp, viagensResp] = await Promise.all([
+    api('/api/solicitacoes-rh?status=pendente'),
+    api(`/api/escala-folgas?mes=${mesAtual}`),
+    api('/api/usuarios'),
+    api(`/api/tecnicos/viagens?mes=${mesAtual}`),
+  ]);
+
+  const tecnicosAtivos = tecnicosResp.usuarios.filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  const escalasHoje = escalasResp.escalas.filter((e) => e.data === hojeISO);
+  // se tem folga coletiva marcada hoje, todo mundo está fora — senão, conta só quem tem
+  // marcação individual (mesma regra de "não disponível" usada nos calendários).
+  const coletivaHoje = escalasHoje.some((e) => e.usuario_id === null);
+  const foraHoje = coletivaHoje ? tecnicosAtivos.length : new Set(escalasHoje.filter((e) => e.usuario_id !== null).map((e) => e.usuario_id)).size;
+  const diariasComBonus = (viagensResp.tecnicos || []).reduce((soma, t) => soma + (t.dias_total || 0), 0);
+
+  const grid = document.getElementById('equipe-grid');
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="equipe-card" onclick="ir('tecnicos-solicitacoes')">
+      <div class="equipe-card-icone">🙋</div>
+      <div class="equipe-card-titulo">Solicitações</div>
+      <div class="stat-valor">${solicitacoesResp.solicitacoes.length}</div>
+      <div class="stat-label">pendente(s)</div>
+    </div>
+    <div class="equipe-card" onclick="ir('escala-folga')">
+      <div class="equipe-card-icone">🗓️</div>
+      <div class="equipe-card-titulo">Escala de Folga</div>
+      <div class="stat-valor">${foraHoje}</div>
+      <div class="stat-label">de folga hoje</div>
+    </div>
+    <div class="equipe-card" onclick="ir('tecnicos-acompanhamento')">
+      <div class="equipe-card-icone">✈️</div>
+      <div class="equipe-card-titulo">Acompanhamento de viagens</div>
+      <div class="stat-valor">${diariasComBonus}</div>
+      <div class="stat-label">diária(s) com bônus este mês</div>
+    </div>`;
+}
+
 let acompanhamentoMes = new Date().toISOString().slice(0, 7);
 
 async function renderTecnicosAcompanhamento() {
@@ -13802,7 +13854,10 @@ async function renderTecnicosAcompanhamento() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Acompanhamento de viagens</h1><p>Bônus de R$200 por diária de viagem — limite de 7 diárias por técnico/mês antes de precisar de justificativa.</p></div>
-      <input type="month" id="acomp-mes" value="${acompanhamentoMes}" onchange="mudarMesAcompanhamento()">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="month" id="acomp-mes" value="${acompanhamentoMes}" onchange="mudarMesAcompanhamento()">
+        <button class="btn-outline-sm" onclick="ir('equipe')">‹ Equipe</button>
+      </div>
     </div>
     <div id="acomp-lista"><div class="empty">Carregando...</div></div>`;
   await carregarAcompanhamento();
@@ -14004,7 +14059,10 @@ async function renderEscalaFolga() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Escala de Folga</h1><p>DSR, compensação de banco de horas, home office e férias da equipe — clique num nome pra ver e marcar os dias dele.</p></div>
-      <input type="month" id="escala-mes" value="${escalaFolgaMesAtual}" onchange="mudarMesEscalaFolga()">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="month" id="escala-mes" value="${escalaFolgaMesAtual}" onchange="mudarMesEscalaFolga()">
+        <button class="btn-outline-sm" onclick="ir('equipe')">‹ Equipe</button>
+      </div>
     </div>
     <div class="escala-folga-layout">
       <div class="panel" id="escala-lista-wrap"><div class="empty">Carregando...</div></div>
@@ -14255,7 +14313,10 @@ let solicitacoesRHFiltroStatus = 'pendente';
 async function renderTecnicosSolicitacoes() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Solicitações dos técnicos</h1><p>Folga, banco de horas, férias e home office.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Solicitações dos técnicos</h1><p>Folga, banco de horas, férias e home office.</p></div>
+      <button class="btn-outline-sm" onclick="ir('equipe')">‹ Equipe</button>
+    </div>
     <div class="panel" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
       <label style="font-size:13px;">Tipo<br><select id="sol-filtro-tipo" onchange="filtrarSolicitacoesRH()">
         <option value="">Todos</option>
