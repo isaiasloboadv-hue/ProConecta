@@ -2977,6 +2977,62 @@ function sanitizarCiclos(lista) {
     .filter((c) => c.tipo_amostra || c.quantidade || c.hora_inicial || c.hora_final || c.qtd_ok || c.qtd_desvio || c.descricao_desvio);
 }
 
+// todo relatório manual traz o nome da empresa visitada (mesmo quando ainda não é um cliente
+// cadastrado — ex.: Demonstração Técnica a um prospect, ficha de um equipamento levantado em
+// campo) — usa isso pra ir alimentando a lista de Clientes sozinha, sem o administrador precisar
+// digitar tudo de novo: empresa nova vira cliente novo; empresa que já existe só tem os campos
+// que ainda estavam vazios completados (nunca sobrescreve o que o administrador já preencheu com
+// cuidado). O mesmo vale pro equipamento, casado pelo número de série — identificador natural de
+// uma unidade física, do jeito que /api/equipamentos/buscar-por-serie já assume.
+function sincronizarClienteDoRelatorio(data, empresaId, body) {
+  const nomeEmpresa = String(body.empresa || '').trim();
+  if (!nomeEmpresa) return;
+  const clientesDaEmpresa = tenant.listar(data, 'clientes', empresaId);
+  let cliente = clientesDaEmpresa.find((c) => String(c.nome_empresa || '').trim().toLowerCase() === nomeEmpresa.toLowerCase());
+  if (cliente) {
+    const preencheSeVazio = (campo, valor) => { if (!cliente[campo] && valor) cliente[campo] = valor; };
+    preencheSeVazio('contato', body.contato);
+    preencheSeVazio('telefone', body.telefone);
+    preencheSeVazio('endereco', body.endereco);
+    preencheSeVazio('numero', body.numero);
+    preencheSeVazio('bairro', body.bairro);
+    preencheSeVazio('cep', body.cep);
+    preencheSeVazio('cidade', body.cidade);
+    preencheSeVazio('estado', body.estado);
+  } else {
+    cliente = tenant.criar(data, 'clientes', empresaId, {
+      nome_empresa: nomeEmpresa,
+      contato: body.contato || '', telefone: body.telefone || '', email: '',
+      nivel_acesso: 'completo', setor: '',
+      endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
+    });
+  }
+
+  const numeroSerie = String(body.numero_serie || '').trim();
+  if (!numeroSerie) return;
+  const equipamentosDaEmpresa = tenant.listar(data, 'equipamentos', empresaId);
+  const existente = equipamentosDaEmpresa.find((e) => String(e.numero_serie || '').trim().toLowerCase() === numeroSerie.toLowerCase());
+  if (!existente) {
+    // "modelo_maquina" é o campo usado nos relatórios de preventiva/corretiva/aceite de entrega;
+    // "equipamento" nos mais simples (ficha, ciclagem); "equipamento_demonstrado" no Promotor —
+    // tenta os três, nessa ordem, pra pegar a descrição em qualquer um dos formatos.
+    const descricao = String(body.modelo_maquina || body.equipamento || body.equipamento_demonstrado || '').trim();
+    tenant.criar(data, 'equipamentos', empresaId, {
+      cliente_id: cliente.id,
+      tipo: descricao || 'Equipamento',
+      modelo: String(body.marca || '').trim(),
+      numero_serie: numeroSerie,
+      data_fabricacao: body.data_fabricacao || '',
+      localizacao: '',
+    });
+  } else if (existente.cliente_id === null) {
+    // já existia no catálogo (cadastrado sem cliente ainda) — agora apareceu de verdade num
+    // relatório, então atrela ao cliente
+    existente.cliente_id = cliente.id;
+  }
+}
+
 // POST /api/relatorios-manutencao — cria um relatório avulso; salva na hora, sem aprovação do admin.
 // Três formatos possíveis, diferenciados por body.tipo: "completo" (formulário manual de sempre),
 // "ficha" (só os dados que a etiqueta do equipamento tem, vindo do Lev. Estoque Etiqueta) ou
@@ -3175,6 +3231,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     const agendaVinculada = tenant.buscar(data, 'agenda', item.agenda_id, user.empresa_id);
     if (agendaVinculada && !agendaVinculada.finalizada) agendaVinculada.status = 'concluida';
   }
+  sincronizarClienteDoRelatorio(data, user.empresa_id, body);
   db.save(data);
   enviarJSON(res, 201, { relatorio: item });
 });
@@ -3383,6 +3440,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       fotos,
     });
   }
+  sincronizarClienteDoRelatorio(data, user.empresa_id, body);
   db.save(data);
   enviarJSON(res, 200, { relatorio: item });
 });
