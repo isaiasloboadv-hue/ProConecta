@@ -2977,6 +2977,24 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
 
+// POST /api/relatorios-manutencao/:id/enviar-email — botão "Encaminhar" da tela Relatório: manda
+// o PDF (já gerado no navegador, igual ao botão "PDF") por e-mail em anexo. O envio por WhatsApp
+// não passa por aqui — é feito só no navegador (wa.me / Web Share), sem nada pra guardar no servidor.
+rota('POST', /^\/api\/relatorios-manutencao\/(\d+)\/enviar-email$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  const body = await lerCorpo(req);
+  if (!body.pdf_base64 || !Array.isArray(body.emails) || body.emails.length === 0) {
+    return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
+  }
+  const data = db.load();
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
+  if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
+  const nomeArquivo = `relatorio-${item.id}.pdf`;
+  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo });
+  enviarJSON(res, 200, { envio: resultado });
+});
+
 // POST /api/relatorios-manutencao/ler-etiqueta — recebe a foto da etiqueta/placa do equipamento,
 // manda pra IA extrair marca/equipamento/nº série/data de fabricação e devolve pra pré-preencher
 // o formulário no front (não salva nada aqui — só a leitura). Exige a IA configurada.

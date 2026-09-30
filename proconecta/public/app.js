@@ -5562,6 +5562,7 @@ function linhasRelatorioManut() {
       <td data-label="Tipo">${tagTipoRelatorioManut(r)}</td>
       <td class="td-acoes">
         <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
+        <button class="btn-outline-sm" onclick="abrirEncaminharRelatorioManutencao(${i})">Encaminhar</button>
         ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
         ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
         <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
@@ -9992,14 +9993,113 @@ async function relatorioManutCompleto(i) {
   return relatorio;
 }
 
+// escolhe qual gerarPdfXXX chamar conforme o tipo do relatório — usado tanto pra abrir o PDF
+// numa aba nova quanto pra pegar o Blob dele na hora de encaminhar (e-mail/WhatsApp)
+function gerarPdfUrlRelatorioManutencao(r, logo) {
+  return r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'entrega_teste' ? gerarPdfRelatorioEntregaTeste(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+}
+
 async function abrirPdfRelatorioManutencao(i) {
   const r = await relatorioManutCompleto(i);
   if (!r) return;
   try {
     const logo = await carregarLogoDataUri();
-    const url = r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'entrega_teste' ? gerarPdfRelatorioEntregaTeste(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
-    window.open(url, '_blank');
+    window.open(gerarPdfUrlRelatorioManutencao(r, logo), '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+}
+
+// pega o PDF do relatório (já gerado no navegador, mesmo caminho do botão "PDF") como base64,
+// pra mandar em anexo por e-mail
+async function gerarPdfBase64RelatorioManutencao(r) {
+  const logo = await carregarLogoDataUri();
+  const blob = await (await fetch(gerarPdfUrlRelatorioManutencao(r, logo))).blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Falha ao ler o PDF gerado.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+// botão "Encaminhar" da tela Relatório: escolhe entre e-mail (manda pro backend, que anexa e
+// envia) ou WhatsApp (compartilha o arquivo de verdade via Web Share quando o navegador suporta
+// — a maioria dos celulares —, senão baixa o PDF e abre o WhatsApp com uma mensagem pronta,
+// já que um link wa.me não tem como levar um anexo junto).
+async function abrirEncaminharRelatorioManutencao(i) {
+  const r = await relatorioManutCompleto(i);
+  if (!r) return;
+  let modal = document.getElementById('modal-encaminhar');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-encaminhar';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  const fechar = () => modal.classList.remove('show');
+  const nomeDestino = r.empresa || r.equipamento || 'este atendimento';
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:400px;">
+      <h3>Encaminhar relatório</h3>
+      <p>Relatório de <b>${esc(nomeDestino)}</b>.</p>
+      <div class="field"><label>E-mail(s) — separados por vírgula</label><input id="encaminhar-emails" value="${esc(r.email || '')}" placeholder="cliente@empresa.com"></div>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;" id="encaminhar-btn-email">Enviar por e-mail</button>
+      <button class="btn-outline-sm" style="width:100%; justify-content:center; margin-top:10px;" id="encaminhar-btn-whatsapp">Enviar por WhatsApp</button>
+      <button class="btn-outline-sm" style="width:100%; justify-content:center; margin-top:10px;" id="encaminhar-btn-cancelar">Cancelar</button>
+    </div>`;
+  modal.querySelector('#encaminhar-btn-cancelar').onclick = fechar;
+  modal.querySelector('#encaminhar-btn-email').onclick = async () => {
+    const emails = modal.querySelector('#encaminhar-emails').value.split(',').map((e) => e.trim()).filter(Boolean);
+    if (!emails.length) return alert('Informe ao menos um e-mail.');
+    const btn = modal.querySelector('#encaminhar-btn-email');
+    btn.disabled = true; btn.textContent = 'Enviando...';
+    try {
+      const pdfBase64 = await gerarPdfBase64RelatorioManutencao(r);
+      await api(`/api/relatorios-manutencao/${r.id}/enviar-email`, { method: 'POST', body: { pdf_base64: pdfBase64, emails } });
+      fechar();
+      mostrarToast('Relatório enviado por e-mail.');
+    } catch (e) {
+      alert('Erro ao enviar: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Enviar por e-mail';
+    }
+  };
+  modal.querySelector('#encaminhar-btn-whatsapp').onclick = async () => {
+    const btn = modal.querySelector('#encaminhar-btn-whatsapp');
+    btn.disabled = true; btn.textContent = 'Preparando...';
+    try {
+      await encaminharRelatorioManutencaoWhatsapp(r);
+      fechar();
+    } catch (e) {
+      alert('Erro ao preparar o PDF: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Enviar por WhatsApp';
+    }
+  };
+}
+
+async function encaminharRelatorioManutencaoWhatsapp(r) {
+  const logo = await carregarLogoDataUri();
+  const blob = await (await fetch(gerarPdfUrlRelatorioManutencao(r, logo))).blob();
+  const nomeArquivo = nomeArquivoRelatorioManutencao(r) + '.pdf';
+  const texto = `Segue o relatório de ${r.empresa || r.equipamento || 'atendimento'}.`;
+  const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+  if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+    try {
+      await navigator.share({ files: [arquivo], text: texto });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      // qualquer outro erro do compartilhamento nativo: cai pro fallback de baixar + wa.me abaixo
+    }
+  }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = nomeArquivo;
+  document.body.appendChild(link); link.click(); link.remove();
+  const telefone = (r.telefone || '').replace(/\D/g, '');
+  const numero = telefone ? (telefone.length <= 11 ? '55' + telefone : telefone) : '';
+  window.open(`https://wa.me/${numero}?text=${encodeURIComponent(texto + ' Anexe o PDF que acabou de baixar.')}`, '_blank');
 }
 
 async function abrirFotosRelatorioManutencao(i) {
