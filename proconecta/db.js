@@ -404,6 +404,60 @@ function migrar(data) {
     if (r.tecnico_cargo === undefined) r.tecnico_cargo = '';
     if (r.tecnico_setor === undefined) r.tecnico_setor = '';
   }
+  // backfill: relatórios criados antes do cruzamento automático com Clientes/Equipamentos existir
+  // (ver sincronizarClienteDoRelatorio em server.js) passam por aqui uma vez, na ordem em que
+  // foram criados, pra alimentar a lista com o que já tinha sido reportado em campo e ficou de
+  // fora até agora. Mesma regra de sempre — idempotente, roda de novo a cada boot sem duplicar:
+  // nome de empresa repetido (mesmo em caixa diferente) não cria outro cliente, só completa o que
+  // estava vazio; nº de série repetido não duplica o equipamento.
+  const relatoriosOrdenados = [...data.relatorios_manutencao].sort((a, b) => (a.criado_em || '').localeCompare(b.criado_em || ''));
+  for (const r of relatoriosOrdenados) {
+    const nomeEmpresa = String(r.empresa || '').trim();
+    if (!nomeEmpresa) continue;
+    const empresaId = r.empresa_id;
+    const clientesDaEmpresa = data.clientes.filter((c) => c.empresa_id === empresaId);
+    let cliente = clientesDaEmpresa.find((c) => String(c.nome_empresa || '').trim().toLowerCase() === nomeEmpresa.toLowerCase());
+    if (cliente) {
+      const preencheSeVazio = (campo, valor) => { if (!cliente[campo] && valor) cliente[campo] = valor; };
+      preencheSeVazio('contato', r.contato);
+      preencheSeVazio('telefone', r.telefone);
+      preencheSeVazio('endereco', r.endereco);
+      preencheSeVazio('numero', r.numero);
+      preencheSeVazio('bairro', r.bairro);
+      preencheSeVazio('cep', r.cep);
+      preencheSeVazio('cidade', r.cidade);
+      preencheSeVazio('estado', r.estado);
+    } else {
+      cliente = {
+        id: nextId(data, 'clientes'), empresa_id: empresaId,
+        nome_empresa: nomeEmpresa,
+        contato: r.contato || '', telefone: r.telefone || '', email: '',
+        nivel_acesso: 'completo', setor: '',
+        endereco: r.endereco || '', numero: r.numero || '', bairro: r.bairro || '',
+        cep: r.cep || '', cidade: r.cidade || '', estado: r.estado || '',
+      };
+      data.clientes.push(cliente);
+    }
+
+    const numeroSerie = String(r.numero_serie || '').trim();
+    if (!numeroSerie) continue;
+    const equipamentosDaEmpresa = data.equipamentos.filter((e) => e.empresa_id === empresaId);
+    const existente = equipamentosDaEmpresa.find((e) => String(e.numero_serie || '').trim().toLowerCase() === numeroSerie.toLowerCase());
+    if (!existente) {
+      const descricao = String(r.modelo_maquina || r.equipamento || r.equipamento_demonstrado || '').trim();
+      data.equipamentos.push({
+        id: nextId(data, 'equipamentos'), empresa_id: empresaId,
+        cliente_id: cliente.id,
+        tipo: descricao || 'Equipamento',
+        modelo: String(r.marca || '').trim(),
+        numero_serie: numeroSerie,
+        data_fabricacao: r.data_fabricacao || '',
+        localizacao: '',
+      });
+    } else if (existente.cliente_id === null) {
+      existente.cliente_id = cliente.id;
+    }
+  }
   protegerAdminMaster(data);
   return data;
 }
