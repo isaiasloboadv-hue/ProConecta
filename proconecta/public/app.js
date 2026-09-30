@@ -1424,7 +1424,7 @@ function desenharGradeCalendario() {
           <span class="cal-day-num">${data.getDate()}</span>
           ${qtd ? `<span class="cal-day-badge">${qtd}</span>` : ''}
         </div>
-        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((e) => `<span class="cal-day-tag cal-day-tag-indisponivel" title="${esc(LABEL_ESCALA_FOLGA_FRONT[e.tipo])}">${esc(e.usuario_nome)} (${LETRA_ESCALA_FOLGA_FRONT[e.tipo]})</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
+        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((e) => `<span class="cal-day-tag cal-day-tag-indisponivel" title="${esc(tituloTagEscala(e))}">${esc(e.usuario_nome)} (${letraTagEscala(e)})</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
       </div>`;
     }).join('');
 }
@@ -11348,20 +11348,22 @@ async function renderCalendarioTecnico() {
 }
 
 let calTecnicoFiltro = 'ativos';
-// escala de folga (própria + colegas) do mês em exibição no Calendário do técnico — ver
-// garantirEscalaMesCalendarioTecnico. Só leitura aqui (marcar/limpar continua exclusivo do
-// administrador, na Escala de Folga); o técnico só sugere, via long-press num dia (ver
-// abrirSugestaoEscalaTecnico), que vira uma solicitação normal em Solicitações.
-let escalaCalTecnicoMes = null;
+// escala de folga (própria + colegas) do mês em exibição no Calendário do técnico e na Agenda
+// geral do admin — ver garantirEscalaMesCalendarioTecnico. Só leitura aqui (marcar/limpar continua
+// exclusivo do administrador, na Escala de Folga, ou automático ao aprovar uma solicitação); o
+// técnico só sugere, via long-press num dia (ver abrirSugestaoEscalaTecnico), que vira uma
+// solicitação normal em Solicitações.
 window._escalaCalTecnicoCache = [];
 
+// busca sempre de novo, de propósito — nunca cacheia por mês: uma solicitação aprovada em
+// Solicitações muda a escala na hora, e se essa função só buscasse a primeira vez que o usuário
+// visita a tela nesse mês (como fazia antes), quem já tivesse passado pela Agenda geral ou pelo
+// Calendário antes de aprovar um pedido ficaria vendo dado velho até trocar de mês e voltar.
 async function garantirEscalaMesCalendarioTecnico() {
   const mesId = `${calAno}-${String(calMes + 1).padStart(2, '0')}`;
-  if (escalaCalTecnicoMes === mesId) return;
   try {
     const { escalas } = await api(`/api/escala-folgas?mes=${mesId}`);
     window._escalaCalTecnicoCache = escalas;
-    escalaCalTecnicoMes = mesId;
   } catch (e) { window._escalaCalTecnicoCache = []; }
 }
 
@@ -11471,11 +11473,11 @@ function desenharGradeCalendarioTecnico() {
         <div class="cal-day-topo">
           <span class="cal-day-num">${data.getDate()}</span>
           <span class="cal-day-topo-direita">
-            ${escalaPropria ? `<span class="cal-day-escala-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaPropria.tipo])}${escalaPropria.usuario_id === null ? ' (coletiva)' : ''}">${iconeEscala(escalaPropria.tipo)}</span>` : ''}
+            ${escalaPropria ? `<span class="cal-day-escala-icone" title="${esc(tituloTagEscala(escalaPropria))}${escalaPropria.usuario_id === null ? ' (coletiva)' : ''}">${iconeEscala(escalaPropria.tipo)}</span>` : ''}
             ${qtd ? `<span class="cal-day-badge">${qtd}</span>` : ''}
           </span>
         </div>
-        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((e) => `<span class="cal-day-tag" title="${esc(LABEL_ESCALA_FOLGA_FRONT[e.tipo])}">${esc(e.usuario_nome)} (${LETRA_ESCALA_FOLGA_FRONT[e.tipo]})</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
+        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((e) => `<span class="cal-day-tag" title="${esc(tituloTagEscala(e))}">${esc(e.usuario_nome)} (${letraTagEscala(e)})</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
       </div>`;
     }).join('');
 }
@@ -13772,6 +13774,20 @@ function mostrarPrompt(mensagem) {
 
 const LABEL_SOLICITACAO_RH_FRONT = { folga: 'Folga', banco_horas: 'Banco de horas', ferias: 'Férias', home_office: 'Home office' };
 
+// detalhe do banco de horas nas listas de solicitação (técnico e admin) — crédito só mostra as
+// horas; débito mostra também COMO vai usar (dia inteiro ou entrar mais tarde/sair mais cedo às
+// tantas), a mesma informação que depois vira a tag específica no calendário quando aprovado.
+function detalheBancoHorasRH(s) {
+  if (s.tipo !== 'banco_horas') return '';
+  const sinal = s.operacao === 'credito' ? '+' : '-';
+  if (s.operacao === 'credito') return ` (${sinal}${s.horas}h)`;
+  const modalidade = s.modalidade_banco === 'dia_inteiro' ? 'dia inteiro'
+    : s.modalidade_banco === 'entrada_atrasada' ? `entrar às ${s.horario}`
+    : s.modalidade_banco === 'saida_antecipada' ? `sair às ${s.horario}`
+    : '';
+  return ` (${sinal}${s.horas}h — ${modalidade})`;
+}
+
 function tagStatusSolicitacaoRH(status) {
   if (status === 'aprovado') return tag('Aprovado', 'green');
   if (status === 'reprovado') return tag('Reprovado', 'falha');
@@ -13927,9 +13943,26 @@ async function abrirOSDeViagem(id) {
 // acontecem no POST/PUT /api/agenda — isso aqui é só o cadastro da escala em si.
 const LABEL_ESCALA_FOLGA_FRONT = { dsr: 'DSR', banco_horas: 'Compensação de banco de horas', home_office: 'Home office', ferias: 'Férias' };
 // inicial usada nas tags compactas dos calendários (admin e técnico) — uma letra só, ao lado do
-// nome, pra caber numa tag pequena sem precisar escrever o tipo inteiro.
+// nome, pra caber numa tag pequena sem precisar escrever o tipo inteiro. Banco de horas parcial
+// (entrar mais tarde / sair mais cedo, vindo de uma solicitação aprovada — ver
+// MAPA_TIPO_SOLICITACAO_PARA_ESCALA em server.js) ganha letra própria, diferente do dia inteiro.
 const LETRA_ESCALA_FOLGA_FRONT = { dsr: 'D', banco_horas: 'B', home_office: 'H', ferias: 'F' };
 const LABEL_ABRANGENCIA_FERIADO = { nacional: 'Nacional', estadual: 'Estadual', municipal: 'Municipal' };
+
+function letraTagEscala(e) {
+  if (e.tipo === 'banco_horas') {
+    if (e.modalidade_banco === 'entrada_atrasada') return 'E';
+    if (e.modalidade_banco === 'saida_antecipada') return 'S';
+    return 'B';
+  }
+  return LETRA_ESCALA_FOLGA_FRONT[e.tipo];
+}
+
+function tituloTagEscala(e) {
+  if (e.tipo === 'banco_horas' && e.modalidade_banco === 'entrada_atrasada') return `Entra mais tarde, às ${e.horario}`;
+  if (e.tipo === 'banco_horas' && e.modalidade_banco === 'saida_antecipada') return `Sai mais cedo, às ${e.horario}`;
+  return LABEL_ESCALA_FOLGA_FRONT[e.tipo];
+}
 
 // mesmo desenho (círculo + dois olhos + sorriso) nas duas cores — DSR em amarelo, banco de horas
 // em azul — pra ficarem visualmente pareados em vez de misturar emoji nativo com ícone customizado.
@@ -14262,7 +14295,7 @@ async function carregarSolicitacoesRH() {
       ${solicitacoes.map((s) => `
         <tr>
           <td data-label="Técnico">${esc(s.tecnico_nome)}</td>
-          <td data-label="Tipo">${LABEL_SOLICITACAO_RH_FRONT[s.tipo]}${s.tipo === 'banco_horas' ? ` (${s.operacao === 'credito' ? '+' : '-'}${s.horas}h)` : ''}</td>
+          <td data-label="Tipo">${LABEL_SOLICITACAO_RH_FRONT[s.tipo]}${detalheBancoHorasRH(s)}</td>
           <td data-label="Período">${fmtData(s.data_inicio)}${s.data_fim && s.data_fim !== s.data_inicio ? ' a ' + fmtData(s.data_fim) : ''}</td>
           <td data-label="Motivo">${esc(s.motivo)}</td>
           <td data-label="Status">${tagStatusSolicitacaoRH(s.status)}${s.resposta_admin ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">${esc(s.resposta_admin)}</div>` : ''}</td>
@@ -14300,11 +14333,17 @@ async function renderSolicitacoesRH() {
         </select></div>
         <div><label>Data</label><input type="date" id="srh-data-inicio"></div>
         <div id="srh-data-fim-wrap"><label>Até (opcional, se for um período)</label><input type="date" id="srh-data-fim"></div>
-        <div class="hidden" id="srh-horas-wrap"><label>Horas</label><input type="number" id="srh-horas" min="1" step="0.5"></div>
-        <div class="hidden" id="srh-operacao-wrap"><label>Crédito ou débito</label><select id="srh-operacao">
+        <div class="hidden" id="srh-operacao-wrap"><label>Crédito ou débito</label><select id="srh-operacao" onchange="atualizarFormSolicitacaoRH()">
           <option value="credito">Crédito (horas a favor)</option>
           <option value="debito">Débito (horas a repor)</option>
         </select></div>
+        <div class="hidden" id="srh-modalidade-banco-wrap"><label>Como quer usar?</label><select id="srh-modalidade-banco" onchange="atualizarFormSolicitacaoRH()">
+          <option value="dia_inteiro">Dia inteiro (expediente completo, ${TURNO_ENTRADA_PADRAO_FRONT}–${TURNO_SAIDA_PADRAO_FRONT})</option>
+          <option value="entrada_atrasada">Entrar mais tarde</option>
+          <option value="saida_antecipada">Sair mais cedo</option>
+        </select></div>
+        <div class="hidden" id="srh-horario-banco-wrap"><label id="srh-horario-banco-label">Horário</label><input type="time" id="srh-horario-banco" oninput="atualizarFormSolicitacaoRH()"></div>
+        <div class="hidden" id="srh-horas-wrap"><label>Horas</label><input type="number" id="srh-horas" min="0.5" step="0.5"></div>
         <div class="full"><label>Motivo</label><textarea id="srh-motivo" placeholder="Explique o motivo do pedido..."></textarea></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="enviarSolicitacaoRH()">Enviar pedido</button>
@@ -14312,22 +14351,57 @@ async function renderSolicitacoesRH() {
     <div id="srh-lista"><div class="empty">Carregando...</div></div>`;
   // vem de um long-press no Calendário (ver abrirSugestaoEscalaTecnico) — pré-preenche o
   // formulário com o tipo e o dia sugeridos, só falta o técnico digitar o motivo e enviar.
+  // "Compensação de banco de horas" ali sempre significa usar saldo (débito), então já marca isso.
   if (window._sugestaoEscalaPreenchimento) {
     const { tipo, data } = window._sugestaoEscalaPreenchimento;
     window._sugestaoEscalaPreenchimento = null;
     document.getElementById('srh-tipo').value = tipo;
     document.getElementById('srh-data-inicio').value = data;
+    if (tipo === 'banco_horas') document.getElementById('srh-operacao').value = 'debito';
     atualizarFormSolicitacaoRH();
     document.getElementById('srh-motivo').focus();
   }
   await carregarMinhasSolicitacoesRH();
 }
 
+// mesmo turno usado pelo servidor pra calcular o débito de banco de horas (ver
+// horasBancoDaModalidade em server.js) — replicado aqui só pra mostrar o total de horas em tempo
+// real enquanto o técnico escolhe o horário, sem precisar de ida e volta ao servidor. O servidor
+// recalcula e valida de novo ao receber o pedido, então uma conta errada aqui nunca é aceita.
+const TURNO_ENTRADA_PADRAO_FRONT = '08:00';
+const TURNO_SAIDA_PADRAO_FRONT = '17:00';
+const CARGA_HORARIA_DIA_BANCO_FRONT = 8;
+
+function horasBancoDaModalidadeFront(modalidade, horario) {
+  if (modalidade === 'dia_inteiro') return CARGA_HORARIA_DIA_BANCO_FRONT;
+  if (!horario) return '';
+  const minutosDe = (h) => { const [hh, mm] = h.split(':').map(Number); return hh * 60 + mm; };
+  const minutos = minutosDe(horario);
+  const entrada = minutosDe(TURNO_ENTRADA_PADRAO_FRONT);
+  const saida = minutosDe(TURNO_SAIDA_PADRAO_FRONT);
+  const horas = modalidade === 'entrada_atrasada' ? (minutos - entrada) / 60 : (saida - minutos) / 60;
+  return horas > 0 ? Math.round(horas * 100) / 100 : '';
+}
+
 function atualizarFormSolicitacaoRH() {
   const tipo = document.getElementById('srh-tipo').value;
-  document.getElementById('srh-data-fim-wrap').classList.toggle('hidden', tipo === 'banco_horas');
-  document.getElementById('srh-horas-wrap').classList.toggle('hidden', tipo !== 'banco_horas');
-  document.getElementById('srh-operacao-wrap').classList.toggle('hidden', tipo !== 'banco_horas');
+  const ehBanco = tipo === 'banco_horas';
+  document.getElementById('srh-data-fim-wrap').classList.toggle('hidden', ehBanco);
+  document.getElementById('srh-operacao-wrap').classList.toggle('hidden', !ehBanco);
+
+  const operacao = document.getElementById('srh-operacao').value;
+  const ehDebito = ehBanco && operacao === 'debito';
+  document.getElementById('srh-modalidade-banco-wrap').classList.toggle('hidden', !ehDebito);
+
+  const modalidade = document.getElementById('srh-modalidade-banco').value;
+  const ehParcial = ehDebito && modalidade !== 'dia_inteiro';
+  document.getElementById('srh-horario-banco-wrap').classList.toggle('hidden', !ehParcial);
+  document.getElementById('srh-horario-banco-label').textContent = modalidade === 'entrada_atrasada' ? 'Vai entrar às' : 'Vai sair às';
+
+  const horasInput = document.getElementById('srh-horas');
+  document.getElementById('srh-horas-wrap').classList.toggle('hidden', !ehBanco);
+  horasInput.readOnly = ehDebito;
+  if (ehDebito) horasInput.value = horasBancoDaModalidadeFront(modalidade, document.getElementById('srh-horario-banco').value);
 }
 
 async function enviarSolicitacaoRH() {
@@ -14342,9 +14416,17 @@ async function enviarSolicitacaoRH() {
     motivo,
   };
   if (tipo === 'banco_horas') {
-    body.horas = document.getElementById('srh-horas').value;
     body.operacao = document.getElementById('srh-operacao').value;
-    if (!body.horas) return alert('Informe as horas.');
+    if (body.operacao === 'credito') {
+      body.horas = document.getElementById('srh-horas').value;
+      if (!body.horas) return alert('Informe as horas.');
+    } else {
+      body.modalidade_banco = document.getElementById('srh-modalidade-banco').value;
+      if (body.modalidade_banco !== 'dia_inteiro') {
+        body.horario = document.getElementById('srh-horario-banco').value;
+        if (!body.horario) return alert('Informe o horário.');
+      }
+    }
   }
   try {
     await api('/api/solicitacoes-rh', { method: 'POST', body });
@@ -14365,7 +14447,7 @@ async function carregarMinhasSolicitacoesRH() {
       <tr><th>Tipo</th><th>Período</th><th>Motivo</th><th>Status</th><th></th></tr>
       ${solicitacoes.map((s) => `
         <tr>
-          <td data-label="Tipo">${LABEL_SOLICITACAO_RH_FRONT[s.tipo]}${s.tipo === 'banco_horas' ? ` (${s.operacao === 'credito' ? '+' : '-'}${s.horas}h)` : ''}</td>
+          <td data-label="Tipo">${LABEL_SOLICITACAO_RH_FRONT[s.tipo]}${detalheBancoHorasRH(s)}</td>
           <td data-label="Período">${fmtData(s.data_inicio)}${s.data_fim && s.data_fim !== s.data_inicio ? ' a ' + fmtData(s.data_fim) : ''}</td>
           <td data-label="Motivo">${esc(s.motivo)}</td>
           <td data-label="Status">${tagStatusSolicitacaoRH(s.status)}${s.resposta_admin ? `<div style="font-size:12px; color:var(--ink-soft); margin-top:4px;">${esc(s.resposta_admin)}</div>` : ''}</td>

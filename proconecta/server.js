@@ -1308,6 +1308,65 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
 const TIPOS_ESCALA_FOLGA = ['dsr', 'banco_horas', 'home_office', 'ferias'];
 const ABRANGENCIAS_FERIADO = ['nacional', 'estadual', 'municipal'];
 
+// turno padrão da empresa (usado só pra calcular o débito de banco de horas quando o técnico
+// pede pra entrar mais tarde ou sair mais cedo — ver horasBancoDaModalidade) — carga horária
+// fixa em 8h, mesmo o turno indo das 8 às 17 (1h de intervalo não remunerado no meio).
+const MODALIDADES_BANCO_HORAS = ['dia_inteiro', 'entrada_atrasada', 'saida_antecipada'];
+const TURNO_ENTRADA_PADRAO = '08:00';
+const TURNO_SAIDA_PADRAO = '17:00';
+const CARGA_HORARIA_DIA_BANCO = 8;
+
+function minutosDoHorario(horario) {
+  const [h, m] = horario.split(':').map(Number);
+  return h * 60 + m;
+}
+
+// quantas horas do banco a modalidade consome — dia inteiro usa a carga horária cheia; entrar
+// mais tarde ou sair mais cedo usa só a diferença entre o horário escolhido e o limite do turno,
+// pra não obrigar o técnico a calcular isso manualmente.
+function horasBancoDaModalidade(modalidade, horario) {
+  if (modalidade === 'dia_inteiro') return CARGA_HORARIA_DIA_BANCO;
+  const minutos = minutosDoHorario(horario);
+  const entrada = minutosDoHorario(TURNO_ENTRADA_PADRAO);
+  const saida = minutosDoHorario(TURNO_SAIDA_PADRAO);
+  if (modalidade === 'entrada_atrasada') return Math.round(((minutos - entrada) / 60) * 100) / 100;
+  if (modalidade === 'saida_antecipada') return Math.round(((saida - minutos) / 60) * 100) / 100;
+  return 0;
+}
+
+// AAAA-MM-DD (início) até AAAA-MM-DD (fim), inclusive — em UTC de propósito, pra nunca escorregar
+// de dia por causa de fuso horário (essas datas não têm hora, só o dia importa).
+function diasEntreISO(inicioISO, fimISO) {
+  const [ai, mi, di] = inicioISO.split('-').map(Number);
+  const [af, mf, df] = fimISO.split('-').map(Number);
+  const fim = Date.UTC(af, mf - 1, df);
+  const dias = [];
+  for (let atual = Date.UTC(ai, mi - 1, di); atual <= fim; atual += 24 * 60 * 60 * 1000) {
+    const d = new Date(atual);
+    dias.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`);
+  }
+  return dias;
+}
+
+// cria ou substitui a marcação de escala de um dia (mesma regra do POST /api/escala-folgas
+// manual do administrador: uma marcação individual por pessoa por dia) — reaproveitada quando
+// uma solicitação do técnico é aprovada (ver decidir), pra nunca ter duas marcações conflitantes.
+function marcarEscalaFolgaDia(data, empresaId, { usuarioId, diaISO, tipo, modalidadeBanco, horario, definidoPor }) {
+  const existente = data.escala_folgas.find((e) => e.usuario_id === usuarioId && e.data === diaISO && e.empresa_id === empresaId);
+  if (existente) {
+    existente.tipo = tipo;
+    existente.modalidade_banco = modalidadeBanco || null;
+    existente.horario = horario || null;
+    existente.definido_por = definidoPor;
+    existente.atualizado_em = new Date().toISOString();
+    return existente;
+  }
+  return tenant.criar(data, 'escala_folgas', empresaId, {
+    usuario_id: usuarioId, data: diaISO, tipo, modalidade_banco: modalidadeBanco || null, horario: horario || null,
+    definido_por: definidoPor, criado_em: new Date().toISOString(), atualizado_em: null,
+  });
+}
+
 // GET /api/feriados?ano=AAAA — feriados cadastrados (nacional/estadual/municipal); qualquer um
 // da empresa pode ver (é só o pano de fundo do calendário), só o administrador cadastra/exclui.
 // O sistema não vem com nenhum feriado pré-cadastrado — o administrador quem informa as datas
@@ -1425,6 +1484,10 @@ rota('DELETE', /^\/api\/escala-folgas\/(\d+)$/, async (req, res, m) => {
 
 const TIPOS_SOLICITACAO_RH = ['folga', 'banco_horas', 'ferias', 'home_office'];
 const LABEL_SOLICITACAO_RH = { folga: 'folga', banco_horas: 'banco de horas', ferias: 'férias', home_office: 'home office' };
+// pra qual tipo de escala_folgas cada solicitação aprovada vira (ver POST .../decidir) — "folga"
+// pedida pelo técnico não é bem um DSR (que é escala da empresa, não pedido individual), mas do
+// ponto de vista de quem lê o calendário é a mesma coisa: um dia em que essa pessoa não trabalha.
+const MAPA_TIPO_SOLICITACAO_PARA_ESCALA = { folga: 'dsr', banco_horas: 'banco_horas', home_office: 'home_office', ferias: 'ferias' };
 
 // POST /api/solicitacoes-rh — o técnico cria um pedido
 rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
@@ -1433,9 +1496,35 @@ rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
   const body = await lerCorpo(req);
   if (!TIPOS_SOLICITACAO_RH.includes(body.tipo)) return enviarJSON(res, 400, { erro: 'Tipo de solicitação inválido.' });
   if (!body.data_inicio) return enviarJSON(res, 400, { erro: 'Informe a data.' });
-  if (body.tipo === 'banco_horas' && (!body.horas || !['credito', 'debito'].includes(body.operacao))) {
-    return enviarJSON(res, 400, { erro: 'Informe as horas e se é crédito ou débito no banco de horas.' });
+
+  // banco de horas: crédito é hora extra trabalhada (o técnico informa quantas, não tira ele do
+  // expediente) — débito é hora que ele vai usar, então em vez de digitar um número solto, ele
+  // escolhe COMO: o dia inteiro (carga cheia) ou um horário específico de entrada/saída, e o
+  // sistema calcula as horas sozinho, sem risco de conta errada.
+  let horasBanco = null;
+  let modalidadeBanco = null;
+  let horarioBanco = null;
+  if (body.tipo === 'banco_horas') {
+    if (!['credito', 'debito'].includes(body.operacao)) {
+      return enviarJSON(res, 400, { erro: 'Informe se é crédito ou débito no banco de horas.' });
+    }
+    if (body.operacao === 'credito') {
+      if (!body.horas || Number(body.horas) <= 0) return enviarJSON(res, 400, { erro: 'Informe as horas.' });
+      horasBanco = Number(body.horas);
+    } else {
+      if (!MODALIDADES_BANCO_HORAS.includes(body.modalidade_banco)) {
+        return enviarJSON(res, 400, { erro: 'Escolha como quer usar o banco de horas: dia inteiro, entrar mais tarde ou sair mais cedo.' });
+      }
+      modalidadeBanco = body.modalidade_banco;
+      if (modalidadeBanco !== 'dia_inteiro') {
+        if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.horario || '')) return enviarJSON(res, 400, { erro: 'Informe o horário.' });
+        horarioBanco = body.horario;
+      }
+      horasBanco = horasBancoDaModalidade(modalidadeBanco, horarioBanco);
+      if (!(horasBanco > 0)) return enviarJSON(res, 400, { erro: 'Horário fora do expediente (08:00–17:00).' });
+    }
   }
+
   if (!String(body.motivo || '').trim()) return enviarJSON(res, 400, { erro: 'Descreva o motivo do pedido.' });
   const data = db.load();
   const item = tenant.criar(data, 'solicitacoes_rh', user.empresa_id, {
@@ -1443,8 +1532,10 @@ rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
     tipo: body.tipo,
     data_inicio: body.data_inicio,
     data_fim: body.data_fim || body.data_inicio,
-    horas: body.tipo === 'banco_horas' ? Number(body.horas) : null,
+    horas: body.tipo === 'banco_horas' ? horasBanco : null,
     operacao: body.tipo === 'banco_horas' ? body.operacao : null,
+    modalidade_banco: modalidadeBanco,
+    horario: horarioBanco,
     motivo: String(body.motivo).trim(),
     status: 'pendente',
     resposta_admin: '',
@@ -1495,6 +1586,24 @@ rota('POST', /^\/api\/solicitacoes-rh\/(\d+)\/decidir$/, async (req, res, m) => 
   item.lida_tecnico = false;
   item.resolvido_em = new Date().toISOString();
   item.resolvido_por = user.id;
+
+  // aprovado: reflete na Escala de Folga automaticamente, pra virar tag nos calendários (admin e
+  // técnico) sem o administrador precisar marcar de novo à mão. Banco de horas em crédito fica de
+  // fora — é hora extra trabalhada, não tira ninguém do expediente, então não bloqueia nenhum dia.
+  if (body.status === 'aprovado' && MAPA_TIPO_SOLICITACAO_PARA_ESCALA[item.tipo] && !(item.tipo === 'banco_horas' && item.operacao !== 'debito')) {
+    const tipoEscala = MAPA_TIPO_SOLICITACAO_PARA_ESCALA[item.tipo];
+    diasEntreISO(item.data_inicio, item.data_fim).forEach((diaISO) => {
+      marcarEscalaFolgaDia(data, user.empresa_id, {
+        usuarioId: item.tecnico_id,
+        diaISO,
+        tipo: tipoEscala,
+        modalidadeBanco: item.tipo === 'banco_horas' ? item.modalidade_banco : null,
+        horario: item.tipo === 'banco_horas' ? item.horario : null,
+        definidoPor: user.id,
+      });
+    });
+  }
+
   db.save(data);
   enviarPush(data, item.tecnico_id, {
     titulo: `Solicitação ${body.status === 'aprovado' ? 'aprovada' : 'reprovada'}`,
