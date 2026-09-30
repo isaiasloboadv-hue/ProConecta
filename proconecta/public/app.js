@@ -1256,6 +1256,7 @@ let minhaAgendaFiltro = 'ativos';
 async function renderAgenda() {
   if (USER.papel === 'administrador') {
     await carregarAgendaComVisitas();
+    await carregarTecnicosParaCalendario();
     return renderAgendaCalendario();
   }
   minhaAgendaDetalheId = null;
@@ -1324,11 +1325,23 @@ function dataISOLocal(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function renderAgendaCalendario() {
+// roster de técnicos ativos pra calcular, dia a dia, quem está disponível (ver
+// desenharGradeCalendario) — o time em si não muda por mês, então busca uma vez só por
+// visita à tela (a escala do mês em exibição é cacheada à parte, em garantirEscalaMesCalendarioTecnico,
+// reaproveitada aqui porque o administrador já tem acesso à mesma rota GET /api/escala-folgas).
+window._tecnicosCalendarioCache = [];
+async function carregarTecnicosParaCalendario() {
+  try {
+    const { usuarios } = await api('/api/usuarios');
+    window._tecnicosCalendarioCache = usuarios.filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  } catch (e) { window._tecnicosCalendarioCache = []; }
+}
+
+async function renderAgendaCalendario() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total</p></div>
+      <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total — tag verde mostra quem está disponível pra alocar naquele dia</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
     <div id="form-nova-atividade"></div>
@@ -1347,6 +1360,7 @@ function renderAgendaCalendario() {
       <div class="cal-grid" id="cal-grid"></div>
     </div>
   `;
+  await garantirEscalaMesCalendarioTecnico();
   desenharGradeCalendario();
 }
 
@@ -1355,18 +1369,20 @@ function alternarFiltroCalendario(valor) {
   desenharGradeCalendario();
 }
 
-function mudarMesCalendario(delta) {
+async function mudarMesCalendario(delta) {
   calMes += delta;
   if (calMes < 0) { calMes = 11; calAno--; }
   if (calMes > 11) { calMes = 0; calAno++; }
+  await garantirEscalaMesCalendarioTecnico();
   desenharGradeCalendario();
 }
 
-function irParaHojeCalendario() {
+async function irParaHojeCalendario() {
   const hoje = new Date();
   calAno = hoje.getFullYear();
   calMes = hoje.getMonth();
   calDiaSelecionado = dataISOLocal(hoje);
+  await garantirEscalaMesCalendarioTecnico();
   desenharGradeCalendario();
 }
 
@@ -1382,6 +1398,9 @@ function desenharGradeCalendario() {
     if (!dia) return;
     contagemPorDia[dia] = (contagemPorDia[dia] || 0) + 1;
   });
+
+  const tecnicos = window._tecnicosCalendarioCache || [];
+  const escalas = window._escalaCalTecnicoCache || [];
 
   const inicioSemana = new Date(calAno, calMes, 1).getDay();
   const diasNoMes = new Date(calAno, calMes + 1, 0).getDate();
@@ -1403,9 +1422,20 @@ function desenharGradeCalendario() {
       if (data.getMonth() !== calMes) classes.push('fora-mes');
       if (iso === hojeISO) classes.push('hoje');
       if (iso === calDiaSelecionado) classes.push('selecionado');
+
+      // disponível = sem marcação de escala nesse dia (nem individual, nem folga coletiva) — quem
+      // está de folga/férias/banco de horas/home office não entra na lista, é quem sobra que pode
+      // ser alocado numa O.S. nova. Corta em 3 tags visíveis + "+N" pra não estourar a célula.
+      const disponiveis = tecnicos.filter((t) => !escalaEfetivaDoDia(escalas, t.id, iso));
+      const tagsVisiveis = disponiveis.slice(0, 3);
+      const tagsExtra = disponiveis.length - tagsVisiveis.length;
+
       return `<div class="${classes.join(' ')}" onclick="selecionarDiaCalendario('${iso}')">
-        <div class="cal-day-num">${data.getDate()}</div>
-        ${qtd ? `<div class="cal-day-badge">${qtd}</div>` : ''}
+        <div class="cal-day-topo">
+          <span class="cal-day-num">${data.getDate()}</span>
+          ${qtd ? `<span class="cal-day-badge">${qtd}</span>` : ''}
+        </div>
+        ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((t) => `<span class="cal-day-tag cal-day-tag-disponivel">${esc(t.nome)}</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
       </div>`;
     }).join('');
 }
@@ -11452,10 +11482,14 @@ function desenharGradeCalendarioTecnico() {
       const tagsExtra = tagsColegas.length - tagsVisiveis.length;
 
       return `<div class="${classes.join(' ')}" data-dia="${iso}" onclick="selecionarDiaCalendarioTecnico('${iso}')" ${feriadosDoDia.length ? `title="${esc(feriadosDoDia.map((f) => f.nome).join(', '))}"` : ''}>
-        <div class="cal-day-num">${data.getDate()}</div>
-        ${escalaPropria ? `<span class="cal-day-escala-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaPropria.tipo])}${escalaPropria.usuario_id === null ? ' (coletiva)' : ''}">${iconeEscala(escalaPropria.tipo)}</span>` : ''}
+        <div class="cal-day-topo">
+          <span class="cal-day-num">${data.getDate()}</span>
+          <span class="cal-day-topo-direita">
+            ${escalaPropria ? `<span class="cal-day-escala-icone" title="${esc(LABEL_ESCALA_FOLGA_FRONT[escalaPropria.tipo])}${escalaPropria.usuario_id === null ? ' (coletiva)' : ''}">${iconeEscala(escalaPropria.tipo)}</span>` : ''}
+            ${qtd ? `<span class="cal-day-badge">${qtd}</span>` : ''}
+          </span>
+        </div>
         ${tagsVisiveis.length ? `<div class="cal-day-tags">${tagsVisiveis.map((t) => `<span class="cal-day-tag">${esc(t)}</span>`).join('')}${tagsExtra > 0 ? `<span class="cal-day-tag cal-day-tag-mais">+${tagsExtra}</span>` : ''}</div>` : ''}
-        ${qtd ? `<div class="cal-day-badge">${qtd}</div>` : ''}
       </div>`;
     }).join('');
 }
