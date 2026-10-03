@@ -861,6 +861,42 @@ async function hidratarFotosProfundo(valor) {
   return valor;
 }
 
+// ---------- limite de tentativas de login (sem isso, um script tentava milhares de senhas por
+// minuto contra /api/login) — contador em memória por IP, não é persistido nem é à prova de um
+// atacante trocando de IP a cada tentativa, mas barra o caso comum (um script batendo sempre do
+// mesmo lugar). Reseta sozinho: cada IP esquece a janela antiga assim que ela expira.
+const JANELA_LOGIN_MS = 15 * 60 * 1000; // 15 minutos
+const LIMITE_TENTATIVAS_LOGIN = 10;
+const tentativasLogin = new Map(); // ip -> { contagem, desde }
+
+function ipDaRequisicao(req) {
+  const encaminhado = req.headers['x-forwarded-for'];
+  if (encaminhado) return String(encaminhado).split(',')[0].trim();
+  return (req.socket && req.socket.remoteAddress) || 'desconhecido';
+}
+function loginBloqueado(ip) {
+  const registro = tentativasLogin.get(ip);
+  if (!registro) return false;
+  if (Date.now() - registro.desde > JANELA_LOGIN_MS) { tentativasLogin.delete(ip); return false; }
+  return registro.contagem >= LIMITE_TENTATIVAS_LOGIN;
+}
+function registrarTentativaLoginFalha(ip) {
+  const registro = tentativasLogin.get(ip);
+  if (!registro || Date.now() - registro.desde > JANELA_LOGIN_MS) {
+    tentativasLogin.set(ip, { contagem: 1, desde: Date.now() });
+  } else {
+    registro.contagem++;
+  }
+}
+// varredura periódica só pra não deixar o Map crescer pra sempre com IPs que nunca mais voltam
+// (sem isso, cada IP que tenta uma vez só e nunca mais aparece fica ocupando memória de graça)
+setInterval(() => {
+  const agora = Date.now();
+  for (const [ip, registro] of tentativasLogin) {
+    if (agora - registro.desde > JANELA_LOGIN_MS) tentativasLogin.delete(ip);
+  }
+}, 30 * 60 * 1000);
+
 // ---------- rotas da API ----------
 
 const rotas = [];
@@ -870,12 +906,18 @@ function rota(metodo, regex, handler) {
 
 // POST /api/login
 rota('POST', /^\/api\/login$/, async (req, res) => {
+  const ip = ipDaRequisicao(req);
+  if (loginBloqueado(ip)) {
+    return enviarJSON(res, 429, { erro: 'Muitas tentativas de login. Tente de novo em alguns minutos.' });
+  }
   const { email: emailLogin, senha } = await lerCorpo(req);
   const data = db.load();
   const u = data.usuarios.find((x) => x.email === emailLogin);
   if (!u || u.status !== 'ativo' || !conferirSenha(senha || '', u.salt, u.hash)) {
+    registrarTentativaLoginFalha(ip);
     return enviarJSON(res, 401, { erro: 'E-mail ou senha inválidos.' });
   }
+  tentativasLogin.delete(ip);
   const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   const empresaDoUsuario = data.empresas.find((e) => e.id === u.empresa_id);
   enviarJSON(res, 200, { token, usuario: {
