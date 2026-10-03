@@ -460,6 +460,16 @@ function migrar(data) {
   // ficha cadastral (menu Equipe > Cadastros): foto de perfil opcional — sem ela, o front mostra
   // uma silhueta padrão, então aqui só garante que o campo exista (string vazia) em vez de undefined.
   data.usuarios.forEach((u) => { if (u.foto_perfil === undefined) u.foto_perfil = ''; });
+  // ficha cadastral ampliada: certificados (arquivo + validade), integrações com empresas-cliente
+  // (acesso/credencial pra atuar nelas, com validade) e competências (nível de conhecimento num
+  // tipo de equipamento) — cada uma é uma coleção própria, um registro por item, presa ao técnico
+  // dono (usuario_id) e à empresa (empresa_id, como tudo mais no sistema).
+  if (!data.certificados_colaborador) data.certificados_colaborador = [];
+  if (!data._seq.certificados_colaborador) data._seq.certificados_colaborador = 1;
+  if (!data.integracoes_colaborador) data.integracoes_colaborador = [];
+  if (!data._seq.integracoes_colaborador) data._seq.integracoes_colaborador = 1;
+  if (!data.competencias_colaborador) data.competencias_colaborador = [];
+  if (!data._seq.competencias_colaborador) data._seq.competencias_colaborador = 1;
   protegerAdminMaster(data);
   return data;
 }

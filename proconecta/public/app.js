@@ -14012,24 +14012,48 @@ async function abrirFichaCadastral(id) {
   const usuario = (window._cadastrosCache || []).find((u) => u.id === id);
   if (!usuario) return;
   window._fichaFotoNova = null;
+  window._fichaUsuarioId = id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Ficha cadastral</h1><p>Dados simples do técnico — nome, e-mail, telefone e foto.</p>
+    <div class="page-head"><h1>Ficha cadastral</h1><p>Dados, certificados, integrações com empresas e competências do técnico.</p>
       <button class="btn-outline-sm" onclick="renderCadastros()">‹ Cadastros</button>
     </div>
-    <div class="panel" style="max-width:420px;">
-      <div style="text-align:center; margin-bottom:18px;">
-        <label style="cursor:pointer; display:inline-block;">
-          <span id="ficha-avatar-grande">${avatarFichaHtml(usuario, 120)}</span>
-          <input type="file" accept="image/*" style="display:none" onchange="trocarFotoFicha(event)">
-          <div style="font-size:12.5px; color:var(--blue); margin-top:8px;">Trocar foto</div>
-        </label>
+    <div class="empty">Carregando...</div>`;
+
+  const [extra, clientesResp] = await Promise.all([
+    api(`/api/usuarios/${id}/ficha-extra`),
+    api('/api/clientes'),
+  ]);
+  window._fichaExtra = extra;
+  window._clientesCache = clientesResp.clientes;
+
+  main.innerHTML = `
+    <div class="page-head"><h1>Ficha cadastral</h1><p>Dados, certificados, integrações com empresas e competências do técnico.</p>
+      <button class="btn-outline-sm" onclick="renderCadastros()">‹ Cadastros</button>
+    </div>
+    <div class="ficha-detalhe">
+      <div class="panel">
+        <div style="text-align:center; margin-bottom:18px;">
+          <label style="cursor:pointer; display:inline-block;">
+            <span id="ficha-avatar-grande">${avatarFichaHtml(usuario, 120)}</span>
+            <input type="file" accept="image/*" style="display:none" onchange="trocarFotoFicha(event)">
+            <div style="font-size:12.5px; color:var(--blue); margin-top:8px;">Trocar foto</div>
+          </label>
+        </div>
+        <div class="field"><label>Nome</label><input id="ficha-nome" value="${esc(usuario.nome)}"></div>
+        <div class="field"><label>E-mail</label><input id="ficha-email" type="email" value="${esc(usuario.email)}"></div>
+        <div class="field"><label>Telefone</label><input id="ficha-telefone" value="${esc(usuario.celular || '')}" placeholder="(00) 00000-0000"></div>
+        <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:10px;" onclick="salvarFichaCadastral(${id})">Salvar</button>
       </div>
-      <div class="field"><label>Nome</label><input id="ficha-nome" value="${esc(usuario.nome)}"></div>
-      <div class="field"><label>E-mail</label><input id="ficha-email" type="email" value="${esc(usuario.email)}"></div>
-      <div class="field"><label>Telefone</label><input id="ficha-telefone" value="${esc(usuario.celular || '')}" placeholder="(00) 00000-0000"></div>
-      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:10px;" onclick="salvarFichaCadastral(${id})">Salvar</button>
+      <div class="ficha-secoes">
+        <div class="panel" id="ficha-sec-certificados"></div>
+        <div class="panel" id="ficha-sec-integracoes"></div>
+        <div class="panel" id="ficha-sec-competencias"></div>
+      </div>
     </div>`;
+  desenharCertificadosFicha();
+  desenharIntegracoesFicha();
+  desenharCompetenciasFicha();
 }
 
 async function salvarFichaCadastral(id) {
@@ -14048,10 +14072,236 @@ async function salvarFichaCadastral(id) {
     foto_perfil: window._fichaFotoNova !== null ? window._fichaFotoNova : (usuario.foto_perfil || ''),
   };
   try {
-    await api(`/api/usuarios/${id}`, { method: 'PUT', body });
+    const { usuario: atualizado } = await api(`/api/usuarios/${id}`, { method: 'PUT', body });
+    Object.assign(usuario, atualizado);
+    window._fichaFotoNova = null;
     mostrarToast('Ficha cadastral atualizada.');
-    renderCadastros();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+// datas "só dia" (validade de certificado/integração) com ano, formatadas direto da string pra
+// não cair na mesma armadilha de fuso horário do fmtData (que nem mostra o ano, pensado pra
+// datas do ano corrente — aqui o ano importa, uma validade pode ser daqui a vários anos)
+function fmtDataValidade(iso) {
+  if (!iso) return '—';
+  const [ano, mes, dia] = iso.split('-');
+  return `${dia}/${mes}/${ano}`;
+}
+function tagValidade(iso) {
+  if (!iso) return tag('Sem validade', 'gray');
+  return iso < dataISOLocal(new Date()) ? tag('Vencido', 'falha') : tag('Válido', 'green');
+}
+
+// ---------- Certificados do colaborador ----------
+
+function desenharCertificadosFicha() {
+  const el = document.getElementById('ficha-sec-certificados');
+  if (!el) return;
+  const lista = (window._fichaExtra.certificados || []).slice().sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  el.innerHTML = `
+    <div class="ficha-sec-head"><h3>🏅 Certificados</h3><button class="btn-outline-sm" onclick="abrirNovoCertificadoFicha()">+ Adicionar</button></div>
+    <div id="ficha-form-certificado"></div>
+    <div id="ficha-lista-certificados">${lista.length ? lista.map((c) => `
+      <div class="ficha-item">
+        <div class="ficha-item-info">
+          <b>${esc(c.nome)}</b>
+          <span class="ficha-item-sub">${c.data_validade ? 'Validade: ' + fmtDataValidade(c.data_validade) : 'Sem data de validade'}</span>
+          ${tagValidade(c.data_validade)}
+        </div>
+        <div class="ficha-item-acoes">
+          ${c.arquivo ? `<a class="btn-outline-sm" href="${c.arquivo}" target="_blank" rel="noopener" download="${esc(c.arquivo_nome || c.nome)}">Ver arquivo</a>` : ''}
+          <button class="btn-outline-sm" style="color:var(--red); border-color:var(--red);" onclick="excluirCertificadoFicha(${c.id})">Excluir</button>
+        </div>
+      </div>`).join('') : `<div class="empty">Nenhum certificado cadastrado.</div>`}</div>`;
+}
+
+function abrirNovoCertificadoFicha() {
+  const el = document.getElementById('ficha-form-certificado');
+  if (!el) return;
+  window._certificadoArquivoNovo = null;
+  el.innerHTML = `
+    <div class="ficha-form">
+      <div class="field"><label>Nome do certificado</label><input id="fc-nome" placeholder="Ex: NR-10, Curso Fabricante X..."></div>
+      <div class="field"><label>Validade (opcional)</label><input id="fc-validade" type="date"></div>
+      <div class="field"><label>Arquivo (PDF ou imagem, opcional)</label><input id="fc-arquivo" type="file" accept="application/pdf,image/*" onchange="lerArquivoCertificadoFicha(event)"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-outline-sm" style="flex:1; justify-content:center;" onclick="document.getElementById('ficha-form-certificado').innerHTML=''">Cancelar</button>
+        <button class="btn btn-primary" style="flex:1; justify-content:center;" onclick="salvarCertificadoFicha()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+function lerArquivoCertificadoFicha(event) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) { window._certificadoArquivoNovo = null; return; }
+  const leitor = new FileReader();
+  leitor.onload = () => { window._certificadoArquivoNovo = { dataUrl: leitor.result, nome: arquivo.name }; };
+  leitor.readAsDataURL(arquivo);
+}
+
+async function salvarCertificadoFicha() {
+  const nome = document.getElementById('fc-nome').value.trim();
+  if (!nome) return alert('Informe o nome do certificado.');
+  const body = {
+    nome,
+    data_validade: document.getElementById('fc-validade').value || null,
+    arquivo: window._certificadoArquivoNovo ? window._certificadoArquivoNovo.dataUrl : null,
+    arquivo_nome: window._certificadoArquivoNovo ? window._certificadoArquivoNovo.nome : null,
+  };
+  try {
+    const { certificado } = await api(`/api/usuarios/${window._fichaUsuarioId}/certificados`, { method: 'POST', body });
+    window._fichaExtra.certificados.push(certificado);
+    document.getElementById('ficha-form-certificado').innerHTML = '';
+    desenharCertificadosFicha();
+    mostrarToast('Certificado adicionado.');
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function excluirCertificadoFicha(id) {
+  if (!(await mostrarConfirmacao('Excluir este certificado?'))) return;
+  try {
+    await api(`/api/certificados/${id}`, { method: 'DELETE' });
+    window._fichaExtra.certificados = window._fichaExtra.certificados.filter((c) => c.id !== id);
+    desenharCertificadosFicha();
+  } catch (e) { alert('Erro ao excluir: ' + e.message); }
+}
+
+// ---------- Integrações com empresas-cliente ----------
+
+function desenharIntegracoesFicha() {
+  const el = document.getElementById('ficha-sec-integracoes');
+  if (!el) return;
+  const lista = (window._fichaExtra.integracoes || []).slice().sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  el.innerHTML = `
+    <div class="ficha-sec-head"><h3>🏢 Empresas / Integrações</h3><button class="btn-outline-sm" onclick="abrirNovaIntegracaoFicha()">+ Adicionar</button></div>
+    <div id="ficha-form-integracao"></div>
+    <div id="ficha-lista-integracoes">${lista.length ? lista.map((i) => `
+      <div class="ficha-item">
+        <div class="ficha-item-info">
+          <b>${esc(i.cliente_nome)}</b>
+          <span class="ficha-item-sub">${i.data_validade ? 'Validade: ' + fmtDataValidade(i.data_validade) : 'Sem data de validade'}</span>
+          ${tagValidade(i.data_validade)}
+          ${i.observacao ? `<span class="ficha-item-sub">${esc(i.observacao)}</span>` : ''}
+        </div>
+        <div class="ficha-item-acoes">
+          <button class="btn-outline-sm" style="color:var(--red); border-color:var(--red);" onclick="excluirIntegracaoFicha(${i.id})">Excluir</button>
+        </div>
+      </div>`).join('') : `<div class="empty">Nenhuma integração cadastrada.</div>`}</div>`;
+}
+
+function abrirNovaIntegracaoFicha() {
+  const el = document.getElementById('ficha-form-integracao');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="ficha-form">
+      <div class="field"><label>Empresa</label>${campoClienteHTML('fi-empresa', window._clientesCache || [])}</div>
+      <div class="field"><label>Validade (opcional)</label><input id="fi-validade" type="date"></div>
+      <div class="field"><label>Observação (opcional)</label><input id="fi-observacao" placeholder="Ex: acesso ao sistema da linha..."></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-outline-sm" style="flex:1; justify-content:center;" onclick="document.getElementById('ficha-form-integracao').innerHTML=''">Cancelar</button>
+        <button class="btn btn-primary" style="flex:1; justify-content:center;" onclick="salvarIntegracaoFicha()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+async function salvarIntegracaoFicha() {
+  const clienteId = document.getElementById('fi-empresa').value;
+  const nomeDigitado = document.getElementById('fi-empresa-nome').value.trim();
+  if (!clienteId && !nomeDigitado) return alert('Escolha uma empresa cadastrada em Clientes, ou digite o nome.');
+  const body = {
+    cliente_id: clienteId || null,
+    cliente_nome_manual: clienteId ? null : nomeDigitado,
+    data_validade: document.getElementById('fi-validade').value || null,
+    observacao: document.getElementById('fi-observacao').value.trim(),
+  };
+  try {
+    const { integracao } = await api(`/api/usuarios/${window._fichaUsuarioId}/integracoes`, { method: 'POST', body });
+    window._fichaExtra.integracoes.push(integracao);
+    document.getElementById('ficha-form-integracao').innerHTML = '';
+    desenharIntegracoesFicha();
+    mostrarToast('Integração adicionada.');
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function excluirIntegracaoFicha(id) {
+  if (!(await mostrarConfirmacao('Excluir esta integração?'))) return;
+  try {
+    await api(`/api/integracoes/${id}`, { method: 'DELETE' });
+    window._fichaExtra.integracoes = window._fichaExtra.integracoes.filter((i) => i.id !== id);
+    desenharIntegracoesFicha();
+  } catch (e) { alert('Erro ao excluir: ' + e.message); }
+}
+
+// ---------- Competências (nível de conhecimento por equipamento) ----------
+
+const NIVEL_COMPETENCIA_LABEL = { basico: 'Básico', intermediario: 'Intermediário', avancado: 'Avançado' };
+const NIVEL_COMPETENCIA_COR = { basico: 'gray', intermediario: 'amber', avancado: 'green' };
+
+function desenharCompetenciasFicha() {
+  const el = document.getElementById('ficha-sec-competencias');
+  if (!el) return;
+  const lista = (window._fichaExtra.competencias || []).slice().sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  el.innerHTML = `
+    <div class="ficha-sec-head"><h3>🛠️ Competências</h3><button class="btn-outline-sm" onclick="abrirNovaCompetenciaFicha()">+ Adicionar</button></div>
+    <div id="ficha-form-competencia"></div>
+    <div id="ficha-lista-competencias">${lista.length ? lista.map((c) => `
+      <div class="ficha-item">
+        <div class="ficha-item-info">
+          <b>${esc(c.equipamento)}</b>
+          ${tag(NIVEL_COMPETENCIA_LABEL[c.nivel] || c.nivel, NIVEL_COMPETENCIA_COR[c.nivel] || 'gray')}
+          ${c.observacao ? `<span class="ficha-item-sub">${esc(c.observacao)}</span>` : ''}
+        </div>
+        <div class="ficha-item-acoes">
+          <button class="btn-outline-sm" style="color:var(--red); border-color:var(--red);" onclick="excluirCompetenciaFicha(${c.id})">Excluir</button>
+        </div>
+      </div>`).join('') : `<div class="empty">Nenhuma competência cadastrada.</div>`}</div>`;
+}
+
+function abrirNovaCompetenciaFicha() {
+  const el = document.getElementById('ficha-form-competencia');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="ficha-form">
+      <div class="field"><label>Equipamento</label><input id="fcp-equipamento" placeholder="Ex: Prensa Hidráulica X..."></div>
+      <div class="field"><label>Nível de conhecimento</label>
+        <select id="fcp-nivel">
+          <option value="basico">Básico</option>
+          <option value="intermediario">Intermediário</option>
+          <option value="avancado">Avançado</option>
+        </select>
+      </div>
+      <div class="field"><label>Observação (opcional)</label><input id="fcp-observacao" placeholder="Ex: desde 2023, treinado pelo fabricante..."></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-outline-sm" style="flex:1; justify-content:center;" onclick="document.getElementById('ficha-form-competencia').innerHTML=''">Cancelar</button>
+        <button class="btn btn-primary" style="flex:1; justify-content:center;" onclick="salvarCompetenciaFicha()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+async function salvarCompetenciaFicha() {
+  const equipamento = document.getElementById('fcp-equipamento').value.trim();
+  if (!equipamento) return alert('Informe o equipamento.');
+  const body = {
+    equipamento,
+    nivel: document.getElementById('fcp-nivel').value,
+    observacao: document.getElementById('fcp-observacao').value.trim(),
+  };
+  try {
+    const { competencia } = await api(`/api/usuarios/${window._fichaUsuarioId}/competencias`, { method: 'POST', body });
+    window._fichaExtra.competencias.push(competencia);
+    document.getElementById('ficha-form-competencia').innerHTML = '';
+    desenharCompetenciasFicha();
+    mostrarToast('Competência adicionada.');
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function excluirCompetenciaFicha(id) {
+  if (!(await mostrarConfirmacao('Excluir esta competência?'))) return;
+  try {
+    await api(`/api/competencias/${id}`, { method: 'DELETE' });
+    window._fichaExtra.competencias = window._fichaExtra.competencias.filter((c) => c.id !== id);
+    desenharCompetenciasFicha();
+  } catch (e) { alert('Erro ao excluir: ' + e.message); }
 }
 
 let acompanhamentoMes = new Date().toISOString().slice(0, 7);

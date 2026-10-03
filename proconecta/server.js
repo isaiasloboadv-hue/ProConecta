@@ -3847,6 +3847,126 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- ficha cadastral ampliada (menu Equipe > Cadastros): certificados, integrações com
+// empresas-cliente e competências do técnico. As 3 coleções seguem o mesmo padrão: uma rota GET
+// que devolve tudo junto (abrir a ficha não devia precisar de 3 requisições), e POST/DELETE
+// dedicados por tipo. Mesma regra de acesso do resto da ficha: só administrador.
+rota('GET', /^\/api\/usuarios\/(\d+)\/ficha-extra$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê a ficha cadastral.' });
+  const data = db.load();
+  const usuarioId = Number(m[1]);
+  if (!tenant.buscar(data, 'usuarios', usuarioId, user.empresa_id)) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  const certificados = tenant.listar(data, 'certificados_colaborador', user.empresa_id).filter((c) => c.usuario_id === usuarioId);
+  const integracoes = tenant.listar(data, 'integracoes_colaborador', user.empresa_id).filter((i) => i.usuario_id === usuarioId).map((i) => {
+    const cliente = data.clientes.find((c) => c.id === i.cliente_id && c.empresa_id === user.empresa_id);
+    return { ...i, cliente_nome: cliente ? cliente.nome_empresa : i.cliente_nome_manual || '(empresa excluída)' };
+  });
+  const competencias = tenant.listar(data, 'competencias_colaborador', user.empresa_id).filter((c) => c.usuario_id === usuarioId);
+  enviarJSON(res, 200, { certificados, integracoes, competencias });
+});
+
+// POST /api/usuarios/:id/certificados — nome + validade opcional + arquivo (PDF ou imagem, base64)
+rota('POST', /^\/api\/usuarios\/(\d+)\/certificados$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra certificados.' });
+  const data = db.load();
+  const usuarioId = Number(m[1]);
+  if (!tenant.buscar(data, 'usuarios', usuarioId, user.empresa_id)) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome do certificado é obrigatório.' });
+  const item = tenant.criar(data, 'certificados_colaborador', user.empresa_id, {
+    usuario_id: usuarioId,
+    nome: String(body.nome).trim(),
+    data_validade: body.data_validade || null,
+    arquivo: body.arquivo || null,
+    arquivo_nome: body.arquivo_nome || null,
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { certificado: item });
+});
+
+rota('DELETE', /^\/api\/certificados\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui certificados.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'certificados_colaborador', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Certificado não encontrado.' });
+  data.certificados_colaborador = data.certificados_colaborador.filter((c) => c.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// POST /api/usuarios/:id/integracoes — empresa-cliente (cliente_id) em que o técnico tem
+// acesso/credencial pra atuar, com validade opcional
+rota('POST', /^\/api\/usuarios\/(\d+)\/integracoes$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra integrações.' });
+  const data = db.load();
+  const usuarioId = Number(m[1]);
+  if (!tenant.buscar(data, 'usuarios', usuarioId, user.empresa_id)) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  const body = await lerCorpo(req);
+  const cliente = body.cliente_id ? tenant.buscar(data, 'clientes', Number(body.cliente_id), user.empresa_id) : null;
+  if (!cliente && !(body.cliente_nome_manual && String(body.cliente_nome_manual).trim())) {
+    return enviarJSON(res, 400, { erro: 'Escolha uma empresa cadastrada ou digite o nome.' });
+  }
+  const item = tenant.criar(data, 'integracoes_colaborador', user.empresa_id, {
+    usuario_id: usuarioId,
+    cliente_id: cliente ? cliente.id : null,
+    cliente_nome_manual: cliente ? null : String(body.cliente_nome_manual).trim(),
+    data_validade: body.data_validade || null,
+    observacao: body.observacao || '',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { integracao: { ...item, cliente_nome: cliente ? cliente.nome_empresa : item.cliente_nome_manual } });
+});
+
+rota('DELETE', /^\/api\/integracoes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui integrações.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'integracoes_colaborador', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Integração não encontrada.' });
+  data.integracoes_colaborador = data.integracoes_colaborador.filter((i) => i.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// POST /api/usuarios/:id/competencias — nível de conhecimento do técnico num equipamento
+const NIVEIS_COMPETENCIA = ['basico', 'intermediario', 'avancado'];
+rota('POST', /^\/api\/usuarios\/(\d+)\/competencias$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra competências.' });
+  const data = db.load();
+  const usuarioId = Number(m[1]);
+  if (!tenant.buscar(data, 'usuarios', usuarioId, user.empresa_id)) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  const body = await lerCorpo(req);
+  if (!body.equipamento || !String(body.equipamento).trim()) return enviarJSON(res, 400, { erro: 'Informe o equipamento.' });
+  if (!NIVEIS_COMPETENCIA.includes(body.nivel)) return enviarJSON(res, 400, { erro: 'Nível inválido.' });
+  const item = tenant.criar(data, 'competencias_colaborador', user.empresa_id, {
+    usuario_id: usuarioId,
+    equipamento: String(body.equipamento).trim(),
+    nivel: body.nivel,
+    observacao: body.observacao || '',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { competencia: item });
+});
+
+rota('DELETE', /^\/api\/competencias\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui competências.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'competencias_colaborador', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Competência não encontrada.' });
+  data.competencias_colaborador = data.competencias_colaborador.filter((c) => c.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // ---------- atendimento por chat (chamados: IA de 1º nível -> fila -> técnico) ----------
 // o mesmo "chamado" é o fio da conversa tanto quando o cliente entra pelo chat dentro do
 // ProConecta quanto quando manda mensagem pelo WhatsApp (ver whatsapp.js) — o técnico responde

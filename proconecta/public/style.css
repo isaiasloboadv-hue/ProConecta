@@ -596,6 +596,21 @@ tr:last-child td{border-bottom:none;}
 .ficha-card-nome{font-weight:700;color:var(--navy);}
 .ficha-card-info{font-size:12px;color:var(--ink-soft);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
+/* detalhe da ficha (abrirFichaCadastral) — tela cheia: coluna fixa com foto/dados básicos à
+   esquerda, seções (certificados/integrações/competências) empilhadas à direita; vira 1 coluna
+   só no celular/tablet estreito. */
+.ficha-detalhe{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start;}
+@media(max-width:900px){.ficha-detalhe{grid-template-columns:1fr;}}
+.ficha-secoes{display:flex;flex-direction:column;gap:18px;}
+.ficha-sec-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.ficha-sec-head h3{margin:0;font-size:15.5px;color:var(--navy);}
+.ficha-item{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line);}
+.ficha-item:first-child{border-top:none;padding-top:0;}
+.ficha-item-info{display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
+.ficha-item-sub{font-size:12px;color:var(--ink-soft);}
+.ficha-item-acoes{display:flex;gap:8px;flex-shrink:0;}
+.ficha-form{background:#FAFBFD;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;}
+
 /* menu "Chat" do administrador (renderChatAdmin): topo 50/50 (Atendimentos | Solicitação de
    Atendimento), embaixo 25/75 (Fila da IA | Técnicos atendendo) — 4 colunas iguais permitem os
    dois ritmos sem precisar de subgrid. */
