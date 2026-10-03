@@ -581,10 +581,59 @@ function estaUsandoPostgres() {
 // que fica sempre carregado na memória, e isso foi o que estourou o limite de RAM do plano
 // gratuito do Render conforme foram se acumulando; agora só uma referência pequena fica no bloco
 // principal, e a foto de verdade só é buscada quando alguém realmente precisa dela) ----------
-
+//
+// Com SUPABASE_URL + SUPABASE_SERVICE_KEY configuradas, fotos NOVAS vão pro Supabase Storage (um
+// serviço de arquivo de verdade, fora do processo do servidor — sobrevive a redeploy, diferente do
+// disco local do modo arquivo) em vez da tabela/pasta antiga. A referência vira a própria URL
+// pública da foto (em vez de um id curto), então carregarFoto reconhece isso e devolve na hora, sem
+// precisar buscar em lugar nenhum. Fotos antigas continuam exatamente onde estavam — nada migra
+// sozinho (ver scripts/migrar-fotos-supabase.js pra mover as existentes quando quiser).
 const FOTOS_DIR = path.join(__dirname, 'fotos');
+const SUPABASE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'fotos';
+
+function supabaseStorageConfigurado() {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+}
+
+async function salvarFotoSupabase(dadosBase64) {
+  const texto = dadosBase64.trim();
+  // só o prefixo precisa bater com a regex (sem precisar alcançar o fim da string) — extrair o
+  // base64 por posição do "," é mais resistente a essa string vir com espaço/quebra de linha
+  // sobrando na ponta (ex.: uma foto antiga lida de um arquivo) do que tentar casar tudo de uma vez.
+  const m = /^data:([^;]+);base64,/.exec(texto);
+  const mime = m ? m[1] : 'application/octet-stream';
+  const base64 = m ? texto.slice(m[0].length) : texto;
+  const buffer = Buffer.from(base64, 'base64');
+  const extensao = (mime.split('/')[1] || 'bin').replace('jpeg', 'jpg');
+  const nome = `${crypto.randomBytes(12).toString('hex')}.${extensao}`;
+  const resp = await fetch(`${process.env.SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${nome}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}`, 'Content-Type': mime },
+    body: buffer,
+  });
+  if (!resp.ok) {
+    const detalhe = await resp.text().catch(() => '');
+    throw new Error(`Supabase Storage respondeu ${resp.status}: ${detalhe}`);
+  }
+  return `${process.env.SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${nome}`;
+}
+
+// lê uma foto do backend ANTIGO (Postgres ou disco local), ignorando o Supabase mesmo que esteja
+// configurado — usado pelo script de migração, que precisa ler de onde a foto já está antes de
+// subir pro Supabase; o carregarFoto "normal" abaixo não serve pra isso porque, com Supabase
+// configurado, uma referência nova (URL) nunca chega até aqui.
+async function carregarFotoAntiga(id) {
+  if (!id) return null;
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query('SELECT dados FROM fotos WHERE id = $1', [id]);
+    return r.rows.length ? r.rows[0].dados : null;
+  }
+  const caminho = path.join(FOTOS_DIR, String(id));
+  return fs.existsSync(caminho) ? fs.readFileSync(caminho, 'utf8') : null;
+}
 
 async function salvarFoto(dadosBase64) {
+  if (supabaseStorageConfigurado()) return salvarFotoSupabase(dadosBase64);
   const id = crypto.randomBytes(12).toString('hex');
   if (estaUsandoPostgres()) {
     await obterPool().query('INSERT INTO fotos (id, dados) VALUES ($1, $2)', [id, dadosBase64]);
@@ -597,12 +646,9 @@ async function salvarFoto(dadosBase64) {
 
 async function carregarFoto(id) {
   if (!id) return null;
-  if (estaUsandoPostgres()) {
-    const r = await obterPool().query('SELECT dados FROM fotos WHERE id = $1', [id]);
-    return r.rows.length ? r.rows[0].dados : null;
-  }
-  const caminho = path.join(FOTOS_DIR, String(id));
-  return fs.existsSync(caminho) ? fs.readFileSync(caminho, 'utf8') : null;
+  // referência do Supabase Storage já é a própria URL pública — nada pra buscar
+  if (typeof id === 'string' && /^https?:\/\//.test(id)) return id;
+  return carregarFotoAntiga(id);
 }
 
 // ---------- mensagens de chat (atendimento por chamado + chat interno da equipe) — mesma ideia
@@ -779,6 +825,7 @@ async function migrarMensagensSeNecessario() {
 
 module.exports = {
   load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto,
+  supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,

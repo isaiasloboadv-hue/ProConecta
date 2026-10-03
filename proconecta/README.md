@@ -184,6 +184,39 @@ npm install
 DATABASE_URL="sua-connection-string-aqui" node server.js
 ```
 
+## Armazenamento de fotos (Supabase Storage)
+
+Por padrão, as fotos enviadas pelos técnicos (fotos de relatório, assinaturas)
+ficam numa tabela à parte no Postgres, ou numa pasta local (`fotos/`) no modo
+arquivo. A pasta local **some a cada redeploy** em hospedeiros sem disco
+persistente (como o Render) — pra evitar perder fotos, configure o Supabase
+Storage (mesmo projeto do banco acima, se já estiver usando):
+
+1. No painel do Supabase, vá em **Storage** e crie um bucket novo, marcado
+   como **Public** (leitura pública — as fotos continuam exigindo login pra
+   aparecer dentro do sistema, só o arquivo em si fica acessível por link
+   direto, como qualquer imagem de site)
+2. Em **Settings → API**, copie a **Project URL** e a **service_role key**
+   (não é a `anon` key — essa aqui tem permissão de escrita)
+3. No painel do Render, adicione em **Environment**:
+   - `SUPABASE_URL`: a Project URL
+   - `SUPABASE_SERVICE_KEY`: a service_role key
+   - `SUPABASE_STORAGE_BUCKET`: o nome do bucket criado no passo 1 (se
+     omitir, usa `fotos`)
+
+A partir daí, toda foto **nova** vai pro Supabase Storage. Fotos que já
+existiam continuam no lugar antigo (Postgres ou pasta local) e continuam
+funcionando normalmente — nada quebra por não migrar. Pra mover as fotos
+antigas também, rode uma vez (com as 3 variáveis acima configuradas, mais
+`DATABASE_URL` se estiver em modo Postgres):
+
+```
+node scripts/migrar-fotos-supabase.js
+```
+
+O script só copia — nunca apaga nada do lugar antigo. Confirme que as fotos
+abrem certo antes de limpar manualmente a tabela/pasta antiga, se quiser.
+
 ## E-mail de verdade (convite de acesso e cópia de relatórios)
 
 Sem configuração, o link de primeiro acesso só aparece na tela do
