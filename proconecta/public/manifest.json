@@ -1,0 +1,16 @@
+{
+  "name": "Pro Conecta",
+  "short_name": "Pro Conecta",
+  "description": "Gestão técnica e biblioteca de manutenção de equipamentos",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F5F9FE",
+  "theme_color": "#0A2647",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

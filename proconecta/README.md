@@ -18,13 +18,46 @@ node server.js
 
 Abra **http://localhost:3000** no navegador.
 
-Contas de teste (senha para todas: `123456`):
+O banco começa **vazio** (sem usuários de exemplo) — veja "Primeiro acesso"
+logo abaixo para criar a conta de administrador inicial.
 
-| Papel | E-mail |
-|---|---|
-| Administrador | admin@proconecta.com.br |
-| Técnico | isaias@proconecta.com.br |
-| Cliente | cliente@abc.com.br |
+## Primeiro acesso (conta de administrador master)
+
+Como o banco começa vazio, ninguém consegue logar até existir ao menos um
+usuário. Pra criar automaticamente uma conta de administrador no primeiro
+boot, defina duas variáveis de ambiente antes de rodar o servidor:
+
+```
+ADMIN_EMAIL="seu@email.com.br" ADMIN_SENHA="uma-senha-forte" node server.js
+```
+
+(no Render, adicione as duas em **Environment**, igual à `DATABASE_URL`). O
+sistema cria essa conta só na primeira vez — depois disso pode remover as
+variáveis sem problema, ou deixar configuradas (elas não recriam a conta se
+o e-mail já existir). Essa conta ("Desenvolvedor") fica marcada como
+**protegida**: nenhum outro administrador consegue editá-la ou excluí-la
+pela tela de Usuários (nem forçando a chamada à API diretamente) — só ela
+mesma pode editar os próprios dados. A partir desse primeiro login, o
+próprio administrador cadastra os demais usuários pela tela **Usuários**
+(convite de primeiro acesso por e-mail — veja "E-mail de convite de
+verdade" abaixo).
+
+## Segredo do token de login (PROCONECTA_SECRET)
+
+O token que mantém o usuário logado é assinado com uma chave secreta. Antes
+de colocar em produção, defina:
+
+```
+PROCONECTA_SECRET="uma-string-longa-e-aleatória-só-sua"
+```
+
+(no Render, adicione em **Environment**, igual à `DATABASE_URL`). Sem essa
+variável configurada, o sistema roda normalmente (gera uma chave aleatória
+sozinho a cada vez que o processo sobe — dá pra testar local sem configurar
+nada), mas **todo reinício do servidor derruba as sessões abertas**, já que
+a chave muda a cada boot. Configure essa variável antes de ir pra produção
+pra evitar isso — e nunca reaproveite uma chave que já apareceu em algum
+lugar público (um commit antigo, um chat, etc.).
 
 ## O que já funciona de verdade
 
@@ -61,9 +94,10 @@ do mesmo jeito.
 
 ## Onde ficam os dados
 
-Tudo fica em `data.json`, criado automaticamente na primeira vez que você roda
-o servidor (com os dados de teste acima). Para começar do zero, apague esse
-arquivo e rode `node server.js` de novo.
+Tudo fica em `data.json`, criado automaticamente (vazio, ou já com a conta
+master se `ADMIN_EMAIL`/`ADMIN_SENHA` estiverem definidas) na primeira vez que
+você roda o servidor. Para começar do zero, apague esse arquivo e rode
+`node server.js` de novo.
 
 ## Estrutura do projeto
 
@@ -72,7 +106,7 @@ proconecta/
 ├── server.js       servidor HTTP e todas as rotas da API
 ├── db.js           acesso ao "banco de dados" (arquivo data.json)
 ├── auth.js         hash de senha e token de sessão
-├── email.js        envio do e-mail de primeiro acesso (simulado por padrão)
+├── email.js        envio de e-mail (convite de acesso, cópia de relatório) — simulado por padrão
 ├── data.json        os dados salvos (gerado automaticamente)
 └── public/          o que o navegador carrega
     ├── index.html
@@ -150,21 +184,296 @@ npm install
 DATABASE_URL="sua-connection-string-aqui" node server.js
 ```
 
-## E-mail de convite de verdade
+## Armazenamento de fotos (Supabase Storage)
 
-Sem configuração, o link de primeiro acesso só aparece na tela do
-administrador e no log do servidor. Para enviar por e-mail de verdade, crie
-uma conta grátis em [resend.com](https://resend.com) e defina as variáveis de
-ambiente antes de rodar o servidor:
+Por padrão, as fotos enviadas pelos técnicos (fotos de relatório, assinaturas)
+ficam numa tabela à parte no Postgres, ou numa pasta local (`fotos/`) no modo
+arquivo. A pasta local **some a cada redeploy** em hospedeiros sem disco
+persistente (como o Render) — pra evitar perder fotos, configure o Supabase
+Storage (mesmo projeto do banco acima, se já estiver usando):
+
+1. No painel do Supabase, vá em **Storage** e crie um bucket novo, marcado
+   como **Public** (leitura pública — as fotos continuam exigindo login pra
+   aparecer dentro do sistema, só o arquivo em si fica acessível por link
+   direto, como qualquer imagem de site)
+2. Em **Settings → API**, copie a **Project URL** e a **service_role key**
+   (não é a `anon` key — essa aqui tem permissão de escrita)
+3. No painel do Render, adicione em **Environment**:
+   - `SUPABASE_URL`: a Project URL
+   - `SUPABASE_SERVICE_KEY`: a service_role key
+   - `SUPABASE_STORAGE_BUCKET`: o nome do bucket criado no passo 1 (se
+     omitir, usa `fotos`)
+
+A partir daí, toda foto **nova** vai pro Supabase Storage. Fotos que já
+existiam continuam no lugar antigo (Postgres ou pasta local) e continuam
+funcionando normalmente — nada quebra por não migrar. Pra mover as fotos
+antigas também, rode uma vez (com as 3 variáveis acima configuradas, mais
+`DATABASE_URL` se estiver em modo Postgres):
 
 ```
-RESEND_API_KEY=sua_chave_aqui
-EMAIL_REMETENTE="Pro Conecta <onboarding@seudominio.com.br>"
+node scripts/migrar-fotos-supabase.js
+```
+
+O script só copia — nunca apaga nada do lugar antigo. Confirme que as fotos
+abrem certo antes de limpar manualmente a tabela/pasta antiga, se quiser.
+
+## Identificação da empresa por subdomínio
+
+Cada empresa cadastrada no painel da Plataforma (Super Admin) pode ter um
+**subdomínio** próprio (ex.: `clinica-x` em `clinica-x.proconecta.com.br`).
+Quando a requisição chega por um host cujo primeiro rótulo bate com o
+subdomínio de alguma empresa, o sistema usa os dados (marca, cores) e o
+login daquela empresa; sem bater com nenhum subdomínio cadastrado (host
+"nu", `localhost`, IP, ou simplesmente nenhuma empresa configurou
+subdomínio ainda), tudo continua caindo na empresa 1 (a instalação de
+origem) e o login busca o e-mail em qualquer empresa — exatamente o
+comportamento de sempre, então nenhuma instalação existente precisa
+configurar nada pra continuar funcionando igual.
+
+Isso resolve o caso de duas empresas diferentes terem usuário com o mesmo
+e-mail: uma vez que cada uma tenha seu subdomínio configurado (e o DNS/proxy
+de fato apontando os dois hosts pro mesmo servidor), o login de cada uma
+passa a ser isolado pelo host da requisição, mesmo com e-mail repetido.
+
+Configurar o subdomínio da empresa 1 por variável de ambiente (sem precisar
+do painel):
+
+```
+EMPRESA_SUBDOMINIO=promarking
+```
+
+As demais empresas configuram o subdomínio pelo próprio painel da
+Plataforma (campo "Subdomínio" no cadastro/edição da empresa).
+
+## Marca e configurações por empresa
+
+Cada empresa tem sua própria logo, cores, dados de contato e dois valores
+que antes eram fixos no código (valor do bônus de viagem por diária e o
+limite de diárias/mês antes de exigir justificativa do administrador).
+
+- **Administrador**: edita tudo isso da própria empresa no menu **Minha
+  Empresa** (`PUT /api/empresa`) — nome, site, WhatsApp, telefone, cores,
+  logo (upload direto, guardada do mesmo jeito que as outras fotos do
+  sistema) e os dois valores de bônus de viagem.
+- **Super Admin**: edita os mesmos campos de qualquer empresa pelo painel
+  da Plataforma.
+
+Sem logo própria configurada, o sistema usa a logo padrão (`/logo.png`) em
+todo lugar — tela de login, cabeçalho e PDFs gerados. A logo só é
+trocada de verdade quando a empresa sobe uma.
+
+O nome que aparece como remetente nos e-mails (convite de acesso, cópia de
+relatório) também já reflete o nome de cada empresa — a caixa de e-mail
+técnica continua sendo a mesma configurada em `EMAIL_SMTP_USER`/
+`RESEND_API_KEY` (decisão deliberada: isolar caixa de e-mail por empresa
+exigiria guardar credencial de e-mail por empresa, um dado sensível a mais
+pra administrar).
+
+## Papéis supervisor e financeiro
+
+Dois papéis novos, cadastráveis só pelo administrador geral (menu
+**Usuários**):
+
+- **Supervisor**: acesso de leitura às mesmas telas do administrador —
+  Agenda geral, Relatório, Biblioteca, Clientes, Equipamentos, Usuários e
+  Equipe (viagens/bônus, escala de folga, solicitações). O servidor libera
+  essas rotas pra esse papel só em `GET`; toda rota de escrita continua
+  exigindo `administrador`, então qualquer botão de criar/editar/excluir
+  que apareça nessas telas reaproveitadas falha com 403 — a restrição é
+  garantida no servidor, não só por esconder o botão.
+- **Financeiro**: aprova a prestação de contas — ver seção abaixo.
+
+## Módulo Prestação de Contas
+
+Módulo contratável (`prestacao_contas` em `MODULOS_DISPONIVEIS`, ativado
+pelo Super Admin no painel da Plataforma — não vem na versão "Manutenção"
+por padrão). Despesas de viagem/campo lançadas pelo técnico (hospedagem,
+alimentação, combustível, pedágio, outros), uma a uma, cada item com
+descrição, valor e foto de comprovante opcional — complementa o bônus fixo
+por diária (R$/diária configurável, ver "Marca e configurações por
+empresa") com despesas reais e variáveis.
+
+- **Técnico/administrador** (menu "Prestação de Contas"): lança uma
+  prestação nova com um ou mais itens; acompanha o status das próprias
+  (pendente/aprovado/reprovado, com o motivo quando reprovado).
+- **Financeiro/administrador** (mesmo menu, fila de aprovação): vê as
+  pendentes da empresa e aprova ou reprova (reprovar exige um comentário).
+- **Supervisor**: lê todas (próprias telas, só leitura — ver seção acima).
+
+Rotas: `POST /api/prestacao-contas`, `GET /api/prestacao-contas/minhas`
+(`?todas=1` pra administrador/financeiro/supervisor verem de todo mundo),
+`GET /api/prestacao-contas/fila`, `POST /api/prestacao-contas/:id/aprovar`,
+`POST /api/prestacao-contas/:id/reprovar`.
+
+## Cotas de plano (limite de técnicos e de equipamentos)
+
+O Super Admin pode definir, por empresa (painel da Plataforma), um limite
+de quantos usuários com papel "suporte" (técnico) e quantos equipamentos
+(catálogo + unidades atreladas, juntos) aquela empresa pode cadastrar —
+reflexo do plano contratado. Sem limite definido (campo vazio = `null`,
+o padrão pra toda empresa existente), nada muda — é assim que o sistema
+sempre funcionou.
+
+Com um limite configurado, o servidor recusa passar da cota em qualquer
+ponto de criação (`POST /api/usuarios` com `papel: "suporte"`,
+`POST /api/equipamentos`, `POST /api/equipamentos/:id/atrelar`), com uma
+mensagem clara pedindo pra falar com o suporte pra ampliar. Uma empresa
+nova, cadastrada a partir de uma versão/pacote que já tenha
+`limite_tecnicos`/`limite_equipamentos` definidos, herda esse limite —
+editável depois por empresa, independente da versão original (mesmo
+padrão de `modulos_ativos`).
+
+## Painel do Super Admin: organização em dashboard → lista → tela individual
+
+A tela "Plataforma" (menu do Super Admin) é um dashboard com 2 widgets —
+"Nova empresa" e "Cadastros" — no mesmo padrão já usado em Equipe/Cadastros
+de técnicos. "Cadastros" abre uma lista com um card por empresa (nome,
+badge de status, contagem de administradores); clicar num card abre a
+tela individual daquela empresa, com todo o formulário de edição (status e
+cobrança, dados, administradores, módulos, terminologia). Antes disso,
+todas as empresas cadastradas apareciam empilhadas numa página só, o que
+ficava enorme e difícil de navegar com mais de uma ou duas empresas.
+
+## Status e plano da empresa (painel do Super Admin)
+
+Cada empresa tem um `status`: `teste` (toda empresa nova, cadastrada pelo
+Super Admin a partir de agora), `ativa` (padrão de toda empresa já
+existente, inclusive a instalação atual) ou `suspensa`. Suspender bloqueia
+o acesso na hora: login novo recebe 403, e qualquer requisição de quem já
+estava logado (o token continua "válido" por até 12h) também passa a ser
+recusada no próprio despachante central de rotas — não é preciso esperar o
+token expirar nem forçar logout manual. A instalação atual (empresa 1)
+nunca pode ser suspensa, nem pela rota nem pelo painel (mesma trava que já
+existia pra exclusão de empresa). O `super_admin` nunca é afetado, porque
+não pertence a nenhuma empresa.
+
+O painel da Plataforma também guarda, por empresa, `plano_valor_mensal` e
+`plano_dia_vencimento` — só exibição, sem nenhuma integração de cobrança
+nesta etapa. Os dois campos aceitam ficar em branco (`null`, o padrão de
+toda empresa).
+
+No front, qualquer resposta da API com `codigo: "empresa_suspensa"` (não só
+a de login) dispara logout automático e mostra o aviso na tela de login —
+isso cobre também as chamadas silenciosas em segundo plano (sino de
+notificações a cada 15s, chat interno), que nunca mostravam erro nenhum
+pro usuário antes dessa checagem central em `api()`.
+
+## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
+
+Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua
+sendo a fonte de verdade que o app lê e escreve), o sistema já cria tabelas
+próprias — `t_usuarios`, `t_clientes`, `t_equipamentos`, `t_agenda`,
+`t_visitas`, `t_relatorios_manutencao`, `t_chamados`, `t_registros` — com
+`empresa_id` indexado em todas (e também técnico + data em `t_agenda`, e
+busca de texto em `t_registros`/`t_relatorios_manutencao`). É o primeiro
+passo pra sair de "tudo numa linha JSONB só" pra um banco de verdade,
+indexado — **ainda não é o caminho que o app usa pra ler/escrever no dia a
+dia** (isso é um trabalho maior, à parte, feito aos poucos).
+
+Pra preencher essas tabelas com um retrato dos dados de agora (não
+apaga nem muda o `app_state` original — só copia):
+
+```
+DATABASE_URL="..." node scripts/migrar-para-tabelas.js
+```
+
+Pode rodar de novo quando quiser, pra atualizar o retrato — idempotente,
+nunca duplica linha. O script também confere, ao final, se a contagem de
+cada coleção bate entre o blob e a tabela nova.
+
+Toda foto nova (em modo Postgres ou arquivo, sem precisar de Supabase
+Storage configurado) também já guarda a empresa a que pertence — coluna
+`empresa_id` na tabela `fotos`, ou um arquivo `<id>.empresa` ao lado da
+foto em modo arquivo. Fotos antigas ficam com esse campo vazio (não é
+usado em nenhuma rota ainda — só fundação pra uma futura conta de espaço
+usado por empresa).
+
+## E-mail de verdade (convite de acesso e cópia de relatórios)
+
+Sem configuração, o link de primeiro acesso só aparece na tela do
+administrador e no log do servidor, e o "enviar por e-mail" do relatório só é
+simulado (registrado no log). Para enviar de verdade usando uma conta Gmail
+ou Hotmail/Outlook comum — sem precisar de domínio próprio — defina as
+variáveis de ambiente antes de rodar o servidor:
+
+```
+EMAIL_SMTP_USER=seuemail@hotmail.com
+EMAIL_SMTP_SENHA=a_senha_de_app_gerada_abaixo
 APP_URL=https://seu-dominio-em-producao.com.br
 node server.js
 ```
 
+O provedor (Gmail ou Hotmail/Outlook) é adivinhado a partir do domínio do
+`EMAIL_SMTP_USER`; pra usar um domínio diferente (Google Workspace com domínio
+próprio, por exemplo), defina `EMAIL_SMTP_PROVEDOR=gmail` ou `hotmail`
+explicitamente.
+
+**Importante — `EMAIL_SMTP_SENHA` não é a senha normal de login da conta.**
+É uma "senha de app", específica pra esse tipo de acesso, que precisa ser
+gerada separadamente:
+
+- **Gmail**: a conta precisa ter a verificação em duas etapas ativada
+  (myaccount.google.com → Segurança). Depois, em
+  [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
+  crie uma senha de app (qualquer nome, ex: "Pro Conecta") — copie os 16
+  caracteres gerados, sem espaços.
+- **Hotmail/Outlook**: em
+  [account.microsoft.com/security](https://account.microsoft.com/security) →
+  "Opções de segurança avançadas" → "Senhas de aplicativo" → "Criar uma nova
+  senha de aplicativo". Se a conta ainda não tem verificação em duas etapas,
+  o site pede pra ativar primeiro.
+
+Alternativa (mantida por compatibilidade): `RESEND_API_KEY` +
+`EMAIL_REMETENTE`, caso prefira usar o [resend.com](https://resend.com) em
+vez de uma conta Gmail/Hotmail — mas esse exige domínio próprio verificado.
+Se `EMAIL_SMTP_USER` estiver configurado, ele tem prioridade sobre o Resend.
+
 Nenhuma outra mudança é necessária — veja `email.js`.
+
+## Atendimento por chat (IA de 1º nível -> fila -> técnico)
+
+O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
+mandando mensagem no WhatsApp da empresa — os dois caem no mesmo "chamado" e na mesma conversa.
+Um assistente de IA responde primeiro, consultando a Biblioteca de Defeitos/Falhas e
+Procedimentos já aprovada no sistema (nunca inventa solução fora dela — ver `ia.js`); se não
+resolver, o atendimento cai na **Fila de Atendimento** do técnico, que assume a conversa — isso já
+abre uma Ordem de Serviço automaticamente, com os dados do cliente pré-preenchidos. O
+administrador acompanha os números do dia (total, resolvidos pela IA, por técnico, tempo médio)
+no menu **Atendimentos**.
+
+A parte da IA liga sozinha, sem depender do WhatsApp, assim que a variável abaixo existir:
+
+```
+ANTHROPIC_API_KEY=sua_chave_da_api_da_anthropic
+node server.js
+```
+
+- `ANTHROPIC_API_KEY`: crie em [console.anthropic.com](https://console.anthropic.com).
+- `ANTHROPIC_MODEL` (opcional): sobrescreve o modelo padrão usado.
+
+Sem essa variável, o chat dentro do app continua funcionando normalmente — só que sem o primeiro
+atendimento automático: a conversa já cai direto na fila do técnico.
+
+### Canal WhatsApp (opcional, além do chat do app)
+
+Pra também receber mensagens pelo WhatsApp Business e a IA responder por lá (ver `whatsapp.js`),
+defina também:
+
+```
+WHATSAPP_TOKEN=token_de_acesso_do_numero_do_whatsapp_business
+WHATSAPP_PHONE_ID=phone_number_id_do_meta_for_developers
+WHATSAPP_VERIFY_TOKEN=uma_frase_secreta_qualquer_que_voce_inventa
+```
+
+- `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_ID`: vêm do painel do app em
+  [developers.facebook.com](https://developers.facebook.com), produto WhatsApp → Configuração da
+  API → aba de teste (token temporário) ou, em produção, um token de **System User** permanente.
+- `WHATSAPP_VERIFY_TOKEN`: você inventa qualquer texto — só precisa ser o mesmo valor colocado
+  aqui e no campo "Verify token" quando configurar a URL do webhook no painel da Meta (a URL é
+  `https://seu-dominio/api/whatsapp/webhook`).
+
+Sem essas três variáveis, o webhook do WhatsApp não faz nada — o chat dentro do app funciona
+normalmente do mesmo jeito.
 
 ## Referências do projeto
 

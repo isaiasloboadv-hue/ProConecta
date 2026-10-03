@@ -16,6 +16,11 @@
   --orange:#C15A22;
   --orange-bg:#FBE8DA;
   --red:#B3261E;
+  --red-bg:#FBE4E2;
+  --teal:#0E7C86;
+  --purple:#6B4FA0;
+  --purple-bg:#EDE7F6;
+  --pink:#B23A6B;
 }
 *{box-sizing:border-box;}
 body{margin:0;font-family:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--blue-pale-2);color:var(--ink);}
@@ -44,6 +49,8 @@ header{
 .wordmark.inline{display:flex;align-items:baseline;gap:6px;}
 .wordmark.inline .pro{color:#5FC1EE;font-size:17px;letter-spacing:.8px;}
 .wordmark.inline .conecta{color:#fff;font-size:17px;letter-spacing:.8px;}
+.empresa-tag{margin-left:4px;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
+.empresa-tag:empty{display:none;}
 
 .header-right{display:flex;align-items:center;gap:14px;}
 .user-chip{display:flex;align-items:center;gap:10px;}
@@ -55,7 +62,7 @@ header{
 .btn-logout:hover{background:rgba(255,255,255,0.2);}
 
 /* ---------- AUTH (LOGIN / PRIMEIRO ACESSO) ---------- */
-#authView, #app-screen.auth-mode{
+#authView, #splashView, #app-screen.auth-mode{
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;
   background:
     linear-gradient(180deg, rgba(7,20,40,.88) 0%, rgba(9,30,56,.94) 55%, var(--navy-deep) 100%),
@@ -68,15 +75,8 @@ header{
 .auth-form h1{font-size:19px;margin:0 0 4px;color:var(--navy);font-weight:800;text-align:center;}
 .auth-form>p{margin:0 0 22px;color:var(--ink-soft);font-size:13px;text-align:center;}
 .auth-strip{display:flex;gap:6px;margin:22px -34px -32px;border-radius:0 0 18px 18px;overflow:hidden;height:64px;}
-.auth-strip img{flex:1;width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.05);}
+.auth-strip img{flex:1;min-width:0;width:100%;height:100%;object-fit:cover;display:block;filter:saturate(1.05);}
 .auth-error{background:#FDE8E5;color:#B3453A;font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:8px;margin-bottom:14px;}
-.demo-box{margin-top:22px;background:var(--blue-pale);border-radius:11px;padding:14px 16px;}
-.demo-box .dtitle{font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
-.demo-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:12.5px;color:var(--ink);border-top:1px solid #DCE9FA;}
-.demo-row:first-of-type{border-top:none;}
-.demo-row b{color:var(--navy);}
-.demo-row .demo-use{background:#fff;border:1.5px solid var(--line);color:var(--blue);font-family:inherit;font-weight:700;font-size:11.5px;padding:4px 10px;border-radius:7px;cursor:pointer;}
-.demo-row .demo-use:hover{border-color:var(--blue);}
 .auth-link{background:none;border:none;color:var(--blue);font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;padding:0;margin-top:16px;text-align:left;}
 
 /* ---------- USUÁRIOS (ADMIN) ---------- */
@@ -103,12 +103,16 @@ header{
 nav.side{
   width:222px;flex-shrink:0;background:var(--navy);padding:22px 12px;
 }
+.hamburger-btn{display:none;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
+.hamburger-btn:hover{background:rgba(255,255,255,0.2);}
+.nav-backdrop{display:none;}
 nav.side .tag{color:#6E88AE;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;padding:0 12px 10px;display:block;}
 nav.side button{
   display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:transparent;border:none;
   color:#C7D6EA;font-family:inherit;font-size:14.5px;font-weight:600;padding:11px 12px;border-radius:9px;cursor:pointer;margin-bottom:3px;
 }
 nav.side button .dot{width:6px;height:6px;border-radius:50%;background:#3C5A82;flex-shrink:0;}
+nav.side button .nav-icone{font-size:15px;line-height:1;flex-shrink:0;}
 nav.side button:hover{background:rgba(255,255,255,0.06);color:#fff;}
 nav.side button.active{background:var(--blue);color:#fff;}
 nav.side button.active .dot{background:#fff;}
@@ -122,9 +126,18 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .nav-group-header .chevron{display:inline-block;font-size:10px;color:#7E97BC;transition:transform .15s;flex-shrink:0;}
 .nav-group-header .chevron.open{transform:rotate(90deg);color:#fff;}
 
+.btn-presenca{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;padding:0 12px;height:36px;font-family:inherit;font-weight:700;font-size:12.5px;cursor:pointer;}
+.btn-presenca:hover{background:rgba(255,255,255,0.2);}
+.btn-presenca:disabled{opacity:.6;cursor:default;}
+.btn-presenca .presenca-bolinha{width:8px;height:8px;border-radius:50%;background:#8B98AE;flex-shrink:0;}
+.btn-presenca.online .presenca-bolinha{background:var(--green);box-shadow:0 0 0 3px rgba(23,114,69,.35);}
+.btn-presenca.offline .presenca-bolinha{background:#8B98AE;}
+
 .bell-wrap{position:relative;}
 .btn-bell{position:relative;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .btn-bell:hover{background:rgba(255,255,255,0.2);}
+@keyframes girar{to{transform:rotate(360deg);}}
+.girando svg{animation:girar .6s linear infinite;}
 .bell-badge{position:absolute;top:-3px;right:-3px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:10px;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--navy);}
 .bell-panel{position:absolute;top:46px;right:0;width:290px;background:#fff;border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.25);padding:10px;display:none;z-index:60;}
 .bell-panel.show{display:block;}
@@ -140,7 +153,7 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .combo-item:hover{background:var(--blue-pale);}
 .combo-empty{padding:9px 10px;color:var(--ink-soft);font-size:13px;}
 
-main{flex:1;padding:30px 36px 60px;max-width:1200px;}
+main{flex:1;padding:30px 36px 60px;max-width:1600px;}
 .page-head{margin-bottom:26px;}
 .page-head h1{font-size:23px;margin:0 0 4px;font-weight:800;color:var(--navy);}
 .page-head p{margin:0;color:var(--ink-soft);font-size:14.5px;}
@@ -150,6 +163,58 @@ main{flex:1;padding:30px 36px 60px;max-width:1200px;}
 .panel h2{font-size:15.5px;margin:0 0 18px;color:var(--navy);font-weight:700;display:flex;align-items:center;gap:8px;}
 .panel h2::before{content:"";width:4px;height:16px;background:var(--blue);border-radius:2px;display:inline-block;}
 .panel-head{padding:0 0 14px;border-bottom:1px solid var(--line);margin-bottom:16px;font-weight:700;font-size:15px;color:var(--navy);display:flex;justify-content:space-between;align-items:center;}
+
+/* gráfico horizontal de viagens por técnico (Acompanhamento de viagens, admin) */
+.viagens-chart-legenda{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:18px;font-size:12.5px;color:var(--ink-soft);}
+.viagens-chart-legenda span{display:flex;align-items:center;gap:6px;}
+.viagens-chart-dot{width:10px;height:10px;border-radius:3px;display:inline-block;flex-shrink:0;}
+.viagens-chart-dot.bonus{background:var(--blue);}
+.viagens-chart-dot.sem-bonus{background:#C7D2E0;}
+.viagens-chart-dot.fora-ordem{background:var(--red);border-radius:50%;}
+.viagens-chart{display:flex;flex-direction:column;gap:14px;}
+.viagens-chart-row{display:flex;align-items:center;gap:12px;border-radius:10px;padding:4px 6px;margin:-4px -6px;transition:background .15s;}
+.viagens-chart-row.clicavel{cursor:pointer;}
+.viagens-chart-row.clicavel:hover{background:var(--blue-pale);}
+.viagens-chart-nome{width:130px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.viagens-chart-bars{flex:1;display:flex;flex-direction:column;gap:5px;}
+.viagens-chart-bar-wrap{position:relative;background:var(--blue-pale-2);border-radius:6px;height:22px;display:flex;align-items:center;}
+.viagens-chart-bar{height:100%;border-radius:6px;display:flex;align-items:center;justify-content:flex-end;padding:0 8px;box-sizing:border-box;min-width:0;transition:width .2s;}
+.viagens-chart-bar.bonus{background:var(--blue);}
+.viagens-chart-bar.sem-bonus{background:#C7D2E0;}
+.viagens-chart-valor{color:#fff;font-size:11.5px;font-weight:700;}
+.viagens-chart-bar.sem-bonus .viagens-chart-valor{color:var(--navy);}
+.viagens-chart-selo{position:absolute;left:calc(100% + 4px);top:50%;transform:translateY(-50%);background:var(--red);color:#fff;font-size:11px;font-weight:700;min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0;}
+@media (max-width:640px){.viagens-chart-nome{width:88px;font-size:12px;}}
+
+/* Escala de Folga (feriados + DSR/banco de horas/home office/férias da equipe) */
+.escala-folga-layout{display:grid;grid-template-columns:260px 1fr;gap:20px;align-items:start;margin-bottom:22px;}
+@media (max-width:900px){.escala-folga-layout{grid-template-columns:1fr;}}
+.escala-lista{display:flex;flex-direction:column;gap:4px;max-height:520px;overflow-y:auto;}
+.escala-pessoa{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;background:none;border:1.5px solid transparent;border-radius:9px;padding:9px 10px;font-family:inherit;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer;transition:.15s;}
+.escala-pessoa:hover{background:var(--blue-pale-2);}
+.escala-pessoa.ativo{background:var(--blue-pale);border-color:var(--blue);color:var(--navy);}
+.escala-pessoa-geral{font-weight:700;}
+.escala-lista-divisor{height:1px;background:var(--line);margin:6px 2px;}
+.escala-cal-legenda{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;font-size:12px;color:var(--ink-soft);}
+.escala-cal-legenda span{display:flex;align-items:center;gap:5px;}
+.escala-cal-legenda-feriado{padding:2px 8px;border-radius:5px;background:#FDE8E5;color:#B3453A;font-weight:600;}
+.escala-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+.escala-cal-cabecalho{text-align:center;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;padding-bottom:4px;}
+.escala-cal-dia{position:relative;aspect-ratio:1;border-radius:9px;background:var(--blue-pale-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px;}
+.escala-cal-dia.vazio{background:none;}
+.escala-cal-dia.feriado{background:#FDE8E5;}
+.escala-cal-dia.coletiva{background:#E4E9F1;}
+.escala-cal-dia.coletiva.feriado{background:#F6DEDC;}
+.escala-cal-dia.clicavel{cursor:pointer;transition:.15s;}
+.escala-cal-dia.clicavel:hover{outline:2px solid var(--blue);outline-offset:-2px;}
+.escala-cal-dia-num{font-size:12.5px;font-weight:700;color:var(--ink);}
+.escala-cal-dia.feriado .escala-cal-dia-num{color:#B3453A;}
+.escala-cal-dia-icone{font-size:15px;line-height:1;}
+.escala-opcoes{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.escala-opcoes button{display:flex;align-items:center;gap:6px;justify-content:center;}
+.escala-feriados-lista{display:flex;flex-direction:column;gap:2px;}
+.escala-feriado-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);font-size:13.5px;}
+.escala-feriado-item:last-child{border-bottom:none;}
 
 label{display:block;font-size:12.5px;font-weight:700;color:var(--ink-soft);margin:0 0 6px;text-transform:uppercase;letter-spacing:.4px;}
 input[type=text],input[type=search],input[type=password],input:not([type]),textarea,select{
@@ -179,6 +244,18 @@ textarea{resize:vertical;min-height:64px;}
 .photo-add{width:64px;height:64px;border-radius:8px;border:1.5px dashed #B7C6DC;background:#fff;color:var(--blue);cursor:pointer;font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex-shrink:0;}
 .photo-add:hover{border-color:var(--blue);background:var(--blue-pale);}
 .photo-add .plus{font-size:18px;line-height:1;}
+
+.rm-bloco-foto{background:var(--blue-pale);border-radius:10px;padding:12px 14px;margin-bottom:12px;}
+.rm-bloco-foto .step-photos{margin-left:0;}
+.rt-toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:12px;}
+.rt-toolbar button{width:28px;height:28px;border-radius:6px;border:1.5px solid var(--line);background:#fff;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;}
+.rt-toolbar button:hover{border-color:var(--blue);background:var(--blue-pale-2);}
+.rt-toolbar input[type=color]{width:28px;height:28px;border-radius:6px;border:1.5px solid var(--line);padding:2px;background:#fff;cursor:pointer;}
+.rt-toolbar select{width:auto;height:28px;padding:0 8px;font-size:12px;border-radius:6px;}
+.rt-toolbar .rt-rm{width:auto;padding:0 10px;margin-left:auto;color:var(--red);border-color:var(--red);font-weight:700;font-size:11px;}
+.rt-editor{background:#fff;border:1.5px solid var(--line);border-radius:8px;padding:10px 12px;min-height:60px;font-size:13.5px;margin-top:8px;}
+.rt-editor:focus{outline:none;border-color:var(--blue);}
+.rt-editor:empty::before{content:attr(data-placeholder);color:#9AAAC2;}
 
 .item-steps{margin:8px 0 0;padding-left:18px;}
 .item-steps li{margin-bottom:5px;}
@@ -235,14 +312,26 @@ textarea{resize:vertical;min-height:64px;}
 .tag-green{background:var(--green-bg);color:var(--green);}
 .tag-amber{background:var(--amber-bg);color:var(--amber);}
 .tag-orange{background:var(--orange-bg);color:var(--orange);}
+.tag-purple{background:var(--purple-bg);color:var(--purple);}
+.tag-gray{background:#EEF1F6;color:var(--ink-soft);}
+.tag-red{background:var(--red-bg);color:var(--red);}
 .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;}
 .badge-pendente{background:var(--amber-bg);color:var(--amber);}
 .badge-aprovado{background:var(--green-bg);color:var(--green);}
 .badge-alteracao{background:var(--orange-bg);color:var(--orange);}
 
 .item-body{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:13.5px;color:var(--ink);line-height:1.55;}
+/* .kv (rótulo: valor) é usado tanto solto (detalhe da O.S.) quanto dentro de .item-body — sem
+   essa regra base, as linhas ficavam todas grudadas, sem respiro nem destaque no rótulo. */
+.kv{margin-bottom:7px;font-size:13px;line-height:1.55;color:var(--ink);}
+.kv b{color:var(--navy);font-weight:700;}
 .item-body .kv{margin-bottom:8px;}
 .item-body .kv b{color:var(--navy);}
+/* em telas bem largas, texto corrido não deveria esticar até a borda do painel — fica difícil de
+   ler; limita a largura pra manter uma linha confortável, como no celular. */
+@media(min-width:900px){
+  .kv,.admin-note,.os-relatorio-box,.item-body{max-width:760px;}
+}
 .item-autor{display:flex; justify-content:flex-end; margin-top:10px; font-size:11.5px; color:var(--ink-soft);}
 .item-autor b{color:var(--navy);}
 
@@ -266,35 +355,71 @@ textarea{resize:vertical;min-height:64px;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
 .cal-dow{text-align:center;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.5px;padding-bottom:6px;}
 .cal-day{position:relative;border:1px solid var(--line);border-radius:10px;background:#fff;min-height:64px;padding:6px 8px;cursor:pointer;transition:border-color .15s;}
+@media(min-width:900px){.cal-day{min-height:96px;padding:10px 12px;}.cal-day-num{font-size:15px;}}
 .cal-day:hover{border-color:var(--blue);}
 .cal-day.fora-mes{background:var(--blue-pale-2);color:#B7C3D6;}
 .cal-day.hoje{border-color:var(--blue);box-shadow:0 0 0 1.5px var(--blue) inset;}
 .cal-day.selecionado{background:var(--blue-pale);border-color:var(--blue);}
 .cal-day-num{font-size:13px;font-weight:700;}
-.cal-day-badge{position:absolute;bottom:6px;right:6px;background:var(--blue);color:#fff;font-size:10.5px;font-weight:800;min-width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+/* linha de topo em flex (número do dia + ícone de escala + contador de O.S.) — nenhum dos três é
+   mais position:absolute, pra nunca sobrepor as tags que crescem logo abaixo (ver .cal-day-tags) */
+.cal-day-topo{display:flex;align-items:center;justify-content:space-between;gap:4px;}
+.cal-day-topo-direita{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+.cal-day-badge{background:var(--blue);color:#fff;font-size:10.5px;font-weight:800;min-width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:0 4px;flex-shrink:0;}
+.cal-day.feriado{background:#FDE8E5;}
+.cal-day.feriado .cal-day-num{color:#B3453A;}
+.cal-day-escala-icone{display:inline-flex;line-height:1;flex-shrink:0;}
+.cal-day-escala-icone svg{width:15px;height:15px;}
+.cal-day-tags{display:flex;flex-direction:column;gap:2px;margin-top:4px;}
+.cal-day-tag{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#E1F3E6;color:#1E7A3E;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:5px;}
+.cal-day-tag-mais{background:#DCE6F5;color:var(--blue);}
+.cal-day-tag-indisponivel{background:#E1F3E6;color:#1E7A3E;}
 @media (max-width:700px){
   .cal-day{min-height:42px;padding:4px 5px;}
   .cal-day-num{font-size:11.5px;}
   .cal-mes-label{min-width:auto;font-size:14px;}
+  .cal-day-tag{font-size:8.5px;padding:1px 3px;}
+  .cal-day-escala-icone svg{width:12px;height:12px;}
 }
 
 .os-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(195px, 1fr));gap:12px;align-items:stretch;margin-bottom:22px;}
 .os-card{position:relative;display:flex;flex-direction:column;height:100%;border:1px solid var(--line);border-radius:12px;padding:12px 13px 11px;background:#fff;min-width:0;}
+.os-card-finalizada{background:#EBEEF2;opacity:.7;filter:saturate(.5);}
+.os-card-finalizada:hover{opacity:.9;}
+.os-fase-banner{display:flex;align-items:center;justify-content:center;text-align:center;height:30px;margin:-12px -13px 9px;padding:0 13px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:#fff;border-radius:12px 12px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.os-fase-navy{background:var(--navy);}
+.os-fase-amber{background:var(--amber);}
+.os-fase-blue{background:var(--blue);}
+.os-fase-orange{background:var(--orange);}
+.os-fase-red{background:var(--red);}
+.os-fase-teal{background:var(--teal);}
+.os-fase-green{background:var(--green);}
+.os-fase-purple{background:var(--purple);}
+.os-fase-pink{background:var(--pink);}
+.os-badge-retrabalho{width:18px;height:18px;flex-shrink:0;border-radius:50%;background:var(--red);color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px rgba(255,255,255,.85);}
+.os-badge-numero{position:absolute;bottom:8px;right:8px;z-index:2;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--navy);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px rgba(255,255,255,.85);}
 .os-tarja{display:inline-block;align-self:flex-start;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 8px;border-radius:6px;margin-bottom:8px;}
 .os-tarja-agendado{background:var(--green-bg);color:var(--green);}
 .os-tarja-pendente{background:var(--amber-bg);color:var(--amber);}
 .os-tarja-concluido{background:var(--blue-pale);color:var(--blue);}
+.os-tarja-finalizada{background:var(--line);color:var(--ink-soft);}
 .os-card-top{display:flex;gap:4px;flex-wrap:nowrap;align-items:center;margin-bottom:7px;}
 .os-card-top .tag{font-size:9.5px;padding:2px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .os-tag-tipo{flex:1 1 auto;min-width:0;}
 .os-tag-tecnico{flex:0 1 auto;min-width:0;max-width:48%;background:var(--blue-pale-2);color:var(--ink-soft);border:1px solid var(--line);}
 .os-card-title{font-size:13.5px;font-weight:800;color:var(--navy);margin-bottom:8px;line-height:1.3;overflow-wrap:break-word;}
-.os-card-fields{display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px dashed var(--line);}
+.os-card-fields{position:relative;display:flex;flex-direction:column;gap:6px;padding-top:8px;border-top:1px dashed var(--line);}
+.os-card-fields-com-badges{padding-right:70px;}
+.os-card-fields-badges{position:absolute;top:6px;right:0;z-index:2;display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
+.os-card-fields-badges .tag{font-size:9px;padding:2px 6px;white-space:nowrap;}
 .os-field{display:flex;flex-direction:column;gap:1px;min-width:0;}
 .os-field-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8E9DB3;}
 .os-field-value{font-size:12px;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .os-card-footer{display:flex;flex-direction:column;align-items:flex-start;gap:5px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--line);}
-.os-venc{font-size:10.5px;font-weight:700;color:var(--red);background:#FDE8E5;padding:2px 8px;border-radius:6px;}
+.os-venc{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:6px;}
+.os-venc-vencido{color:var(--red);background:#FDE8E5;}
+.os-venc-hoje{color:var(--amber);background:var(--amber-bg);}
+.os-venc-futuro{color:var(--green);background:var(--green-bg);}
 .os-dias-abertura{font-size:10.5px;color:var(--ink-soft);}
 .os-card-actions{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:9px;border-top:1px dashed var(--line);}
 .os-card-actions .btn,.os-card-actions .btn-outline-sm,.os-card-actions .btn-ghost{width:100%;text-align:center;}
@@ -314,11 +439,41 @@ textarea{resize:vertical;min-height:64px;}
 .os-timeline-data{font-size:12px;color:var(--ink-soft);margin-top:2px;}
 .os-relatorio-box{margin-top:16px;padding:16px 18px;background:var(--blue-pale-2);border:1px solid var(--line);border-radius:12px;}
 .os-relatorio-box-titulo{font-size:13.5px;font-weight:800;color:var(--navy);margin-bottom:12px;}
+/* agrupa o conteúdo do relatório em seções com título, igual ao PDF gerado (gerarPdfLaudo /
+   gerarPdfRelatorio) — em vez de uma lista corrida de campos, cada bloco (dados do
+   equipamento, laudo técnico, serviço realizado...) fica separado e com destaque próprio. */
+.relatorio-secao{margin-top:16px;}
+.relatorio-secao:first-child{margin-top:0;}
+.relatorio-secao-titulo{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--blue);padding-bottom:6px;margin-bottom:9px;border-bottom:1.5px solid var(--blue-pale);}
+.relatorio-secao-texto{font-size:13px;line-height:1.55;color:var(--ink);white-space:pre-wrap;}
+
+/* célula de ações (Abrir/Editar/Excluir...) das tabelas — em telas largas os botões ficam numa
+   linha só; em telas estreitas (ver media query abaixo) quebram em várias linhas dentro do
+   cartão, em vez de vazar pra fora da borda. */
+.td-acoes{white-space:nowrap;}
+.td-acoes .btn,.td-acoes .btn-outline-sm,.td-acoes .btn-ghost{margin:2px 4px 2px 0;}
 
 table{width:100%;border-collapse:collapse;}
 th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-soft);padding:10px 6px;border-bottom:1px solid var(--line);}
 td{padding:12px 6px;border-bottom:1px solid var(--line);font-size:13px;}
 tr:last-child td{border-bottom:none;}
+@media(max-width:700px){
+  /* em telas estreitas a tabela vira uma lista de cartões (uma linha = um cartão), em vez de
+     espremer colunas e forçar rolagem lateral */
+  .panel table{display:block;width:100%;}
+  .panel table tbody{display:block;width:100%;}
+  .panel table tr:first-child{display:none;}
+  .panel table tr{display:block;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .panel table tr:last-child{margin-bottom:0;}
+  .panel table td{display:block;width:auto;padding:4px 0;font-size:12.5px;border:none;}
+  .panel table td[data-label]::before{content:attr(data-label) ": ";font-weight:700;color:var(--ink-soft);font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:1px;}
+  .panel table td.empty{padding:16px 0;text-align:center;}
+  .panel table td:empty{display:none;}
+  /* os botões de ação não cabem todos numa linha só num cartão estreito — deixa quebrar em
+     várias linhas em vez de vazar pra fora da borda do cartão. */
+  .panel table td.td-acoes{white-space:normal;display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+  .panel table td.td-acoes .btn,.panel table td.td-acoes .btn-outline-sm,.panel table td.td-acoes .btn-ghost{margin:0;}
+}
 
 .toast{
   position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--navy);color:#fff;
@@ -328,18 +483,148 @@ tr:last-child td{border-bottom:none;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
 @media(max-width:860px){
+  .hamburger-btn{display:flex;}
   .shell{flex-direction:row;}
-  nav.side{width:132px;flex-shrink:0;padding:16px 8px;}
-  nav.side .tag{font-size:9.5px;padding:0 6px 8px;}
-  nav.side button{font-size:12.5px;padding:9px 8px;white-space:normal;}
-  .nav-group-header{font-size:12.5px;padding:9px 8px;}
-  main{padding:18px 12px 50px;}
+  nav.side{
+    position:fixed;top:68px;left:0;bottom:0;width:250px;max-width:80vw;z-index:90;
+    padding:18px 10px;overflow-y:auto;
+    transform:translateX(-100%);transition:transform .22s ease;
+    box-shadow:8px 0 24px rgba(0,0,0,.25);
+  }
+  nav.side.open{transform:translateX(0);}
+  .nav-backdrop{position:fixed;top:68px;left:0;right:0;bottom:0;background:rgba(7,15,28,.55);z-index:85;}
+  .nav-backdrop.show{display:block;}
+  main{padding:18px 12px 50px;max-width:100%;}
   .row2,.row3,.form-grid{grid-template-columns:1fr;}
   header{padding:0 14px;}
   .user-meta{display:none;}
+  .btn-presenca{padding:0;width:36px;justify-content:center;}
+  .btn-presenca .presenca-label{display:none;}
   .filtros-row{flex-direction:column;align-items:stretch;}
 }
 @media(max-width:520px){
-  nav.side{width:104px;}
   .brand .wordmark.inline{display:none;}
+  .empresa-tag{display:none;}
 }
+
+/* ---------- atendimento por chat (IA -> fila -> técnico) ---------- */
+.chat-panel{display:flex;flex-direction:column;padding:14px;}
+.chat-mensagens{display:flex;flex-direction:column;gap:10px;max-height:56vh;min-height:180px;overflow-y:auto;padding:4px 2px;}
+.chat-msg{max-width:78%;padding:9px 12px;border-radius:12px;background:var(--blue-pale-2);border:1px solid var(--line);}
+.chat-msg-outro{align-self:flex-start;}
+.chat-msg-proprio{align-self:flex-end;background:var(--blue);border-color:var(--blue);}
+.chat-msg-proprio .chat-msg-texto,.chat-msg-proprio .chat-msg-hora{color:#fff;}
+.chat-msg-proprio .chat-msg-rotulo{color:rgba(255,255,255,.85);}
+.chat-msg-ia{background:var(--green-bg);border-color:var(--green-bg);}
+.chat-msg-rotulo{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;color:var(--ink-soft);margin-bottom:3px;}
+.chat-msg-texto{font-size:13.5px;line-height:1.5;white-space:pre-wrap;color:var(--ink);}
+.chat-msg-hora{font-size:10px;color:var(--ink-soft);margin-top:4px;text-align:right;}
+.chat-sistema{align-self:center;font-size:11.5px;color:var(--ink-soft);background:var(--line);padding:5px 12px;border-radius:20px;}
+.chat-compositor{display:flex;gap:8px;margin-top:12px;align-items:flex-end;}
+.chat-compositor textarea{flex:1;resize:none;min-height:42px;}
+@media(max-width:600px){ .chat-msg{max-width:90%;} }
+
+/* ---------- chat interno: widget flutuante (tipo Facebook Messenger) ---------- */
+/* fica fora do fluxo normal da página (position:fixed, fora do #main) de propósito — assim
+   navegar pelo sistema nunca fecha nem reseta a conversa que está aberta. */
+.chat-widget{position:fixed;right:20px;bottom:20px;z-index:150;display:flex;flex-direction:column;align-items:flex-end;gap:12px;}
+.chat-widget-launcher{
+  width:54px;height:54px;border-radius:50%;background:var(--blue);color:#fff;border:none;
+  box-shadow:0 6px 18px rgba(7,15,28,.3);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;position:relative;font-size:22px;line-height:1;flex-shrink:0;
+}
+.chat-widget-launcher:hover{filter:brightness(1.08);}
+.chat-widget-badge{
+  position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:11px;font-weight:800;
+  min-width:20px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  padding:0 5px;border:2px solid #fff;
+}
+.chat-widget-painel{
+  width:320px;max-width:calc(100vw - 32px);height:440px;max-height:70vh;background:#fff;
+  border-radius:14px;box-shadow:0 12px 36px rgba(7,15,28,.28);display:flex;flex-direction:column;
+  overflow:hidden;border:1px solid var(--line);
+}
+.chat-widget-topo{background:var(--navy);color:#fff;padding:12px 14px;display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.chat-widget-topo #chat-widget-titulo{flex:1;font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chat-widget-voltar,.chat-widget-nova,.chat-widget-fechar{background:none;border:none;color:#fff;font-size:19px;cursor:pointer;padding:0 4px;line-height:1;}
+.chat-widget-voltar:hover,.chat-widget-nova:hover,.chat-widget-fechar:hover{opacity:.8;}
+.chat-widget-corpo{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;}
+.chat-widget-contatos{flex:1;overflow-y:auto;}
+.chat-widget-vazio{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;}
+.chat-widget-corpo .user-row{padding:8px 10px;gap:8px;margin-bottom:6px;}
+.chat-widget-corpo .u-avatar-lg{width:34px;height:34px;font-size:12px;}
+.chat-widget-corpo .u-info .u-line1{font-size:12.5px;}
+.chat-widget-corpo .u-info .u-line2{font-size:11px;}
+.chat-widget-corpo .badge{font-size:10px;padding:3px 7px;flex-shrink:0;}
+.chat-widget-corpo .chat-mensagens{flex:1;max-height:none;min-height:0;}
+.chat-widget-corpo .chat-compositor{margin-top:8px;flex-shrink:0;}
+.chat-widget-corpo .chat-compositor textarea{min-height:34px;font-size:13px;}
+@media(max-width:480px){
+  .chat-widget{right:14px;bottom:14px;}
+  .chat-widget-painel{position:fixed;left:14px;right:14px;bottom:78px;width:auto;height:65vh;max-height:65vh;}
+}
+
+.atendimento-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px;}
+.atendimento-card{border:1px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;transition:.15s;background:#fff;}
+.atendimento-card:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}
+.atendimento-card.atendimento-urgente{border-color:var(--red);}
+.atendimento-card-finalizado{background:#EBEEF2;opacity:.7;filter:saturate(.5);}
+.atendimento-card-finalizado:hover{opacity:.9;}
+.atendimento-card-topo{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;}
+.atendimento-numero{font-size:10.5px;font-weight:800;letter-spacing:.4px;color:var(--ink-soft);text-transform:uppercase;}
+.atendimento-cliente{font-weight:700;font-size:14.5px;color:var(--navy);margin-bottom:2px;}
+.atendimento-equip{font-size:12.5px;color:var(--ink-soft);margin-bottom:6px;}
+.atendimento-resumo{font-size:12.5px;color:var(--ink);line-height:1.4;margin-bottom:10px;}
+.atendimento-status{margin-top:auto;}
+
+.atendimento-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:14px;}
+.stat-tile{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 14px;text-align:center;}
+.stat-valor{font-size:26px;font-weight:800;color:var(--navy);font-variant-numeric:tabular-nums;}
+.stat-label{font-size:11.5px;color:var(--ink-soft);margin-top:4px;text-transform:uppercase;letter-spacing:.3px;}
+
+/* painel Equipe (renderEquipe) — cards clicáveis, cada um leva pra tela cheia do assunto */
+.equipe-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;}
+.equipe-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 18px;text-align:center;cursor:pointer;transition:border-color .15s,box-shadow .15s;}
+.equipe-card:hover{border-color:var(--blue);box-shadow:0 2px 10px rgba(20,103,214,.1);}
+.equipe-card-icone{font-size:26px;}
+.equipe-card-titulo{font-weight:700;color:var(--navy);margin:6px 0 12px;}
+
+/* Cadastros (renderCadastros/abrirFichaCadastral) — grid de fichas com foto (ou silhueta padrão
+   quando não tem), nome, e-mail e telefone; clica num card pra abrir e editar a ficha completa */
+.ficha-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;}
+.ficha-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 14px;text-align:center;cursor:pointer;transition:border-color .15s,box-shadow .15s;}
+.ficha-card:hover{border-color:var(--blue);box-shadow:0 2px 10px rgba(20,103,214,.1);}
+.ficha-card-avatar{display:flex;justify-content:center;margin-bottom:10px;}
+.ficha-card-nome{font-weight:700;color:var(--navy);}
+.ficha-card-info{font-size:12px;color:var(--ink-soft);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* detalhe da ficha (abrirFichaCadastral) — tela cheia: coluna fixa com foto/dados básicos à
+   esquerda, seções (certificados/integrações/competências) empilhadas à direita; vira 1 coluna
+   só no celular/tablet estreito. */
+.ficha-detalhe{display:grid;grid-template-columns:320px 1fr;gap:18px;align-items:start;}
+@media(max-width:900px){.ficha-detalhe{grid-template-columns:1fr;}}
+.ficha-secoes{display:flex;flex-direction:column;gap:18px;}
+.ficha-sec-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.ficha-sec-head h3{margin:0;font-size:15.5px;color:var(--navy);}
+.ficha-item{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line);}
+.ficha-item:first-child{border-top:none;padding-top:0;}
+.ficha-item-info{display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
+.ficha-item-sub{font-size:12px;color:var(--ink-soft);}
+.ficha-item-acoes{display:flex;gap:8px;flex-shrink:0;}
+.ficha-form{background:#FAFBFD;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px;}
+
+/* menu "Chat" do administrador (renderChatAdmin): topo 50/50 (Atendimentos | Solicitação de
+   Atendimento), embaixo 25/75 (Fila da IA | Técnicos atendendo) — 4 colunas iguais permitem os
+   dois ritmos sem precisar de subgrid. */
+.chat-admin-grid{display:grid;grid-template-columns:repeat(4, 1fr);gap:16px;align-items:start;}
+.chat-admin-atendimentos{grid-column:1 / 3;}
+.chat-admin-solicitacao{grid-column:3 / 5;}
+.chat-admin-ia{grid-column:1 / 2;}
+.chat-admin-tecnicos{grid-column:2 / 5;}
+@media (max-width: 900px){
+  .chat-admin-grid{grid-template-columns:1fr;}
+  .chat-admin-atendimentos, .chat-admin-solicitacao, .chat-admin-ia, .chat-admin-tecnicos{grid-column:1 / -1;}
+}
+.chat-admin-lista{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.chat-admin-linha{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.15s;background:#fff;}
+.chat-admin-linha:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}
