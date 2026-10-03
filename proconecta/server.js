@@ -855,7 +855,7 @@ function registroComAutor(data, r) {
 // geral de 25MB da requisição inteira) — porta aberta pra abuso de armazenamento.
 const TIPO_FOTO_REGEX = /^data:image\/(jpeg|jpg|png|webp);base64,/;
 const TAMANHO_MAX_FOTO_BYTES = 8 * 1024 * 1024; // 8MB — bem acima do que a compressão no navegador produz
-async function extrairFotosProfundo(valor) {
+async function extrairFotosProfundo(valor, empresaId) {
   if (typeof valor === 'string') {
     // qualquer "data:" URI comprida é tratada como tentativa de anexar um arquivo (é assim que
     // toda foto/assinatura desse sistema chega) — rejeita explicitamente se não for uma imagem
@@ -873,12 +873,12 @@ async function extrairFotosProfundo(valor) {
       erro.publico = true;
       throw erro;
     }
-    const id = await db.salvarFoto(valor);
+    const id = await db.salvarFoto(valor, empresaId);
     return { __foto_ref: id };
   }
-  if (Array.isArray(valor)) return Promise.all(valor.map((v) => extrairFotosProfundo(v)));
+  if (Array.isArray(valor)) return Promise.all(valor.map((v) => extrairFotosProfundo(v, empresaId)));
   if (valor && typeof valor === 'object') {
-    const entradas = await Promise.all(Object.entries(valor).map(async ([k, v]) => [k, await extrairFotosProfundo(v)]));
+    const entradas = await Promise.all(Object.entries(valor).map(async ([k, v]) => [k, await extrairFotosProfundo(v, empresaId)]));
     return Object.fromEntries(entradas);
   }
   return valor;
@@ -1060,7 +1060,7 @@ rota('PUT', /^\/api\/entregas\/([a-f0-9]+)$/, async (req, res, m) => {
   const item = buscarEntregaTestePorToken(data, m[1]);
   if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
   if (item.status_preenchimento === 'concluido') return enviarJSON(res, 409, { erro: 'Este comprovante já foi assinado e concluído.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), item.empresa_id);
   Object.assign(item, {
     empresa: body.empresa || '', contato: body.contato || '', email: body.email || '',
     equipamento: body.equipamento || '', numero_serie: body.numero_serie || '',
@@ -1080,7 +1080,7 @@ rota('POST', /^\/api\/entregas\/([a-f0-9]+)\/concluir$/, async (req, res, m) => 
   const item = buscarEntregaTestePorToken(data, m[1]);
   if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
   if (item.status_preenchimento === 'concluido') return enviarJSON(res, 409, { erro: 'Este comprovante já foi assinado e concluído.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), item.empresa_id);
   const erro = validarRelatorioEntregaTeste(body);
   if (erro) return enviarJSON(res, 400, { erro });
   Object.assign(item, {
@@ -2221,7 +2221,7 @@ rota('POST', /^\/api\/agenda\/(\d+)\/retorno\/confirmar-chegada$/, async (req, r
 rota('POST', /^\/api\/visitas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico pode registrar uma visita.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const data = db.load();
   const agendaItem = tenant.buscar(data, 'agenda', Number(body.agenda_id), user.empresa_id);
   if (!agendaItem) return enviarJSON(res, 404, { erro: 'Atividade de agenda não encontrada.' });
@@ -2706,7 +2706,7 @@ rota('GET', /^\/api\/registros\/fila$/, async (req, res) => {
 rota('POST', /^\/api\/registros$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só técnico, produção ou administrador podem enviar registros.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const erro = validarRegistro(body);
   if (erro) return enviarJSON(res, 400, { erro });
   const data = db.load();
@@ -2730,7 +2730,7 @@ rota('POST', /^\/api\/registros$/, async (req, res) => {
 rota('POST', /^\/api\/registros\/(\d+)\/reenviar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const data = db.load();
   const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
@@ -2780,7 +2780,7 @@ rota('POST', /^\/api\/registros\/(\d+)\/sugerir-alteracao$/, async (req, res, m)
 rota('PUT', /^\/api\/registros\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita diretamente.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const data = db.load();
   const registro = tenant.buscar(data, 'registros', Number(m[1]), user.empresa_id);
   if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
@@ -3207,7 +3207,7 @@ function sincronizarClienteDoRelatorio(data, empresaId, body) {
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : body.tipo === 'entrega_teste' ? 'entrega_teste' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
@@ -3409,7 +3409,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
-  const body = await extrairFotosProfundo(await lerCorpo(req));
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
@@ -5148,9 +5148,12 @@ db.pronto.then(() => {
 async function migrarFotosParaTabelaSeparada() {
   const data = db.load();
   if (data._fotos_migradas) return;
-  data.visitas = await extrairFotosProfundo(data.visitas);
-  data.registros = await extrairFotosProfundo(data.registros);
-  data.relatorios_manutencao = await extrairFotosProfundo(data.relatorios_manutencao);
+  // cada registro já carrega seu próprio empresa_id — processa um a um (em vez de passar o
+  // array inteiro de uma vez) pra cada foto nascer marcada com a empresa certa, não uma só pra
+  // todo mundo.
+  data.visitas = await Promise.all(data.visitas.map((v) => extrairFotosProfundo(v, v.empresa_id)));
+  data.registros = await Promise.all(data.registros.map((r) => extrairFotosProfundo(r, r.empresa_id)));
+  data.relatorios_manutencao = await Promise.all(data.relatorios_manutencao.map((r) => extrairFotosProfundo(r, r.empresa_id)));
   data._fotos_migradas = true;
   db.save(data);
   console.log('[fotos] migração de fotos pra tabela separada concluída.');

@@ -565,6 +565,11 @@ async function inicializarPostgres() {
   const p = obterPool();
   await p.query('CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)');
   await p.query('CREATE TABLE IF NOT EXISTS fotos (id TEXT PRIMARY KEY, dados TEXT NOT NULL, criado_em TIMESTAMPTZ DEFAULT now())');
+  // empresa_id nullable de propósito: fotos já existentes antes desse campo existir ficam com
+  // null (continuam abrindo normalmente — carregarFoto não usa esse campo pra nada ainda, é só
+  // fundação pra uma futura conta de espaço usado por empresa — ver Etapa 4/passo 5 do plano).
+  await p.query('ALTER TABLE fotos ADD COLUMN IF NOT EXISTS empresa_id INTEGER');
+  await p.query('CREATE INDEX IF NOT EXISTS idx_fotos_empresa ON fotos (empresa_id)');
   await p.query(`CREATE TABLE IF NOT EXISTS mensagens_chamado (
     id SERIAL PRIMARY KEY, chamado_id INTEGER NOT NULL, autor TEXT NOT NULL, texto TEXT NOT NULL, criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   )`);
@@ -684,16 +689,34 @@ async function carregarFotoAntiga(id) {
   return fs.existsSync(caminho) ? fs.readFileSync(caminho, 'utf8') : null;
 }
 
-async function salvarFoto(dadosBase64) {
+// empresaId é opcional (quem chama sem saber a empresa, ex. código antigo, continua funcionando
+// igual) — quando informado, fica guardado junto da foto: na própria linha da tabela em modo
+// Postgres, ou num arquivo `<id>.empresa` ao lado da foto em modo arquivo (nunca dentro do
+// arquivo da foto em si, pra nunca arriscar corromper uma foto já existente). Só metadado, não é
+// lido por carregarFoto nem em nenhum fluxo do dia a dia ainda — fundação pra uma futura conta de
+// espaço usado por empresa (ver Etapa 4/passo 5 do plano).
+async function salvarFoto(dadosBase64, empresaId) {
   if (supabaseStorageConfigurado()) return salvarFotoSupabase(dadosBase64);
   const id = crypto.randomBytes(12).toString('hex');
   if (estaUsandoPostgres()) {
-    await obterPool().query('INSERT INTO fotos (id, dados) VALUES ($1, $2)', [id, dadosBase64]);
+    await obterPool().query('INSERT INTO fotos (id, dados, empresa_id) VALUES ($1, $2, $3)', [id, dadosBase64, empresaId || null]);
   } else {
     if (!fs.existsSync(FOTOS_DIR)) fs.mkdirSync(FOTOS_DIR, { recursive: true });
     fs.writeFileSync(path.join(FOTOS_DIR, id), dadosBase64);
+    if (empresaId) fs.writeFileSync(path.join(FOTOS_DIR, `${id}.empresa`), String(empresaId));
   }
   return id;
+}
+
+// só pra teste/auditoria (ver salvarFoto) — não é usado em nenhuma rota ainda.
+async function empresaIdDaFoto(id) {
+  if (!id) return null;
+  if (estaUsandoPostgres()) {
+    const r = await obterPool().query('SELECT empresa_id FROM fotos WHERE id = $1', [id]);
+    return r.rows.length ? r.rows[0].empresa_id : null;
+  }
+  const caminho = path.join(FOTOS_DIR, `${id}.empresa`);
+  return fs.existsSync(caminho) ? Number(fs.readFileSync(caminho, 'utf8')) : null;
 }
 
 async function carregarFoto(id) {
@@ -877,7 +900,7 @@ async function migrarMensagensSeNecessario() {
 
 module.exports = {
   load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto,
-  supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga,
+  supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga, empresaIdDaFoto,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,

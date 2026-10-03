@@ -268,6 +268,13 @@ Pode rodar de novo quando quiser, pra atualizar o retrato — idempotente,
 nunca duplica linha. O script também confere, ao final, se a contagem de
 cada coleção bate entre o blob e a tabela nova.
 
+Toda foto nova (em modo Postgres ou arquivo, sem precisar de Supabase
+Storage configurado) também já guarda a empresa a que pertence — coluna
+`empresa_id` na tabela `fotos`, ou um arquivo `<id>.empresa` ao lado da
+foto em modo arquivo. Fotos antigas ficam com esse campo vazio (não é
+usado em nenhuma rota ainda — só fundação pra uma futura conta de espaço
+usado por empresa).
+
 ## E-mail de verdade (convite de acesso e cópia de relatórios)
 
 Sem configuração, o link de primeiro acesso só aparece na tela do
