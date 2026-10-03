@@ -323,6 +323,17 @@ nova, cadastrada a partir de uma versão/pacote que já tenha
 editável depois por empresa, independente da versão original (mesmo
 padrão de `modulos_ativos`).
 
+## Painel do Super Admin: organização em dashboard → lista → tela individual
+
+A tela "Plataforma" (menu do Super Admin) é um dashboard com 2 widgets —
+"Nova empresa" e "Cadastros" — no mesmo padrão já usado em Equipe/Cadastros
+de técnicos. "Cadastros" abre uma lista com um card por empresa (nome,
+badge de status, contagem de administradores); clicar num card abre a
+tela individual daquela empresa, com todo o formulário de edição (status e
+cobrança, dados, administradores, módulos, terminologia). Antes disso,
+todas as empresas cadastradas apareciam empilhadas numa página só, o que
+ficava enorme e difícil de navegar com mais de uma ou duas empresas.
+
 ## Status e plano da empresa (painel do Super Admin)
 
 Cada empresa tem um `status`: `teste` (toda empresa nova, cadastrada pelo

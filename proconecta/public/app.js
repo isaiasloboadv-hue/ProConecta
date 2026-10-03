@@ -846,6 +846,8 @@ async function ir(pagina) {
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
+    if (pagina === 'plataforma-nova-empresa') return renderPlataformaNovaEmpresa();
+    if (pagina === 'plataforma-cadastros') return renderPlataformaCadastros();
     if (pagina === 'minha-empresa') return renderMinhaEmpresa();
     if (pagina === 'crm-em-breve') return renderModuloEmBreve('crm', 'CRM');
     if (pagina === 'agendamento-em-breve') return renderModuloEmBreve('agendamento', 'Agendamento Online');
@@ -866,18 +868,54 @@ let _plataformaModulosCache = [];
 let _plataformaVersoesCache = [];
 let _plataformaEmpresasCache = [];
 
+// painel reorganizado como dashboard de widgets (mesmo padrão de renderEquipe/renderCadastros):
+// "Plataforma" é só os 2 cards de entrada, "Nova empresa" é tela própria, "Cadastros" é a lista
+// clicável, e cada empresa abre na própria tela individual — antes era tudo empilhado numa página
+// só, o que ficava enorme e difícil de navegar com mais de uma ou duas empresas cadastradas.
 async function renderPainelPlataforma() {
-  const [{ empresas }, { modulos }, { versoes }] = await Promise.all([
-    api('/api/plataforma/empresas'), api('/api/plataforma/modulos'), api('/api/plataforma/versoes'),
-  ]);
-  _plataformaModulosCache = modulos;
-  _plataformaVersoesCache = versoes;
-  _plataformaEmpresasCache = empresas;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Plataforma</h1><p>${empresas.length} empresa(s) cadastrada(s).</p></div>
+    <div class="page-head"><h1>Plataforma</h1><p>Empresas clientes, módulos contratados e configurações da conta Super Admin.</p></div>
+    <div class="equipe-grid" id="plataforma-grid">
+      <div class="equipe-card"><div class="empty">Carregando...</div></div>
+      <div class="equipe-card"><div class="empty">Carregando...</div></div>
+    </div>`;
+
+  const { empresas } = await api('/api/plataforma/empresas');
+  _plataformaEmpresasCache = empresas;
+
+  const grid = document.getElementById('plataforma-grid');
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="equipe-card" onclick="ir('plataforma-nova-empresa')">
+      <div class="equipe-card-icone">➕</div>
+      <div class="equipe-card-titulo">Nova empresa</div>
+      <div class="stat-label">cadastrar empresa cliente</div>
+    </div>
+    <div class="equipe-card" onclick="ir('plataforma-cadastros')">
+      <div class="equipe-card-icone">🏢</div>
+      <div class="equipe-card-titulo">Cadastros</div>
+      <div class="stat-valor">${empresas.length}</div>
+      <div class="stat-label">empresa(s) cadastrada(s)</div>
+    </div>`;
+}
+
+async function renderPlataformaNovaEmpresa() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Nova empresa</h1><p>Cadastre uma empresa cliente e, se quiser, já crie o primeiro administrador dela.</p>
+      <button class="btn-outline-sm" onclick="ir('painel-plataforma')">‹ Plataforma</button>
+    </div>
+    <div class="empty">Carregando...</div>`;
+
+  const { versoes } = await api('/api/plataforma/versoes');
+  _plataformaVersoesCache = versoes;
+
+  main.innerHTML = `
+    <div class="page-head"><h1>Nova empresa</h1><p>Cadastre uma empresa cliente e, se quiser, já crie o primeiro administrador dela.</p>
+      <button class="btn-outline-sm" onclick="ir('painel-plataforma')">‹ Plataforma</button>
+    </div>
     <div class="panel">
-      <div class="panel-head">Nova empresa</div>
       <div class="form-grid">
         <div><label>Nome da empresa*</label><input id="pe-nome" placeholder="Nome da empresa cliente"></div>
         <div><label>Subdomínio</label><input id="pe-subdominio" placeholder="ex.: empresa (sem .proconecta.com.br)"></div>
@@ -894,15 +932,65 @@ async function renderPainelPlataforma() {
         <div><label>Senha</label><input id="pe-admin-senha" type="password" placeholder="mínimo 6 caracteres"></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="criarEmpresaPlataforma()">Cadastrar empresa</button>
-    </div>
-    <div id="pe-lista">${renderListaEmpresasPlataforma(empresas)}</div>`;
+    </div>`;
 }
 
-function renderListaEmpresasPlataforma(empresas) {
-  return empresas.map((e) => `
+async function renderPlataformaCadastros() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Cadastros</h1><p>Empresas clientes cadastradas na plataforma.</p>
+      <button class="btn-outline-sm" onclick="ir('painel-plataforma')">‹ Plataforma</button>
+    </div>
+    <div class="ficha-grid" id="plataforma-cadastros-grid"><div class="empty">Carregando...</div></div>`;
+
+  const [{ empresas }, { modulos }] = await Promise.all([
+    api('/api/plataforma/empresas'), api('/api/plataforma/modulos'),
+  ]);
+  _plataformaEmpresasCache = empresas;
+  _plataformaModulosCache = modulos;
+
+  const grid = document.getElementById('plataforma-cadastros-grid');
+  if (!grid) return;
+  if (!empresas.length) { grid.innerHTML = `<div class="empty">Nenhuma empresa cadastrada ainda.</div>`; return; }
+  grid.innerHTML = empresas.map((e) => `
+    <div class="ficha-card" onclick="abrirEmpresaPlataforma(${e.id})">
+      <div class="ficha-card-avatar">
+        ${e.logo_url
+          ? `<img src="${esc(e.logo_url)}" style="width:72px; height:72px; border-radius:12px; object-fit:contain; background:#fff; border:1px solid var(--line);">`
+          : `<div style="width:72px; height:72px; border-radius:12px; background:#EEF1F6; display:flex; align-items:center; justify-content:center; font-size:28px;">🏢</div>`}
+      </div>
+      <div class="ficha-card-nome">${esc(e.nome)}${e.id === 1 ? ' 🏠' : ''}</div>
+      <div class="ficha-card-info">${(e.administradores || []).length} administrador(es)</div>
+      <span class="tag ${e.status === 'suspensa' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}" style="margin-top:6px;">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span>
+    </div>`).join('');
+}
+
+// reaproveita a lista já cadastrada ao entrar pelos Cadastros — mesmo padrão de
+// window._cadastrosCache em abrirFichaCadastral (ficha de técnico).
+function abrirEmpresaPlataforma(id) {
+  const empresa = (_plataformaEmpresasCache || []).find((e) => e.id === id);
+  if (!empresa) return;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${esc(empresa.nome)}</h1><p>Dados, status, administradores, módulos e terminologia dessa empresa.</p>
+      <button class="btn-outline-sm" onclick="ir('plataforma-cadastros')">‹ Cadastros</button>
+    </div>
+    ${conteudoEmpresaPlataforma(empresa)}`;
+}
+
+// busca a empresa de novo no servidor (reflete qualquer alteração salva) e volta pra tela
+// individual dela — chamado depois de qualquer ação que muda os dados dessa empresa.
+async function recarregarEmpresaPlataforma(empresaId) {
+  const { empresas } = await api('/api/plataforma/empresas');
+  _plataformaEmpresasCache = empresas;
+  abrirEmpresaPlataforma(empresaId);
+}
+
+function conteudoEmpresaPlataforma(e) {
+  return `
     <div class="panel">
       <div class="panel-head" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <span>${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''} <span class="tag ${e.status === 'suspensa' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span></span>
+        <span>${e.id === 1 ? '<span class="tag">instalação atual</span> ' : ''}<span class="tag ${e.status === 'suspensa' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span></span>
         ${e.id !== 1 ? `<button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="excluirEmpresaPlataforma(${e.id})">Excluir empresa</button>` : ''}
       </div>
       <h2 style="margin-top:0;">Status e cobrança</h2>
@@ -980,7 +1068,7 @@ function renderListaEmpresasPlataforma(empresas) {
         <div><label>Termo pra "Equipamento"</label><input id="pe-term-equipamento-${e.id}" value="${esc((e.terminologia || {}).equipamento || '')}" placeholder="Equipamento"></div>
       </div>
       <button class="btn btn-outline-sm" onclick="salvarTerminologiaPlataforma(${e.id})">Salvar terminologia</button>
-    </div>`).join('');
+    </div>`;
 }
 
 async function criarEmpresaPlataforma() {
@@ -999,7 +1087,7 @@ async function criarEmpresaPlataforma() {
     } else {
       mostrarToast('Empresa cadastrada. Crie um administrador pra alguém conseguir logar nela.');
     }
-    renderPainelPlataforma();
+    ir('plataforma-cadastros');
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -1013,7 +1101,7 @@ async function criarAdministradorPlataforma(empresaId) {
   try {
     await api(`/api/plataforma/empresas/${empresaId}/administrador`, { method: 'POST', body: { nome, email, senha } });
     mostrarToast('Administrador criado — já pode logar com esse e-mail e senha.');
-    renderPainelPlataforma();
+    recarregarEmpresaPlataforma(empresaId);
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -1056,7 +1144,7 @@ async function salvarDadosEmpresaPlataforma(empresaId) {
     await api(`/api/plataforma/empresas/${empresaId}`, { method: 'PUT', body });
     delete window._plataformaLogoNovaPorEmpresa[empresaId];
     mostrarToast('Dados da empresa atualizados.');
-    renderPainelPlataforma();
+    recarregarEmpresaPlataforma(empresaId);
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -1071,7 +1159,7 @@ async function aplicarStatusEmpresaPlataforma(empresaId) {
   try {
     await api(`/api/plataforma/empresas/${empresaId}/status`, { method: 'PUT', body: { status } });
     mostrarToast('Status da empresa atualizado.');
-    renderPainelPlataforma();
+    recarregarEmpresaPlataforma(empresaId);
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -1090,7 +1178,7 @@ async function salvarPlanoEmpresaPlataforma(empresaId) {
       },
     });
     mostrarToast('Plano atualizado.');
-    renderPainelPlataforma();
+    recarregarEmpresaPlataforma(empresaId);
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -1108,10 +1196,17 @@ async function excluirEmpresaPlataforma(empresaId) {
   try {
     await api(`/api/plataforma/empresas/${empresaId}`, { method: 'DELETE', body: { confirmar_nome: digitado.trim() } });
     mostrarToast('Empresa excluída.');
-    renderPainelPlataforma();
+    ir('plataforma-cadastros');
   } catch (e) {
     mostrarToast(e.message);
   }
+}
+
+// administrador só vem com o próprio id — acha a empresa dona dele na lista já carregada, pra
+// saber pra qual tela individual voltar depois de salvar/excluir.
+function empresaDoAdministradorPlataforma(adminId) {
+  const empresa = (_plataformaEmpresasCache || []).find((e) => (e.administradores || []).some((a) => a.id === adminId));
+  return empresa ? empresa.id : null;
 }
 
 async function salvarAdministradorPlataforma(adminId) {
@@ -1120,10 +1215,11 @@ async function salvarAdministradorPlataforma(adminId) {
   const status = document.getElementById(`pe-adm-status-${adminId}`).value;
   const senha = document.getElementById(`pe-adm-senha-${adminId}`).value;
   if (!nome || !email) return mostrarToast('Preencha nome e e-mail do administrador.');
+  const empresaId = empresaDoAdministradorPlataforma(adminId);
   try {
     await api(`/api/plataforma/administradores/${adminId}`, { method: 'PUT', body: { nome, email, status, senha: senha || undefined } });
     mostrarToast('Administrador atualizado.');
-    renderPainelPlataforma();
+    if (empresaId) recarregarEmpresaPlataforma(empresaId); else ir('plataforma-cadastros');
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -1131,10 +1227,11 @@ async function salvarAdministradorPlataforma(adminId) {
 
 async function excluirAdministradorPlataforma(adminId) {
   if (!(await mostrarConfirmacao('Excluir este administrador? Se for o único da empresa, ninguém mais vai conseguir logar nela até criar outro.'))) return;
+  const empresaId = empresaDoAdministradorPlataforma(adminId);
   try {
     await api(`/api/plataforma/administradores/${adminId}`, { method: 'DELETE' });
     mostrarToast('Administrador excluído.');
-    renderPainelPlataforma();
+    if (empresaId) recarregarEmpresaPlataforma(empresaId); else ir('plataforma-cadastros');
   } catch (e) {
     mostrarToast(e.message);
   }
