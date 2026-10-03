@@ -115,6 +115,13 @@ function sincronizarEmpresaPadrao(data) {
   // server.js). Fica null até alguém configurar — nesse caso toda requisição cai na empresa 1
   // (comportamento de hoje, preservado).
   if (empresa.subdominio === undefined) empresa.subdominio = null;
+  // logo própria (Etapa 5/passo 1) — guardada como referência de foto (ver extrairFotosProfundo),
+  // null até a empresa subir uma; sem logo própria o front usa a logo padrão do sistema.
+  if (empresa.logo_url === undefined) empresa.logo_url = null;
+  // valores padrão que antes eram constante fixa no código (Etapa 5/passo 4) — toda empresa já
+  // nasce com o mesmo valor de hoje, só editável a partir de agora pelo administrador/Super Admin.
+  if (empresa.valor_bonus_viagem === undefined) empresa.valor_bonus_viagem = 200;
+  if (empresa.limite_viagens_bonus_mes === undefined) empresa.limite_viagens_bonus_mes = 7;
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;

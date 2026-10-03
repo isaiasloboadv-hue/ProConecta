@@ -245,6 +245,30 @@ EMPRESA_SUBDOMINIO=promarking
 As demais empresas configuram o subdomínio pelo próprio painel da
 Plataforma (campo "Subdomínio" no cadastro/edição da empresa).
 
+## Marca e configurações por empresa
+
+Cada empresa tem sua própria logo, cores, dados de contato e dois valores
+que antes eram fixos no código (valor do bônus de viagem por diária e o
+limite de diárias/mês antes de exigir justificativa do administrador).
+
+- **Administrador**: edita tudo isso da própria empresa no menu **Minha
+  Empresa** (`PUT /api/empresa`) — nome, site, WhatsApp, telefone, cores,
+  logo (upload direto, guardada do mesmo jeito que as outras fotos do
+  sistema) e os dois valores de bônus de viagem.
+- **Super Admin**: edita os mesmos campos de qualquer empresa pelo painel
+  da Plataforma.
+
+Sem logo própria configurada, o sistema usa a logo padrão (`/logo.png`) em
+todo lugar — tela de login, cabeçalho e PDFs gerados. A logo só é
+trocada de verdade quando a empresa sobe uma.
+
+O nome que aparece como remetente nos e-mails (convite de acesso, cópia de
+relatório) também já reflete o nome de cada empresa — a caixa de e-mail
+técnica continua sendo a mesma configurada em `EMAIL_SMTP_USER`/
+`RESEND_API_KEY` (decisão deliberada: isolar caixa de e-mail por empresa
+exigiria guardar credencial de e-mail por empresa, um dado sensível a mais
+pra administrar).
+
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 
 Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua

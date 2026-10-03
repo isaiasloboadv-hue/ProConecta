@@ -240,9 +240,10 @@ function checarEscalaAntesDeSalvar(data, empresaId, tecnicoId, diaInicioOS, diaF
 function motivoExigeJustificativaViagem(data, empresaId, tecnicoId, dataHoraInicio, viagemDiaInicio, viagemDiaFimPrevisto, diasNovaViagem, excluirId) {
   const motivos = [];
   let foraDeOrdem = false;
+  const limite = limiteViagensBonusMes(data.empresas.find((e) => e.id === empresaId));
   const jaTem = contarDiariasBonusMes(data, empresaId, tecnicoId, dataHoraInicio, excluirId);
-  if (jaTem + diasNovaViagem > LIMITE_VIAGENS_BONUS_MES) {
-    motivos.push(`este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${LIMITE_VIAGENS_BONUS_MES})`);
+  if (jaTem + diasNovaViagem > limite) {
+    motivos.push(`este técnico já tem ${jaTem} diária(s) de bônus neste mês e essa viagem soma mais ${diasNovaViagem} (limite: ${limite})`);
   }
   const vez = tecnicoDaVez(data, empresaId, excluirId);
   if (vez && vez.id !== tecnicoId) {
@@ -794,11 +795,23 @@ function usuarioPublico(u) {
 
 // resumo da empresa exposto no login/GET /api/me — pra tela e PDF saberem, sem consulta à parte,
 // de qual empresa é a sessão atual (super_admin não tem empresa, vem null).
-function empresaResumo(empresa) {
+async function empresaResumo(empresa) {
   if (!empresa) return null;
-  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio } = empresa;
-  return { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio };
+  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes } = empresa;
+  return {
+    id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio,
+    logo_url: await hidratarFotosProfundo(logo_url),
+    valor_bonus_viagem: valorBonusViagem(empresa), limite_viagens_bonus_mes: limiteViagensBonusMes(empresa),
+  };
 }
+
+// valor do bônus de viagem (R$/diária) e limite de diárias/mês antes de exigir justificativa —
+// Etapa 5/passo 4: configurável por empresa a partir de agora, com o valor fixo de sempre (200 e
+// 7) como padrão pra quem não configurou nada (toda empresa já nasce com isso — ver
+// sincronizarEmpresaPadrao em db.js — então essas constantes só entram em jogo se o registro da
+// empresa, por algum motivo, não tiver o campo).
+function valorBonusViagem(empresa) { return (empresa && empresa.valor_bonus_viagem) ?? VALOR_BONUS_VIAGEM; }
+function limiteViagensBonusMes(empresa) { return (empresa && empresa.limite_viagens_bonus_mes) ?? LIMITE_VIAGENS_BONUS_MES; }
 
 // extrai o 1º rótulo do host (ex.: "promarking" de "promarking.proconecta.app:3000") pra servir de
 // candidato a subdomínio. Exige pelo menos 3 partes (sub.domínio.tld) — domínio "nu", localhost e IP
@@ -964,18 +977,55 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   const empresaDoUsuario = data.empresas.find((e) => e.id === u.empresa_id);
   enviarJSON(res, 200, { token, usuario: {
     ...usuarioPublico(u),
-    empresa: empresaResumo(empresaDoUsuario),
+    empresa: await empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
   } });
 });
 
-// dados de marca da empresa (nome, contato, cores) — pública porque a tela de login também usa,
-// antes de qualquer autenticação. Hoje só existe uma empresa (id 1); ver db.js.
+// dados de marca da empresa (nome, contato, cores, logo) — pública porque a tela de login também
+// usa, antes de qualquer autenticação. Resolvida pelo subdomínio da requisição (ver
+// resolverEmpresaPorRequisicao) — cai na empresa 1 se nenhum subdomínio bater.
 rota('GET', /^\/api\/empresa$/, async (req, res) => {
   const data = db.load();
   const empresa = resolverEmpresaPorRequisicao(data, req);
-  enviarJSON(res, 200, { empresa });
+  if (!empresa) return enviarJSON(res, 200, { empresa: null });
+  enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
+});
+
+// PUT /api/empresa — o próprio administrador edita a marca da sua empresa (nome, contato, cores,
+// logo) e os valores padrão de bônus de viagem. Separado da rota do Super Admin
+// (/api/plataforma/empresas/:id), que edita qualquer empresa — aqui só a própria, e sem tocar em
+// versão/módulos/subdomínio/terminologia (isso continua só no painel da plataforma).
+rota('PUT', /^\/api\/empresa$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita os dados da própria empresa.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === user.empresa_id);
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  Object.assign(empresa, {
+    nome: String(body.nome).trim(),
+    site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
+    emails: Array.isArray(body.emails) ? body.emails : [],
+    cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,
+  });
+  // logo: omitido no corpo = mantém a atual; null/"" = volta pra padrão; qualquer outra coisa já
+  // chegou aqui transformada em {__foto_ref} por extrairFotosProfundo (ver acima).
+  if (body.logo_url !== undefined) empresa.logo_url = body.logo_url || null;
+  if (body.valor_bonus_viagem !== undefined) {
+    const valor = Number(body.valor_bonus_viagem);
+    if (!Number.isFinite(valor) || valor < 0) return enviarJSON(res, 400, { erro: 'Valor do bônus de viagem inválido.' });
+    empresa.valor_bonus_viagem = valor;
+  }
+  if (body.limite_viagens_bonus_mes !== undefined) {
+    const limite = Number(body.limite_viagens_bonus_mes);
+    if (!Number.isInteger(limite) || limite < 0) return enviarJSON(res, 400, { erro: 'Limite de diárias por mês inválido.' });
+    empresa.limite_viagens_bonus_mes = limite;
+  }
+  db.save(data);
+  enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
 });
 
 // GET /api/me
@@ -986,7 +1036,7 @@ rota('GET', /^\/api\/me$/, async (req, res) => {
   const empresaDoUsuario = data.empresas.find((e) => e.id === user.empresa_id);
   enviarJSON(res, 200, { usuario: {
     ...user,
-    empresa: empresaResumo(empresaDoUsuario),
+    empresa: await empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
   } });
@@ -1408,6 +1458,9 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();
+  const empresaDoUsuario = data.empresas.find((e) => e.id === user.empresa_id);
+  const valorBonus = valorBonusViagem(empresaDoUsuario);
+  const limiteBonus = limiteViagensBonusMes(empresaDoUsuario);
   // o técnico só acompanha as próprias viagens — o administrador acompanha o time todo
   let tecnicos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
   if (user.papel === 'suporte') tecnicos = tecnicos.filter((u) => u.id === user.id);
@@ -1425,8 +1478,8 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
       quantidade: viagens.length,
       quantidade_sem_bonus: quantidadeSemBonus,
       dias_total: diasTotal,
-      valor_total: diasTotal * VALOR_BONUS_VIAGEM,
-      passou_limite: diasTotal > LIMITE_VIAGENS_BONUS_MES,
+      valor_total: diasTotal * valorBonus,
+      passou_limite: diasTotal > limiteBonus,
       com_justificativa: viagens.filter((a) => a.justificativa_limite_viagens || a.escala_conflito_tipo).length,
       viagens: viagensComDias.map(({ item: a, dias }) => ({
         id: a.id, numero_os: a.numero_os || `OS-${String(a.id).padStart(6, '0')}`,
@@ -1451,7 +1504,7 @@ rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
         })),
     };
   }).sort((a, b) => b.dias_total - a.dias_total);
-  enviarJSON(res, 200, { mes, limite: LIMITE_VIAGENS_BONUS_MES, valor_bonus: VALOR_BONUS_VIAGEM, tecnicos: porTecnico });
+  enviarJSON(res, 200, { mes, limite: limiteBonus, valor_bonus: valorBonus, tecnicos: porTecnico });
 });
 
 // ---------- escala de folga (feriados + DSR, compensação de banco de horas, home office, férias) ----------
@@ -2424,7 +2477,8 @@ rota('POST', /^\/api\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res, m) =>
   if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
   if (visita.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
   const nomeArquivo = `relatorio-tecnico-${visita.id}.pdf`;
-  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo });
+  const nomeEmpresa = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
+  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo, nomeEmpresa });
   enviarJSON(res, 200, { envio: resultado });
 });
 
@@ -3096,7 +3150,8 @@ rota('POST', /^\/api\/relatorios-manutencao\/(\d+)\/enviar-email$/, async (req, 
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   const nomeArquivo = `relatorio-${item.id}.pdf`;
-  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo });
+  const nomeEmpresa = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
+  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo, nomeEmpresa });
   enviarJSON(res, 200, { envio: resultado });
 });
 
@@ -3868,7 +3923,8 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   });
   db.save(data);
   const link = `${APP_URL}/ativar.html?token=${convite_token}`;
-  const resultado = await email.enviarConvite({ nome: novo.nome, email: novo.email, link });
+  const nomeEmpresa = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
+  const resultado = await email.enviarConvite({ nome: novo.nome, email: novo.email, link, nomeEmpresa });
   enviarJSON(res, 201, { usuario: usuarioPublico(novo), convite: resultado });
 });
 
@@ -3887,7 +3943,8 @@ rota('POST', /^\/api\/usuarios\/(\d+)\/reenviar-convite$/, async (req, res, m) =
   u.convite_token = gerarTokenConvite();
   db.save(data);
   const link = `${APP_URL}/ativar.html?token=${u.convite_token}`;
-  const resultado = await email.enviarConvite({ nome: u.nome, email: u.email, link });
+  const nomeEmpresa = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
+  const resultado = await email.enviarConvite({ nome: u.nome, email: u.email, link, nomeEmpresa });
   enviarJSON(res, 200, { usuario: usuarioPublico(u), convite: resultado });
 });
 
@@ -4868,12 +4925,13 @@ rota('GET', /^\/api\/plataforma\/empresas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
   const data = db.load();
-  const empresas = data.empresas.map((e) => ({
+  const empresas = await Promise.all(data.empresas.map(async (e) => ({
     ...e,
+    logo_url: await hidratarFotosProfundo(e.logo_url),
     administradores: data.usuarios
       .filter((u) => u.empresa_id === e.id && u.papel === 'administrador')
       .map((u) => ({ id: u.id, nome: u.nome, email: u.email, status: u.status })),
-  }));
+  })));
   enviarJSON(res, 200, { empresas });
 });
 
@@ -4914,7 +4972,7 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
 rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
-  const body = await lerCorpo(req);
+  const body = await extrairFotosProfundo(await lerCorpo(req), Number(m[1]));
   if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
   const data = db.load();
   const empresa = data.empresas.find((e) => e.id === Number(m[1]));
@@ -4933,8 +4991,17 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
     emails: Array.isArray(body.emails) ? body.emails : [],
     cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,
   });
+  if (body.logo_url !== undefined) empresa.logo_url = body.logo_url || null;
+  if (body.valor_bonus_viagem !== undefined) {
+    const valor = Number(body.valor_bonus_viagem);
+    if (Number.isFinite(valor) && valor >= 0) empresa.valor_bonus_viagem = valor;
+  }
+  if (body.limite_viagens_bonus_mes !== undefined) {
+    const limite = Number(body.limite_viagens_bonus_mes);
+    if (Number.isInteger(limite) && limite >= 0) empresa.limite_viagens_bonus_mes = limite;
+  }
   db.save(data);
-  enviarJSON(res, 200, { empresa });
+  enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
 });
 
 // DELETE /api/plataforma/empresas/:id — exclui a empresa e todo o dado que pertence só a ela

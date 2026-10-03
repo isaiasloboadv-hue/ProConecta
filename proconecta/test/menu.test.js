@@ -52,14 +52,14 @@ test('empresa sem nenhum módulo ativo só vê itens de núcleo', () => {
   ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: [] };
   const nav = ctx.navDoUsuario.call(ctx);
   const chaves = Array.from(nav, (n) => n.key);
-  assert.deepEqual(chaves.sort(), ['clientes', 'usuarios'].sort());
+  assert.deepEqual(chaves.sort(), ['clientes', 'minha-empresa', 'usuarios'].sort());
 });
 
 test('sem modulos_ativos definido (undefined) se comporta como nenhum módulo ativo, não trava', () => {
   const ctx = carregarLogicaDeMenu();
   ctx.USER = { papel: 'administrador', acesso_total: true };
   const nav = ctx.navDoUsuario.call(ctx);
-  assert.deepEqual(Array.from(nav, (n) => n.key).sort(), ['clientes', 'usuarios'].sort());
+  assert.deepEqual(Array.from(nav, (n) => n.key).sort(), ['clientes', 'minha-empresa', 'usuarios'].sort());
 });
 
 test('restrição por menus (acesso_total: false) continua funcionando por cima do filtro de módulo', () => {

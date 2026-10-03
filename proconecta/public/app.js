@@ -160,6 +160,16 @@ async function api(path, opts = {}) {
 window._empresa = null;
 async function carregarEmpresa() {
   try { window._empresa = (await api('/api/empresa')).empresa; } catch (e) {}
+  aplicarMarcaNaTela();
+}
+// troca toda <img class="brand-mark-img"> da tela (tela de login, cabeçalho) pela logo própria da
+// empresa (window._empresa.logo_url), se ela tiver uma — senão mantém a logo padrão do sistema
+// (/logo.png, já no HTML). Também invalida o cache da logo usada nos PDFs (ver
+// carregarLogoDataUri), pra um PDF gerado depois de trocar a logo já saír com a nova.
+function aplicarMarcaNaTela() {
+  const url = window._empresa && window._empresa.logo_url;
+  document.querySelectorAll('.brand-mark-img').forEach((img) => { img.src = url || '/logo.png'; });
+  _logoDataUriPromise = null;
 }
 function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
 function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
@@ -402,6 +412,7 @@ function entrarNoApp() {
   document.getElementById('authView').style.display = 'none';
   document.getElementById('appView').style.display = 'block';
   if (USER.empresa) window._empresa = USER.empresa;
+  aplicarMarcaNaTela();
   const empresaTag = document.getElementById('empresaTag');
   if (empresaTag) empresaTag.textContent = USER.empresa ? USER.empresa.nome : (USER.papel === 'super_admin' ? 'Painel da plataforma' : '');
   montarSidebar();
@@ -586,6 +597,9 @@ const NAV = {
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
     { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
+    // Etapa 5 do briefing white label: o próprio administrador edita a marca da empresa (nome,
+    // contato, cores, logo) e os valores padrão de bônus de viagem — sem precisar do Super Admin.
+    { key: 'minha-empresa', modulo: 'nucleo', label: 'Minha Empresa', page: 'minha-empresa' },
     // esqueleto dos módulos novos — sem tela de verdade ainda, só prova que o pipeline de
     // ativação funciona ponta a ponta (ver renderModuloEmBreve). Só aparece se a empresa tiver
     // contratado o módulo (moduloAtivoNoMenu, igual qualquer outro item com `modulo`).
@@ -795,6 +809,7 @@ async function ir(pagina) {
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
+    if (pagina === 'minha-empresa') return renderMinhaEmpresa();
     if (pagina === 'crm-em-breve') return renderModuloEmBreve('crm', 'CRM');
     if (pagina === 'agendamento-em-breve') return renderModuloEmBreve('agendamento', 'Agendamento Online');
     if (pagina === 'financeiro-em-breve') return renderModuloEmBreve('financeiro', 'Financeiro');
@@ -854,6 +869,15 @@ function renderListaEmpresasPlataforma(empresas) {
       </div>
       <h2 style="margin-top:0;">Dados da empresa</h2>
       <div class="form-grid">
+        <div style="grid-column:1/-1;">
+          <label>Logo</label>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div id="pe-logo-preview-${e.id}" style="width:56px; height:56px; border-radius:8px; border:1px solid var(--line,#e5e5e5); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#fff;">
+              ${e.logo_url ? `<img src="${esc(e.logo_url)}" style="width:100%; height:100%; object-fit:contain;">` : `<span style="font-size:10px; color:var(--gray-500,#888); text-align:center;">sem logo</span>`}
+            </div>
+            <input type="file" accept="image/*" onchange="trocarLogoPlataforma(event, ${e.id})">
+          </div>
+        </div>
         <div><label>Nome</label><input id="pe-dados-nome-${e.id}" value="${esc(e.nome)}"></div>
         <div><label>Subdomínio</label><input id="pe-dados-subdominio-${e.id}" value="${esc(e.subdominio || '')}" placeholder="ex.: empresa (sem .proconecta.com.br)"></div>
         <div><label>Site</label><input id="pe-dados-site-${e.id}" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
@@ -861,6 +885,8 @@ function renderListaEmpresasPlataforma(empresas) {
         <div><label>Telefone</label><input id="pe-dados-telefone-${e.id}" value="${esc(e.telefone || '')}"></div>
         <div><label>Cor primária</label><input type="color" id="pe-dados-corprim-${e.id}" value="${esc(e.cor_primaria || '#0A2647')}"></div>
         <div><label>Cor secundária</label><input type="color" id="pe-dados-corsec-${e.id}" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
+        <div><label>Bônus de viagem — valor/diária (R$)</label><input type="number" min="0" step="0.01" id="pe-dados-valorbonus-${e.id}" value="${esc(e.valor_bonus_viagem ?? 200)}"></div>
+        <div><label>Bônus de viagem — limite diárias/mês</label><input type="number" min="0" step="1" id="pe-dados-limitebonus-${e.id}" value="${esc(e.limite_viagens_bonus_mes ?? 7)}"></div>
       </div>
       <button class="btn btn-outline-sm" onclick="salvarDadosEmpresaPlataforma(${e.id})">Salvar dados</button>
       <h2>Administradores</h2>
@@ -937,6 +963,22 @@ async function criarAdministradorPlataforma(empresaId) {
   }
 }
 
+// logo nova por empresa, guardada aqui até salvar — mesmo padrão de window._minhaEmpresaLogoNova
+// em Minha Empresa (só vai no corpo do PUT se realmente mudou, pra não reenviar sem necessidade).
+window._plataformaLogoNovaPorEmpresa = {};
+function trocarLogoPlataforma(event, empresaId) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    comprimirImagemDataUrl(leitor.result).then((dataUrl) => {
+      window._plataformaLogoNovaPorEmpresa[empresaId] = dataUrl;
+      document.getElementById(`pe-logo-preview-${empresaId}`).innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:contain;">`;
+    });
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
 async function salvarDadosEmpresaPlataforma(empresaId) {
   const nome = document.getElementById(`pe-dados-nome-${empresaId}`).value.trim();
   if (!nome) return mostrarToast('Informe o nome da empresa.');
@@ -948,9 +990,13 @@ async function salvarDadosEmpresaPlataforma(empresaId) {
     telefone: document.getElementById(`pe-dados-telefone-${empresaId}`).value.trim(),
     cor_primaria: document.getElementById(`pe-dados-corprim-${empresaId}`).value,
     cor_secundaria: document.getElementById(`pe-dados-corsec-${empresaId}`).value,
+    valor_bonus_viagem: Number(document.getElementById(`pe-dados-valorbonus-${empresaId}`).value),
+    limite_viagens_bonus_mes: Number(document.getElementById(`pe-dados-limitebonus-${empresaId}`).value),
   };
+  if (window._plataformaLogoNovaPorEmpresa[empresaId] !== undefined) body.logo_url = window._plataformaLogoNovaPorEmpresa[empresaId];
   try {
     await api(`/api/plataforma/empresas/${empresaId}`, { method: 'PUT', body });
+    delete window._plataformaLogoNovaPorEmpresa[empresaId];
     mostrarToast('Dados da empresa atualizados.');
     renderPainelPlataforma();
   } catch (e) {
@@ -1018,6 +1064,94 @@ async function salvarTerminologiaPlataforma(empresaId) {
   try {
     await api(`/api/plataforma/empresas/${empresaId}/terminologia`, { method: 'PUT', body: { terminologia: { equipamento } } });
     mostrarToast('Terminologia atualizada.');
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+// ---------- Minha Empresa (Etapa 5 do briefing white label) ----------
+// o próprio administrador edita a marca da empresa (nome, contato, cores, logo) e os valores
+// padrão de bônus de viagem — sem precisar do Super Admin. Usa USER.empresa (já carregado no
+// login/GET /api/me) pra preencher o formulário, sem precisar de outra chamada à API.
+async function renderMinhaEmpresa() {
+  const e = USER.empresa || {};
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Minha Empresa</h1><p>Dados de marca e configurações usados nos relatórios, PDFs e e-mails enviados pelo sistema.</p></div>
+    <div class="panel">
+      <div class="panel-head">Marca</div>
+      <div class="form-grid">
+        <div style="grid-column:1/-1;">
+          <label>Logo</label>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div id="me-logo-preview" style="width:72px; height:72px; border-radius:8px; border:1px solid var(--line,#e5e5e5); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#fff;">
+              ${e.logo_url ? `<img src="${esc(e.logo_url)}" style="width:100%; height:100%; object-fit:contain;">` : `<span style="font-size:11px; color:var(--gray-500,#888); text-align:center;">sem logo própria</span>`}
+            </div>
+            <div>
+              <input type="file" accept="image/*" id="me-logo-arquivo" onchange="trocarLogoMinhaEmpresa(event)">
+              ${e.logo_url ? `<div><button class="btn-outline-sm" style="margin-top:6px;" onclick="removerLogoMinhaEmpresa()">Remover logo (voltar pra padrão)</button></div>` : ''}
+            </div>
+          </div>
+        </div>
+        <div><label>Nome da empresa*</label><input id="me-nome" value="${esc(e.nome || '')}"></div>
+        <div><label>Site</label><input id="me-site" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
+        <div><label>WhatsApp</label><input id="me-whatsapp" value="${esc(e.whatsapp || '')}"></div>
+        <div><label>Telefone</label><input id="me-telefone" value="${esc(e.telefone || '')}"></div>
+        <div><label>Cor primária</label><input type="color" id="me-corprim" value="${esc(e.cor_primaria || '#0A2647')}"></div>
+        <div><label>Cor secundária</label><input type="color" id="me-corsec" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
+      </div>
+      <h2>Valores padrão de bônus de viagem</h2>
+      <div class="form-grid">
+        <div><label>Valor por diária (R$)</label><input type="number" min="0" step="0.01" id="me-valor-bonus" value="${esc(e.valor_bonus_viagem ?? 200)}"></div>
+        <div><label>Limite de diárias/mês antes de exigir justificativa</label><input type="number" min="0" step="1" id="me-limite-bonus" value="${esc(e.limite_viagens_bonus_mes ?? 7)}"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
+    </div>`;
+}
+
+// guarda a logo nova (já comprimida) separada do resto do formulário — só vai no corpo do PUT se
+// o usuário realmente trocou, pra nunca reenviar (e duplicar na tabela de fotos) a logo que já
+// estava lá sem mudança nenhuma.
+window._minhaEmpresaLogoNova = undefined;
+function trocarLogoMinhaEmpresa(event) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    comprimirImagemDataUrl(leitor.result).then((dataUrl) => {
+      window._minhaEmpresaLogoNova = dataUrl;
+      document.getElementById('me-logo-preview').innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:contain;">`;
+    });
+  };
+  leitor.readAsDataURL(arquivo);
+}
+function removerLogoMinhaEmpresa() {
+  window._minhaEmpresaLogoNova = null; // null explícito = remover (diferente de undefined = não mudar)
+  document.getElementById('me-logo-preview').innerHTML = `<span style="font-size:11px; color:var(--gray-500,#888); text-align:center;">sem logo própria</span>`;
+}
+
+async function salvarMinhaEmpresa() {
+  const nome = document.getElementById('me-nome').value.trim();
+  if (!nome) return mostrarToast('Informe o nome da empresa.');
+  const body = {
+    nome,
+    site: document.getElementById('me-site').value.trim(),
+    whatsapp: document.getElementById('me-whatsapp').value.trim(),
+    telefone: document.getElementById('me-telefone').value.trim(),
+    cor_primaria: document.getElementById('me-corprim').value,
+    cor_secundaria: document.getElementById('me-corsec').value,
+    valor_bonus_viagem: Number(document.getElementById('me-valor-bonus').value),
+    limite_viagens_bonus_mes: Number(document.getElementById('me-limite-bonus').value),
+  };
+  if (window._minhaEmpresaLogoNova !== undefined) body.logo_url = window._minhaEmpresaLogoNova;
+  try {
+    const { empresa } = await api('/api/empresa', { method: 'PUT', body });
+    USER.empresa = empresa;
+    window._empresa = empresa;
+    window._minhaEmpresaLogoNova = undefined;
+    aplicarMarcaNaTela();
+    mostrarToast('Dados da empresa atualizados.');
+    renderMinhaEmpresa();
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -4672,9 +4806,15 @@ const PDF_COR = {
 };
 
 let _logoDataUriPromise = null;
+// Etapa 5/passo 1: usa a logo própria da empresa (window._empresa.logo_url) quando configurada,
+// senão cai na logo padrão do sistema — mesmo cache de antes (um fetch só, reaproveitado em todo
+// PDF gerado na sessão), invalidado por aplicarMarcaNaTela sempre que a marca muda (login, troca
+// de logo em Minha Empresa).
 function carregarLogoDataUri() {
+  const logoEmpresa = window._empresa && window._empresa.logo_url;
+  if (logoEmpresa && logoEmpresa.startsWith('data:')) return Promise.resolve(logoEmpresa);
   if (!_logoDataUriPromise) {
-    _logoDataUriPromise = fetch('/logo.png')
+    _logoDataUriPromise = fetch(logoEmpresa || '/logo.png')
       .then((resp) => resp.blob())
       .then((blob) => new Promise((resolve, reject) => {
         const leitor = new FileReader();

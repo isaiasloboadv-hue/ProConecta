@@ -82,8 +82,16 @@ async function obterTransporte() {
   return transporteCache;
 }
 
-function remetente() {
-  return process.env.EMAIL_REMETENTE || process.env.EMAIL_SMTP_USER || 'Pro Conecta <onboarding@proconecta.com.br>';
+// nomeEmpresa (opcional, Etapa 5/passo 3): troca só o NOME que aparece pro destinatário — a
+// caixa técnica continua a mesma, configurada nas variáveis de ambiente de sempre. Por decisão
+// do dono do sistema, cada empresa não tem conta de e-mail própria (isso exigiria guardar
+// credencial de e-mail por empresa, um dado sensível) — só aparece com o nome dela na frente.
+function remetente(nomeEmpresa) {
+  const base = process.env.EMAIL_REMETENTE || process.env.EMAIL_SMTP_USER || 'Pro Conecta <onboarding@proconecta.com.br>';
+  if (!nomeEmpresa) return base;
+  const m = /^(.*)<(.+)>$/.exec(base);
+  const endereco = m ? m[2].trim() : base.trim();
+  return `${nomeEmpresa} <${endereco}>`;
 }
 
 // limite duro além dos timeouts do próprio nodemailer — em algumas redes uma conexão
@@ -97,17 +105,17 @@ function comLimiteDeTempo(promessa, ms) {
   ]);
 }
 
-async function enviarViaSmtp({ to, assunto, corpoHtml, attachments }) {
+async function enviarViaSmtp({ to, assunto, corpoHtml, attachments, nomeEmpresa }) {
   const transporte = await obterTransporte();
   if (!transporte) return null; // sem SMTP configurado — quem chamou decide o próximo provedor/fallback
   await comLimiteDeTempo(
-    transporte.sendMail({ from: remetente(), to, subject: assunto, html: corpoHtml, attachments }),
+    transporte.sendMail({ from: remetente(nomeEmpresa), to, subject: assunto, html: corpoHtml, attachments }),
     15000
   );
   return { enviado: true, modo: 'smtp' };
 }
 
-async function enviarViaResend({ to, assunto, corpoHtml, attachments }) {
+async function enviarViaResend({ to, assunto, corpoHtml, attachments, nomeEmpresa }) {
   if (!process.env.RESEND_API_KEY) return null;
   const resp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -116,7 +124,7 @@ async function enviarViaResend({ to, assunto, corpoHtml, attachments }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: remetente(), to, subject: assunto, html: corpoHtml,
+      from: remetente(nomeEmpresa), to, subject: assunto, html: corpoHtml,
       ...(attachments ? { attachments: attachments.map((a) => ({ filename: a.filename, content: a.content.toString('base64') })) } : {}),
     }),
   });
@@ -132,11 +140,11 @@ async function enviarViaResend({ to, assunto, corpoHtml, attachments }) {
 // dois podem estar configurados ao mesmo tempo, e nesse caso o Resend serve de rede de
 // segurança. Só desiste (modo 'erro') se os dois estiverem configurados e os dois falharem;
 // se nenhum estiver configurado, só loga no console (modo simulado, usado em desenvolvimento).
-async function enviar({ to, assunto, corpoHtml, attachments, logSimulado }) {
+async function enviar({ to, assunto, corpoHtml, attachments, logSimulado, nomeEmpresa }) {
   let houveFalha = false;
 
   try {
-    const viaSmtp = await enviarViaSmtp({ to, assunto, corpoHtml, attachments });
+    const viaSmtp = await enviarViaSmtp({ to, assunto, corpoHtml, attachments, nomeEmpresa });
     if (viaSmtp) return viaSmtp;
   } catch (e) {
     console.error('[email] Falha ao enviar via SMTP:', e.message);
@@ -144,7 +152,7 @@ async function enviar({ to, assunto, corpoHtml, attachments, logSimulado }) {
   }
 
   try {
-    const viaResend = await enviarViaResend({ to, assunto, corpoHtml, attachments });
+    const viaResend = await enviarViaResend({ to, assunto, corpoHtml, attachments, nomeEmpresa });
     if (viaResend) return viaResend;
   } catch (e) {
     console.error('[email] Falha ao enviar via Resend:', e.message);
@@ -159,7 +167,9 @@ async function enviar({ to, assunto, corpoHtml, attachments, logSimulado }) {
   return { enviado: false, modo: 'simulado' };
 }
 
-async function enviarConvite({ nome, email, link }) {
+// nomeEmpresa (opcional): nome que aparece como remetente pro destinatário — ver remetente()
+// acima. Quem chama (server.js) passa o nome da empresa de quem está convidando/enviando.
+async function enviarConvite({ nome, email, link, nomeEmpresa }) {
   const assunto = 'Seu acesso ao Pro Conecta';
   const corpoHtml = `
     <p>Olá, ${nome}.</p>
@@ -168,17 +178,17 @@ async function enviarConvite({ nome, email, link }) {
     <p>Se você não esperava este e-mail, pode ignorá-lo.</p>
   `;
   const resultado = await enviar({
-    to: [email], assunto, corpoHtml,
+    to: [email], assunto, corpoHtml, nomeEmpresa,
     logSimulado: () => console.log(`[email] Para: ${email} — ${link}\n`),
   });
   return { ...resultado, link };
 }
 
-async function enviarRelatorio({ emails, pdfBase64, nomeArquivo }) {
+async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa }) {
   const assunto = 'Relatório técnico — Pro Conecta';
   const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>`;
   const resultado = await enviar({
-    to: emails, assunto, corpoHtml,
+    to: emails, assunto, corpoHtml, nomeEmpresa,
     attachments: [{ filename: nomeArquivo, content: Buffer.from(pdfBase64, 'base64') }],
     logSimulado: () => console.log(`[email] Relatório "${nomeArquivo}" seria enviado para: ${emails.join(', ')}\n`),
   });
