@@ -323,6 +323,24 @@ nova, cadastrada a partir de uma versão/pacote que já tenha
 editável depois por empresa, independente da versão original (mesmo
 padrão de `modulos_ativos`).
 
+## Status e plano da empresa (painel do Super Admin)
+
+Cada empresa tem um `status`: `teste` (toda empresa nova, cadastrada pelo
+Super Admin a partir de agora), `ativa` (padrão de toda empresa já
+existente, inclusive a instalação atual) ou `suspensa`. Suspender bloqueia
+o acesso na hora: login novo recebe 403, e qualquer requisição de quem já
+estava logado (o token continua "válido" por até 12h) também passa a ser
+recusada no próprio despachante central de rotas — não é preciso esperar o
+token expirar nem forçar logout manual. A instalação atual (empresa 1)
+nunca pode ser suspensa, nem pela rota nem pelo painel (mesma trava que já
+existia pra exclusão de empresa). O `super_admin` nunca é afetado, porque
+não pertence a nenhuma empresa.
+
+O painel da Plataforma também guarda, por empresa, `plano_valor_mensal` e
+`plano_dia_vencimento` — só exibição, sem nenhuma integração de cobrança
+nesta etapa. Os dois campos aceitam ficar em branco (`null`, o padrão de
+toda empresa).
+
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 
 Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua

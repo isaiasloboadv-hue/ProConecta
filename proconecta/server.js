@@ -973,8 +973,13 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
     return enviarJSON(res, 401, { erro: 'E-mail ou senha inválidos.' });
   }
   tentativasLogin.delete(ip);
-  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   const empresaDoUsuario = data.empresas.find((e) => e.id === u.empresa_id);
+  // empresa suspensa (Etapa 7/passo 1): bloqueia login de qualquer usuário dela, exceto
+  // super_admin (não pertence a empresa nenhuma — empresaDoUsuario fica undefined pra ele).
+  if (empresaDoUsuario && empresaDoUsuario.status === 'suspensa') {
+    return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.' });
+  }
+  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: {
     ...usuarioPublico(u),
     empresa: await empresaResumo(empresaDoUsuario),
@@ -5107,6 +5112,12 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
     // escolhida (null = sem limite), editável depois por empresa pela rota de PUT abaixo.
     limite_tecnicos: versao && versao.limite_tecnicos != null ? versao.limite_tecnicos : null,
     limite_equipamentos: versao && versao.limite_equipamentos != null ? versao.limite_equipamentos : null,
+    // status (Etapa 7/passo 1) — nasce "teste", diferente da empresa 1 (instalação atual, que
+    // sincronizarEmpresaPadrao em db.js já marca "ativa"). Super Admin muda depois pelo PUT de
+    // status. Plano/cobrança (passo 2) nascem vazios — só exibição, sem gateway de pagamento.
+    status: 'teste',
+    plano_valor_mensal: null,
+    plano_dia_vencimento: null,
   };
   data.empresas.push(empresa);
   db.save(data);
@@ -5130,11 +5141,15 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
   if (subdominio && data.empresas.some((e) => e.id !== empresa.id && e.subdominio === subdominio)) {
     return enviarJSON(res, 400, { erro: 'Esse subdomínio já está em uso por outra empresa.' });
   }
+  // site/whatsapp/telefone/emails só mudam quando vêm no corpo (Etapa 7/passo 2: a tela de
+  // status/plano manda um PUT parcial, só com o que ela edita — sem isso, apagaria esses campos).
   Object.assign(empresa, {
     nome: String(body.nome).trim(),
     subdominio,
-    site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
-    emails: Array.isArray(body.emails) ? body.emails : [],
+    site: body.site !== undefined ? body.site : empresa.site,
+    whatsapp: body.whatsapp !== undefined ? body.whatsapp : empresa.whatsapp,
+    telefone: body.telefone !== undefined ? body.telefone : empresa.telefone,
+    emails: body.emails !== undefined ? (Array.isArray(body.emails) ? body.emails : []) : empresa.emails,
     cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,
   });
   if (body.logo_url !== undefined) empresa.logo_url = body.logo_url || null;
@@ -5154,8 +5169,39 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
   if (body.limite_equipamentos !== undefined) {
     empresa.limite_equipamentos = body.limite_equipamentos === null || body.limite_equipamentos === '' ? null : Number(body.limite_equipamentos);
   }
+  // plano e cobrança (Etapa 7/passo 2) — só exibição, sem gateway de pagamento.
+  if (body.plano_valor_mensal !== undefined) {
+    empresa.plano_valor_mensal = body.plano_valor_mensal === null || body.plano_valor_mensal === '' ? null : Number(body.plano_valor_mensal);
+  }
+  if (body.plano_dia_vencimento !== undefined) {
+    empresa.plano_dia_vencimento = body.plano_dia_vencimento === null || body.plano_dia_vencimento === '' ? null : Number(body.plano_dia_vencimento);
+  }
   db.save(data);
   enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
+});
+
+// PUT /api/plataforma/empresas/:id/status { status } — Etapa 7/passo 1: suspender/reativar (ou
+// marcar como "teste"). "suspensa" bloqueia login novo e qualquer rota pra quem já estava logado
+// (ver checagem central no dispatcher, mais abaixo) — a empresa 1 (instalação atual, em uso de
+// verdade) nunca pode ser suspensa por aqui, mesma trava do DELETE.
+const STATUS_EMPRESA_VALIDOS = ['teste', 'ativa', 'suspensa'];
+rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/status$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const id = Number(m[1]);
+  const body = await lerCorpo(req);
+  if (!STATUS_EMPRESA_VALIDOS.includes(body.status)) {
+    return enviarJSON(res, 400, { erro: `Status inválido — use um de: ${STATUS_EMPRESA_VALIDOS.join(', ')}.` });
+  }
+  if (id === 1 && body.status === 'suspensa') {
+    return enviarJSON(res, 400, { erro: 'A instalação atual (empresa 1) não pode ser suspensa.' });
+  }
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === id);
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  empresa.status = body.status;
+  db.save(data);
+  enviarJSON(res, 200, { empresa });
 });
 
 // DELETE /api/plataforma/empresas/:id — exclui a empresa e todo o dado que pertence só a ela
@@ -5325,7 +5371,17 @@ const server = http.createServer(async (req, res) => {
       if (rotaEncontrada.modulo !== 'publico') {
         const user = usuarioAutenticado(req);
         if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
-        if (rotaEncontrada.modulo !== 'nucleo' && !db.moduloAtivo(db.load(), user.empresa_id, rotaEncontrada.modulo)) {
+        // empresa suspensa (Etapa 7/passo 1): bloqueia também quem já estava logado antes da
+        // suspensão — o token continua válido por até 12h, então checa de novo a cada requisição,
+        // não só no login. super_admin não pertence a empresa (empresa_id null) e nunca é afetado.
+        const dadosAtuais = db.load();
+        if (user.empresa_id) {
+          const empresaDoUsuario = dadosAtuais.empresas.find((e) => e.id === user.empresa_id);
+          if (empresaDoUsuario && empresaDoUsuario.status === 'suspensa') {
+            return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.' });
+          }
+        }
+        if (rotaEncontrada.modulo !== 'nucleo' && !db.moduloAtivo(dadosAtuais, user.empresa_id, rotaEncontrada.modulo)) {
           return enviarJSON(res, 403, { erro: `Módulo "${rotaEncontrada.modulo}" não está ativo pra sua empresa.` });
         }
       }

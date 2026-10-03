@@ -128,6 +128,14 @@ function sincronizarEmpresaPadrao(data) {
   // ela contratou) — ver PUT /api/plataforma/empresas/:id.
   if (empresa.limite_tecnicos === undefined) empresa.limite_tecnicos = null;
   if (empresa.limite_equipamentos === undefined) empresa.limite_equipamentos = null;
+  // status (Etapa 7/passo 1): empresa 1 (instalação atual, já em uso de verdade) nasce "ativa" —
+  // só empresa nova, cadastrada pelo Super Admin depois disso existir, começa "teste" (ver
+  // POST /api/plataforma/empresas). "suspensa" bloqueia login e qualquer rota pra quem já estava
+  // logado (ver resolverEmpresaPorRequisicao/dispatcher central em server.js).
+  if (empresa.status === undefined) empresa.status = 'ativa';
+  // plano e cobrança (Etapa 7/passo 2) — só exibição, sem integração de pagamento nesta etapa.
+  if (empresa.plano_valor_mensal === undefined) empresa.plano_valor_mensal = null;
+  if (empresa.plano_dia_vencimento === undefined) empresa.plano_dia_vencimento = null;
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;

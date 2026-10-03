@@ -894,10 +894,26 @@ function renderListaEmpresasPlataforma(empresas) {
   return empresas.map((e) => `
     <div class="panel">
       <div class="panel-head" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <span>${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''}</span>
+        <span>${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''} <span class="tag" style="background:${e.status === 'suspensa' ? 'var(--red,#c00)' : e.status === 'teste' ? '#b8860b' : 'var(--green,#1a7f37)'}; color:#fff;">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span></span>
         ${e.id !== 1 ? `<button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="excluirEmpresaPlataforma(${e.id})">Excluir empresa</button>` : ''}
       </div>
-      <h2 style="margin-top:0;">Dados da empresa</h2>
+      <h2 style="margin-top:0;">Status e cobrança</h2>
+      <p style="margin-top:-8px; color:var(--gray-500, #666);">Suspender bloqueia login e uso imediato de quem já estava logado — ação separada das demais, de propósito.</p>
+      <div class="form-grid">
+        <div>
+          <label>Status</label>
+          <select id="pe-status-${e.id}" ${e.id === 1 ? 'disabled' : ''}>
+            <option value="teste" ${e.status === 'teste' ? 'selected' : ''}>Teste</option>
+            <option value="ativa" ${(!e.status || e.status === 'ativa') ? 'selected' : ''}>Ativa</option>
+            <option value="suspensa" ${e.status === 'suspensa' ? 'selected' : ''}>Suspensa</option>
+          </select>
+        </div>
+        <div><label>Plano — valor mensal (R$)</label><input type="number" min="0" step="0.01" id="pe-plano-valor-${e.id}" value="${e.plano_valor_mensal != null ? esc(e.plano_valor_mensal) : ''}" placeholder="não definido"></div>
+        <div><label>Plano — dia de vencimento</label><input type="number" min="1" max="31" step="1" id="pe-plano-dia-${e.id}" value="${e.plano_dia_vencimento != null ? esc(e.plano_dia_vencimento) : ''}" placeholder="não definido"></div>
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarPlanoEmpresaPlataforma(${e.id})">Salvar plano</button>
+      ${e.id === 1 ? '' : `<button class="btn btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="aplicarStatusEmpresaPlataforma(${e.id})">Aplicar status</button>`}
+      <h2>Dados da empresa</h2>
       <div class="form-grid">
         <div style="grid-column:1/-1;">
           <label>Logo</label>
@@ -1032,6 +1048,40 @@ async function salvarDadosEmpresaPlataforma(empresaId) {
     await api(`/api/plataforma/empresas/${empresaId}`, { method: 'PUT', body });
     delete window._plataformaLogoNovaPorEmpresa[empresaId];
     mostrarToast('Dados da empresa atualizados.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+// status (Etapa 7/passo 1) fica separado de "Salvar dados" de propósito — suspender corta acesso
+// na hora (login novo e qualquer requisição de quem já estava logado), então pede uma ação própria,
+// não algo que vai junto sem querer com um campo de texto qualquer.
+async function aplicarStatusEmpresaPlataforma(empresaId) {
+  const status = document.getElementById(`pe-status-${empresaId}`).value;
+  if (status === 'suspensa' && !confirm('Suspender bloqueia o login e qualquer uso do sistema por essa empresa imediatamente, inclusive de quem já estiver logado agora. Confirma?')) return;
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}/status`, { method: 'PUT', body: { status } });
+    mostrarToast('Status da empresa atualizado.');
+    renderPainelPlataforma();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarPlanoEmpresaPlataforma(empresaId) {
+  const valor = document.getElementById(`pe-plano-valor-${empresaId}`).value;
+  const dia = document.getElementById(`pe-plano-dia-${empresaId}`).value;
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}`, {
+      method: 'PUT',
+      body: {
+        nome: _plataformaEmpresasCache.find((e) => e.id === empresaId).nome,
+        plano_valor_mensal: valor === '' ? null : Number(valor),
+        plano_dia_vencimento: dia === '' ? null : Number(dia),
+      },
+    });
+    mostrarToast('Plano atualizado.');
     renderPainelPlataforma();
   } catch (e) {
     mostrarToast(e.message);
