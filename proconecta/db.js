@@ -74,13 +74,14 @@ function seed() {
     solicitacoes_rh: [],
     feriados: [],
     escala_folgas: [],
+    prestacoes_contas: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
     versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -219,6 +220,10 @@ function migrar(data) {
   if (!data._seq.feriados) data._seq.feriados = 1;
   if (!data.escala_folgas) data.escala_folgas = [];
   if (!data._seq.escala_folgas) data._seq.escala_folgas = 1;
+  // prestação de contas (Etapa 6/passo 2 do plano white label) — despesas de viagem/campo que o
+  // técnico lança pra aprovação do financeiro/administrador, além do bônus fixo por diária.
+  if (!data.prestacoes_contas) data.prestacoes_contas = [];
+  if (!data._seq.prestacoes_contas) data._seq.prestacoes_contas = 1;
   // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
   if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];

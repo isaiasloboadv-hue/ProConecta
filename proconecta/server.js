@@ -4882,19 +4882,132 @@ rota('GET', /^\/api\/admin\/diagnostico-memoria$/, async (req, res) => {
   });
 });
 
-// ---------- esqueleto dos módulos novos (crm, agendamento, financeiro, prestacao_contas) ----------
+// ---------- esqueleto dos módulos novos (crm, agendamento, financeiro) ----------
 // ainda não têm tela nem dado nenhum — só provam que o pipeline de ativação funciona ponta a
-// ponta pros 4 de uma vez: rota gated pelo módulo certo (ver rotas-modulo.js), menu que só aparece
-// se o módulo estiver ativo (ver NAV em public/app.js) levando a uma tela "Em breve". Quando um
-// desses módulos ganhar telas de verdade, essa rota de status é substituída pelas rotas reais.
-for (const chave of ['crm', 'agendamento', 'financeiro', 'prestacao_contas']) {
-  const caminho = chave === 'prestacao_contas' ? 'prestacao-contas' : chave;
-  rota('GET', new RegExp(`^/api/${caminho}/status$`), async (req, res) => {
+// ponta: rota gated pelo módulo certo (ver rotas-modulo.js), menu que só aparece se o módulo
+// estiver ativo (ver NAV em public/app.js) levando a uma tela "Em breve". Quando um desses módulos
+// ganhar telas de verdade, essa rota de status é substituída pelas rotas reais — como já aconteceu
+// com prestacao_contas (ver rotas de verdade abaixo, seção "prestação de contas").
+for (const chave of ['crm', 'agendamento', 'financeiro']) {
+  rota('GET', new RegExp(`^/api/${chave}/status$`), async (req, res) => {
     const user = usuarioAutenticado(req);
     if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
     enviarJSON(res, 200, { modulo: chave, status: 'em construção' });
   });
 }
+
+// ---------- prestação de contas (Etapa 6/passo 2 do briefing white label) ----------
+// despesas de viagem/campo (hospedagem, alimentação, combustível, pedágio, outros) que o técnico
+// lança pra aprovação — complementa o bônus fixo por diária (ver valorBonusViagem) com despesas
+// reais, variáveis, uma a uma. Pode ser vinculada a uma O.S. (agenda_id) ou lançada solta.
+const CATEGORIAS_DESPESA = ['hospedagem', 'alimentacao', 'combustivel', 'pedagio', 'outros'];
+function sanitizarItensDespesa(itens) {
+  if (!Array.isArray(itens)) return [];
+  return itens
+    .filter((it) => it && CATEGORIAS_DESPESA.includes(it.categoria) && Number(it.valor) > 0)
+    .map((it) => ({
+      categoria: it.categoria,
+      descricao: String(it.descricao || '').slice(0, 300),
+      valor: Number(it.valor),
+      data: it.data || '',
+      foto: it.foto || null,
+    }));
+}
+
+// POST /api/prestacao-contas — técnico (ou administrador, em nome de alguém da equipe) lança uma
+// prestação de contas nova. Nasce sempre "pendente" — só financeiro/administrador decide.
+rota('POST', /^\/api\/prestacao-contas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador lançam prestação de contas.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const itens = sanitizarItensDespesa(body.itens);
+  if (!itens.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos um item de despesa válido (categoria e valor maior que zero).' });
+  const data = db.load();
+  if (body.agenda_id && !tenant.buscar(data, 'agenda', Number(body.agenda_id), user.empresa_id)) {
+    return enviarJSON(res, 400, { erro: 'O.S. informada não encontrada.' });
+  }
+  const valor_total = itens.reduce((soma, it) => soma + it.valor, 0);
+  const item = tenant.criar(data, 'prestacoes_contas', user.empresa_id, {
+    autor_id: user.id, autor_nome: user.nome,
+    agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+    descricao: String(body.descricao || '').slice(0, 500),
+    itens, valor_total,
+    status: 'pendente',
+    aprovado_por: null, data_decisao: null, comentario_financeiro: '',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { prestacao: item });
+});
+
+// GET /api/prestacao-contas/minhas — o técnico só vê as próprias; administrador vê com ?todas=1
+// (mesmo padrão de /api/relatorios-manutencao/meus).
+rota('GET', /^\/api\/prestacao-contas\/minhas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'prestacoes_contas', user.empresa_id);
+  if (!(['administrador', 'financeiro', 'supervisor'].includes(user.papel) && query.todas === '1')) {
+    lista = lista.filter((p) => p.autor_id === user.id);
+  }
+  lista = [...lista].sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  enviarJSON(res, 200, { prestacoes: await hidratarFotosProfundo(lista) });
+});
+
+// GET /api/prestacao-contas/fila — fila de aprovação (pendentes), pra financeiro/administrador.
+rota('GET', /^\/api\/prestacao-contas\/fila$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador acessam a fila de aprovação.' });
+  const data = db.load();
+  const lista = tenant.listar(data, 'prestacoes_contas', user.empresa_id)
+    .filter((p) => p.status === 'pendente')
+    .sort((a, b) => (a.criado_em || '').localeCompare(b.criado_em || ''));
+  enviarJSON(res, 200, { prestacoes: await hidratarFotosProfundo(lista) });
+});
+
+// POST /api/prestacao-contas/:id/aprovar
+rota('POST', /^\/api\/prestacao-contas\/(\d+)\/aprovar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador decidem prestações de contas.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'prestacoes_contas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Prestação de contas não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Esta prestação de contas já foi decidida.' });
+  item.status = 'aprovado';
+  item.aprovado_por = user.nome;
+  item.data_decisao = new Date().toISOString();
+  db.save(data);
+  enviarPush(data, item.autor_id, {
+    titulo: 'Prestação de contas aprovada',
+    corpo: `Sua prestação de contas de R$ ${item.valor_total.toFixed(2)} foi aprovada.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { prestacao: item });
+});
+
+// POST /api/prestacao-contas/:id/reprovar { comentario }
+rota('POST', /^\/api\/prestacao-contas\/(\d+)\/reprovar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador decidem prestações de contas.' });
+  const body = await lerCorpo(req);
+  if (!body.comentario || !String(body.comentario).trim()) return enviarJSON(res, 400, { erro: 'Explique o motivo da reprovação.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'prestacoes_contas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Prestação de contas não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Esta prestação de contas já foi decidida.' });
+  item.status = 'reprovado';
+  item.aprovado_por = user.nome;
+  item.data_decisao = new Date().toISOString();
+  item.comentario_financeiro = String(body.comentario).trim();
+  db.save(data);
+  enviarPush(data, item.autor_id, {
+    titulo: 'Prestação de contas reprovada',
+    corpo: `Sua prestação de contas de R$ ${item.valor_total.toFixed(2)} foi reprovada: ${item.comentario_financeiro}`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { prestacao: item });
+});
 
 // ---------- painel da plataforma (Super Admin) ----------
 // papel `super_admin` é o dono da plataforma, não de uma empresa — não tem empresa_id (fica null

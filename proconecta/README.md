@@ -281,8 +281,29 @@ Dois papéis novos, cadastráveis só pelo administrador geral (menu
   exigindo `administrador`, então qualquer botão de criar/editar/excluir
   que apareça nessas telas reaproveitadas falha com 403 — a restrição é
   garantida no servidor, não só por esconder o botão.
-- **Financeiro**: ainda sem tela própria — aprova a prestação de contas
-  quando esse módulo (hoje só esqueleto) for construído de verdade.
+- **Financeiro**: aprova a prestação de contas — ver seção abaixo.
+
+## Módulo Prestação de Contas
+
+Módulo contratável (`prestacao_contas` em `MODULOS_DISPONIVEIS`, ativado
+pelo Super Admin no painel da Plataforma — não vem na versão "Manutenção"
+por padrão). Despesas de viagem/campo lançadas pelo técnico (hospedagem,
+alimentação, combustível, pedágio, outros), uma a uma, cada item com
+descrição, valor e foto de comprovante opcional — complementa o bônus fixo
+por diária (R$/diária configurável, ver "Marca e configurações por
+empresa") com despesas reais e variáveis.
+
+- **Técnico/administrador** (menu "Prestação de Contas"): lança uma
+  prestação nova com um ou mais itens; acompanha o status das próprias
+  (pendente/aprovado/reprovado, com o motivo quando reprovado).
+- **Financeiro/administrador** (mesmo menu, fila de aprovação): vê as
+  pendentes da empresa e aprova ou reprova (reprovar exige um comentário).
+- **Supervisor**: lê todas (próprias telas, só leitura — ver seção acima).
+
+Rotas: `POST /api/prestacao-contas`, `GET /api/prestacao-contas/minhas`
+(`?todas=1` pra administrador/financeiro/supervisor verem de todo mundo),
+`GET /api/prestacao-contas/fila`, `POST /api/prestacao-contas/:id/aprovar`,
+`POST /api/prestacao-contas/:id/reprovar`.
 
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 

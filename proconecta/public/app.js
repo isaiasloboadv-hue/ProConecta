@@ -549,6 +549,7 @@ const NAV = {
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
+    { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -606,7 +607,7 @@ const NAV = {
     { key: 'crm', modulo: 'crm', label: 'CRM', page: 'crm-em-breve' },
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
-    { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-em-breve' },
+    { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
   ],
   cliente: [
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -657,6 +658,7 @@ const NAV = {
   supervisor: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -672,9 +674,10 @@ const NAV = {
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
   ],
-  // financeiro (aprova prestação de contas) ainda sem tela própria — ganha o item de menu
-  // quando o módulo prestacao_contas de verdade for construído (próximo passo desta mesma etapa).
-  financeiro: [],
+  // financeiro — Etapa 6/passo 2: aprova as prestações de contas lançadas pelos técnicos.
+  financeiro: [
+    { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
+  ],
 };
 
 // ícone de cada item de topo do menu lateral (só o nível principal — os submenus continuam sem
@@ -839,7 +842,8 @@ async function ir(pagina) {
     if (pagina === 'crm-em-breve') return renderModuloEmBreve('crm', 'CRM');
     if (pagina === 'agendamento-em-breve') return renderModuloEmBreve('agendamento', 'Agendamento Online');
     if (pagina === 'financeiro-em-breve') return renderModuloEmBreve('financeiro', 'Financeiro');
-    if (pagina === 'prestacao-contas-em-breve') return renderModuloEmBreve('prestacao-contas', 'Prestação de Contas');
+    if (pagina === 'prestacao-contas-minhas') return renderPrestacaoContasMinhas();
+    if (pagina === 'prestacao-contas-fila') return renderPrestacaoContasFila();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -1196,6 +1200,180 @@ async function renderModuloEmBreve(caminhoApi, titulo) {
       <p>Módulo <b>${esc(titulo)}</b> ativo pra sua empresa — status do servidor: <i>${esc(status)}</i>.</p>
       <p>As telas de verdade desse módulo ainda não existem. Em breve.</p>
     </div>`;
+}
+
+// ---------- Prestação de Contas (Etapa 6/passo 2 do briefing white label) ----------
+// despesas de viagem/campo (hospedagem, alimentação, combustível, pedágio, outros) que o técnico
+// lança uma a uma pra aprovação — complementa o bônus fixo por diária (ver Equipe/Acompanhamento
+// de viagens) com despesas reais, variáveis. Duas telas: a do técnico (lança + acompanha as
+// próprias) e a do financeiro/administrador (fila de aprovação). Supervisor reaproveita a tela do
+// técnico, só leitura (sem botão de lançar), com ?todas=1 — ver GET /api/prestacao-contas/minhas.
+const CATEGORIA_DESPESA_LABEL = {
+  hospedagem: 'Hospedagem', alimentacao: 'Alimentação', combustivel: 'Combustível',
+  pedagio: 'Pedágio', outros: 'Outros',
+};
+function statusPrestacaoTag(status) {
+  if (status === 'aprovado') return tag('Aprovado', 'green');
+  if (status === 'reprovado') return tag('Reprovado', 'red');
+  return tag('Pendente', 'amber');
+}
+function fmtMoeda(valor) {
+  return `R$ ${Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+window._prestacaoItensDraft = [];
+function renderCardPrestacao(p, { comBotoesDecisao } = {}) {
+  const itensHtml = p.itens.map((it) => `
+    <div class="pc-item-linha" style="display:flex; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line,#eee);">
+      ${it.foto ? `<img src="${esc(it.foto)}" style="width:36px; height:36px; object-fit:cover; border-radius:6px; cursor:pointer;" onclick="window.open('${esc(it.foto)}','_blank')">` : ''}
+      <div style="flex:1;">
+        <b>${esc(CATEGORIA_DESPESA_LABEL[it.categoria] || it.categoria)}</b>
+        ${it.descricao ? ` — ${esc(it.descricao)}` : ''}
+        ${it.data ? ` <span style="color:var(--gray-500,#888);">(${esc(fmtData(it.data))})</span>` : ''}
+      </div>
+      <div>${fmtMoeda(it.valor)}</div>
+    </div>`).join('');
+  return `
+    <div class="panel" id="pc-card-${p.id}">
+      <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>${esc(p.autor_nome)} — ${fmtData(p.criado_em)}</span>
+        ${statusPrestacaoTag(p.status)}
+      </div>
+      ${p.descricao ? `<p>${esc(p.descricao)}</p>` : ''}
+      ${itensHtml}
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+        <b>Total: ${fmtMoeda(p.valor_total)}</b>
+      </div>
+      ${p.status === 'reprovado' && p.comentario_financeiro ? `<div class="admin-note" style="margin-top:8px;"><b>Motivo da reprovação:</b> ${esc(p.comentario_financeiro)}</div>` : ''}
+      ${comBotoesDecisao ? `
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <button class="btn btn-primary btn-sm" onclick="aprovarPrestacaoContas(${p.id})">Aprovar</button>
+          <button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="reprovarPrestacaoContas(${p.id})">Reprovar</button>
+        </div>` : ''}
+    </div>`;
+}
+
+async function renderPrestacaoContasMinhas() {
+  const podeCriar = USER.papel === 'suporte' || USER.papel === 'administrador';
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Prestação de Contas</h1><p>Despesas de viagem/campo lançadas pra aprovação — hospedagem, alimentação, combustível, pedágio e outras.</p></div>
+    ${podeCriar ? `<div class="panel"><button class="btn btn-primary btn-sm" onclick="abrirFormPrestacaoContas()">+ Nova prestação de contas</button><div id="pc-form"></div></div>` : ''}
+    <div id="pc-lista"><div class="empty">Carregando...</div></div>`;
+  const vePodeTodos = USER.papel === 'administrador' || USER.papel === 'supervisor';
+  const { prestacoes } = await api('/api/prestacao-contas/minhas' + (vePodeTodos ? '?todas=1' : ''));
+  const lista = document.getElementById('pc-lista');
+  lista.innerHTML = prestacoes.length
+    ? prestacoes.map((p) => renderCardPrestacao(p)).join('')
+    : '<div class="empty">Nenhuma prestação de contas ainda.</div>';
+}
+
+function abrirFormPrestacaoContas() {
+  window._prestacaoItensDraft = [];
+  const form = document.getElementById('pc-form');
+  form.innerHTML = `
+    <div class="panel" style="background:var(--blue-pale-2); margin-top:10px;">
+      <label>Descrição geral (opcional)</label>
+      <textarea id="pc-descricao" placeholder="Ex.: viagem a Campinas, atendimento OS-000123"></textarea>
+      <h2>Itens de despesa</h2>
+      <div id="pc-itens-draft"></div>
+      <div class="form-grid" style="align-items:end;">
+        <div><label>Categoria</label><select id="pc-item-categoria">
+          ${Object.entries(CATEGORIA_DESPESA_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select></div>
+        <div><label>Data</label><input type="date" id="pc-item-data"></div>
+        <div><label>Valor (R$)</label><input type="number" min="0" step="0.01" id="pc-item-valor"></div>
+        <div><label>Descrição</label><input id="pc-item-descricao" placeholder="opcional"></div>
+        <div><label>Comprovante (foto, opcional)</label><input type="file" accept="image/*" id="pc-item-foto"></div>
+      </div>
+      <button class="btn-outline-sm" onclick="adicionarItemPrestacao()">+ Adicionar item</button>
+      <div style="margin-top:14px;">
+        <button class="btn btn-primary btn-sm" onclick="enviarPrestacaoContas()">Enviar prestação de contas</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('pc-form').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function renderItensDraftPrestacao() {
+  const div = document.getElementById('pc-itens-draft');
+  if (!div) return;
+  if (!window._prestacaoItensDraft.length) { div.innerHTML = '<p style="color:var(--gray-500,#888);">Nenhum item adicionado ainda.</p>'; return; }
+  div.innerHTML = window._prestacaoItensDraft.map((it, i) => `
+    <div style="display:flex; gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line,#e5e5e5);">
+      ${it.foto ? `<img src="${esc(it.foto)}" style="width:32px; height:32px; object-fit:cover; border-radius:6px;">` : ''}
+      <div style="flex:1;">${esc(CATEGORIA_DESPESA_LABEL[it.categoria] || it.categoria)}${it.descricao ? ' — ' + esc(it.descricao) : ''}</div>
+      <div>${fmtMoeda(it.valor)}</div>
+      <button class="btn-outline-sm" onclick="removerItemPrestacao(${i})">Remover</button>
+    </div>`).join('');
+}
+
+async function adicionarItemPrestacao() {
+  const categoria = document.getElementById('pc-item-categoria').value;
+  const data = document.getElementById('pc-item-data').value;
+  const valor = Number(document.getElementById('pc-item-valor').value);
+  const descricao = document.getElementById('pc-item-descricao').value.trim();
+  const arquivoInput = document.getElementById('pc-item-foto');
+  if (!valor || valor <= 0) return mostrarToast('Informe um valor maior que zero.');
+  let foto = null;
+  if (arquivoInput.files && arquivoInput.files[0]) {
+    [foto] = await lerFotosComoDataUrl(arquivoInput.files);
+  }
+  window._prestacaoItensDraft.push({ categoria, data, valor, descricao, foto });
+  document.getElementById('pc-item-valor').value = '';
+  document.getElementById('pc-item-descricao').value = '';
+  arquivoInput.value = '';
+  renderItensDraftPrestacao();
+}
+function removerItemPrestacao(i) {
+  window._prestacaoItensDraft.splice(i, 1);
+  renderItensDraftPrestacao();
+}
+
+async function enviarPrestacaoContas() {
+  if (!window._prestacaoItensDraft.length) return mostrarToast('Adicione ao menos um item de despesa.');
+  const descricao = document.getElementById('pc-descricao').value.trim();
+  try {
+    await api('/api/prestacao-contas', { method: 'POST', body: { descricao, itens: window._prestacaoItensDraft } });
+    mostrarToast('Prestação de contas enviada — aguardando aprovação.');
+    window._prestacaoItensDraft = [];
+    renderPrestacaoContasMinhas();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function renderPrestacaoContasFila() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Prestação de Contas — Aprovação</h1><p>Despesas de viagem/campo lançadas pelos técnicos, aguardando decisão.</p></div>
+    <div id="pc-fila"><div class="empty">Carregando...</div></div>`;
+  const { prestacoes } = await api('/api/prestacao-contas/fila');
+  const div = document.getElementById('pc-fila');
+  div.innerHTML = prestacoes.length
+    ? prestacoes.map((p) => renderCardPrestacao(p, { comBotoesDecisao: true })).join('')
+    : '<div class="empty">Nenhuma prestação de contas pendente.</div>';
+}
+
+async function aprovarPrestacaoContas(id) {
+  try {
+    await api(`/api/prestacao-contas/${id}/aprovar`, { method: 'POST' });
+    mostrarToast('Prestação de contas aprovada.');
+    renderPrestacaoContasFila();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+async function reprovarPrestacaoContas(id) {
+  const comentario = prompt('Explique o motivo da reprovação:');
+  if (comentario === null) return;
+  if (!comentario.trim()) return mostrarToast('Informe o motivo da reprovação.');
+  try {
+    await api(`/api/prestacao-contas/${id}/reprovar`, { method: 'POST', body: { comentario: comentario.trim() } });
+    mostrarToast('Prestação de contas reprovada.');
+    renderPrestacaoContasFila();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
 }
 
 function tag(texto, cor) { return `<span class="tag tag-${cor}">${texto}</span>`; }
