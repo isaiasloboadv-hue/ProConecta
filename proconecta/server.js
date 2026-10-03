@@ -814,9 +814,30 @@ function registroComAutor(data, r) {
 // só extrai string que realmente é uma imagem (sempre vem como "data:image/...;base64,..." —
 // é assim que toda captura de foto/assinatura desse sistema gera o valor no navegador) — assim
 // nunca corre o risco de confundir um texto comprido (laudo técnico, causa, solução) com foto.
+// Tipo restrito aos formatos que o próprio sistema gera (jpeg/png, vindos da câmera/canvas de
+// assinatura, já comprimidos no navegador antes do envio — ver comprimirImagemDataUrl) e tamanho
+// limitado por arquivo: sem isso, qualquer "data:" URI passava, de qualquer tamanho (até o limite
+// geral de 25MB da requisição inteira) — porta aberta pra abuso de armazenamento.
+const TIPO_FOTO_REGEX = /^data:image\/(jpeg|jpg|png|webp);base64,/;
+const TAMANHO_MAX_FOTO_BYTES = 8 * 1024 * 1024; // 8MB — bem acima do que a compressão no navegador produz
 async function extrairFotosProfundo(valor) {
   if (typeof valor === 'string') {
+    // qualquer "data:" URI comprida é tratada como tentativa de anexar um arquivo (é assim que
+    // toda foto/assinatura desse sistema chega) — rejeita explicitamente se não for uma imagem
+    // dos tipos aceitos, ou se passar do limite de tamanho, em vez de deixar passar como texto
+    // comum (isso faria exatamente o que essa função existe pra evitar: inchar o bloco principal).
     if (!valor.startsWith('data:') || valor.length < 100) return valor;
+    if (!TIPO_FOTO_REGEX.test(valor)) {
+      const erro = new Error('Tipo de arquivo não aceito — só imagens (JPEG, PNG ou WEBP).');
+      erro.publico = true;
+      throw erro;
+    }
+    const base64 = valor.slice(valor.indexOf(',') + 1);
+    if (Buffer.byteLength(base64, 'base64') > TAMANHO_MAX_FOTO_BYTES) {
+      const erro = new Error('Uma das fotos enviadas passa do limite de 8MB.');
+      erro.publico = true;
+      throw erro;
+    }
     const id = await db.salvarFoto(valor);
     return { __foto_ref: id };
   }
@@ -4991,6 +5012,10 @@ const server = http.createServer(async (req, res) => {
       await rotaEncontrada.handler(req, res, m);
     } catch (e) {
       console.error(e);
+      // erro.publico = true marca um erro de validação com mensagem segura pra mostrar ao usuário
+      // (ex.: limite de tamanho de foto) — tudo o mais continua como "Erro interno." genérico, pra
+      // nunca vazar detalhe de uma falha inesperada de verdade pra quem está do outro lado da API.
+      if (e.publico) return enviarJSON(res, e.status || 400, { erro: e.message });
       enviarJSON(res, 500, { erro: 'Erro interno.', detalhe: String(e.message || e) });
     }
     return;
