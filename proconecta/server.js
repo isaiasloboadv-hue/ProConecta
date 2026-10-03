@@ -3756,7 +3756,7 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   const novo = tenant.criar(data, 'usuarios', user.empresa_id, {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
-    celular: body.celular || '', cliente_id: body.cliente_id || null,
+    celular: body.celular || '', foto_perfil: '', cliente_id: body.cliente_id || null,
     acesso_total, menus, departamento,
     status: 'convite_enviado', convite_token,
     salt: null, hash: null,
@@ -3818,7 +3818,8 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   Object.assign(alvo, {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
-    celular: body.celular || '', cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
+    celular: body.celular || '', foto_perfil: body.foto_perfil !== undefined ? body.foto_perfil : (alvo.foto_perfil || ''),
+    cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
     acesso_total, menus, departamento,
   });
   db.save(data);

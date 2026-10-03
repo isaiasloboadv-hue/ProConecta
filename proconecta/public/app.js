@@ -788,6 +788,7 @@ async function ir(pagina) {
     if (pagina === 'fila-reparo') return renderFilaReparo();
     if (pagina === 'fila-estoque') return renderFilaEstoque();
     if (pagina === 'equipe') return renderEquipe();
+    if (pagina === 'cadastros') return renderCadastros();
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
     if (pagina === 'minhas-viagens') return renderMinhasViagens();
     if (pagina === 'escala-folga') return renderEscalaFolga();
@@ -13944,7 +13945,113 @@ async function renderEquipe() {
       <div class="equipe-card-titulo">Acompanhamento de viagens</div>
       <div class="stat-valor">${diariasComBonus}</div>
       <div class="stat-label">diária(s) com bônus este mês</div>
+    </div>
+    <div class="equipe-card" onclick="ir('cadastros')">
+      <div class="equipe-card-icone">🪪</div>
+      <div class="equipe-card-titulo">Cadastros</div>
+      <div class="stat-valor">${tecnicosAtivos.length}</div>
+      <div class="stat-label">ficha(s) cadastral(is)</div>
     </div>`;
+}
+
+// silhueta padrão (estilo foto de perfil "em branco" do Facebook antigo) pra quem ainda não tem
+// foto cadastrada — cinza de fundo com a cabeça+ombros num tom mais claro, sem depender de
+// nenhuma imagem externa (SVG embutido, funciona offline).
+function avatarFichaHtml(usuario, tamanhoPx) {
+  if (usuario && usuario.foto_perfil) {
+    return `<img src="${usuario.foto_perfil}" alt="Foto de ${esc(usuario.nome)}" style="width:${tamanhoPx}px; height:${tamanhoPx}px; border-radius:50%; object-fit:cover; display:block;">`;
+  }
+  return `
+    <svg width="${tamanhoPx}" height="${tamanhoPx}" viewBox="0 0 100 100" style="border-radius:50%; display:block;">
+      <circle cx="50" cy="50" r="50" fill="#ccd3db"/>
+      <circle cx="50" cy="40" r="19" fill="#f2f4f7"/>
+      <path d="M50 62c-25 0-42 14-42 32v6h84v-6c0-18-17-32-42-32z" fill="#f2f4f7"/>
+    </svg>`;
+}
+
+async function renderCadastros() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Cadastros</h1><p>Ficha cadastral de cada técnico — nome, e-mail, telefone e foto de perfil.</p>
+      <button class="btn-outline-sm" onclick="ir('equipe')">‹ Equipe</button>
+    </div>
+    <div class="ficha-grid" id="cadastros-grid"><div class="empty">Carregando...</div></div>`;
+
+  const { usuarios } = await api('/api/usuarios');
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte').sort((a, b) => a.nome.localeCompare(b.nome));
+  window._cadastrosCache = tecnicos;
+
+  const grid = document.getElementById('cadastros-grid');
+  if (!grid) return;
+  if (!tecnicos.length) { grid.innerHTML = `<div class="empty">Nenhum técnico cadastrado ainda.</div>`; return; }
+  grid.innerHTML = tecnicos.map((u) => `
+    <div class="ficha-card" onclick="abrirFichaCadastral(${u.id})">
+      <div class="ficha-card-avatar">${avatarFichaHtml(u, 72)}</div>
+      <div class="ficha-card-nome">${esc(u.nome)}</div>
+      <div class="ficha-card-info">${esc(u.email)}</div>
+      <div class="ficha-card-info">${esc(u.celular || 'Telefone não informado')}</div>
+      ${u.status === 'convite_enviado' ? tag('Convite pendente', 'amber') : ''}
+    </div>`).join('');
+}
+
+function trocarFotoFicha(event) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    comprimirImagemDataUrl(leitor.result).then((dataUrl) => {
+      window._fichaFotoNova = dataUrl;
+      const wrapper = document.getElementById('ficha-avatar-grande');
+      if (wrapper) wrapper.innerHTML = `<img src="${dataUrl}" style="width:120px; height:120px; border-radius:50%; object-fit:cover; display:block;">`;
+    });
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
+async function abrirFichaCadastral(id) {
+  const usuario = (window._cadastrosCache || []).find((u) => u.id === id);
+  if (!usuario) return;
+  window._fichaFotoNova = null;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Ficha cadastral</h1><p>Dados simples do técnico — nome, e-mail, telefone e foto.</p>
+      <button class="btn-outline-sm" onclick="renderCadastros()">‹ Cadastros</button>
+    </div>
+    <div class="panel" style="max-width:420px;">
+      <div style="text-align:center; margin-bottom:18px;">
+        <label style="cursor:pointer; display:inline-block;">
+          <span id="ficha-avatar-grande">${avatarFichaHtml(usuario, 120)}</span>
+          <input type="file" accept="image/*" style="display:none" onchange="trocarFotoFicha(event)">
+          <div style="font-size:12.5px; color:var(--blue); margin-top:8px;">Trocar foto</div>
+        </label>
+      </div>
+      <div class="field"><label>Nome</label><input id="ficha-nome" value="${esc(usuario.nome)}"></div>
+      <div class="field"><label>E-mail</label><input id="ficha-email" type="email" value="${esc(usuario.email)}"></div>
+      <div class="field"><label>Telefone</label><input id="ficha-telefone" value="${esc(usuario.celular || '')}" placeholder="(00) 00000-0000"></div>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:10px;" onclick="salvarFichaCadastral(${id})">Salvar</button>
+    </div>`;
+}
+
+async function salvarFichaCadastral(id) {
+  const usuario = (window._cadastrosCache || []).find((u) => u.id === id);
+  if (!usuario) return;
+  const nome = document.getElementById('ficha-nome').value.trim();
+  const email = document.getElementById('ficha-email').value.trim();
+  if (!nome || !email) return alert('Preencha nome e e-mail.');
+  const body = {
+    nome, email,
+    cargo: usuario.cargo || '', setor: usuario.setor || '',
+    papel: usuario.papel, cliente_id: usuario.cliente_id || null,
+    acesso_total: usuario.acesso_total, menus: usuario.menus || [],
+    departamento: usuario.departamento || null,
+    celular: document.getElementById('ficha-telefone').value.trim(),
+    foto_perfil: window._fichaFotoNova !== null ? window._fichaFotoNova : (usuario.foto_perfil || ''),
+  };
+  try {
+    await api(`/api/usuarios/${id}`, { method: 'PUT', body });
+    mostrarToast('Ficha cadastral atualizada.');
+    renderCadastros();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 let acompanhamentoMes = new Date().toISOString().slice(0, 7);

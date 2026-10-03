@@ -133,7 +133,7 @@ function bootstrapAdminMaster(data) {
   data.usuarios.push({
     id: nextId(data, 'usuarios'),
     nome: 'Desenvolvedor', email, papel: 'administrador',
-    cargo: '', setor: '', celular: '', cliente_id: null,
+    cargo: '', setor: '', celular: '', foto_perfil: '', cliente_id: null,
     status: 'ativo', convite_token: null, salt, hash,
     protegido: true,
   });
@@ -166,7 +166,7 @@ function bootstrapSuperAdmin(data) {
   data.usuarios.push({
     id: nextId(data, 'usuarios'),
     nome: 'Super Admin', email, papel: 'super_admin', empresa_id: null,
-    cargo: '', setor: '', celular: '', cliente_id: null,
+    cargo: '', setor: '', celular: '', foto_perfil: '', cliente_id: null,
     status: 'ativo', convite_token: null, salt, hash,
     protegido: true,
   });
@@ -457,6 +457,9 @@ function migrar(data) {
       existente.cliente_id = cliente.id;
     }
   }
+  // ficha cadastral (menu Equipe > Cadastros): foto de perfil opcional — sem ela, o front mostra
+  // uma silhueta padrão, então aqui só garante que o campo exista (string vazia) em vez de undefined.
+  data.usuarios.forEach((u) => { if (u.foto_perfil === undefined) u.foto_perfil = ''; });
   protegerAdminMaster(data);
   return data;
 }
