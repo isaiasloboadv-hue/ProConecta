@@ -917,6 +917,8 @@ function renderListaEmpresasPlataforma(empresas) {
         <div><label>Cor secundária</label><input type="color" id="pe-dados-corsec-${e.id}" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
         <div><label>Bônus de viagem — valor/diária (R$)</label><input type="number" min="0" step="0.01" id="pe-dados-valorbonus-${e.id}" value="${esc(e.valor_bonus_viagem ?? 200)}"></div>
         <div><label>Bônus de viagem — limite diárias/mês</label><input type="number" min="0" step="1" id="pe-dados-limitebonus-${e.id}" value="${esc(e.limite_viagens_bonus_mes ?? 7)}"></div>
+        <div><label>Cota do plano — limite de técnicos</label><input type="number" min="0" step="1" id="pe-dados-limitetecnicos-${e.id}" value="${e.limite_tecnicos != null ? esc(e.limite_tecnicos) : ''}" placeholder="sem limite"></div>
+        <div><label>Cota do plano — limite de equipamentos</label><input type="number" min="0" step="1" id="pe-dados-limiteequip-${e.id}" value="${e.limite_equipamentos != null ? esc(e.limite_equipamentos) : ''}" placeholder="sem limite"></div>
       </div>
       <button class="btn btn-outline-sm" onclick="salvarDadosEmpresaPlataforma(${e.id})">Salvar dados</button>
       <h2>Administradores</h2>
@@ -1022,6 +1024,8 @@ async function salvarDadosEmpresaPlataforma(empresaId) {
     cor_secundaria: document.getElementById(`pe-dados-corsec-${empresaId}`).value,
     valor_bonus_viagem: Number(document.getElementById(`pe-dados-valorbonus-${empresaId}`).value),
     limite_viagens_bonus_mes: Number(document.getElementById(`pe-dados-limitebonus-${empresaId}`).value),
+    limite_tecnicos: document.getElementById(`pe-dados-limitetecnicos-${empresaId}`).value === '' ? null : Number(document.getElementById(`pe-dados-limitetecnicos-${empresaId}`).value),
+    limite_equipamentos: document.getElementById(`pe-dados-limiteequip-${empresaId}`).value === '' ? null : Number(document.getElementById(`pe-dados-limiteequip-${empresaId}`).value),
   };
   if (window._plataformaLogoNovaPorEmpresa[empresaId] !== undefined) body.logo_url = window._plataformaLogoNovaPorEmpresa[empresaId];
   try {

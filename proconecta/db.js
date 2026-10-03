@@ -123,6 +123,11 @@ function sincronizarEmpresaPadrao(data) {
   // nasce com o mesmo valor de hoje, só editável a partir de agora pelo administrador/Super Admin.
   if (empresa.valor_bonus_viagem === undefined) empresa.valor_bonus_viagem = 200;
   if (empresa.limite_viagens_bonus_mes === undefined) empresa.limite_viagens_bonus_mes = 7;
+  // cotas de plano (Etapa 6/passo 3) — null = sem limite (comportamento de hoje, preservado pra
+  // quem já existia). Só o Super Admin define/edita (não é um dado da própria empresa, é o que
+  // ela contratou) — ver PUT /api/plataforma/empresas/:id.
+  if (empresa.limite_tecnicos === undefined) empresa.limite_tecnicos = null;
+  if (empresa.limite_equipamentos === undefined) empresa.limite_equipamentos = null;
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;

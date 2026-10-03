@@ -3787,6 +3787,18 @@ rota('GET', /^\/api\/equipamentos\/buscar-por-serie$/, async (req, res) => {
 });
 
 // POST /api/equipamentos — cadastra um tipo/modelo no catálogo (ainda sem cliente nem nº de série)
+// cota de plano (Etapa 6/passo 3) — limite de equipamentos contratado pela empresa (catálogo +
+// unidades atreladas, contadas juntas); null/sem campo = sem limite. Devolve a mensagem de erro
+// (ou null se estiver dentro da cota) — os dois pontos de criação de equipamento chamam isso.
+function erroLimiteEquipamentos(data, empresaId) {
+  const empresa = data.empresas.find((e) => e.id === empresaId);
+  const limite = empresa && empresa.limite_equipamentos;
+  if (limite == null) return null;
+  const jaTem = tenant.listar(data, 'equipamentos', empresaId).length;
+  if (jaTem >= limite) return `Limite de equipamentos do plano atingido (${limite}). Fale com o suporte pra ampliar.`;
+  return null;
+}
+
 rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção cadastram equipamentos.' });
@@ -3795,6 +3807,8 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
     return enviarJSON(res, 400, { erro: 'Tipo e modelo são obrigatórios.' });
   }
   const data = db.load();
+  const erroLimite = erroLimiteEquipamentos(data, user.empresa_id);
+  if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: null,
     tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
@@ -3858,6 +3872,8 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
   }
   const cliente = tenant.buscar(data, 'clientes', Number(body.cliente_id), user.empresa_id);
   if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
+  const erroLimite = erroLimiteEquipamentos(data, user.empresa_id);
+  if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: cliente.id,
     tipo: catalogo.tipo,
@@ -3909,6 +3925,19 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   }
   if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
+  }
+  // cota de plano (Etapa 6/passo 3) — limite de técnicos (papel "suporte") contratado pela
+  // empresa; null/sem campo = sem limite (maioria das empresas hoje). Conta convite pendente
+  // junto (já ocupa a vaga, mesmo antes de ativar a conta).
+  if (body.papel === 'suporte') {
+    const empresaDoUsuario = data.empresas.find((e) => e.id === user.empresa_id);
+    const limite = empresaDoUsuario && empresaDoUsuario.limite_tecnicos;
+    if (limite != null) {
+      const jaTem = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte').length;
+      if (jaTem >= limite) {
+        return enviarJSON(res, 400, { erro: `Limite de técnicos do plano atingido (${limite}). Fale com o suporte pra ampliar.` });
+      }
+    }
   }
   const convite_token = gerarTokenConvite();
   const { acesso_total, menus } = sanitizarMenusAcesso(body.papel, body);
@@ -5074,6 +5103,10 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
     versao_id: versao ? versao.id : null,
     modulos_ativos: versao ? [...versao.modulos] : [],
     terminologia: {},
+    // cotas de plano (Etapa 6/passo 3): a empresa nova herda o limite padrão da versão
+    // escolhida (null = sem limite), editável depois por empresa pela rota de PUT abaixo.
+    limite_tecnicos: versao && versao.limite_tecnicos != null ? versao.limite_tecnicos : null,
+    limite_equipamentos: versao && versao.limite_equipamentos != null ? versao.limite_equipamentos : null,
   };
   data.empresas.push(empresa);
   db.save(data);
@@ -5112,6 +5145,14 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
   if (body.limite_viagens_bonus_mes !== undefined) {
     const limite = Number(body.limite_viagens_bonus_mes);
     if (Number.isInteger(limite) && limite >= 0) empresa.limite_viagens_bonus_mes = limite;
+  }
+  // cotas de plano (Etapa 6/passo 3) — vazio/null = sem limite (removido de propósito, pra o
+  // Super Admin conseguir voltar uma empresa pra "sem limite" depois de ter definido uma cota).
+  if (body.limite_tecnicos !== undefined) {
+    empresa.limite_tecnicos = body.limite_tecnicos === null || body.limite_tecnicos === '' ? null : Number(body.limite_tecnicos);
+  }
+  if (body.limite_equipamentos !== undefined) {
+    empresa.limite_equipamentos = body.limite_equipamentos === null || body.limite_equipamentos === '' ? null : Number(body.limite_equipamentos);
   }
   db.save(data);
   enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });

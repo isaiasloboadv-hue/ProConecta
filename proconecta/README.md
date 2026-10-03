@@ -305,6 +305,24 @@ Rotas: `POST /api/prestacao-contas`, `GET /api/prestacao-contas/minhas`
 `GET /api/prestacao-contas/fila`, `POST /api/prestacao-contas/:id/aprovar`,
 `POST /api/prestacao-contas/:id/reprovar`.
 
+## Cotas de plano (limite de técnicos e de equipamentos)
+
+O Super Admin pode definir, por empresa (painel da Plataforma), um limite
+de quantos usuários com papel "suporte" (técnico) e quantos equipamentos
+(catálogo + unidades atreladas, juntos) aquela empresa pode cadastrar —
+reflexo do plano contratado. Sem limite definido (campo vazio = `null`,
+o padrão pra toda empresa existente), nada muda — é assim que o sistema
+sempre funcionou.
+
+Com um limite configurado, o servidor recusa passar da cota em qualquer
+ponto de criação (`POST /api/usuarios` com `papel: "suporte"`,
+`POST /api/equipamentos`, `POST /api/equipamentos/:id/atrelar`), com uma
+mensagem clara pedindo pra falar com o suporte pra ampliar. Uma empresa
+nova, cadastrada a partir de uma versão/pacote que já tenha
+`limite_tecnicos`/`limite_equipamentos` definidos, herda esse limite —
+editável depois por empresa, independente da versão original (mesmo
+padrão de `modulos_ativos`).
+
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 
 Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua
