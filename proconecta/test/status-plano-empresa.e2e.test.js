@@ -99,7 +99,13 @@ test('status da empresa: suspende login novo e sessão já aberta; empresa 1 nun
     // a sessão que já estava logada (token ainda "válido") é bloqueada na próxima requisição
     const usoDepoisDeSuspender = await fetch(`${base}/api/usuarios`, { headers: authEmpresa2 });
     assert.equal(usoDepoisDeSuspender.status, 403);
-    assert.match((await usoDepoisDeSuspender.json()).erro, /suspensa/);
+    const corpoUsoDepoisDeSuspender = await usoDepoisDeSuspender.json();
+    assert.match(corpoUsoDepoisDeSuspender.erro, /suspensa/);
+    // código de erro específico (Etapa 7, melhoria): o front usa isso pra fazer logout automático
+    // e mostrar um aviso claro, mesmo em chamadas silenciosas de fundo (sino, chat), que nunca
+    // mostram mensagem de erro pro usuário.
+    assert.equal(corpoUsoDepoisDeSuspender.codigo, 'empresa_suspensa');
+    assert.equal((await loginBloqueado.json()).codigo, 'empresa_suspensa');
 
     // super_admin nunca é afetado (não pertence a empresa nenhuma)
     const superAindaFunciona = await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper });

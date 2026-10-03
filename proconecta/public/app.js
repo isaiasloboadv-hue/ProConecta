@@ -136,6 +136,14 @@ async function api(path, opts = {}) {
       // instabilidade da hospedagem (ex: "acordando" após período inativo no plano gratuito),
       // não um erro de validação de verdade
       erro.falhaTransitoria = corpoInvalido || !data.erro || [502, 503, 504].includes(res.status);
+      // empresa suspensa (Etapa 7/passo 1): acontece em qualquer chamada, inclusive as silenciosas
+      // em segundo plano (sino, chat), que nunca mostram erro pro usuário — por isso o logout e o
+      // aviso saem daqui, central, em vez de depender do catch de cada tela.
+      if (data.codigo === 'empresa_suspensa' && TOKEN) {
+        sair();
+        const erroEl = document.getElementById('login-erro');
+        if (erroEl) { erroEl.textContent = erro.message; erroEl.classList.remove('hidden'); }
+      }
       throw erro;
     }
     return data;

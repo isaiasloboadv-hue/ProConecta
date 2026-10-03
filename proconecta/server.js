@@ -977,7 +977,7 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   // empresa suspensa (Etapa 7/passo 1): bloqueia login de qualquer usuário dela, exceto
   // super_admin (não pertence a empresa nenhuma — empresaDoUsuario fica undefined pra ele).
   if (empresaDoUsuario && empresaDoUsuario.status === 'suspensa') {
-    return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.' });
+    return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.', codigo: 'empresa_suspensa' });
   }
   const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: {
@@ -5378,7 +5378,7 @@ const server = http.createServer(async (req, res) => {
         if (user.empresa_id) {
           const empresaDoUsuario = dadosAtuais.empresas.find((e) => e.id === user.empresa_id);
           if (empresaDoUsuario && empresaDoUsuario.status === 'suspensa') {
-            return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.' });
+            return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.', codigo: 'empresa_suspensa' });
           }
         }
         if (rotaEncontrada.modulo !== 'nucleo' && !db.moduloAtivo(dadosAtuais, user.empresa_id, rotaEncontrada.modulo)) {

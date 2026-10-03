@@ -341,6 +341,12 @@ O painel da Plataforma também guarda, por empresa, `plano_valor_mensal` e
 nesta etapa. Os dois campos aceitam ficar em branco (`null`, o padrão de
 toda empresa).
 
+No front, qualquer resposta da API com `codigo: "empresa_suspensa"` (não só
+a de login) dispara logout automático e mostra o aviso na tela de login —
+isso cobre também as chamadas silenciosas em segundo plano (sino de
+notificações a cada 15s, chat interno), que nunca mostravam erro nenhum
+pro usuário antes dessa checagem central em `api()`.
+
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 
 Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua
