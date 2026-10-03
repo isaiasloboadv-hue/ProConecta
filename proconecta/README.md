@@ -42,6 +42,23 @@ próprio administrador cadastra os demais usuários pela tela **Usuários**
 (convite de primeiro acesso por e-mail — veja "E-mail de convite de
 verdade" abaixo).
 
+## Segredo do token de login (PROCONECTA_SECRET)
+
+O token que mantém o usuário logado é assinado com uma chave secreta. Antes
+de colocar em produção, defina:
+
+```
+PROCONECTA_SECRET="uma-string-longa-e-aleatória-só-sua"
+```
+
+(no Render, adicione em **Environment**, igual à `DATABASE_URL`). Sem essa
+variável configurada, o sistema roda normalmente (gera uma chave aleatória
+sozinho a cada vez que o processo sobe — dá pra testar local sem configurar
+nada), mas **todo reinício do servidor derruba as sessões abertas**, já que
+a chave muda a cada boot. Configure essa variável antes de ir pra produção
+pra evitar isso — e nunca reaproveite uma chave que já apareceu em algum
+lugar público (um commit antigo, um chat, etc.).
+
 ## O que já funciona de verdade
 
 - **Login** com senha (hash + salt, sem senha em texto puro) e sessão por token assinado
