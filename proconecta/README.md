@@ -217,6 +217,29 @@ node scripts/migrar-fotos-supabase.js
 O script só copia — nunca apaga nada do lugar antigo. Confirme que as fotos
 abrem certo antes de limpar manualmente a tabela/pasta antiga, se quiser.
 
+## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
+
+Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua
+sendo a fonte de verdade que o app lê e escreve), o sistema já cria tabelas
+próprias — `t_usuarios`, `t_clientes`, `t_equipamentos`, `t_agenda`,
+`t_visitas`, `t_relatorios_manutencao`, `t_chamados`, `t_registros` — com
+`empresa_id` indexado em todas (e também técnico + data em `t_agenda`, e
+busca de texto em `t_registros`/`t_relatorios_manutencao`). É o primeiro
+passo pra sair de "tudo numa linha JSONB só" pra um banco de verdade,
+indexado — **ainda não é o caminho que o app usa pra ler/escrever no dia a
+dia** (isso é um trabalho maior, à parte, feito aos poucos).
+
+Pra preencher essas tabelas com um retrato dos dados de agora (não
+apaga nem muda o `app_state` original — só copia):
+
+```
+DATABASE_URL="..." node scripts/migrar-para-tabelas.js
+```
+
+Pode rodar de novo quando quiser, pra atualizar o retrato — idempotente,
+nunca duplica linha. O script também confere, ao final, se a contagem de
+cada coleção bate entre o blob e a tabela nova.
+
 ## E-mail de verdade (convite de acesso e cópia de relatórios)
 
 Sem configuração, o link de primeiro acesso só aparece na tela do

@@ -510,6 +510,52 @@ function obterPool() {
 
 let cache = null;
 
+// ---------- Etapa 4 (briefing white label) — tabelas indexadas por empresa, fase 1 ----------
+// Fase "segura": cria as tabelas (vazias) e deixa prontas pra receber os dados via script de
+// migração (scripts/migrar-para-tabelas.js) — o app continua lendo/escrevendo pelo blob JSONB
+// de sempre (app_state), sem nenhuma mudança de comportamento. Nada aqui é lido pelo resto do
+// sistema ainda; é só a fundação. O corte de verdade (tenant.js passar a consultar essas tabelas
+// em vez do array em memória) é um trabalho grande à parte — torna as consultas assíncronas,
+// o que mexe em centenas de pontos de server.js — e fica pra uma etapa futura, feita aos poucos.
+//
+// Cada linha guarda o registro inteiro em `dados` (JSONB) — mais simples e resistente a ficar
+// desatualizado que replicar campo por campo numa coluna própria, já que o schema de cada
+// coleção ainda muda com frequência do lado do db.js/server.js. `empresa_id` (e, pra agenda,
+// também técnico/data) viram colunas de verdade, indexadas — é isso que dá a consulta rápida por
+// empresa (e por empresa+técnico+data na agenda) que o diagnóstico apontou como faltando, e é
+// o que permite ligar Row Level Security depois (cada empresa só enxerga suas próprias linhas no
+// nível do próprio banco — hoje impossível, porque tudo mora numa linha JSONB só).
+// 'agenda' entra na lista por completude (pro script de migração saber que ela também tem tabela
+// própria), mas é criada à parte logo abaixo, com as colunas extras de técnico/data.
+const COLECOES_EM_TABELA = ['usuarios', 'clientes', 'equipamentos', 'agenda', 'visitas', 'relatorios_manutencao', 'chamados', 'registros'];
+const COLECOES_SEM_COLUNAS_EXTRAS = COLECOES_EM_TABELA.filter((c) => c !== 'agenda');
+
+async function inicializarTabelasMultiempresa(p) {
+  for (const colecao of COLECOES_SEM_COLUNAS_EXTRAS) {
+    await p.query(`CREATE TABLE IF NOT EXISTS t_${colecao} (
+      id INTEGER PRIMARY KEY, empresa_id INTEGER NOT NULL, dados JSONB NOT NULL,
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+    await p.query(`CREATE INDEX IF NOT EXISTS idx_t_${colecao}_empresa ON t_${colecao} (empresa_id)`);
+  }
+  // agenda: além de empresa_id, técnico + data — é a combinação mais consultada do sistema
+  // (agenda do técnico, calendário geral do mês)
+  await p.query(`CREATE TABLE IF NOT EXISTS t_agenda (
+    id INTEGER PRIMARY KEY, empresa_id INTEGER NOT NULL, tecnico_id INTEGER, data_hora_inicio TEXT,
+    dados JSONB NOT NULL, atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`);
+  await p.query('CREATE INDEX IF NOT EXISTS idx_t_agenda_empresa_tecnico_data ON t_agenda (empresa_id, tecnico_id, data_hora_inicio)');
+  // busca de texto na biblioteca técnica (registros) e nos relatórios — gerada automaticamente a
+  // partir do próprio JSON (mais simples que listar campo por campo e manter isso sincronizado
+  // manualmente; o tokenizador do Postgres já ignora a pontuação/estrutura do JSON sozinho)
+  await p.query(`ALTER TABLE t_registros ADD COLUMN IF NOT EXISTS busca_texto TSVECTOR
+    GENERATED ALWAYS AS (to_tsvector('portuguese', dados::text)) STORED`);
+  await p.query('CREATE INDEX IF NOT EXISTS idx_t_registros_busca ON t_registros USING GIN (busca_texto)');
+  await p.query(`ALTER TABLE t_relatorios_manutencao ADD COLUMN IF NOT EXISTS busca_texto TSVECTOR
+    GENERATED ALWAYS AS (to_tsvector('portuguese', dados::text)) STORED`);
+  await p.query('CREATE INDEX IF NOT EXISTS idx_t_relatorios_manutencao_busca ON t_relatorios_manutencao USING GIN (busca_texto)');
+}
+
 async function inicializarPostgres() {
   const p = obterPool();
   await p.query('CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY, data JSONB NOT NULL)');
@@ -523,6 +569,7 @@ async function inicializarPostgres() {
     texto TEXT NOT NULL, criado_em TIMESTAMPTZ NOT NULL DEFAULT now(), lida BOOLEAN NOT NULL DEFAULT false
   )`);
   await p.query('CREATE INDEX IF NOT EXISTS idx_mensagens_internas_par ON mensagens_internas_tbl (remetente_id, destinatario_id)');
+  await inicializarTabelasMultiempresa(p);
   const r = await p.query('SELECT data FROM app_state WHERE id = 1');
   if (r.rows.length === 0) {
     const data = seed();
@@ -829,4 +876,5 @@ module.exports = {
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,
+  obterPool, COLECOES_EM_TABELA,
 };
