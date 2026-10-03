@@ -269,6 +269,21 @@ técnica continua sendo a mesma configurada em `EMAIL_SMTP_USER`/
 exigiria guardar credencial de e-mail por empresa, um dado sensível a mais
 pra administrar).
 
+## Papéis supervisor e financeiro
+
+Dois papéis novos, cadastráveis só pelo administrador geral (menu
+**Usuários**):
+
+- **Supervisor**: acesso de leitura às mesmas telas do administrador —
+  Agenda geral, Relatório, Biblioteca, Clientes, Equipamentos, Usuários e
+  Equipe (viagens/bônus, escala de folga, solicitações). O servidor libera
+  essas rotas pra esse papel só em `GET`; toda rota de escrita continua
+  exigindo `administrador`, então qualquer botão de criar/editar/excluir
+  que apareça nessas telas reaproveitadas falha com 403 — a restrição é
+  garantida no servidor, não só por esconder o botão.
+- **Financeiro**: ainda sem tela própria — aprova a prestação de contas
+  quando esse módulo (hoje só esqueleto) for construído de verdade.
+
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 
 Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua

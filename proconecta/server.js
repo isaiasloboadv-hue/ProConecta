@@ -1454,7 +1454,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
 // a O.S. de ser salva sem justificativa, por isso as duas contam junto pro selo vermelho).
 rota('GET', /^\/api\/tecnicos\/viagens$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  if (!exigirPapel(user, ['administrador', 'suporte', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();
@@ -1627,7 +1627,7 @@ rota('DELETE', /^\/api\/feriados\/(\d+)$/, async (req, res, m) => {
 // abaixo) pro próprio Calendário mostrar a escala dele e a dos colegas.
 rota('GET', /^\/api\/escala-folgas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  if (!exigirPapel(user, ['administrador', 'suporte', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const mes = query.mes || new Date().toISOString().slice(0, 7);
   const data = db.load();
@@ -1765,7 +1765,7 @@ rota('POST', /^\/api\/solicitacoes-rh$/, async (req, res) => {
 // opcionais ?tipo= e ?status=)
 rota('GET', /^\/api\/solicitacoes-rh$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   const solicitacoesDaEmpresa = tenant.listar(data, 'solicitacoes_rh', user.empresa_id);
@@ -3103,11 +3103,11 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   // por autor_id logo abaixo já garante que ele não vê relatório de outra pessoa. Com ?todas=1 o
   // administrador vê os relatórios de todo mundo (mesmo uso do ?todas=1 de /api/agenda), pra
   // telas como a linha do tempo da O.S. conseguirem mostrar o relatório de qualquer técnico.
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id);
-  if (!(user.papel === 'administrador' && query.todas === '1')) {
+  if (!(['administrador', 'supervisor'].includes(user.papel) && query.todas === '1')) {
     lista = lista.filter((r) => r.autor_id === user.id);
   }
   const agendaDaEmpresa = tenant.listar(data, 'agenda', user.empresa_id);
@@ -3127,11 +3127,11 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
 // GET /api/relatorios-manutencao/:id — reabrir um relatório já criado (pra gerar o PDF de novo)
 rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
-  // administrador vê/reabre o relatório de qualquer técnico (tela "Relatório" com filtro por
-  // todo mundo); o técnico continua só vendo os que ele mesmo criou.
-  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
+  // administrador (e supervisor, só leitura) vê/reabre o relatório de qualquer técnico (tela
+  // "Relatório" com filtro por todo mundo); o técnico continua só vendo os que ele mesmo criou.
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || ['administrador', 'supervisor'].includes(user.papel)));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
@@ -3683,7 +3683,7 @@ rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // GET /api/clientes — administrador: lista de empresas-cliente (para vincular usuário/chamado)
 rota('GET', /^\/api\/clientes$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção veem clientes.' });
+  if (!exigirPapel(user, ['administrador', 'producao', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção veem clientes.' });
   const data = db.load();
   enviarJSON(res, 200, { clientes: tenant.listar(data, 'clientes', user.empresa_id) });
 });
@@ -3884,7 +3884,7 @@ rota('GET', /^\/api\/equipamentos\/(\d+)\/historico$/, async (req, res, m) => {
 // GET /api/usuarios
 rota('GET', /^\/api\/usuarios$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê usuários.' });
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê usuários.' });
   const data = db.load();
   const usuariosDaEmpresa = tenant.listar(data, 'usuarios', user.empresa_id);
   const admin = usuariosDaEmpresa.find((u) => u.id === user.id) || user;
@@ -4015,7 +4015,7 @@ rota('DELETE', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
 // dedicados por tipo. Mesma regra de acesso do resto da ficha: só administrador.
 rota('GET', /^\/api\/usuarios\/(\d+)\/ficha-extra$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê a ficha cadastral.' });
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê a ficha cadastral.' });
   const data = db.load();
   const usuarioId = Number(m[1]);
   if (!tenant.buscar(data, 'usuarios', usuarioId, user.empresa_id)) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
@@ -4262,12 +4262,12 @@ rota('GET', /^\/api\/chamados\/meus-encerrados$/, async (req, res) => {
 // específico, incluindo o histórico dele com ?status=encerrado&tecnico_id=).
 rota('GET', /^\/api\/chamados$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só técnico ou administrador acessam a fila de atendimento.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   const chamadosDaEmpresa = tenant.listar(data, 'chamados', user.empresa_id);
   let lista;
-  if (user.papel === 'administrador') {
+  if (['administrador', 'supervisor'].includes(user.papel)) {
     lista = query.status ? chamadosDaEmpresa.filter((c) => c.status === query.status) : chamadosDaEmpresa.filter((c) => c.status !== 'encerrado');
     // tela "Chat" do administrador: além do painel geral (sem filtro), usa isso pra abrir o
     // histórico/atendimentos de um técnico específico (modal "técnicos atendendo").

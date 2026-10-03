@@ -18,7 +18,7 @@ function t(chave, padrao) {
   return (USER && USER.terminologia && USER.terminologia[chave]) || padrao;
 }
 
-const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin' };
+const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
 // Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
 const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda' };
@@ -649,6 +649,32 @@ const NAV = {
   super_admin: [
     { key: 'painel-plataforma', label: 'Plataforma', page: 'painel-plataforma' },
   ],
+  // Etapa 6 do briefing white label — papel "só visualização de tudo": reaproveita as MESMAS
+  // telas do administrador (o servidor já libera leitura pra supervisor nas rotas certas — ver
+  // server.js), mas nenhuma rota de escrita libera esse papel, então qualquer botão de
+  // criar/editar/excluir/aprovar que apareça nessas telas falha com 403 no servidor. É a
+  // abordagem rápida escolhida agora; esconder esses botões de verdade fica pra um próximo passo.
+  supervisor: [
+    { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
+    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
+      { key: 'acessar', label: 'Acessar biblioteca', children: [
+        { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
+        { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
+      ]},
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
+    ]},
+    { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
+    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
+      { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
+      { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+    ]},
+    { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
+    { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
+  ],
+  // financeiro (aprova prestação de contas) ainda sem tela própria — ganha o item de menu
+  // quando o módulo prestacao_contas de verdade for construído (próximo passo desta mesma etapa).
+  financeiro: [],
 };
 
 // ícone de cada item de topo do menu lateral (só o nível principal — os submenus continuam sem
@@ -1392,7 +1418,7 @@ function numerosSequenciaisOS(lista) {
 let minhaAgendaFiltro = 'ativos';
 
 async function renderAgenda() {
-  if (USER.papel === 'administrador') {
+  if (USER.papel === 'administrador' || USER.papel === 'supervisor') {
     await carregarAgendaComVisitas();
     return renderAgendaCalendario();
   }
@@ -5736,7 +5762,8 @@ async function renderRelatorioManutencao() {
   // administrador vê o relatório de todo mundo (qualquer tipo), com filtro de busca; o técnico
   // continua vendo só os que ele mesmo criou, sem os filtros (não faz sentido filtrar por
   // técnico/empresa numa lista que já é só dele).
-  const { relatorios } = await api('/api/relatorios-manutencao/meus' + (USER.papel === 'administrador' ? '?todas=1' : ''));
+  const vePodeTodos = USER.papel === 'administrador' || USER.papel === 'supervisor';
+  const { relatorios } = await api('/api/relatorios-manutencao/meus' + (vePodeTodos ? '?todas=1' : ''));
   window._relatoriosManutCache = relatorios;
   window._relatoriosManutFiltro = { tipo: '', tecnico: '', empresa: '', os: '', periodo: '', busca: '' };
   desenharRelatorioManutencao();
@@ -5749,7 +5776,7 @@ function desenharRelatorioManutencao() {
   // marcados como "Rascunho", pra ficar claro que falta concluir e dar como retomar/descartar.
   const pendentes = rascunhosNovosPendentes();
   const main = document.getElementById('main');
-  const podeFiltrar = USER.papel === 'administrador';
+  const podeFiltrar = USER.papel === 'administrador' || USER.papel === 'supervisor';
 
   const tiposPresentes = [...new Set(relatorios.map((r) => r.tipo))].sort((a, b) => (TIPOS_RELATORIO_MANUT_LABEL[a] || a).localeCompare(TIPOS_RELATORIO_MANUT_LABEL[b] || b));
   const tecnicosPresentes = [...new Set(relatorios.map((r) => r.autor_nome).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -12612,14 +12639,16 @@ let usuarioEmEdicaoId = null;
 function papeisCadastraveis(usuario) {
   if (usuario && usuario.id === USER.id) return [usuario.papel];
   if (USER.papel === 'administrador' && USER.departamento) return [USER.departamento, 'cliente'];
-  return ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente'];
+  // supervisor (só visualização) e financeiro (aprova prestação de contas) — Etapa 6 do briefing
+  // white label — só o administrador geral cadastra, igual administrador.
+  return ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro'];
 }
 function mostrarFormUsuario(usuario) {
   usuarioEmEdicaoId = usuario ? usuario.id : null;
   const clientes = window._clientesCache || [];
   const opcoesPapel = {
     suporte: 'Suporte', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque',
-    administrador: 'Administrador', cliente: 'Cliente',
+    administrador: 'Administrador', cliente: 'Cliente', supervisor: 'Supervisor', financeiro: 'Financeiro',
   };
   const permitidos = papeisCadastraveis(usuario);
   const papelPadrao = usuario ? usuario.papel : permitidos[0];
@@ -14557,7 +14586,7 @@ function abrirDetalheViagensTecnico(tecnicoId) {
     ...t.viagens_sem_bonus.map((v) => ({ ...v, categoria: 'sem-bonus' })),
   ].sort((a, b) => (a.data_hora_inicio || '').localeCompare(b.data_hora_inicio || ''));
   const [ano, mesNum] = (resp.mes || '').split('-');
-  const souAdmin = USER.papel === 'administrador';
+  const souAdmin = USER.papel === 'administrador' || USER.papel === 'supervisor';
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Viagens de ${esc(t.tecnico_nome)}</h1><p>${mesNum && ano ? `${mesNum}/${ano} — ` : ''}${t.viagens.length} com bônus de diária, ${t.viagens_sem_bonus.length} sem bônus</p></div>
