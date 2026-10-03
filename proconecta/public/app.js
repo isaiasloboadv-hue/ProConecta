@@ -827,6 +827,7 @@ async function renderPainelPlataforma() {
       <div class="panel-head">Nova empresa</div>
       <div class="form-grid">
         <div><label>Nome da empresa*</label><input id="pe-nome" placeholder="Nome da empresa cliente"></div>
+        <div><label>Subdomínio</label><input id="pe-subdominio" placeholder="ex.: empresa (sem .proconecta.com.br)"></div>
         <div><label>Versão</label><select id="pe-versao">
           <option value="">Nenhuma (sem módulo nenhum ativo)</option>
           ${versoes.map((v) => `<option value="${v.id}">${esc(v.nome)} (${v.modulos.map(esc).join(', ')})</option>`).join('')}
@@ -854,6 +855,7 @@ function renderListaEmpresasPlataforma(empresas) {
       <h2 style="margin-top:0;">Dados da empresa</h2>
       <div class="form-grid">
         <div><label>Nome</label><input id="pe-dados-nome-${e.id}" value="${esc(e.nome)}"></div>
+        <div><label>Subdomínio</label><input id="pe-dados-subdominio-${e.id}" value="${esc(e.subdominio || '')}" placeholder="ex.: empresa (sem .proconecta.com.br)"></div>
         <div><label>Site</label><input id="pe-dados-site-${e.id}" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
         <div><label>WhatsApp</label><input id="pe-dados-whatsapp-${e.id}" value="${esc(e.whatsapp || '')}"></div>
         <div><label>Telefone</label><input id="pe-dados-telefone-${e.id}" value="${esc(e.telefone || '')}"></div>
@@ -902,12 +904,13 @@ function renderListaEmpresasPlataforma(empresas) {
 async function criarEmpresaPlataforma() {
   const nome = document.getElementById('pe-nome').value.trim();
   if (!nome) return mostrarToast('Informe o nome da empresa.');
+  const subdominio = document.getElementById('pe-subdominio').value.trim();
   const versaoId = document.getElementById('pe-versao').value;
   const adminNome = document.getElementById('pe-admin-nome').value.trim();
   const adminEmail = document.getElementById('pe-admin-email').value.trim();
   const adminSenha = document.getElementById('pe-admin-senha').value;
   try {
-    const { empresa } = await api('/api/plataforma/empresas', { method: 'POST', body: { nome, versao_id: versaoId || null } });
+    const { empresa } = await api('/api/plataforma/empresas', { method: 'POST', body: { nome, subdominio, versao_id: versaoId || null } });
     if (adminNome || adminEmail || adminSenha) {
       await api(`/api/plataforma/empresas/${empresa.id}/administrador`, { method: 'POST', body: { nome: adminNome, email: adminEmail, senha: adminSenha } });
       mostrarToast('Empresa e administrador cadastrados.');
@@ -939,6 +942,7 @@ async function salvarDadosEmpresaPlataforma(empresaId) {
   if (!nome) return mostrarToast('Informe o nome da empresa.');
   const body = {
     nome,
+    subdominio: document.getElementById(`pe-dados-subdominio-${empresaId}`).value.trim(),
     site: document.getElementById(`pe-dados-site-${empresaId}`).value.trim(),
     whatsapp: document.getElementById(`pe-dados-whatsapp-${empresaId}`).value.trim(),
     telefone: document.getElementById(`pe-dados-telefone-${empresaId}`).value.trim(),

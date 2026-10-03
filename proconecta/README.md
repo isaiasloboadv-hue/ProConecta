@@ -217,6 +217,34 @@ node scripts/migrar-fotos-supabase.js
 O script só copia — nunca apaga nada do lugar antigo. Confirme que as fotos
 abrem certo antes de limpar manualmente a tabela/pasta antiga, se quiser.
 
+## Identificação da empresa por subdomínio
+
+Cada empresa cadastrada no painel da Plataforma (Super Admin) pode ter um
+**subdomínio** próprio (ex.: `clinica-x` em `clinica-x.proconecta.com.br`).
+Quando a requisição chega por um host cujo primeiro rótulo bate com o
+subdomínio de alguma empresa, o sistema usa os dados (marca, cores) e o
+login daquela empresa; sem bater com nenhum subdomínio cadastrado (host
+"nu", `localhost`, IP, ou simplesmente nenhuma empresa configurou
+subdomínio ainda), tudo continua caindo na empresa 1 (a instalação de
+origem) e o login busca o e-mail em qualquer empresa — exatamente o
+comportamento de sempre, então nenhuma instalação existente precisa
+configurar nada pra continuar funcionando igual.
+
+Isso resolve o caso de duas empresas diferentes terem usuário com o mesmo
+e-mail: uma vez que cada uma tenha seu subdomínio configurado (e o DNS/proxy
+de fato apontando os dois hosts pro mesmo servidor), o login de cada uma
+passa a ser isolado pelo host da requisição, mesmo com e-mail repetido.
+
+Configurar o subdomínio da empresa 1 por variável de ambiente (sem precisar
+do painel):
+
+```
+EMPRESA_SUBDOMINIO=promarking
+```
+
+As demais empresas configuram o subdomínio pelo próprio painel da
+Plataforma (campo "Subdomínio" no cadastro/edição da empresa).
+
 ## Tabelas indexadas por empresa (fundação multiempresa, em andamento)
 
 Em modo Postgres, além do `app_state` (o blob JSONB de sempre, que continua

@@ -111,6 +111,10 @@ function sincronizarEmpresaPadrao(data) {
   if (empresa.versao_id === undefined) empresa.versao_id = 1;
   if (!Array.isArray(empresa.modulos_ativos)) empresa.modulos_ativos = [...MODULOS_VERSAO_MANUTENCAO];
   if (!empresa.terminologia || typeof empresa.terminologia !== 'object') empresa.terminologia = {};
+  // subdomínio: identifica a empresa pela URL antes do login (ver resolverEmpresaPorRequisicao em
+  // server.js). Fica null até alguém configurar — nesse caso toda requisição cai na empresa 1
+  // (comportamento de hoje, preservado).
+  if (empresa.subdominio === undefined) empresa.subdominio = null;
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;
@@ -118,6 +122,7 @@ function sincronizarEmpresaPadrao(data) {
   if (process.env.EMPRESA_EMAILS) empresa.emails = process.env.EMPRESA_EMAILS.split(',').map((e) => e.trim()).filter(Boolean);
   if (process.env.EMPRESA_COR_PRIMARIA) empresa.cor_primaria = process.env.EMPRESA_COR_PRIMARIA;
   if (process.env.EMPRESA_COR_SECUNDARIA) empresa.cor_secundaria = process.env.EMPRESA_COR_SECUNDARIA;
+  if (process.env.EMPRESA_SUBDOMINIO) empresa.subdominio = process.env.EMPRESA_SUBDOMINIO.trim().toLowerCase();
 }
 
 // se as variáveis de ambiente ADMIN_EMAIL/ADMIN_SENHA estiverem definidas e ainda não existir

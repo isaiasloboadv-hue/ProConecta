@@ -796,8 +796,43 @@ function usuarioPublico(u) {
 // de qual empresa é a sessão atual (super_admin não tem empresa, vem null).
 function empresaResumo(empresa) {
   if (!empresa) return null;
-  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria } = empresa;
-  return { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria };
+  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio } = empresa;
+  return { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio };
+}
+
+// extrai o 1º rótulo do host (ex.: "promarking" de "promarking.proconecta.app:3000") pra servir de
+// candidato a subdomínio. Exige pelo menos 3 partes (sub.domínio.tld) — domínio "nu", localhost e IP
+// nunca contam, pra nunca confundir a instalação raiz com um subdomínio de empresa.
+function subdominioDoHost(host) {
+  if (!host) return null;
+  const semPorta = String(host).split(':')[0];
+  const partes = semPorta.split('.');
+  if (partes.length < 3) return null;
+  if (/^\d+$/.test(partes[0])) return null;
+  return partes[0].toLowerCase();
+}
+
+// identifica a empresa da requisição pelo subdomínio (ver CONFLITO #1 do diagnóstico: duas empresas
+// podem ter usuário com o mesmo e-mail, então login/dados de marca precisam saber a empresa ANTES
+// de olhar pro usuário). Sem subdomínio configurado nessa empresa ou host sem subdomínio → cai na
+// empresa 1 (a instalação de origem), que é o comportamento de hoje — nada muda pra quem não
+// configurou subdomínio nenhum.
+function resolverEmpresaPorRequisicao(data, req) {
+  const sub = subdominioDoHost(req.headers.host);
+  if (sub) {
+    const porSubdominio = data.empresas.find((e) => e.subdominio === sub);
+    if (porSubdominio) return porSubdominio;
+  }
+  return data.empresas.find((e) => e.id === 1) || null;
+}
+
+// valida e normaliza o subdomínio digitado no painel do super admin (só letras minúsculas, números
+// e hífen — o mesmo formato aceito num rótulo de host de verdade). Vazio/undefined = empresa sem
+// subdomínio próprio (cai na empresa 1 — ver resolverEmpresaPorRequisicao).
+const SUBDOMINIO_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+function normalizarSubdominio(valor) {
+  if (valor === undefined || valor === null || valor === '') return null;
+  return String(valor).trim().toLowerCase();
 }
 
 function registroComAutor(data, r) {
@@ -912,7 +947,14 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   }
   const { email: emailLogin, senha } = await lerCorpo(req);
   const data = db.load();
-  const u = data.usuarios.find((x) => x.email === emailLogin);
+  // só restringe o login por empresa quando o host da requisição bate com um subdomínio
+  // configurado de verdade — sem isso, mantém o comportamento de sempre (busca o e-mail em
+  // qualquer empresa), pra não quebrar instalação nenhuma que ainda não configurou subdomínio.
+  // super_admin nunca é restrito (não pertence a empresa nenhuma — empresa_id null).
+  const subHost = subdominioDoHost(req.headers.host);
+  const empresaPorSubdominio = subHost ? data.empresas.find((e) => e.subdominio === subHost) : null;
+  const u = data.usuarios.find((x) => x.email === emailLogin
+    && (!empresaPorSubdominio || x.papel === 'super_admin' || x.empresa_id === empresaPorSubdominio.id));
   if (!u || u.status !== 'ativo' || !conferirSenha(senha || '', u.salt, u.hash)) {
     registrarTentativaLoginFalha(ip);
     return enviarJSON(res, 401, { erro: 'E-mail ou senha inválidos.' });
@@ -932,7 +974,7 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
 // antes de qualquer autenticação. Hoje só existe uma empresa (id 1); ver db.js.
 rota('GET', /^\/api\/empresa$/, async (req, res) => {
   const data = db.load();
-  const empresa = data.empresas.find((e) => e.id === 1);
+  const empresa = resolverEmpresaPorRequisicao(data, req);
   enviarJSON(res, 200, { empresa });
 });
 
@@ -4844,9 +4886,17 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
   const data = db.load();
   const versao = body.versao_id ? data.versoes.find((v) => v.id === Number(body.versao_id)) : null;
   if (body.versao_id && !versao) return enviarJSON(res, 400, { erro: 'Versão não encontrada.' });
+  const subdominio = normalizarSubdominio(body.subdominio);
+  if (subdominio && !SUBDOMINIO_REGEX.test(subdominio)) {
+    return enviarJSON(res, 400, { erro: 'Subdomínio inválido — use só letras minúsculas, números e hífen.' });
+  }
+  if (subdominio && data.empresas.some((e) => e.subdominio === subdominio)) {
+    return enviarJSON(res, 400, { erro: 'Esse subdomínio já está em uso por outra empresa.' });
+  }
   const empresa = {
     id: nextId(data, 'empresas'),
     nome: String(body.nome).trim(),
+    subdominio,
     site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
     emails: Array.isArray(body.emails) ? body.emails : [],
     cor_primaria: body.cor_primaria || '#0A2647', cor_secundaria: body.cor_secundaria || '#0E7C86',
@@ -4869,8 +4919,16 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const empresa = data.empresas.find((e) => e.id === Number(m[1]));
   if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  const subdominio = body.subdominio !== undefined ? normalizarSubdominio(body.subdominio) : empresa.subdominio;
+  if (subdominio && !SUBDOMINIO_REGEX.test(subdominio)) {
+    return enviarJSON(res, 400, { erro: 'Subdomínio inválido — use só letras minúsculas, números e hífen.' });
+  }
+  if (subdominio && data.empresas.some((e) => e.id !== empresa.id && e.subdominio === subdominio)) {
+    return enviarJSON(res, 400, { erro: 'Esse subdomínio já está em uso por outra empresa.' });
+  }
   Object.assign(empresa, {
     nome: String(body.nome).trim(),
+    subdominio,
     site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
     emails: Array.isArray(body.emails) ? body.emails : [],
     cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,
