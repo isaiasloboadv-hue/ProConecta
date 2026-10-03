@@ -902,7 +902,7 @@ function renderListaEmpresasPlataforma(empresas) {
   return empresas.map((e) => `
     <div class="panel">
       <div class="panel-head" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <span>${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''} <span class="tag" style="background:${e.status === 'suspensa' ? 'var(--red,#c00)' : e.status === 'teste' ? '#b8860b' : 'var(--green,#1a7f37)'}; color:#fff;">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span></span>
+        <span>${esc(e.nome)}${e.id === 1 ? ' <span class="tag">instalação atual</span>' : ''} <span class="tag ${e.status === 'suspensa' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span></span>
         ${e.id !== 1 ? `<button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="excluirEmpresaPlataforma(${e.id})">Excluir empresa</button>` : ''}
       </div>
       <h2 style="margin-top:0;">Status e cobrança</h2>
