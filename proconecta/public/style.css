@@ -594,6 +594,8 @@ tr:last-child td{border-bottom:none;}
 .equipe-card-icone{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin:0 auto;}
 .equipe-card-titulo{font-weight:700;color:var(--navy);margin:6px 0 12px;}
 
+.kpis-row-donut{display:flex;gap:16px;margin-bottom:22px;flex-wrap:wrap;}
+
 /* Cadastros (renderCadastros/abrirFichaCadastral) — grid de fichas com foto (ou silhueta padrão
    quando não tem), nome, e-mail e telefone; clica num card pra abrir e editar a ficha completa */
 .ficha-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;}

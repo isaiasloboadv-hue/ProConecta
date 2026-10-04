@@ -4482,6 +4482,26 @@ function calcularKpisMensais(data, empresaId, filtros = {}) {
   });
 }
 
+// Ranking de técnicos por O.S. concluídas no recorte atual (passo 2 da Opção F — dashboard de KPIs
+// evoluído). Mesmos filtros/recorte do resto dos indicadores; só entra O.S. com finalizada=true, e
+// só técnico (papel suporte) com pelo menos 1 concluída aparece — top 10, do maior pro menor.
+function calcularRankingTecnicosKpis(data, empresaId, filtros = {}) {
+  const agendaEmpresa = filtrarAgendaKpis(data, tenant.listar(data, 'agenda', empresaId), filtros)
+    .filter((a) => a.finalizada && a.tecnico_id);
+  const contagem = new Map();
+  for (const os of agendaEmpresa) {
+    contagem.set(os.tecnico_id, (contagem.get(os.tecnico_id) || 0) + 1);
+  }
+  const usuariosEmpresa = tenant.listar(data, 'usuarios', empresaId);
+  return [...contagem.entries()]
+    .map(([tecnicoId, qtd]) => {
+      const tecnico = usuariosEmpresa.find((u) => u.id === tecnicoId);
+      return { tecnico_id: tecnicoId, tecnico_nome: tecnico ? tecnico.nome : 'Técnico removido', qtd_os_concluidas: qtd };
+    })
+    .sort((a, b) => b.qtd_os_concluidas - a.qtd_os_concluidas)
+    .slice(0, 10);
+}
+
 // lê e normaliza os 5 filtros (período/cliente/equipamento/técnico/contrato) da query string —
 // mesma leitura pros 3 endpoints (dashboard, série mensal e drill-down), pra nunca interpretarem o
 // mesmo filtro de jeitos diferentes.
@@ -4625,6 +4645,15 @@ rota('GET', /^\/api\/kpis\/mensal$/, async (req, res) => {
   const filtros = filtrosKpisDaQuery(query);
   const data = db.load();
   enviarJSON(res, 200, { meses: calcularKpisMensais(data, user.empresa_id, filtros) });
+});
+
+rota('GET', /^\/api\/kpis\/ranking-tecnicos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const filtros = filtrosKpisDaQuery(query);
+  const data = db.load();
+  enviarJSON(res, 200, { ranking: calcularRankingTecnicosKpis(data, user.empresa_id, filtros) });
 });
 
 const INDICADORES_KPI_VALIDOS = ['mtbf', 'mttr', 'disponibilidade', 'backlog', 'preventiva_corretiva'];
