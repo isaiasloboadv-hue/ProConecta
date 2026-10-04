@@ -5372,6 +5372,10 @@ const PDF_COR = {
   bluePale: [223, 236, 249], ink: [23, 43, 58], inkSoft: [102, 120, 138], line: [217, 225, 232],
   green: [25, 135, 84], greenBg: [223, 238, 231], red: [214, 69, 69], redBg: [249, 229, 229], white: [255, 255, 255],
   bege: [242, 233, 216],
+  // mesmas cores das tiles do dashboard de KPIs (ver atualizarKpisDashboard) — usadas só na
+  // exportação em PDF (gerarPdfDashboardKpis), que até agora nunca precisava de roxo/laranja/
+  // âmbar/teal.
+  purple: [111, 82, 168], orange: [230, 126, 34], amber: [199, 134, 10], teal: [8, 145, 178],
 };
 
 let _logoDataUriPromise = null;
@@ -13370,6 +13374,8 @@ let _kpisFiltros = {};
 let _kpisChartTipos = null;
 let _kpisChartMttr = null;
 let _kpisChartDonut = null;
+let _kpisMaoDeObraCache = null;
+let _kpisChartMaoDeObra = null;
 
 async function renderKpisDashboard() {
   const [{ clientes }, { equipamentos }, { usuarios }] = await Promise.all([
@@ -13395,6 +13401,7 @@ async function renderKpisDashboard() {
       <button class="btn btn-primary btn-sm" onclick="aplicarFiltrosKpis()">Aplicar filtros</button>
       <button class="btn-outline-sm" onclick="limparFiltrosKpis()">Limpar</button>
       <button class="btn-outline-sm" onclick="exportarKpisExcel()">Exportar Excel</button>
+      <button class="btn-outline-sm" onclick="exportarKpisDashboardPdf()">Exportar dashboard (PDF)</button>
     </div>
     <div class="kpis-tiles" id="kpis-cards"><div class="empty">Carregando...</div></div>
     <div class="kpis-row-donut">
@@ -13462,9 +13469,11 @@ async function limparFiltrosKpis() {
 async function atualizarKpisDashboard() {
   const params = new URLSearchParams(_kpisFiltros).toString();
   const sufixo = params ? `?${params}` : '';
-  const [{ kpis }, { meses }, { ranking }] = await Promise.all([
+  const [{ kpis }, { meses }, { ranking }, maoDeObra] = await Promise.all([
     api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`), api(`/api/kpis/ranking-tecnicos${sufixo}`),
+    api(`/api/kpis/mao-de-obra${sufixo}`),
   ]);
+  _kpisMaoDeObraCache = maoDeObra;
   // Tiles coloridas (passo 3 da Opção F) — igual ao mockup aprovado: tile inteira clicável abre o
   // mesmo drill-down que o antigo botão "Ver detalhes" (passo 9) já abria. Disponibilidade ganha um
   // anel de progresso (SVG, sem lib nova) em vez de só o número.
@@ -13485,7 +13494,13 @@ async function atualizarKpisDashboard() {
       ? `<div class="kpis-tile-valor-ring">${ringSvg(kpis.disponibilidade_percentual)}<span>${kpis.disponibilidade_percentual}%</span></div>`
       : `<div class="kpis-tile-valor">—</div>`, 'var(--green)', 'disponibilidade')}
     ${tile('Backlog', `<div class="kpis-tile-valor">${kpis.backlog_qtd} O.S.</div>`, 'var(--orange)', 'backlog')}
-    ${tile('O.S. no recorte', `<div class="kpis-tile-valor">${kpis.total_os}</div>`, 'var(--amber)', 'total_os')}`;
+    ${tile('O.S. no recorte', `<div class="kpis-tile-valor">${kpis.total_os}</div>`, 'var(--amber)', 'total_os')}
+    <div class="kpis-tile" style="background:var(--teal);" onclick="abrirMaoDeObraDetalhe()">
+      <div class="kpis-tile-label">Mão de Obra</div>
+      ${maoDeObra.equipe.percentual_ocupacao !== null
+        ? `<div class="kpis-tile-valor-ring">${ringSvg(maoDeObra.equipe.percentual_ocupacao)}<span>${maoDeObra.equipe.percentual_ocupacao}%</span></div>`
+        : `<div class="kpis-tile-valor">—</div>`}
+    </div>`;
   desenharGraficosKpis(meses, kpis);
   desenharRankingTecnicosKpis(ranking);
   desenharCalendarioKpis();
@@ -13583,6 +13598,99 @@ function desenharRankingTecnicosKpis(ranking) {
           <div style="flex:1; background:var(--blue-pale); height:16px; border-radius:8px; overflow:hidden;"><div style="width:${Math.round((r.qtd_os_concluidas / maior) * 100)}%; background:var(--blue); height:16px;"></div></div>
           <div style="width:24px; font-size:12.5px; font-weight:700; color:var(--navy); text-align:right;">${r.qtd_os_concluidas}</div>
         </div>`).join('')}
+    </div>`;
+}
+
+// ---------- KPI de Mão de Obra: horas trabalhadas × paradas por técnico ----------
+// pedido do usuário: "Crie um indicador kpi de mão de obra, horas em que o técnico fica parado e
+// trabalhando. Ao clicar abrir os dados individual de cada técnico e só clicar no técnico abrir
+// as atividades." Clicar na tile do dashboard abre esta tela (resumo da equipe + por técnico);
+// clicar num técnico aqui reaproveita a mesma tela de detalhe da Atividades do Dia (ver
+// abrirDetalheAtividadesTecnico), só que voltando pra cá em vez de pra Atividades do Dia.
+async function abrirMaoDeObraDetalhe() {
+  const params = new URLSearchParams(_kpisFiltros).toString();
+  const sufixo = params ? `?${params}` : '';
+  const resp = _kpisMaoDeObraCache || await api(`/api/kpis/mao-de-obra${sufixo}`);
+  _kpisMaoDeObraCache = resp;
+  // a tela de detalhe por técnico (abrirDetalheAtividadesTecnico) é por mês — usa o mês do fim do
+  // período deste KPI, pra abrir já no mês certo quando o admin clicar num técnico.
+  atividadesEquipeMesAtual = resp.periodo.fim.slice(0, 7);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Mão de Obra</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. "Parado" é uma aproximação: cada dia sem O.S./atendimento e sem atividade registrada conta como uma jornada de ${resp.jornada_padrao_horas}h.</p></div>
+      <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
+    </div>
+    <div class="kpis-row-donut">
+      <div class="panel" style="flex:0 0 260px; margin-bottom:0; display:flex; flex-direction:column;">
+        <div class="panel-head">Equipe — horas trabalhadas × paradas</div>
+        <div style="flex:1; display:flex; align-items:center; justify-content:center; min-height:180px;">
+          <canvas id="mdo-chart-donut" width="180" height="180"></canvas>
+        </div>
+      </div>
+      <div class="panel" style="flex:1; margin-bottom:0;">
+        <div class="panel-head">Por técnico — clique num nome pra ver as atividades dele</div>
+        <div id="mdo-ranking"><div class="empty">Carregando...</div></div>
+      </div>
+    </div>`;
+  desenharMaoDeObra(resp);
+}
+
+function desenharMaoDeObra(resp) {
+  const { equipe, tecnicos } = resp;
+  if (typeof Chart !== 'undefined') {
+    if (_kpisChartMaoDeObra) _kpisChartMaoDeObra.destroy();
+    const canvas = document.getElementById('mdo-chart-donut');
+    // cores de status (não categóricas): verde = trabalhada (bom), âmbar = parada (atenção) — as
+    // mesmas já usadas em Atividades do Dia pro status "concluído"/"pendente" de cada atividade.
+    if (canvas) {
+      _kpisChartMaoDeObra = new Chart(canvas, {
+        type: 'doughnut',
+        data: {
+          labels: ['Trabalhadas', 'Paradas'],
+          datasets: [{ data: [equipe.horas_trabalhadas, equipe.horas_paradas], backgroundColor: ['#198754', '#C7860A'], borderColor: '#fff', borderWidth: 2 }],
+        },
+        options: {
+          responsive: true, cutout: '62%',
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw} h` } },
+          },
+        },
+      });
+    }
+  }
+
+  const ranking = document.getElementById('mdo-ranking');
+  if (!ranking) return;
+  if (!tecnicos.length) {
+    ranking.innerHTML = `<div class="empty">Nenhum técnico ativo nessa equipe.</div>`;
+    return;
+  }
+  ranking.innerHTML = `
+    <div style="margin-bottom:12px; font-size:13px; color:var(--ink-soft);">
+      Equipe: <strong style="color:var(--ink);">${equipe.horas_trabalhadas}h trabalhadas</strong> × <strong style="color:var(--ink);">${equipe.horas_paradas}h paradas</strong>${equipe.percentual_ocupacao !== null ? ` — ${equipe.percentual_ocupacao}% de ocupação` : ''}
+    </div>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      ${tecnicos.map((t) => {
+        const total = t.horas_trabalhadas + t.horas_paradas;
+        const pctTrab = total > 0 ? (t.horas_trabalhadas / total) * 100 : 0;
+        const pctParada = total > 0 ? 100 - pctTrab : 0;
+        const nomeEscapado = esc(t.tecnico_nome).replace(/'/g, '&#39;');
+        return `
+        <div class="viagens-chart-row clicavel" onclick="abrirDetalheAtividadesTecnico(${t.tecnico_id}, '${nomeEscapado}', 'abrirMaoDeObraDetalhe()')" style="flex-direction:column; align-items:stretch;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+            <strong style="font-size:13px; color:var(--ink);">${esc(t.tecnico_nome)}</strong>
+            <span style="font-size:12px; color:var(--ink-soft);">${t.percentual_ocupacao !== null ? `${t.percentual_ocupacao}% ocupação` : 'sem dados no período'}</span>
+          </div>
+          <div style="display:flex; height:14px; border-radius:7px; overflow:hidden; background:var(--line);">
+            ${pctTrab > 0 ? `<div style="width:${pctTrab}%; background:#198754;" title="${t.horas_trabalhadas}h trabalhadas"></div>` : ''}
+            ${pctTrab > 0 && pctParada > 0 ? `<div style="width:2px; background:#fff;"></div>` : ''}
+            ${pctParada > 0 ? `<div style="width:${pctParada}%; background:#C7860A;" title="${t.horas_paradas}h paradas"></div>` : ''}
+          </div>
+          <div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${t.horas_trabalhadas}h trabalhadas · ${t.horas_paradas}h paradas${t.dias_pendentes ? ` · ${t.dias_pendentes} dia(s) pendente(s)` : ''}</div>
+        </div>`;
+      }).join('')}
     </div>`;
 }
 
@@ -13809,6 +13917,183 @@ async function exportarKpisExcel() {
   XLSX.utils.book_append_sheet(livro, abaMensal, 'Mensal');
   const hoje = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(livro, `indicadores-kpis-${hoje}.xlsx`);
+}
+
+// ---------- Exportação do dashboard de KPIs em PDF, pronto pra apresentação em reunião ----------
+// pedido do usuário: "pode baixar um dashboard visual pra apresentação em reunião" — um PDF com a
+// identidade visual do sistema (tiles coloridas, gráficos), não só uma tabela de números como a
+// exportação Excel já faz.
+function gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logoDataUri, imagens, filtroTexto) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: 'Dashboard de Indicadores' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 36;
+  let y = margem;
+
+  function novaPagina() { doc.addPage(); y = margem; }
+
+  function cabecalho(titulo, subtitulo) {
+    const xTexto = margem + (logoDataUri ? 34 : 0);
+    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', margem, y - 6, 26, 30); } catch (e) {} }
+    doc.setFontSize(15); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(limparPdf(titulo), xTexto, y + 10);
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    const linhasSub = doc.splitTextToSize(limparPdf(subtitulo), pageW - margem - xTexto);
+    doc.text(linhasSub, xTexto, y + 24);
+    y += 24 + linhasSub.length * 11 + 10;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(1);
+    doc.line(margem, y, pageW - margem, y);
+    y += 18;
+  }
+
+  function tileBox(x, ty, w, h, titulo, valor, cor) {
+    doc.setFillColor(...cor);
+    doc.roundedRect(x, ty, w, h, 8, 8, 'F');
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(255, 255, 255);
+    doc.text(limparPdf(titulo).toUpperCase(), x + 12, ty + 18);
+    doc.setFontSize(16); doc.setFont(undefined, 'bold');
+    doc.text(String(valor), x + 12, ty + 38);
+  }
+
+  function tituloSecao(txt) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFillColor(...PDF_COR.blue);
+    doc.rect(margem, y - 9, 4, 12, 'F');
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(limparPdf(txt), margem + 10, y); y += 16;
+  }
+
+  function tabelaSimples(colunas, larguras, linhas) {
+    const larguraTotal = pageW - margem * 2;
+    const larg = larguras || colunas.map(() => larguraTotal / colunas.length);
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    let cx = margem;
+    colunas.forEach((c, i) => { doc.text(c, cx, y); cx += larg[i]; });
+    y += 4;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7); doc.line(margem, y, pageW - margem, y); y += 13;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    linhas.forEach((linha) => {
+      if (y > pageH - margem - 16) { novaPagina(); }
+      cx = margem;
+      linha.forEach((valor, i) => { doc.text(String(valor), cx, y); cx += larg[i]; });
+      y += 14;
+    });
+    y += 12;
+  }
+
+  // ===== página 1: tiles + gráficos de distribuição =====
+  cabecalho('Dashboard de Indicadores', filtroTexto);
+
+  const gapTile = 10;
+  const larguraTile = (pageW - margem * 2 - 2 * gapTile) / 3;
+  const alturaTile = 48;
+  const tiles = [
+    { titulo: 'MTBF', valor: kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} d` : '—', cor: PDF_COR.blue },
+    { titulo: 'MTTR', valor: kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', cor: PDF_COR.purple },
+    { titulo: 'Disponibilidade', valor: kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', cor: PDF_COR.green },
+    { titulo: 'Backlog', valor: `${kpis.backlog_qtd} O.S.`, cor: PDF_COR.orange },
+    { titulo: 'O.S. no recorte', valor: `${kpis.total_os}`, cor: PDF_COR.amber },
+    { titulo: 'Mão de Obra', valor: maoDeObra.equipe.percentual_ocupacao !== null ? `${maoDeObra.equipe.percentual_ocupacao}%` : '—', cor: PDF_COR.teal },
+  ];
+  tiles.forEach((tl, i) => {
+    const col = i % 3, lin = Math.floor(i / 3);
+    tileBox(margem + col * (larguraTile + gapTile), y + lin * (alturaTile + gapTile), larguraTile, alturaTile, tl.titulo, tl.valor, tl.cor);
+  });
+  y += 2 * (alturaTile + gapTile) + 14;
+
+  const larguraImg = (pageW - margem * 2 - 20) / 2;
+  if (imagens.donutTipos || imagens.donutMaoDeObra) {
+    tituloSecao('Distribuição');
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Preventiva × Corretiva', margem, y);
+    doc.text('Mão de Obra — trabalhadas × paradas', margem + larguraImg + 20, y);
+    y += 8;
+    if (imagens.donutTipos) { try { doc.addImage(imagens.donutTipos, 'PNG', margem, y, larguraImg, larguraImg); } catch (e) {} }
+    if (imagens.donutMaoDeObra) { try { doc.addImage(imagens.donutMaoDeObra, 'PNG', margem + larguraImg + 20, y, larguraImg, larguraImg); } catch (e) {} }
+    y += larguraImg + 20;
+  }
+
+  // ===== página 2: evolução mensal + tabelas pro handout da reunião =====
+  novaPagina();
+  if (imagens.barMensal) {
+    tituloSecao('Preventiva × Corretiva por mês');
+    try { doc.addImage(imagens.barMensal, 'PNG', margem, y, pageW - margem * 2, 140); } catch (e) {}
+    y += 156;
+  }
+  if (imagens.lineMttr) {
+    tituloSecao('MTTR por mês (horas)');
+    try { doc.addImage(imagens.lineMttr, 'PNG', margem, y, pageW - margem * 2, 140); } catch (e) {}
+    y += 156;
+  }
+
+  if (maoDeObra.tecnicos.length) {
+    tituloSecao('Mão de Obra por técnico');
+    const larg = [pageW - margem * 2 - 280, 90, 90, 100];
+    tabelaSimples(['Técnico', 'Trabalhadas', 'Paradas', '% Ocupação'], larg,
+      maoDeObra.tecnicos.map((tc) => [tc.tecnico_nome, `${tc.horas_trabalhadas} h`, `${tc.horas_paradas} h`, tc.percentual_ocupacao !== null ? `${tc.percentual_ocupacao}%` : '—']));
+  }
+  if (ranking.length) {
+    tituloSecao('Técnicos — O.S. concluídas no recorte');
+    const larg2 = [pageW - margem * 2 - 100, 100];
+    tabelaSimples(['Técnico', 'O.S. concluídas'], larg2, ranking.map((r) => [r.tecnico_nome, r.qtd_os_concluidas]));
+  }
+
+  doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.inkSoft);
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    doc.text(`${empresaNome()} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 14, { align: 'center' });
+  }
+
+  return doc.output('bloburl');
+}
+
+async function exportarKpisDashboardPdf() {
+  if (typeof window.jspdf === 'undefined') return alert('A biblioteca de exportação de PDF não carregou (sem conexão com o CDN). Tente novamente mais tarde.');
+  const textoSelecionado = (id) => {
+    const el = document.getElementById(id);
+    return el && el.selectedOptions[0] ? el.selectedOptions[0].textContent : 'Todos';
+  };
+  const params = new URLSearchParams(_kpisFiltros).toString();
+  const sufixo = params ? `?${params}` : '';
+  const [{ kpis }, { ranking }, maoDeObra] = await Promise.all([
+    api(`/api/kpis${sufixo}`), api(`/api/kpis/ranking-tecnicos${sufixo}`), api(`/api/kpis/mao-de-obra${sufixo}`),
+  ]);
+  const logo = await carregarLogoDataUri();
+
+  const filtroTexto = `Período: ${_kpisFiltros.periodo_inicio || 'todos'} a ${_kpisFiltros.periodo_fim || 'hoje'} · Cliente: ${textoSelecionado('kf-cliente')} · ${t('equipamento', 'Equipamento')}: ${textoSelecionado('kf-equipamento')} · Técnico: ${textoSelecionado('kf-tecnico')}`;
+
+  const imagens = {};
+  const donutTipos = document.getElementById('kpis-chart-donut');
+  if (donutTipos && kpis.percentual_preventiva !== null) { try { imagens.donutTipos = donutTipos.toDataURL('image/png'); } catch (e) {} }
+  const barMensal = document.getElementById('kpis-chart-tipos');
+  if (barMensal) { try { imagens.barMensal = barMensal.toDataURL('image/png'); } catch (e) {} }
+  const lineMttr = document.getElementById('kpis-chart-mttr');
+  if (lineMttr) { try { imagens.lineMttr = lineMttr.toDataURL('image/png'); } catch (e) {} }
+
+  // o donut de Mão de Obra só existe na tela de drill-down (ver abrirMaoDeObraDetalhe), não no
+  // dashboard principal de onde esse botão é clicado — desenha num canvas fora da tela só pra
+  // capturar a imagem, sem precisar o admin navegar até lá antes de exportar.
+  if (typeof Chart !== 'undefined' && (maoDeObra.equipe.horas_trabalhadas || maoDeObra.equipe.horas_paradas)) {
+    const canvasTemp = document.createElement('canvas');
+    canvasTemp.width = 360; canvasTemp.height = 360;
+    canvasTemp.style.position = 'fixed'; canvasTemp.style.left = '-9999px'; canvasTemp.style.top = '0';
+    document.body.appendChild(canvasTemp);
+    const chartTemp = new Chart(canvasTemp, {
+      type: 'doughnut',
+      data: { labels: ['Trabalhadas', 'Paradas'], datasets: [{ data: [maoDeObra.equipe.horas_trabalhadas, maoDeObra.equipe.horas_paradas], backgroundColor: ['#198754', '#C7860A'], borderColor: '#fff', borderWidth: 2 }] },
+      options: { responsive: false, animation: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12, font: { size: 13 } } } } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    try { imagens.donutMaoDeObra = canvasTemp.toDataURL('image/png'); } catch (e) {}
+    chartTemp.destroy();
+    canvasTemp.remove();
+  }
+
+  const url = gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logo, imagens, filtroTexto);
+  window.open(url, '_blank');
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----
@@ -16049,18 +16334,25 @@ async function carregarAtividadesEquipe() {
     </table></div>` : `<p class="empty">Nenhum técnico ativo nessa equipe.</p>`;
 }
 
-async function abrirDetalheAtividadesTecnico(tecnicoId, tecnicoNome) {
+// voltarFn: nome da função (como string, pra caber no onclick) que o botão "‹ Voltar" chama — o
+// padrão é voltar pro resumo da equipe (Atividades do Dia), mas o drill-down da tile "Mão de
+// Obra" do dashboard de KPIs (ver abrirMaoDeObraDetalhe) reaproveita essa mesma tela passando
+// 'abrirMaoDeObraDetalhe()' aqui, pra "clicar no técnico abre as atividades" voltar pro KPI, não
+// pra tela de Atividades do Dia.
+async function abrirDetalheAtividadesTecnico(tecnicoId, tecnicoNome, voltarFn) {
+  const voltar = voltarFn || 'renderAtividadesEquipe()';
+  const mesRef = atividadesEquipeMesAtual;
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Atividades de ${esc(tecnicoNome)}</h1><p>Carregando...</p></div>
-      <button class="btn-outline-sm" onclick="renderAtividadesEquipe()">‹ Voltar</button>
+      <button class="btn-outline-sm" onclick="${voltar}">‹ Voltar</button>
     </div>`;
-  const { dias } = await api(`/api/atividades-nao-programadas/tecnico/${tecnicoId}?mes=${atividadesEquipeMesAtual}`);
+  const { dias } = await api(`/api/atividades-nao-programadas/tecnico/${tecnicoId}?mes=${mesRef}`);
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Atividades de ${esc(tecnicoNome)}</h1><p>${atividadesEquipeMesAtual.split('-').reverse().join('/')}</p></div>
-      <button class="btn-outline-sm" onclick="renderAtividadesEquipe()">‹ Voltar</button>
+      <div><h1>Atividades de ${esc(tecnicoNome)}</h1><p>${mesRef.split('-').reverse().join('/')}</p></div>
+      <button class="btn-outline-sm" onclick="${voltar}">‹ Voltar</button>
     </div>
     <div class="panel"><table>
       <tr><th>Dia</th><th>Status</th><th>Atividades</th></tr>

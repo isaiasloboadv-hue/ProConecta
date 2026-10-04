@@ -281,6 +281,25 @@ function diasDoMesTecnico(data, empresaId, tecnicoId, mesISO) {
   return dias;
 }
 
+// mesma ideia de diasDoMesTecnico, mas pra um intervalo arbitrário de datas (ver KPI de Mão de
+// Obra abaixo, cujo período vem dos mesmos filtros de data do resto do dashboard de KPIs, não só
+// um mês fechado). Limitado a 400 dias por segurança (evita um filtro de período absurdo travar
+// o servidor); nunca avalia além de hoje.
+function diasNoIntervaloTecnico(data, empresaId, tecnicoId, inicioISO, fimISO) {
+  const hojeISO = hojeBrasiliaISO();
+  const fimEfetivo = fimISO > hojeISO ? hojeISO : fimISO;
+  const inicioTs = Date.UTC(...inicioISO.split('-').map(Number).map((v, i) => (i === 1 ? v - 1 : v)));
+  const fimTs = Date.UTC(...fimEfetivo.split('-').map(Number).map((v, i) => (i === 1 ? v - 1 : v)));
+  const dias = [];
+  if (!Number.isFinite(inicioTs) || !Number.isFinite(fimTs) || fimTs < inicioTs) return dias;
+  for (let cursor = inicioTs, n = 0; cursor <= fimTs && n < 400; cursor += 24 * 60 * 60 * 1000, n++) {
+    const d = new Date(cursor);
+    const diaISO = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    dias.push({ data: diaISO, status: statusDiaTecnico(data, empresaId, tecnicoId, diaISO, hojeISO) });
+  }
+  return dias;
+}
+
 // pedido do usuário: cada atividade também tem um tipo (o que é, ex.: "manutenção", texto livre
 // do técnico) e um status — pendente (ainda não começou), em andamento ou concluído — porque uma
 // atividade não programada (ex.: consertar algo no próprio setor) pode continuar depois do dia em
@@ -4672,6 +4691,94 @@ function calcularRankingTecnicosKpis(data, empresaId, filtros = {}) {
     .slice(0, 10);
 }
 
+// ---------- KPI de Mão de Obra (pedido do usuário) ----------
+// "Crie um indicador kpi de mão de obra, horas em que o técnico fica parado e trabalhando." —
+// horas trabalhadas somam a duração real de cada O.S. (data_hora_fim - data_hora_inicio, sempre
+// preenchidos — ver obrig em POST/PUT /api/agenda) mais a duração das atividades não programadas
+// concluídas/em andamento (ver STATUS_ATIVIDADE_NAO_PROGRAMADA); horas paradas são uma aproximação
+// — cada dia 'pendente' (ocioso e ainda sem justificativa, ver statusDiaTecnico) conta como uma
+// jornada padrão inteira. É a mesma lógica de aproximação já usada em "Disponibilidade" (comentário
+// ali: "sem horas reais de operação ainda") — fica explícito no retorno (jornada_padrao_horas) pra
+// quem for interpretar o número saber a base de cálculo.
+const JORNADA_PADRAO_HORAS = 8;
+
+function horasEntreDatasHora(inicio, fim) {
+  const i = horarioBrasiliaParaData(inicio);
+  const f = horarioBrasiliaParaData(fim);
+  if (!i || !f) return 0;
+  const h = (f.getTime() - i.getTime()) / 36e5;
+  return Number.isFinite(h) && h > 0 ? h : 0;
+}
+
+function horasEntreHoraSoDia(diaISO, horaInicio, horaFim) {
+  return horasEntreDatasHora(`${diaISO}T${horaInicio}`, `${diaISO}T${horaFim}`);
+}
+
+function calcularMaoDeObra(data, empresaId, filtros = {}) {
+  const hojeISO = hojeBrasiliaISO();
+  const periodoInicio = filtros.periodoInicio || `${hojeISO.slice(0, 7)}-01`;
+  const periodoFim = filtros.periodoFim || hojeISO;
+
+  const agendaFiltrada = filtrarAgendaKpis(data, tenant.listar(data, 'agenda', empresaId), filtros);
+  const atividadesNoPeriodo = tenant.listar(data, 'atividades_nao_programadas', empresaId)
+    .filter((a) => a.data >= periodoInicio && a.data <= periodoFim);
+
+  let tecnicos = tenant.listar(data, 'usuarios', empresaId).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  if (filtros.tecnicoId) tecnicos = tecnicos.filter((u) => u.id === filtros.tecnicoId);
+
+  const agora = Date.now();
+  const linhas = tecnicos.map((t) => {
+    const horasOS = agendaFiltrada.filter((a) => a.tecnico_id === t.id)
+      .reduce((s, a) => s + horasEntreDatasHora(a.data_hora_inicio, a.data_hora_fim), 0);
+
+    let horasAtividades = 0;
+    for (const registro of atividadesNoPeriodo) {
+      if (registro.usuario_id !== t.id) continue;
+      for (const at of (registro.atividades || [])) {
+        if (at.status === 'concluido' && at.inicio && at.fim) {
+          horasAtividades += horasEntreHoraSoDia(registro.data, at.inicio, at.fim);
+        } else if (at.status === 'em_andamento' && at.inicio) {
+          // "em andamento" sem fim: conta até agora (se for hoje) ou até o fim daquele dia (se for
+          // um dia passado que o técnico nunca voltou a marcar como concluído) — nunca deixa uma
+          // atividade esquecida inflar as horas trabalhadas indefinidamente.
+          const inicioMs = horarioBrasiliaParaData(`${registro.data}T${at.inicio}`);
+          if (!inicioMs) continue;
+          const tetoMs = registro.data === hojeISO ? agora : (horarioBrasiliaParaData(`${registro.data}T23:59`) || agora).getTime();
+          const h = (Math.min(agora, tetoMs) - inicioMs.getTime()) / 36e5;
+          if (Number.isFinite(h) && h > 0) horasAtividades += h;
+        }
+      }
+    }
+
+    const diasPendentes = diasNoIntervaloTecnico(data, empresaId, t.id, periodoInicio, periodoFim)
+      .filter((d) => d.status === 'pendente').length;
+    const horasParadas = Math.round(diasPendentes * JORNADA_PADRAO_HORAS * 10) / 10;
+    const horasTrabalhadas = Math.round((horasOS + horasAtividades) * 10) / 10;
+    const totalHoras = horasTrabalhadas + horasParadas;
+    const percentualOcupacao = totalHoras > 0 ? Math.round((horasTrabalhadas / totalHoras) * 1000) / 10 : null;
+
+    return {
+      tecnico_id: t.id, tecnico_nome: t.nome,
+      horas_trabalhadas: horasTrabalhadas, horas_paradas: horasParadas,
+      dias_pendentes: diasPendentes, percentual_ocupacao: percentualOcupacao,
+    };
+  }).sort((a, b) => (a.percentual_ocupacao ?? 101) - (b.percentual_ocupacao ?? 101)); // mais ocioso primeiro
+
+  const totalTrabalhadas = Math.round(linhas.reduce((s, l) => s + l.horas_trabalhadas, 0) * 10) / 10;
+  const totalParadas = Math.round(linhas.reduce((s, l) => s + l.horas_paradas, 0) * 10) / 10;
+  const totalGeral = totalTrabalhadas + totalParadas;
+
+  return {
+    periodo: { inicio: periodoInicio, fim: periodoFim },
+    jornada_padrao_horas: JORNADA_PADRAO_HORAS,
+    equipe: {
+      horas_trabalhadas: totalTrabalhadas, horas_paradas: totalParadas,
+      percentual_ocupacao: totalGeral > 0 ? Math.round((totalTrabalhadas / totalGeral) * 1000) / 10 : null,
+    },
+    tecnicos: linhas,
+  };
+}
+
 // lê e normaliza os 5 filtros (período/cliente/equipamento/técnico/contrato) da query string —
 // mesma leitura pros 3 endpoints (dashboard, série mensal e drill-down), pra nunca interpretarem o
 // mesmo filtro de jeitos diferentes.
@@ -4831,6 +4938,17 @@ rota('GET', /^\/api\/kpis\/ranking-tecnicos$/, async (req, res) => {
   const filtros = filtrosKpisDaQuery(query);
   const data = db.load();
   enviarJSON(res, 200, { ranking: calcularRankingTecnicosKpis(data, user.empresa_id, filtros) });
+});
+
+// GET /api/kpis/mao-de-obra — horas trabalhadas × paradas por técnico, no mesmo recorte de
+// filtros do resto do dashboard (ver calcularMaoDeObra).
+rota('GET', /^\/api\/kpis\/mao-de-obra$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const filtros = filtrosKpisDaQuery(query);
+  const data = db.load();
+  enviarJSON(res, 200, calcularMaoDeObra(data, user.empresa_id, filtros));
 });
 
 const INDICADORES_KPI_VALIDOS = ['mtbf', 'mttr', 'disponibilidade', 'backlog', 'preventiva_corretiva', 'total_os'];
