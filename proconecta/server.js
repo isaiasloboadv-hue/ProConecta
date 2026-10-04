@@ -4714,21 +4714,42 @@ function horasEntreHoraSoDia(diaISO, horaInicio, horaFim) {
   return horasEntreDatasHora(`${diaISO}T${horaInicio}`, `${diaISO}T${horaFim}`);
 }
 
-// horas de O.S. do técnico num dia específico (dentro do recorte de filtros já aplicado).
-function horasOSDoTecnicoNoDia(agendaFiltrada, tecnicoId, diaISO) {
-  return agendaFiltrada.filter((a) => a.tecnico_id === tecnicoId && String(a.data_hora_inicio || '').slice(0, 10) === diaISO)
-    .reduce((s, a) => s + horasEntreDatasHora(a.data_hora_inicio, a.data_hora_fim), 0);
+// pedido do usuário: "usar também a O.S. que for feita — técnico inicia deslocamento e, ao indicar
+// chegada no destino, mesmo ultrapassando as horas de trabalho normal, as horas excedentes entram
+// como saldo positivo." Em vez do horário AGENDADO (data_hora_inicio/fim, que é só a previsão),
+// usa o ciclo REAL que o próprio técnico registrou pelos botões de deslocamento (ver
+// POST /api/agenda/:id/deslocamento e /chegada): início do deslocamento até a chegada — e, quando
+// a O.S. também tem retorno rastreado (viagem com volta), estende até a chegada do retorno, pra
+// cobrir o dia inteiro de trabalho (ida + no local + volta). deslocamento_iniciado_em/
+// chegada_confirmada_em/retorno_chegada_confirmada_em são timestamps ISO reais (new Date().
+// toISOString()), por isso dá pra comparar direto, sem precisar do ajuste de fuso de Brasília que
+// data_hora_inicio/fim (vindos de <input type="datetime-local">) exigem.
+function horasReaisDaOS(os) {
+  if (!os.deslocamento_iniciado_em) return null; // ainda não iniciou (ou não é O.S. em loco) — cai no horário agendado
+  const fimIso = os.retorno_chegada_confirmada_em || os.chegada_confirmada_em;
+  if (!fimIso) return null; // deslocamento iniciado mas ainda sem chegada registrada — cedo demais pra contar
+  const h = (new Date(fimIso).getTime() - new Date(os.deslocamento_iniciado_em).getTime()) / 36e5;
+  return Number.isFinite(h) && h > 0 ? h : null;
 }
 
-// horas de atividade não programada do técnico num dia específico — "em andamento" sem fim conta
-// até agora (se for hoje) ou até o fim daquele dia (se for um dia passado que o técnico nunca
-// voltou a marcar como concluído), nunca deixando uma atividade esquecida inflar as horas
+// horas de O.S. do técnico num dia específico (dentro do recorte de filtros já aplicado) — usa o
+// ciclo real de deslocamento quando já registrado, senão o horário agendado.
+function horasOSDoTecnicoNoDia(agendaFiltrada, tecnicoId, diaISO) {
+  return agendaFiltrada.filter((a) => a.tecnico_id === tecnicoId && String(a.data_hora_inicio || '').slice(0, 10) === diaISO)
+    .reduce((s, a) => s + (horasReaisDaOS(a) ?? horasEntreDatasHora(a.data_hora_inicio, a.data_hora_fim)), 0);
+}
+
+// horas de atividade não programada do técnico num dia específico. "Em andamento" com um fim já
+// informado usa esse fim igual uma concluída (é o mesmo horário que a tela mostra — contar outra
+// coisa faria o número da tela e o do KPI divergirem); só quando não tem fim nenhum informado é
+// que conta até agora (se for hoje) ou até o fim daquele dia (se for um dia passado que o técnico
+// nunca voltou a marcar como concluído), pra nunca deixar uma atividade esquecida inflar as horas
 // trabalhadas indefinidamente.
 function horasAtividadesDoTecnicoNoDia(registro, diaISO, hojeISO, agora) {
   if (!registro) return 0;
   let horas = 0;
   for (const at of (registro.atividades || [])) {
-    if (at.status === 'concluido' && at.inicio && at.fim) {
+    if (at.inicio && at.fim && (at.status === 'concluido' || at.status === 'em_andamento')) {
       horas += horasEntreHoraSoDia(diaISO, at.inicio, at.fim);
     } else if (at.status === 'em_andamento' && at.inicio) {
       const inicioMs = horarioBrasiliaParaData(`${diaISO}T${at.inicio}`);
@@ -4755,18 +4776,26 @@ function calcularMaoDeObra(data, empresaId, filtros = {}) {
 
   const agora = Date.now();
   // pedido do usuário: "as horas trabalhadas são 8 horas diárias pra cada técnico, evitar se ele
-  // justificar 3 horas, 5 horas está ocioso" — ou seja, a jornada de referência é checada DIA A
-  // DIA, não só no agregado do período: um dia com 3h de atividade registrada (concluída) ainda
-  // sobra 5h de "parado" nesse mesmo dia, mesmo ele não sendo mais um dia 'pendente' (sem
-  // justificativa nenhuma) pra tela de Atividades do Dia. Por isso o cálculo percorre cada dia do
-  // período (diasNoIntervaloTecnico) em vez de só somar o total de horas logadas no período.
+  // justificar 3 horas, 5 horas está ocioso" — a jornada de referência é checada DIA A DIA, não só
+  // no agregado do período: um dia com 3h de atividade registrada ainda sobra 5h de "parado" nesse
+  // mesmo dia, mesmo ele não sendo mais um dia 'pendente' pra tela de Atividades do Dia.
+  //
+  // Depois, outro pedido: "mesmo ultrapassando as horas de trabalho normal, as horas excedentes
+  // entram como saldo positivo pra [um] colchão acumulado" — ex.: um dia só com 6h de atividade
+  // (2h parado) e outro dia de O.S. com 14h reais de trabalho (6h excedentes) juntos no período dão
+  // saldo líquido +4h (6 − 2), não "2h paradas + 6h excedentes" cada um isolado. Por isso o saldo de
+  // cada dia (horas logadas − jornada, pode ser negativo) é somado ALGEBRICAMENTE no período inteiro
+  // antes de separar em paradas (déficit líquido) e excedentes (superávit líquido) — dia bom cobre
+  // dia ruim dentro do mesmo recorte.
   const linhas = tecnicos.map((t) => {
     const dias = diasNoIntervaloTecnico(data, empresaId, t.id, periodoInicio, periodoFim);
-    let horasTrabalhadas = 0;
-    let horasParadas = 0;
+    let horasTrabalhadas = 0; // soma bruta logada (informativa — sem compensação entre dias)
+    let saldoLiquido = 0; // soma de (logadas − jornada) de cada dia útil — pode virar negativo ou positivo
+    let diasUteis = 0;
     let diasPendentes = 0; // dias sem NENHUMA O.S./atividade registrada (métrica à parte, pra "preencheu ou nem abriu o formulário")
     for (const d of dias) {
       if (d.status === 'folga' || d.status === 'futuro') continue; // folga não é trabalho nem ociosidade; futuro ainda não aconteceu
+      diasUteis++;
       let logadas = 0;
       if (d.status === 'os') {
         logadas = horasOSDoTecnicoNoDia(agendaFiltrada, t.id, d.data);
@@ -4777,32 +4806,38 @@ function calcularMaoDeObra(data, empresaId, filtros = {}) {
         diasPendentes++; // 'pendente' — nada registrado nesse dia
       }
       horasTrabalhadas += logadas;
-      horasParadas += Math.max(0, JORNADA_PADRAO_HORAS - logadas);
+      saldoLiquido += logadas - JORNADA_PADRAO_HORAS;
     }
     horasTrabalhadas = Math.round(horasTrabalhadas * 10) / 10;
-    horasParadas = Math.round(horasParadas * 10) / 10;
-    const totalHoras = horasTrabalhadas + horasParadas;
-    const percentualOcupacao = totalHoras > 0 ? Math.round((horasTrabalhadas / totalHoras) * 1000) / 10 : null;
+    const horasParadas = Math.round(Math.max(0, -saldoLiquido) * 10) / 10; // déficit líquido do período
+    const horasExcedentes = Math.round(Math.max(0, saldoLiquido) * 10) / 10; // saldo positivo (colchão) do período
+    const jornadaTotal = diasUteis * JORNADA_PADRAO_HORAS;
+    const percentualOcupacao = jornadaTotal > 0 ? Math.round((horasTrabalhadas / jornadaTotal) * 1000) / 10 : null;
 
     return {
       tecnico_id: t.id, tecnico_nome: t.nome,
-      horas_trabalhadas: horasTrabalhadas, horas_paradas: horasParadas,
-      dias_pendentes: diasPendentes, percentual_ocupacao: percentualOcupacao,
+      horas_trabalhadas: horasTrabalhadas, horas_paradas: horasParadas, horas_excedentes: horasExcedentes,
+      dias_pendentes: diasPendentes, percentual_ocupacao: percentualOcupacao, _jornada_total: jornadaTotal,
     };
   }).sort((a, b) => (a.percentual_ocupacao ?? 101) - (b.percentual_ocupacao ?? 101)); // mais ocioso primeiro
 
   const totalTrabalhadas = Math.round(linhas.reduce((s, l) => s + l.horas_trabalhadas, 0) * 10) / 10;
   const totalParadas = Math.round(linhas.reduce((s, l) => s + l.horas_paradas, 0) * 10) / 10;
-  const totalGeral = totalTrabalhadas + totalParadas;
+  const totalExcedentes = Math.round(linhas.reduce((s, l) => s + l.horas_excedentes, 0) * 10) / 10;
+  // ponderado pelos dias úteis de cada técnico (não é só a média simples dos %), pra um técnico com
+  // poucos dias no recorte (ex.: entrou na equipe no meio do período) não pesar igual a um que tem
+  // o período inteiro.
+  const jornadaTotalEquipe = linhas.reduce((s, l) => s + l._jornada_total, 0);
+  const tecnicosSemCampoInterno = linhas.map(({ _jornada_total, ...resto }) => resto);
 
   return {
     periodo: { inicio: periodoInicio, fim: periodoFim },
     jornada_padrao_horas: JORNADA_PADRAO_HORAS,
     equipe: {
-      horas_trabalhadas: totalTrabalhadas, horas_paradas: totalParadas,
-      percentual_ocupacao: totalGeral > 0 ? Math.round((totalTrabalhadas / totalGeral) * 1000) / 10 : null,
+      horas_trabalhadas: totalTrabalhadas, horas_paradas: totalParadas, horas_excedentes: totalExcedentes,
+      percentual_ocupacao: jornadaTotalEquipe > 0 ? Math.round((totalTrabalhadas / jornadaTotalEquipe) * 1000) / 10 : null,
     },
-    tecnicos: linhas,
+    tecnicos: tecnicosSemCampoInterno,
   };
 }
 

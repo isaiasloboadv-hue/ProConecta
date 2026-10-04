@@ -13618,7 +13618,7 @@ async function abrirMaoDeObraDetalhe() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>MOD</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. A jornada de referência é de ${resp.jornada_padrao_horas}h por dia útil — o que não está coberto por O.S./atendimento nem por atividade registrada naquele dia conta como parado, mesmo num dia parcialmente justificado (ex.: só 3h registradas sobram ${resp.jornada_padrao_horas - 3}h paradas nesse mesmo dia).</p></div>
+      <div><h1>MOD</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. A jornada de referência é de ${resp.jornada_padrao_horas}h por dia útil. Horas de O.S. usam o deslocamento/chegada reais do técnico quando já registrados (não só o horário agendado) — quando um dia passa da jornada, o excedente vira saldo positivo que compensa dias de déficit dentro do mesmo período, e só o que sobra líquido depois dessa compensação conta como parado.</p></div>
       <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
     </div>
     <div class="kpis-row-donut">
@@ -13669,26 +13669,30 @@ function desenharMaoDeObra(resp) {
   }
   ranking.innerHTML = `
     <div style="margin-bottom:12px; font-size:13px; color:var(--ink-soft);">
-      Equipe: <strong style="color:var(--ink);">${equipe.horas_trabalhadas}h trabalhadas</strong> × <strong style="color:var(--ink);">${equipe.horas_paradas}h paradas</strong>${equipe.percentual_ocupacao !== null ? ` — ${equipe.percentual_ocupacao}% de ocupação` : ''}
+      Equipe: <strong style="color:var(--ink);">${equipe.horas_trabalhadas}h trabalhadas</strong> × <strong style="color:var(--ink);">${equipe.horas_paradas}h paradas</strong>${equipe.horas_excedentes ? ` <span style="color:var(--teal); font-weight:700;">(+${equipe.horas_excedentes}h de saldo/colchão)</span>` : ''}${equipe.percentual_ocupacao !== null ? ` — ${equipe.percentual_ocupacao}% de ocupação` : ''}
     </div>
     <div style="display:flex; flex-direction:column; gap:12px;">
       ${tecnicos.map((t) => {
-        const total = t.horas_trabalhadas + t.horas_paradas;
-        const pctTrab = total > 0 ? (t.horas_trabalhadas / total) * 100 : 0;
-        const pctParada = total > 0 ? 100 - pctTrab : 0;
+        // barra: ocupação líquida (já com o saldo de dias de sobra compensando dias de déficit)
+        // até 100%; acima disso o excedente vira um selo à parte em vez de estourar a barra.
+        const pctOcupacao = Math.max(0, Math.min(100, t.percentual_ocupacao ?? 0));
+        const pctParada = 100 - pctOcupacao;
         const nomeEscapado = esc(t.tecnico_nome).replace(/'/g, '&#39;');
         return `
         <div class="viagens-chart-row clicavel" onclick="abrirDetalheAtividadesTecnico(${t.tecnico_id}, '${nomeEscapado}', 'abrirMaoDeObraDetalhe()')" style="flex-direction:column; align-items:stretch;">
-          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; gap:8px;">
             <strong style="font-size:13px; color:var(--ink);">${esc(t.tecnico_nome)}</strong>
-            <span style="font-size:12px; color:var(--ink-soft);">${t.percentual_ocupacao !== null ? `${t.percentual_ocupacao}% ocupação` : 'sem dados no período'}</span>
+            <span style="font-size:12px; color:var(--ink-soft); white-space:nowrap;">
+              ${t.percentual_ocupacao !== null ? `${t.percentual_ocupacao}% ocupação` : 'sem dados no período'}
+              ${t.horas_excedentes ? ` <span style="color:var(--teal); font-weight:700;">+${t.horas_excedentes}h colchão</span>` : ''}
+            </span>
           </div>
           <div style="display:flex; height:14px; border-radius:7px; overflow:hidden; background:var(--line);">
-            ${pctTrab > 0 ? `<div style="width:${pctTrab}%; background:#198754;" title="${t.horas_trabalhadas}h trabalhadas"></div>` : ''}
-            ${pctTrab > 0 && pctParada > 0 ? `<div style="width:2px; background:#fff;"></div>` : ''}
-            ${pctParada > 0 ? `<div style="width:${pctParada}%; background:#C7860A;" title="${t.horas_paradas}h paradas"></div>` : ''}
+            ${pctOcupacao > 0 ? `<div style="width:${pctOcupacao}%; background:#198754;" title="${t.horas_trabalhadas}h trabalhadas"></div>` : ''}
+            ${pctOcupacao > 0 && pctParada > 0 ? `<div style="width:2px; background:#fff;"></div>` : ''}
+            ${pctParada > 0 ? `<div style="width:${pctParada}%; background:#C7860A;" title="${t.horas_paradas}h paradas (líquido)"></div>` : ''}
           </div>
-          <div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${t.horas_trabalhadas}h trabalhadas · ${t.horas_paradas}h paradas${t.dias_pendentes ? ` · ${t.dias_pendentes} dia(s) pendente(s)` : ''}</div>
+          <div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${t.horas_trabalhadas}h trabalhadas · ${t.horas_paradas}h paradas${t.horas_excedentes ? ` · ${t.horas_excedentes}h excedentes` : ''}${t.dias_pendentes ? ` · ${t.dias_pendentes} dia(s) pendente(s)` : ''}</div>
         </div>`;
       }).join('')}
     </div>`;
@@ -14030,9 +14034,9 @@ function gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logoDataUri, imagens, f
 
   if (maoDeObra.tecnicos.length) {
     tituloSecao('MOD por técnico');
-    const larg = [pageW - margem * 2 - 280, 90, 90, 100];
-    tabelaSimples(['Técnico', 'Trabalhadas', 'Paradas', '% Ocupação'], larg,
-      maoDeObra.tecnicos.map((tc) => [tc.tecnico_nome, `${tc.horas_trabalhadas} h`, `${tc.horas_paradas} h`, tc.percentual_ocupacao !== null ? `${tc.percentual_ocupacao}%` : '—']));
+    const larg = [pageW - margem * 2 - 360, 85, 85, 90, 90];
+    tabelaSimples(['Técnico', 'Trabalhadas', 'Paradas', 'Excedentes', '% Ocupação'], larg,
+      maoDeObra.tecnicos.map((tc) => [tc.tecnico_nome, `${tc.horas_trabalhadas} h`, `${tc.horas_paradas} h`, `${tc.horas_excedentes || 0} h`, tc.percentual_ocupacao !== null ? `${tc.percentual_ocupacao}%` : '—']));
   }
   if (ranking.length) {
     tituloSecao('Técnicos — O.S. concluídas no recorte');
