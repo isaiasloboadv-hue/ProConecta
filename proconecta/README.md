@@ -503,6 +503,30 @@ funcionando exatamente como antes, nada foi tornado obrigatório.
 
 Teste: `fmea-laudo-tecnico.e2e.test.js`.
 
+### Passo 4: telas de administração do catálogo FMEA
+
+Os 3 primeiros passos criaram a API e o uso da cascata no Laudo Técnico,
+mas até aqui só dava pra cadastrar Componente/Modo de falha/Causa/Efeito
+chamando a API direto — sem nenhuma tela. Esse passo fecha essa lacuna.
+
+Entrada: **Equipamentos > Cadastrar equipamento** (catálogo), botão
+**FMEA** em cada modelo (só visível pro administrador, mesmo padrão de
+Editar/Excluir ao lado). Dali em diante é um drill-down de 4 telas, mesmo
+padrão de navegação já usado em Plataforma → Cadastros → empresa
+individual:
+
+```
+Componentes (de um modelo)
+  → Modos de falha (de um componente) — formulário com Severidade/
+    Ocorrência/Detecção (1-10) e RPN calculado e mostrado na hora
+    → Causas (de um modo de falha)
+      → Efeitos (de uma causa)
+```
+
+Cada tela tem cadastrar/renomear/excluir; excluir é bloqueado pelo
+servidor quando já existe algo cadastrado embaixo (mesma regra da API,
+passo 1) — a tela só repassa a mensagem de erro.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

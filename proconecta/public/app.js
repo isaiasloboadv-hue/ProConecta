@@ -12887,6 +12887,7 @@ async function renderEquipamentosCadastrar() {
       ${catalogo.length ? catalogo.map((e) => `<tr><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td>
         <td class="td-acoes">
           ${USER.papel === 'administrador' ? `
+            <button class="btn-outline-sm" onclick="abrirFmeaComponentes(${e.id})">FMEA</button>
             <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           ` : ''}
@@ -12946,6 +12947,258 @@ async function excluirEquipamento(id) {
     mostrarToast('Equipamento excluído.');
     if (paginaAtual === 'equipamentos-atrelar') renderEquipamentosAtrelar();
     else renderEquipamentosCadastrar();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- FMEA (RCM/SAP PM Fase 1, passo 4): administração do catálogo em cascata, por modelo de
+// equipamento. Drill-down de 4 telas (mesmo padrão de navegação já usado em Plataforma >
+// Cadastros > empresa individual) — Componentes de um modelo → Modos de falha de um componente →
+// Causas de um modo de falha → Efeitos de uma causa. Só administrador cadastra/edita/exclui (o
+// botão "FMEA" só aparece pra ele, mesmo padrão de Editar/Excluir logo acima); a API já recusa
+// escrita de qualquer outro papel de qualquer forma.
+async function abrirFmeaComponentes(catalogoId) {
+  const catalogo = (window._catalogoCache || []).find((e) => e.id === catalogoId);
+  if (!catalogo) return;
+  const { componentes } = await api(`/api/fmea/componentes?catalogo_id=${catalogoId}`);
+  window._fmeaComponentesCache = componentes;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>FMEA — ${esc(catalogo.tipo)} ${esc(catalogo.modelo)}</h1><p>${componentes.length} componente(s) cadastrado(s)</p></div>
+      <button class="btn-outline-sm" onclick="renderEquipamentosCadastrar()">‹ Equipamentos</button>
+    </div>
+    <p style="color:var(--ink-soft); font-size:13px; margin-top:-14px;">Componentes deste modelo — clique num componente pra ver/cadastrar os modos de falha dele.</p>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Novo componente</label><input id="fc-nome" placeholder="ex.: Fonte de alimentação"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarComponenteFmea(${catalogoId})">+ Adicionar componente</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Componente</th><th></th></tr>
+      ${componentes.length ? componentes.map((c) => `
+        <tr><td data-label="Componente"><a href="#" onclick="abrirFmeaModosFalha(${c.id}); return false;">${esc(c.nome)}</a></td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="renomearComponenteFmea(${c.id})">Renomear</button>
+          <button class="btn-outline-sm" onclick="excluirComponenteFmea(${c.id}, ${catalogoId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhum componente cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+async function criarComponenteFmea(catalogoId) {
+  const nome = document.getElementById('fc-nome').value.trim();
+  if (!nome) return alert('Informe o nome do componente.');
+  try {
+    await api('/api/fmea/componentes', { method: 'POST', body: { catalogo_id: catalogoId, nome } });
+    mostrarToast('Componente cadastrado.');
+    abrirFmeaComponentes(catalogoId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function renomearComponenteFmea(id) {
+  const componente = (window._fmeaComponentesCache || []).find((c) => c.id === id);
+  if (!componente) return;
+  const nome = prompt('Novo nome do componente:', componente.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/fmea/componentes/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Componente renomeado.');
+    abrirFmeaComponentes(componente.catalogo_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirComponenteFmea(id, catalogoId) {
+  if (!(await mostrarConfirmacao('Excluir este componente? Isso só funciona se não houver modos de falha cadastrados nele.'))) return;
+  try {
+    await api(`/api/fmea/componentes/${id}`, { method: 'DELETE' });
+    mostrarToast('Componente excluído.');
+    abrirFmeaComponentes(catalogoId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirFmeaModosFalha(componenteId) {
+  const componente = (window._fmeaComponentesCache || []).find((c) => c.id === componenteId);
+  if (!componente) return;
+  const { modos_falha } = await api(`/api/fmea/modos-falha?componente_id=${componenteId}`);
+  window._fmeaModosFalhaCache = modos_falha;
+  window._fmeaComponenteAtual = componente;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Modos de falha — ${esc(componente.nome)}</h1><p>${modos_falha.length} cadastrado(s)</p></div>
+      <button class="btn-outline-sm" onclick="abrirFmeaComponentes(${componente.catalogo_id})">‹ Componentes</button>
+    </div>
+    <div id="form-modo-falha"></div>
+    <button class="btn btn-primary btn-sm" onclick="mostrarFormModoFalha()" style="margin-bottom:14px;">+ Novo modo de falha</button>
+    <div class="panel"><table>
+      <tr><th>Modo de falha</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th></th></tr>
+      ${modos_falha.length ? modos_falha.map((m) => `
+        <tr><td data-label="Modo de falha"><a href="#" onclick="abrirFmeaCausas(${m.id}); return false;">${esc(m.nome)}</a></td>
+        <td data-label="S">${m.severidade}</td><td data-label="O">${m.ocorrencia}</td><td data-label="D">${m.deteccao}</td><td data-label="RPN"><b>${m.rpn}</b></td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="editarModoFalha(${m.id})">Editar</button>
+          <button class="btn-outline-sm" onclick="excluirModoFalha(${m.id}, ${componenteId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum modo de falha cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+let modoFalhaEmEdicaoId = null;
+function mostrarFormModoFalha(modo) {
+  modoFalhaEmEdicaoId = modo ? modo.id : null;
+  document.getElementById('form-modo-falha').innerHTML = `
+    <div class="panel"><div class="panel-head">${modo ? 'Editar modo de falha' : 'Novo modo de falha'}</div>
+      <div class="form-grid">
+        <div class="full"><label>Nome*</label><input id="mf-nome" value="${modo ? esc(modo.nome) : ''}"></div>
+        <div><label>Severidade (1-10)*</label><input id="mf-severidade" type="number" min="1" max="10" value="${modo ? modo.severidade : ''}"></div>
+        <div><label>Ocorrência (1-10)*</label><input id="mf-ocorrencia" type="number" min="1" max="10" value="${modo ? modo.ocorrencia : ''}"></div>
+        <div><label>Detecção (1-10)*</label><input id="mf-deteccao" type="number" min="1" max="10" value="${modo ? modo.deteccao : ''}"></div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">RPN = Severidade × Ocorrência × Detecção, calculado automaticamente.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarModoFalha()">${modo ? 'Salvar alterações' : 'Salvar'}</button>
+        ${modo ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoModoFalha()">Cancelar</button>` : ''}
+      </div>
+    </div>`;
+}
+function editarModoFalha(id) {
+  const modo = (window._fmeaModosFalhaCache || []).find((m) => m.id === id);
+  if (!modo) return;
+  mostrarFormModoFalha(modo);
+  document.getElementById('form-modo-falha').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function cancelarEdicaoModoFalha() { modoFalhaEmEdicaoId = null; document.getElementById('form-modo-falha').innerHTML = ''; }
+async function salvarModoFalha() {
+  const nome = document.getElementById('mf-nome').value.trim();
+  const severidade = document.getElementById('mf-severidade').value;
+  const ocorrencia = document.getElementById('mf-ocorrencia').value;
+  const deteccao = document.getElementById('mf-deteccao').value;
+  if (!nome) return alert('Informe o nome do modo de falha.');
+  try {
+    if (modoFalhaEmEdicaoId) {
+      await api(`/api/fmea/modos-falha/${modoFalhaEmEdicaoId}`, { method: 'PUT', body: { nome, severidade, ocorrencia, deteccao } });
+      modoFalhaEmEdicaoId = null;
+      mostrarToast('Modo de falha atualizado.');
+    } else {
+      await api('/api/fmea/modos-falha', { method: 'POST', body: { componente_id: window._fmeaComponenteAtual.id, nome, severidade, ocorrencia, deteccao } });
+      mostrarToast('Modo de falha cadastrado.');
+    }
+    abrirFmeaModosFalha(window._fmeaComponenteAtual.id);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function excluirModoFalha(id, componenteId) {
+  if (!(await mostrarConfirmacao('Excluir este modo de falha? Isso só funciona se não houver causas cadastradas nele.'))) return;
+  try {
+    await api(`/api/fmea/modos-falha/${id}`, { method: 'DELETE' });
+    mostrarToast('Modo de falha excluído.');
+    abrirFmeaModosFalha(componenteId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirFmeaCausas(modoFalhaId) {
+  const modo = (window._fmeaModosFalhaCache || []).find((m) => m.id === modoFalhaId);
+  if (!modo) return;
+  const { causas } = await api(`/api/fmea/causas?modo_falha_id=${modoFalhaId}`);
+  window._fmeaCausasCache = causas;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Causas — ${esc(modo.nome)}</h1><p>${causas.length} cadastrada(s)</p></div>
+      <button class="btn-outline-sm" onclick="abrirFmeaModosFalha(${modo.componente_id})">‹ Modos de falha</button>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Nova causa</label><input id="fcs-nome" placeholder="ex.: Sobretensão na rede elétrica"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarCausaFmea(${modoFalhaId})">+ Adicionar causa</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Causa</th><th></th></tr>
+      ${causas.length ? causas.map((c) => `
+        <tr><td data-label="Causa"><a href="#" onclick="abrirFmeaEfeitos(${c.id}); return false;">${esc(c.nome)}</a></td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="renomearCausaFmea(${c.id})">Renomear</button>
+          <button class="btn-outline-sm" onclick="excluirCausaFmea(${c.id}, ${modoFalhaId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhuma causa cadastrada ainda.</td></tr>`}
+    </table></div>`;
+}
+async function criarCausaFmea(modoFalhaId) {
+  const nome = document.getElementById('fcs-nome').value.trim();
+  if (!nome) return alert('Informe o nome da causa.');
+  try {
+    await api('/api/fmea/causas', { method: 'POST', body: { modo_falha_id: modoFalhaId, nome } });
+    mostrarToast('Causa cadastrada.');
+    abrirFmeaCausas(modoFalhaId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function renomearCausaFmea(id) {
+  const causa = (window._fmeaCausasCache || []).find((c) => c.id === id);
+  if (!causa) return;
+  const nome = prompt('Novo nome da causa:', causa.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/fmea/causas/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Causa renomeada.');
+    abrirFmeaCausas(causa.modo_falha_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirCausaFmea(id, modoFalhaId) {
+  if (!(await mostrarConfirmacao('Excluir esta causa? Isso só funciona se não houver efeitos cadastrados nela.'))) return;
+  try {
+    await api(`/api/fmea/causas/${id}`, { method: 'DELETE' });
+    mostrarToast('Causa excluída.');
+    abrirFmeaCausas(modoFalhaId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirFmeaEfeitos(causaId) {
+  const causa = (window._fmeaCausasCache || []).find((c) => c.id === causaId);
+  if (!causa) return;
+  const { efeitos } = await api(`/api/fmea/efeitos?causa_id=${causaId}`);
+  window._fmeaEfeitosCache = efeitos;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Efeitos — ${esc(causa.nome)}</h1><p>${efeitos.length} cadastrado(s)</p></div>
+      <button class="btn-outline-sm" onclick="abrirFmeaCausas(${causa.modo_falha_id})">‹ Causas</button>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Novo efeito</label><input id="fe-nome" placeholder="ex.: Equipamento desliga e não liga mais"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarEfeitoFmea(${causaId})">+ Adicionar efeito</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Efeito</th><th></th></tr>
+      ${efeitos.length ? efeitos.map((e) => `
+        <tr><td data-label="Efeito">${esc(e.nome)}</td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="renomearEfeitoFmea(${e.id})">Renomear</button>
+          <button class="btn-outline-sm" onclick="excluirEfeitoFmea(${e.id}, ${causaId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhum efeito cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+async function criarEfeitoFmea(causaId) {
+  const nome = document.getElementById('fe-nome').value.trim();
+  if (!nome) return alert('Informe o nome do efeito.');
+  try {
+    await api('/api/fmea/efeitos', { method: 'POST', body: { causa_id: causaId, nome } });
+    mostrarToast('Efeito cadastrado.');
+    abrirFmeaEfeitos(causaId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function renomearEfeitoFmea(id) {
+  const efeito = (window._fmeaEfeitosCache || []).find((e) => e.id === id);
+  if (!efeito) return;
+  const nome = prompt('Novo nome do efeito:', efeito.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/fmea/efeitos/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Efeito renomeado.');
+    abrirFmeaEfeitos(efeito.causa_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirEfeitoFmea(id, causaId) {
+  if (!(await mostrarConfirmacao('Excluir este efeito?'))) return;
+  try {
+    await api(`/api/fmea/efeitos/${id}`, { method: 'DELETE' });
+    mostrarToast('Efeito excluído.');
+    abrirFmeaEfeitos(causaId);
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
