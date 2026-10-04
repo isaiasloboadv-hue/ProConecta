@@ -428,6 +428,11 @@ function migrar(data) {
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
     if (e.data_fabricacao === undefined) e.data_fabricacao = '';
+    // contrato de manutenção preventiva (RCM/SAP PM, Fase 1, passo 10) — só faz sentido numa
+    // unidade atrelada a um cliente; equipamento antigo entra como false (sem contrato) até o
+    // administrador marcar manualmente os que têm. Usado pra filtrar o dashboard de KPIs, já que
+    // equipamento com contrato tende a ter padrão de retrabalho/backlog diferente do sem contrato.
+    if (e.tem_contrato_manutencao === undefined) e.tem_contrato_manutencao = false;
   }
   // catalogo_id (RCM/FMEA Fase 1, passo 2): liga cada unidade atrelada (cliente_id preenchido) de
   // volta ao item do catálogo (cliente_id null) de onde ela nasceu — hoje esse vínculo só existe

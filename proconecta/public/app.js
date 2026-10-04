@@ -13307,6 +13307,11 @@ async function renderKpisDashboard() {
       <div class="field"><label>Cliente</label><select id="kf-cliente"><option value="">Todos</option>${clientes.map((c) => `<option value="${c.id}" ${String(_kpisFiltros.cliente_id) === String(c.id) ? 'selected' : ''}>${esc(c.nome_empresa)}</option>`).join('')}</select></div>
       <div class="field"><label>${t('equipamento', 'Equipamento')}</label><select id="kf-equipamento"><option value="">Todos</option>${equipamentosAtrelados.map((e) => `<option value="${e.id}" ${String(_kpisFiltros.equipamento_id) === String(e.id) ? 'selected' : ''}>${esc(e.tipo)} ${esc(e.modelo)}${e.numero_serie ? ` (${esc(e.numero_serie)})` : ''}</option>`).join('')}</select></div>
       <div class="field"><label>Técnico</label><select id="kf-tecnico"><option value="">Todos</option>${tecnicos.map((u) => `<option value="${u.id}" ${String(_kpisFiltros.tecnico_id) === String(u.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
+      <div class="field"><label>Contrato de manutenção</label><select id="kf-contrato">
+        <option value="">Todos</option>
+        <option value="com" ${_kpisFiltros.contrato === 'com' ? 'selected' : ''}>Com contrato</option>
+        <option value="sem" ${_kpisFiltros.contrato === 'sem' ? 'selected' : ''}>Sem contrato</option>
+      </select></div>
       <button class="btn btn-primary btn-sm" onclick="aplicarFiltrosKpis()">Aplicar filtros</button>
       <button class="btn-outline-sm" onclick="limparFiltrosKpis()">Limpar</button>
       <button class="btn-outline-sm" onclick="exportarKpisExcel()">Exportar Excel</button>
@@ -13323,12 +13328,14 @@ function filtrosKpisDaTela() {
   const clienteId = document.getElementById('kf-cliente').value;
   const equipamentoId = document.getElementById('kf-equipamento').value;
   const tecnicoId = document.getElementById('kf-tecnico').value;
+  const contrato = document.getElementById('kf-contrato').value;
   return {
     ...(periodoInicio ? { periodo_inicio: periodoInicio } : {}),
     ...(periodoFim ? { periodo_fim: periodoFim } : {}),
     ...(clienteId ? { cliente_id: clienteId } : {}),
     ...(equipamentoId ? { equipamento_id: equipamentoId } : {}),
     ...(tecnicoId ? { tecnico_id: tecnicoId } : {}),
+    ...(contrato ? { contrato } : {}),
   };
 }
 async function aplicarFiltrosKpis() {
@@ -13337,7 +13344,7 @@ async function aplicarFiltrosKpis() {
 }
 async function limparFiltrosKpis() {
   _kpisFiltros = {};
-  ['kf-periodo-inicio', 'kf-periodo-fim', 'kf-cliente', 'kf-equipamento', 'kf-tecnico'].forEach((id) => { document.getElementById(id).value = ''; });
+  ['kf-periodo-inicio', 'kf-periodo-fim', 'kf-cliente', 'kf-equipamento', 'kf-tecnico', 'kf-contrato'].forEach((id) => { document.getElementById(id).value = ''; });
   await atualizarKpisDashboard();
 }
 
@@ -13400,6 +13407,7 @@ const KPIS_DETALHE_CONFIG = {
     colunas: [
       { label: 'Cliente', chave: 'cliente_nome' },
       { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'Contrato', chave: 'tem_contrato_manutencao', formatar: (v) => (v ? 'Com contrato' : 'Sem contrato') },
       { label: 'Horas totais', chave: 'horas_totais', formatar: (v) => `${v} h` },
       { label: 'Horas paradas', chave: 'horas_paradas', formatar: (v) => `${v} h` },
       { label: 'Disponibilidade', chave: 'disponibilidade_percentual', formatar: (v) => (v === null ? '—' : `${v}%`) },
@@ -13525,6 +13533,7 @@ async function exportarKpisExcel() {
     ['Cliente', textoSelecionado('kf-cliente')],
     [t('equipamento', 'Equipamento'), textoSelecionado('kf-equipamento')],
     ['Técnico', textoSelecionado('kf-tecnico')],
+    ['Contrato de manutenção', textoSelecionado('kf-contrato')],
     [],
     ['Indicador', 'Valor', 'Observação'],
     ['MTBF (dias)', kpis.mtbf_dias ?? '—', 'Tempo médio de calendário entre corretivas do mesmo equipamento'],
@@ -13565,15 +13574,17 @@ async function renderEquipamentosAtrelar() {
         <div><label>Número de série*</label><input id="ae-numero-serie"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="ae-data-fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
         <div><label>Localização</label><input id="ae-localizacao" placeholder="ex: Cozinha"></div>
+        <div class="full"><label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="ae-contrato" style="width:auto;"> Tem contrato de manutenção preventiva?</label></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarAtrelamento()">Atrelar ao cliente</button>
     </div>
     <div id="form-editar-atrelado"></div>
     <div class="panel"><table>
-      <tr><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Fabricação</th><th></th></tr>
+      <tr><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Nº de série</th><th>Fabricação</th><th>Contrato</th><th></th></tr>
       ${atrelados.length ? atrelados.map((e) => {
         const cliente = clientes.find((c) => c.id === e.cliente_id);
         return `<tr><td data-label="Cliente">${esc(cliente ? cliente.nome_empresa : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº de série">${esc(e.numero_serie)}</td><td data-label="Fabricação">${esc(e.data_fabricacao || '—')}</td>
+        <td data-label="Contrato">${e.tem_contrato_manutencao ? '<span class="tag tag-green">Com contrato</span>' : '<span class="tag tag-amber">Sem contrato</span>'}</td>
         <td class="td-acoes">
           <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
           ${USER.papel === 'administrador' ? `
@@ -13581,7 +13592,7 @@ async function renderEquipamentosAtrelar() {
             <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           ` : ''}
         </td></tr>`;
-      }).join('') : `<tr><td colspan="6" class="empty">Nenhum equipamento atrelado a um cliente ainda.</td></tr>`}
+      }).join('') : `<tr><td colspan="7" class="empty">Nenhum equipamento atrelado a um cliente ainda.</td></tr>`}
     </table></div>
     <div id="historico-eq"></div>`;
 }
@@ -13599,6 +13610,7 @@ function editarAtrelado(id) {
         <div><label>Número de série*</label><input id="ea-numero-serie" value="${esc(equipamento.numero_serie)}"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="ea-data-fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(equipamento.data_fabricacao || '')}"></div>
         <div><label>Localização</label><input id="ea-localizacao" value="${esc(equipamento.localizacao || '')}"></div>
+        <div class="full"><label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="ea-contrato" style="width:auto;" ${equipamento.tem_contrato_manutencao ? 'checked' : ''}> Tem contrato de manutenção preventiva?</label></div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarEdicaoAtrelado(${equipamento.id})">Salvar alterações</button>
@@ -13615,6 +13627,7 @@ async function salvarEdicaoAtrelado(id) {
     numero_serie: numeroSerie,
     data_fabricacao: document.getElementById('ea-data-fabricacao').value,
     localizacao: document.getElementById('ea-localizacao').value,
+    tem_contrato_manutencao: document.getElementById('ea-contrato').checked,
   };
   try {
     await api(`/api/equipamentos/${id}`, { method: 'PUT', body });
@@ -13634,6 +13647,7 @@ async function salvarAtrelamento() {
     cliente_id: clienteId, numero_serie: numeroSerie,
     data_fabricacao: document.getElementById('ae-data-fabricacao').value,
     localizacao: document.getElementById('ae-localizacao').value,
+    tem_contrato_manutencao: document.getElementById('ae-contrato').checked,
   };
   try {
     await api(`/api/equipamentos/${equipamentoId}/atrelar`, { method: 'POST', body });
