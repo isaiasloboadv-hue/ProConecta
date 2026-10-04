@@ -691,6 +691,47 @@ equipamento de cada O.S. pra decidir se ela entra no recorte. O
 drill-down de Disponibilidade (que já é por equipamento) ganhou uma
 coluna "Contrato" pra deixar visível qual é qual mesmo sem filtrar.
 
+### Passo 11: contrato de manutenção definível em 3 lugares, com trava "quem preenche primeiro"
+
+Pedido do usuário: além do Atrelar/Editar equipamento (passo 10), ele
+queria poder definir o contrato também na abertura da O.S. e no
+questionário de SLA — já que nem sempre quem atrela o equipamento é
+quem sabe se ele tem contrato. Qualquer um dos 3 que for preenchido
+primeiro trava os outros dois (acinzentados), evitando resposta
+divergente pro mesmo equipamento; depois de travado, só o Atrelar/Editar
+equipamento (admin) pode mudar — inclusive voltar pra "ainda não
+informado" de propósito.
+
+`tem_contrato_manutencao` virou **tri-estado**: `null` (ainda não
+informado) / `true` / `false` — em vez do booleano com default `false`
+do passo 10. Migração em `db.js` converte, uma única vez (flag
+`_migracaoContratoNaoInformadoV1`, pra não repetir a cada boot no modo
+arquivo, que recarrega e re-migra o JSON a cada requisição), todo
+`false` já existente de volta pra `null`: sem essa marca não dava pra
+distinguir "default nunca confirmado" de "sem contrato" de verdade.
+`true` explícito permanece (só o admin consegue gravar `true`).
+
+Os 3 lugares:
+- **Atrelar/Editar equipamento** — select de 3 opções (Ainda não
+  informado/Com contrato/Sem contrato), sempre editável pelo admin,
+  mesmo já travado por outro lugar.
+- **Abertura da O.S.** — campo dedicado em "Dados do equipamento" (Nova
+  O.S.), ao lado do número de série — some atrás de um texto
+  acinzentado quando o equipamento já tem a informação.
+- **Questionário de SLA** — a pergunta "O cliente tem plano de
+  manutenção preventiva ativo?" (`plano_preventiva_ativo`, já existia
+  na pontuação de SLA) agora também alimenta o contrato do equipamento;
+  aparece travada/pré-marcada com o valor já definido em vez de
+  perguntar de novo, tanto na Nova O.S. quanto no encaminhamento pro
+  pós-venda.
+
+Helper único `aplicarContratoDoValor(equipamento, valor)` em
+`server.js` concentra a trava ("só grava se ainda for `null`") e é
+usado pelos 2 lugares não-admin — `slaDoBody` (SLA) e os handlers de
+`POST`/`PUT /api/agenda` (campo dedicado). `agendaComDetalhes` ganhou
+`equipamento_tem_contrato_manutencao` pro front saber se trava sem
+round-trip extra.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

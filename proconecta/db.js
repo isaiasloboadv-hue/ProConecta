@@ -428,11 +428,24 @@ function migrar(data) {
   for (const e of data.equipamentos) {
     if (e.cliente_id === undefined) e.cliente_id = null;
     if (e.data_fabricacao === undefined) e.data_fabricacao = '';
-    // contrato de manutenção preventiva (RCM/SAP PM, Fase 1, passo 10) — só faz sentido numa
-    // unidade atrelada a um cliente; equipamento antigo entra como false (sem contrato) até o
-    // administrador marcar manualmente os que têm. Usado pra filtrar o dashboard de KPIs, já que
-    // equipamento com contrato tende a ter padrão de retrabalho/backlog diferente do sem contrato.
-    if (e.tem_contrato_manutencao === undefined) e.tem_contrato_manutencao = false;
+    // contrato de manutenção preventiva (RCM/SAP PM, Fase 1, passo 10/11) — só faz sentido numa
+    // unidade atrelada a um cliente. Tri-estado: null = ainda não informado por ninguém, true/false
+    // = já definido (trava — ver aplicarContratoDoValor em server.js). Pode ser preenchido em 3
+    // lugares (Atrelar/Editar equipamento, abertura da O.S., pergunta "plano_preventiva_ativo" do
+    // questionário de SLA) — quem preenche primeiro trava os outros dois; só o Atrelar/Editar
+    // equipamento (admin) pode mudar depois de travado.
+    if (e.tem_contrato_manutencao === undefined) e.tem_contrato_manutencao = null;
+  }
+  // passo 11: equipamentos migrados pelo passo 10 ganharam tem_contrato_manutencao = false por
+  // padrão, sem que ninguém tivesse de fato confirmado isso — com a trava nova, esse "false" não
+  // confirmado passaria a bloquear pra sempre as 3 telas achando que já está definido. Converte
+  // esses de volta pra "não informado" (null) uma única vez (flag abaixo evita repetir isso em
+  // todo boot, o que destruiria uma escolha real de "sem contrato" feita depois deste ponto).
+  if (!data._migracaoContratoNaoInformadoV1) {
+    for (const e of data.equipamentos) {
+      if (e.tem_contrato_manutencao === false) e.tem_contrato_manutencao = null;
+    }
+    data._migracaoContratoNaoInformadoV1 = true;
   }
   // catalogo_id (RCM/FMEA Fase 1, passo 2): liga cada unidade atrelada (cliente_id preenchido) de
   // volta ao item do catálogo (cliente_id null) de onde ela nasceu — hoje esse vínculo só existe
@@ -557,9 +570,16 @@ function carregarDoArquivo() {
     fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
     return data;
   }
-  const data = migrar(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
+  const bruto = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+  // no modo arquivo, carregarDoArquivo() roda de novo em TODO load() (não guarda cache em
+  // memória como o modo Postgres) — então uma migração que converte um valor existente (não só
+  // completa campo ausente) só pode ficar de pé se for gravada no disco já nessa primeira vez;
+  // senão a próxima leitura parte do arquivo original de novo e desfaz uma escolha real feita
+  // depois (ver _migracaoContratoNaoInformadoV1 em migrar()).
+  const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
+  const data = migrar(bruto);
   const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-  if (criouAlguem) salvarNoArquivo(data);
+  if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)) salvarNoArquivo(data);
   return data;
 }
 

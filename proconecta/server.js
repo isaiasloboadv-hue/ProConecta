@@ -295,6 +295,9 @@ function agendaComDetalhes(data, item) {
     equipamento_modelo: equipamento ? equipamento.modelo : null,
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
     equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
+    // tri-estado (true/false/null) — usado pela tela de encaminhamento pro pós-venda pra travar a
+    // pergunta "plano_preventiva_ativo" do SLA quando o contrato já estiver definido (passo 11).
+    equipamento_tem_contrato_manutencao: equipamento ? equipamento.tem_contrato_manutencao : null,
     // modelo do catálogo de origem (RCM/FMEA, passo 2) — a tela do Laudo Técnico usa pra buscar
     // só os componentes FMEA cadastrados pra este modelo específico, não de todos os modelos.
     equipamento_catalogo_id: equipamento ? equipamento.catalogo_id : null,
@@ -496,6 +499,18 @@ function dentroDaGarantiaDeFabrica(dataFabricacao) {
   return new Date() <= limite;
 }
 
+// contrato de manutenção preventiva (RCM/SAP PM, passo 11): pode ser definido em 3 lugares —
+// Atrelar/Editar equipamento (admin, sempre sobrescreve, ver rotas de equipamentos), abertura da
+// O.S. (campo dedicado em POST/PUT /api/agenda) e a pergunta "plano_preventiva_ativo" do
+// questionário de SLA (slaDoBody abaixo). Essa função é o ponto único de "quem preenche primeiro
+// trava": só grava se o equipamento ainda não tiver essa informação (null) — depois disso, só o
+// Atrelar/Editar equipamento consegue mudar.
+function aplicarContratoDoValor(equipamento, valor) {
+  if (equipamento && equipamento.tem_contrato_manutencao === null && (valor === true || valor === false)) {
+    equipamento.tem_contrato_manutencao = valor;
+  }
+}
+
 // calcula o SLA a partir das respostas enviadas na abertura/edição manual da O.S. (mesma
 // pontuação usada pela IA no chat) — retorna null se o admin não preencheu o questionário
 function slaDoBody(body, equipamento) {
@@ -503,6 +518,12 @@ function slaDoBody(body, equipamento) {
   const respostas = { ...body.sla_respostas };
   if (respostas.garantia_fabricacao === undefined) {
     respostas.garantia_fabricacao = equipamento ? (dentroDaGarantiaDeFabrica(equipamento.data_fabricacao) || false) : false;
+  }
+  // a pergunta "o cliente tem plano de manutenção preventiva ativo?" é o mesmo dado do contrato
+  // de manutenção do equipamento (ver aplicarContratoDoValor) — alimenta a trava quando ainda não
+  // tiver sido respondida em nenhum dos outros 2 lugares.
+  if (equipamento && typeof respostas.plano_preventiva_ativo === 'boolean') {
+    aplicarContratoDoValor(equipamento, respostas.plano_preventiva_ativo);
   }
   const sla = ia.calcularSla(respostas);
   return {
@@ -1290,6 +1311,10 @@ rota('POST', /^\/api\/agenda$/, async (req, res) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
+  // contrato de manutenção preventiva (RCM/SAP PM, passo 11): campo opcional dedicado na
+  // abertura da O.S. — só pega se o equipamento ainda não tiver essa informação (ver
+  // aplicarContratoDoValor); se já tiver, o front trava e nem envia.
+  aplicarContratoDoValor(equipamentoEscolhido, body.tem_contrato_manutencao);
   const numeroOSDigitado = String(body.numero_os || '').trim();
   if (numeroOSDigitado && tenant.listar(data, 'agenda', user.empresa_id).some((a) => (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado)) {
     return enviarJSON(res, 400, { erro: `Já existe uma O.S. com o número "${numeroOSDigitado}". Escolha outro número.` });
@@ -1423,6 +1448,7 @@ rota('PUT', /^\/api\/agenda\/(\d+)$/, async (req, res, m) => {
   if (TIPOS_LAUDO_TECNICO.includes(body.tipo) && (!equipamentoEscolhido || !equipamentoEscolhido.numero_serie)) {
     return enviarJSON(res, 400, { erro: 'Este equipamento ainda não está atrelado a um cliente (sem número de série). Atrele-o em Equipamentos > Atrelar equipamento antes de abrir esta O.S.' });
   }
+  aplicarContratoDoValor(equipamentoEscolhido, body.tem_contrato_manutencao);
   const numeroOSDigitado = String(body.numero_os || '').trim();
   if (numeroOSDigitado) {
     const jaExisteEmOutra = tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.id !== item.id && (a.numero_os || `OS-${String(a.id).padStart(6, '0')}`) === numeroOSDigitado);
@@ -3902,7 +3928,11 @@ rota('PUT', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
     equipamento.numero_serie = body.numero_serie.trim();
     equipamento.data_fabricacao = body.data_fabricacao || '';
     equipamento.localizacao = body.localizacao || '';
-    equipamento.tem_contrato_manutencao = !!body.tem_contrato_manutencao;
+    // admin sempre pode mudar aqui, mesmo já travado pelos outros 2 lugares (ver
+    // aplicarContratoDoValor) — inclusive voltar pra null ("ainda não informado") de propósito.
+    if (body.tem_contrato_manutencao === true || body.tem_contrato_manutencao === false || body.tem_contrato_manutencao === null) {
+      equipamento.tem_contrato_manutencao = body.tem_contrato_manutencao;
+    }
   }
   db.save(data);
   enviarJSON(res, 200, { equipamento });
@@ -3947,7 +3977,7 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
     numero_serie: body.numero_serie.trim(),
     data_fabricacao: body.data_fabricacao || '',
     localizacao: body.localizacao || '',
-    tem_contrato_manutencao: !!body.tem_contrato_manutencao,
+    tem_contrato_manutencao: body.tem_contrato_manutencao === true ? true : body.tem_contrato_manutencao === false ? false : null,
   });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
@@ -4307,8 +4337,10 @@ function filtrarAgendaKpis(data, agendaEmpresa, filtros) {
   if (filtros.contratoManutencao === 'com' || filtros.contratoManutencao === 'sem') {
     lista = lista.filter((a) => {
       const equipamento = data.equipamentos.find((e) => e.id === a.equipamento_id && e.empresa_id === a.empresa_id);
-      const temContrato = !!(equipamento && equipamento.tem_contrato_manutencao);
-      return filtros.contratoManutencao === 'com' ? temContrato : !temContrato;
+      // tri-estado: equipamento "ainda não informado" (null) não entra em nenhum dos 2 filtros —
+      // ele não é "com" nem "sem" contrato de verdade, é desconhecido (passo 11).
+      const valor = equipamento ? equipamento.tem_contrato_manutencao : null;
+      return filtros.contratoManutencao === 'com' ? valor === true : valor === false;
     });
   }
   return lista;
@@ -4566,7 +4598,7 @@ function calcularKpiDetalhe(data, empresaId, indicador, filtros) {
       const equipamento = data.equipamentos.find((e) => e.id === equipamentoId && e.empresa_id === empresaId);
       linhas.push({
         cliente_nome: ctx.cliente_nome, equipamento_descricao: ctx.equipamento_descricao,
-        tem_contrato_manutencao: !!(equipamento && equipamento.tem_contrato_manutencao),
+        tem_contrato_manutencao: equipamento ? equipamento.tem_contrato_manutencao : null,
         horas_totais: Math.round(horasTotais * 10) / 10, horas_paradas: Math.round(horasParadas * 10) / 10,
         disponibilidade_percentual: horasTotais > 0 ? Math.round(Math.max(0, 1 - horasParadas / horasTotais) * 1000) / 10 : null,
       });
