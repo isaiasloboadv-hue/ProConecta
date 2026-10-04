@@ -13390,7 +13390,7 @@ async function renderKpisDashboard() {
       <button class="btn-outline-sm" onclick="limparFiltrosKpis()">Limpar</button>
       <button class="btn-outline-sm" onclick="exportarKpisExcel()">Exportar Excel</button>
     </div>
-    <div class="equipe-grid" id="kpis-cards"><div class="empty">Carregando...</div></div>
+    <div class="kpis-tiles" id="kpis-cards"><div class="empty">Carregando...</div></div>
     <div class="kpis-row-donut">
       <div class="panel" style="flex:0 0 260px; margin-bottom:0; display:flex; flex-direction:column;">
         <div class="panel-head">Preventiva × Corretiva</div>
@@ -13404,8 +13404,26 @@ async function renderKpisDashboard() {
         <canvas id="kpis-chart-tipos" height="90"></canvas>
       </div>
     </div>
-    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>
-    <div class="panel"><div class="panel-head">Técnicos — O.S. concluídas no recorte atual</div><div id="kpis-ranking-tecnicos"><div class="empty">Carregando...</div></div></div>`;
+    <div class="panel">
+      <div class="panel-head">Calendário de Ordens de Serviço</div>
+      <div class="cal-head">
+        <div class="cal-nav">
+          <button onclick="mudarMesKpisCalendario(-1)">‹</button>
+          <div class="cal-mes-label" id="kpis-cal-mes-label"></div>
+          <button onclick="mudarMesKpisCalendario(1)">›</button>
+        </div>
+        <button class="btn-outline-sm" onclick="irParaHojeKpisCalendario()">Hoje</button>
+      </div>
+      <div class="cal-grid" id="kpis-cal-grid"></div>
+      <div class="kpis-cal-legenda">
+        <span><span class="kpis-cal-dot" style="background:var(--navy);"></span>Hoje</span>
+        <span><span class="kpis-cal-dot" style="background:var(--blue);"></span>Corretiva</span>
+        <span><span class="kpis-cal-dot" style="background:var(--orange);"></span>Preventiva</span>
+        <span><span class="kpis-cal-dot" style="background:var(--ink-soft);"></span>Outros</span>
+      </div>
+    </div>
+    <div class="panel"><div class="panel-head">Técnicos — O.S. concluídas no recorte atual</div><div id="kpis-ranking-tecnicos"><div class="empty">Carregando...</div></div></div>
+    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
   await atualizarKpisDashboard();
 }
 
@@ -13441,26 +13459,104 @@ async function atualizarKpisDashboard() {
   const [{ kpis }, { meses }, { ranking }] = await Promise.all([
     api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`), api(`/api/kpis/ranking-tecnicos${sufixo}`),
   ]);
-  // "Ver detalhes" (passo 9) — pedido do usuário pra ver, a partir de cada card, quais clientes/
-  // equipamentos/O.S. formam aquele número. Só nos indicadores que têm um indicador_kpi
-  // correspondente em INDICADORES_KPI_DETALHE (abrirKpiDetalhe) — Aderência ao plano fica sem
-  // botão porque ainda não existe dado nenhum por trás dela.
-  const card = (titulo, valor, nota, indicador) => `
-    <div style="background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px;">
-      <div style="color:var(--ink-soft); font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;">${esc(titulo)}</div>
-      <div style="font-size:28px; font-weight:800; color:var(--navy); margin-top:6px;">${valor}</div>
-      ${nota ? `<div style="color:var(--ink-soft); font-size:12px; margin-top:4px;">${esc(nota)}</div>` : ''}
-      ${indicador ? `<button class="btn-outline-sm" style="margin-top:10px;" onclick="abrirKpiDetalhe('${indicador}')">Ver detalhes</button>` : ''}
+  // Tiles coloridas (passo 3 da Opção F) — igual ao mockup aprovado: tile inteira clicável abre o
+  // mesmo drill-down que o antigo botão "Ver detalhes" (passo 9) já abria. Disponibilidade ganha um
+  // anel de progresso (SVG, sem lib nova) em vez de só o número.
+  const ringSvg = (pct) => `
+    <svg width="28" height="28" viewBox="0 0 36 36" style="flex-shrink:0;">
+      <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="4"/>
+      <circle cx="18" cy="18" r="15" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="${Math.max(0, Math.min(100, pct))} 100" stroke-dashoffset="25" transform="rotate(-90 18 18)" pathLength="100" stroke-linecap="round"/>
+    </svg>`;
+  const tile = (titulo, valorHtml, cor, indicador) => `
+    <div class="kpis-tile" style="background:${cor};" onclick="abrirKpiDetalhe('${indicador}')">
+      <div class="kpis-tile-label">${esc(titulo)}</div>
+      ${valorHtml}
     </div>`;
   document.getElementById('kpis-cards').innerHTML = `
-    ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas no recorte atual.', 'mtbf')}
-    ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas no recorte atual.', 'mttr')}
-    ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).', 'disponibilidade')}
-    ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`, 'backlog')}
-    ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas no recorte atual.', 'preventiva_corretiva')}
-    ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}`;
+    ${tile('MTBF', `<div class="kpis-tile-valor">${kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} d` : '—'}</div>`, 'var(--blue)', 'mtbf')}
+    ${tile('MTTR', `<div class="kpis-tile-valor">${kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—'}</div>`, 'var(--purple)', 'mttr')}
+    ${tile('Disponibilidade', kpis.disponibilidade_percentual !== null
+      ? `<div class="kpis-tile-valor-ring">${ringSvg(kpis.disponibilidade_percentual)}<span>${kpis.disponibilidade_percentual}%</span></div>`
+      : `<div class="kpis-tile-valor">—</div>`, 'var(--green)', 'disponibilidade')}
+    ${tile('Backlog', `<div class="kpis-tile-valor">${kpis.backlog_qtd} O.S.</div>`, 'var(--orange)', 'backlog')}
+    ${tile('O.S. no recorte', `<div class="kpis-tile-valor">${kpis.total_os}</div>`, 'var(--amber)', 'total_os')}`;
   desenharGraficosKpis(meses, kpis);
   desenharRankingTecnicosKpis(ranking);
+  desenharCalendarioKpis();
+}
+
+// calendário mensal do dashboard de KPIs (passo 3 da Opção F) — navegação própria (independente
+// da Agenda geral), ponto colorido por tipo em vez do número de badge que o calendário da Agenda
+// geral usa, porque aqui o que importa é a mistura preventiva/corretiva do mês, não a quantidade
+// total. Reaproveita o indicador 'total_os' do drill-down, só trocando o período pros limites do
+// mês em exibição (sem mexer nos outros filtros do dashboard).
+let _kpisCalAno = new Date().getFullYear();
+let _kpisCalMes = new Date().getMonth();
+
+async function desenharCalendarioKpis() {
+  const label = document.getElementById('kpis-cal-mes-label');
+  if (label) label.textContent = `${MES_LABEL[_kpisCalMes]} de ${_kpisCalAno}`;
+  const grid = document.getElementById('kpis-cal-grid');
+  if (!grid) return;
+
+  const mm = String(_kpisCalMes + 1).padStart(2, '0');
+  const ultimoDiaNum = new Date(_kpisCalAno, _kpisCalMes + 1, 0).getDate();
+  const params = new URLSearchParams({
+    ..._kpisFiltros, indicador: 'total_os',
+    periodo_inicio: `${_kpisCalAno}-${mm}-01`, periodo_fim: `${_kpisCalAno}-${mm}-${String(ultimoDiaNum).padStart(2, '0')}`,
+  }).toString();
+  const { linhas } = await api(`/api/kpis/detalhe?${params}`);
+
+  const porDia = {};
+  linhas.forEach((l) => {
+    const dia = (l.criado_em || '').slice(0, 10);
+    if (!dia) return;
+    if (!porDia[dia]) porDia[dia] = { corretiva: 0, preventiva: 0, outros: 0 };
+    if (l.tipo === 'corretiva') porDia[dia].corretiva++;
+    else if (l.tipo === 'preventiva') porDia[dia].preventiva++;
+    else porDia[dia].outros++;
+  });
+
+  const inicioSemana = new Date(_kpisCalAno, _kpisCalMes, 1).getDay();
+  const hojeISO = dataISOLocal(new Date());
+  const celulas = [];
+  for (let i = 0; i < inicioSemana; i++) celulas.push(new Date(_kpisCalAno, _kpisCalMes, 1 - (inicioSemana - i)));
+  for (let dia = 1; dia <= ultimoDiaNum; dia++) celulas.push(new Date(_kpisCalAno, _kpisCalMes, dia));
+  while (celulas.length % 7 !== 0) {
+    const ultima = celulas[celulas.length - 1];
+    celulas.push(new Date(ultima.getFullYear(), ultima.getMonth(), ultima.getDate() + 1));
+  }
+
+  grid.innerHTML = DOW_LABEL.map((d) => `<div class="cal-dow">${d}</div>`).join('') +
+    celulas.map((data) => {
+      const iso = dataISOLocal(data);
+      const info = porDia[iso];
+      const classes = ['cal-day'];
+      if (data.getMonth() !== _kpisCalMes) classes.push('fora-mes');
+      if (iso === hojeISO) classes.push('hoje');
+      return `<div class="${classes.join(' ')}">
+        <div class="cal-day-topo"><span class="cal-day-num">${data.getDate()}</span></div>
+        ${info ? `<div class="kpis-cal-dots">
+          ${info.corretiva ? `<span class="kpis-cal-dot" style="background:var(--blue);"></span>` : ''}
+          ${info.preventiva ? `<span class="kpis-cal-dot" style="background:var(--orange);"></span>` : ''}
+          ${info.outros ? `<span class="kpis-cal-dot" style="background:var(--ink-soft);"></span>` : ''}
+        </div>` : ''}
+      </div>`;
+    }).join('');
+}
+
+function mudarMesKpisCalendario(delta) {
+  _kpisCalMes += delta;
+  if (_kpisCalMes < 0) { _kpisCalMes = 11; _kpisCalAno--; }
+  if (_kpisCalMes > 11) { _kpisCalMes = 0; _kpisCalAno++; }
+  desenharCalendarioKpis();
+}
+
+function irParaHojeKpisCalendario() {
+  const hoje = new Date();
+  _kpisCalAno = hoje.getFullYear();
+  _kpisCalMes = hoje.getMonth();
+  desenharCalendarioKpis();
 }
 
 // ranking de técnicos por O.S. concluída (passo 2 da Opção F) — barra horizontal proporcional ao
@@ -13537,6 +13633,16 @@ const KPIS_DETALHE_CONFIG = {
   },
   preventiva_corretiva: {
     titulo: 'Preventiva × Corretiva — detalhe por O.S.',
+    colunas: [
+      { label: 'O.S.', chave: 'numero_os' },
+      { label: 'Cliente', chave: 'cliente_nome' },
+      { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'Tipo', chave: 'tipo' },
+      { label: 'Aberta em', chave: 'criado_em', formatar: fmtData },
+    ],
+  },
+  total_os: {
+    titulo: 'O.S. no recorte — detalhe',
     colunas: [
       { label: 'O.S.', chave: 'numero_os' },
       { label: 'Cliente', chave: 'cliente_nome' },
