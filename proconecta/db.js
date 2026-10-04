@@ -389,6 +389,14 @@ function migrar(data) {
       a.orcamento_aprovado_em = (temPecas && jaAprovado) ? (a.feedback_cliente_em || a.criado_em || new Date().toISOString()) : null;
     }
     if (a.orcamento_reprovado_em === undefined) a.orcamento_reprovado_em = null;
+    if (a.concluida_em === undefined) {
+      // O.S. que já estavam com status "concluida" antes desse campo existir — usa o envio do
+      // relatório (visita) como estimativa de quando isso aconteceu, pra entrar no corte de 24h
+      // do lembrete de "Iniciar retorno" (ver verificarLembretesRecorrentes em server.js) em vez
+      // de ficar sem referência nenhuma e notificar pra sempre.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      a.concluida_em = a.status === 'concluida' ? (visitaDoItem ? (visitaDoItem.atualizado_em || visitaDoItem.criado_em) : a.criado_em) || new Date().toISOString() : null;
+    }
     // fluxo de pós-venda/reparo (só usado em O.S. tipo "atendimento", nascidas de um chamado do
     // chat) — ver server.js, seção "pós-venda / setor reparo"
     if (a.fase_atendimento === undefined) a.fase_atendimento = null;

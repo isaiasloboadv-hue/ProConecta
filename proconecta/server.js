@@ -500,12 +500,30 @@ function horarioBrasiliaParaData(dataHoraLocal) {
   return new Date(`${m[1]}T${m[2]}:00-03:00`);
 }
 
+// pedido do usuário: depois de passar 24h sem o técnico registrar a ação (ex: esqueceu de "Iniciar
+// retorno" numa O.S. antiga, ou nunca mais vai confirmar aquele passo), o lembrete recorrente
+// precisa PARAR de mandar push — senão fica empilhando notificação pra sempre, a cada 5 minutos,
+// ciclo após ciclo (ver screenshot: dezenas de "Iniciar retorno" acumuladas).
+const LIMITE_LEMBRETE_RECORRENTE_MS = 24 * 60 * 60 * 1000;
+
+// true quando já se passaram 24h desde que a etapa ficou pendente (referenciaIso é o timestamp
+// real de quando aquele passo específico começou a esperar o técnico) — nesse caso o lembrete
+// correspondente é pulado neste ciclo. Sem referência nenhuma (O.S. muito antiga, de antes desses
+// campos existirem) usa o início agendado da O.S. como última instância, nunca deixando passar
+// sem corte algum.
+function lembreteExpirado(item, referenciaIso, agora) {
+  const ref = referenciaIso ? new Date(referenciaIso) : horarioBrasiliaParaData(item.data_hora_inicio);
+  return !!ref && (agora.getTime() - ref.getTime()) > LIMITE_LEMBRETE_RECORRENTE_MS;
+}
+
 // lembretes de deslocamento/chegada: cada etapa em que o técnico precisa tocar num botão (sair
 // pro atendimento, chegar no cliente, sair/chegar no retorno pendente da mesma O.S., sair/chegar
 // na viagem de volta pra empresa/hotel) manda um push A CADA CICLO enquanto o botão certo não é
 // tocado — constante até o técnico executar, não só uma vez (um lembrete que passa despercebido
-// não pode ficar esquecido pro resto do dia). Não é um cron de verdade — só funciona enquanto o
-// processo do servidor estiver de pé; num plano que "dorme" por inatividade isso pode não disparar.
+// não pode ficar esquecido pro resto do dia) — mas só até completar 24h sem resposta (ver
+// lembreteExpirado): passado isso, considera que o técnico não vai mais registrar aquele passo e
+// para de notificar, evitando o acúmulo infinito. Não é um cron de verdade — só funciona enquanto
+// o processo do servidor estiver de pé; num plano que "dorme" por inatividade isso pode não disparar.
 async function verificarLembretesRecorrentes() {
   try {
     const data = db.load();
@@ -534,7 +552,8 @@ async function verificarLembretesRecorrentes() {
         }
       }
       // 2) chegou no cliente?
-      if (item.deslocamento_iniciado_em && !item.chegada_confirmada_em) {
+      if (item.deslocamento_iniciado_em && !item.chegada_confirmada_em
+          && !lembreteExpirado(item, item.deslocamento_iniciado_em, agora)) {
         await enviarPush(data, item.tecnico_id, {
           titulo: 'Chegou no cliente?',
           corpo: 'Toque em "Registrar chegada" assim que chegar, pra liberar o atendimento.',
@@ -542,7 +561,8 @@ async function verificarLembretesRecorrentes() {
         });
       }
       // 3) retorno pendente da mesma O.S. — sair de novo
-      if (item.retorno_pendente_tecnico && item.retorno_confirmado_cliente_em && !item.retorno_deslocamento_iniciado_em) {
+      if (item.retorno_pendente_tecnico && item.retorno_confirmado_cliente_em && !item.retorno_deslocamento_iniciado_em
+          && !lembreteExpirado(item, item.retorno_confirmado_cliente_em, agora)) {
         await enviarPush(data, item.tecnico_id, {
           titulo: 'Retorno pendente',
           corpo: 'Toque em "Iniciar deslocamento" assim que sair pro retorno.',
@@ -550,7 +570,8 @@ async function verificarLembretesRecorrentes() {
         });
       }
       // 4) retorno — chegou de novo?
-      if (item.retorno_deslocamento_iniciado_em && !item.retorno_chegada_confirmada_em) {
+      if (item.retorno_deslocamento_iniciado_em && !item.retorno_chegada_confirmada_em
+          && !lembreteExpirado(item, item.retorno_deslocamento_iniciado_em, agora)) {
         await enviarPush(data, item.tecnico_id, {
           titulo: 'Chegou no cliente (retorno)?',
           corpo: 'Toque em "Registrar chegada" assim que chegar.',
@@ -560,19 +581,23 @@ async function verificarLembretesRecorrentes() {
       // 5) viagem de volta pra empresa/hotel — só depois do relatório enviado (status "concluida")
       if (item.categoria === 'inloco' && item.status === 'concluida' && !item.viagem_volta_chegada_em) {
         if (!item.viagem_volta_iniciada_em) {
-          await enviarPush(data, item.tecnico_id, {
-            titulo: 'Iniciar retorno',
-            corpo: 'Toque em "Iniciar retorno" assim que sair do cliente.',
-            url: '/',
-          });
+          if (!lembreteExpirado(item, item.concluida_em, agora)) {
+            await enviarPush(data, item.tecnico_id, {
+              titulo: 'Iniciar retorno',
+              corpo: 'Toque em "Iniciar retorno" assim que sair do cliente.',
+              url: '/',
+            });
+          }
         } else if (!item.viagem_volta_destino_agenda_id) {
           // seguiu direto pra outra O.S. (viagem_volta_destino_agenda_id) — não tem chegada de
           // volta pra cobrar aqui, o "retorno" dela termina quando a próxima O.S. começa a dela
-          await enviarPush(data, item.tecnico_id, {
-            titulo: 'Chegou de volta?',
-            corpo: 'Toque em "Registrar chegada" da viagem de volta assim que chegar.',
-            url: '/',
-          });
+          if (!lembreteExpirado(item, item.viagem_volta_iniciada_em, agora)) {
+            await enviarPush(data, item.tecnico_id, {
+              titulo: 'Chegou de volta?',
+              corpo: 'Toque em "Registrar chegada" da viagem de volta assim que chegar.',
+              url: '/',
+            });
+          }
         }
       }
     }
@@ -2712,6 +2737,7 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     visita = tenant.criar(data, 'visitas', agendaItem.empresa_id, { agenda_id: agendaItem.id, tecnico_id: user.id, equipamento_id: agendaItem.equipamento_id, criado_em: new Date().toISOString(), ...camposVisita });
   }
   agendaItem.status = 'concluida';
+  agendaItem.concluida_em = new Date().toISOString();
 
   // marcado como relevante: entra na fila de aprovação da Biblioteca de Defeitos/Falhas assim que o
   // técnico envia o relatório — o administrador vê na tela de Biblioteca > Aprovação e no sino, sem
@@ -3755,7 +3781,10 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   // atendimento/treinamento_online), pra "Iniciar retorno" (viagem de volta) poder aparecer.
   if (tipo === 'devolutivo' && item.agenda_id) {
     const agendaVinculada = tenant.buscar(data, 'agenda', item.agenda_id, user.empresa_id);
-    if (agendaVinculada && !agendaVinculada.finalizada) agendaVinculada.status = 'concluida';
+    if (agendaVinculada && !agendaVinculada.finalizada) {
+      agendaVinculada.status = 'concluida';
+      agendaVinculada.concluida_em = new Date().toISOString();
+    }
   }
   sincronizarClienteDoRelatorio(data, user.empresa_id, body);
   db.save(data);
