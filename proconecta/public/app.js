@@ -13496,7 +13496,7 @@ async function atualizarKpisDashboard() {
     ${tile('Backlog', `<div class="kpis-tile-valor">${kpis.backlog_qtd} O.S.</div>`, 'var(--orange)', 'backlog')}
     ${tile('O.S. no recorte', `<div class="kpis-tile-valor">${kpis.total_os}</div>`, 'var(--amber)', 'total_os')}
     <div class="kpis-tile" style="background:var(--teal);" onclick="abrirMaoDeObraDetalhe()">
-      <div class="kpis-tile-label">Mão de Obra</div>
+      <div class="kpis-tile-label">MOD</div>
       ${maoDeObra.equipe.percentual_ocupacao !== null
         ? `<div class="kpis-tile-valor-ring">${ringSvg(maoDeObra.equipe.percentual_ocupacao)}<span>${maoDeObra.equipe.percentual_ocupacao}%</span></div>`
         : `<div class="kpis-tile-valor">—</div>`}
@@ -13618,7 +13618,7 @@ async function abrirMaoDeObraDetalhe() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Mão de Obra</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. A jornada de referência é de ${resp.jornada_padrao_horas}h por dia útil — o que não está coberto por O.S./atendimento nem por atividade registrada naquele dia conta como parado, mesmo num dia parcialmente justificado (ex.: só 3h registradas sobram ${resp.jornada_padrao_horas - 3}h paradas nesse mesmo dia).</p></div>
+      <div><h1>MOD</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. A jornada de referência é de ${resp.jornada_padrao_horas}h por dia útil — o que não está coberto por O.S./atendimento nem por atividade registrada naquele dia conta como parado, mesmo num dia parcialmente justificado (ex.: só 3h registradas sobram ${resp.jornada_padrao_horas - 3}h paradas nesse mesmo dia).</p></div>
       <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
     </div>
     <div class="kpis-row-donut">
@@ -13995,7 +13995,7 @@ function gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logoDataUri, imagens, f
     { titulo: 'Disponibilidade', valor: kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', cor: PDF_COR.green },
     { titulo: 'Backlog', valor: `${kpis.backlog_qtd} O.S.`, cor: PDF_COR.orange },
     { titulo: 'O.S. no recorte', valor: `${kpis.total_os}`, cor: PDF_COR.amber },
-    { titulo: 'Mão de Obra', valor: maoDeObra.equipe.percentual_ocupacao !== null ? `${maoDeObra.equipe.percentual_ocupacao}%` : '—', cor: PDF_COR.teal },
+    { titulo: 'MOD', valor: maoDeObra.equipe.percentual_ocupacao !== null ? `${maoDeObra.equipe.percentual_ocupacao}%` : '—', cor: PDF_COR.teal },
   ];
   tiles.forEach((tl, i) => {
     const col = i % 3, lin = Math.floor(i / 3);
@@ -14008,7 +14008,7 @@ function gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logoDataUri, imagens, f
     tituloSecao('Distribuição');
     doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
     doc.text('Preventiva × Corretiva', margem, y);
-    doc.text('Mão de Obra — trabalhadas × paradas', margem + larguraImg + 20, y);
+    doc.text('MOD — trabalhadas × paradas', margem + larguraImg + 20, y);
     y += 8;
     if (imagens.donutTipos) { try { doc.addImage(imagens.donutTipos, 'PNG', margem, y, larguraImg, larguraImg); } catch (e) {} }
     if (imagens.donutMaoDeObra) { try { doc.addImage(imagens.donutMaoDeObra, 'PNG', margem + larguraImg + 20, y, larguraImg, larguraImg); } catch (e) {} }
@@ -14029,7 +14029,7 @@ function gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logoDataUri, imagens, f
   }
 
   if (maoDeObra.tecnicos.length) {
-    tituloSecao('Mão de Obra por técnico');
+    tituloSecao('MOD por técnico');
     const larg = [pageW - margem * 2 - 280, 90, 90, 100];
     tabelaSimples(['Técnico', 'Trabalhadas', 'Paradas', '% Ocupação'], larg,
       maoDeObra.tecnicos.map((tc) => [tc.tecnico_nome, `${tc.horas_trabalhadas} h`, `${tc.horas_paradas} h`, tc.percentual_ocupacao !== null ? `${tc.percentual_ocupacao}%` : '—']));
