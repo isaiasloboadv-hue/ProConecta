@@ -70,12 +70,29 @@ header{
 .btn-logout:hover{background:rgba(255,255,255,0.2);}
 
 /* ---------- AUTH (LOGIN / PRIMEIRO ACESSO) ---------- */
+/* a foto é paisagem (16:9ish); em tela de celular (bem mais alta que larga), "cover" esticado
+   pros 100vh inteiros força um recorte horizontal extremo pra preencher a altura toda — fica
+   "com muito zoom", irreconhecível. Por isso a foto vira uma faixa de altura limitada (::before),
+   não o fundo da tela inteira — o resto desce pro navy sólido, com um gradiente de transição. */
 #authView, #splashView, #app-screen.auth-mode{
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;
+  position:relative;background:var(--navy-deep);overflow:hidden;
+}
+#authView::before, #splashView::before, #app-screen.auth-mode::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:100%;z-index:0;
   background:
     linear-gradient(180deg, rgba(7,20,40,.5) 0%, rgba(9,30,56,.6) 55%, rgba(8,32,57,.75) 100%),
     url('/img/login-bg.jpg') center/cover no-repeat;
 }
+@media (max-width:640px){
+  #authView::before, #splashView::before, #app-screen.auth-mode::before{
+    height:44vh;
+    background:
+      linear-gradient(180deg, rgba(7,20,40,.25) 0%, rgba(9,30,56,.5) 60%, var(--navy-deep) 100%),
+      url('/img/login-bg.jpg') center 42% / cover no-repeat;
+  }
+}
+#authView>*, #splashView>*, #app-screen.auth-mode>*{position:relative;z-index:1;}
 .auth-wrap{width:100%;max-width:420px;background:#fff;border-radius:18px;padding:40px 34px 32px;box-shadow:0 30px 70px rgba(3,12,26,.5);}
 .auth-brand{display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:26px;}
 .auth-brand .brand-mark{margin-bottom:14px;}
