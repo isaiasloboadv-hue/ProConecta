@@ -230,6 +230,80 @@ function checarEscalaAntesDeSalvar(data, empresaId, tecnicoId, diaInicioOS, diaF
   return { bloqueado: false, motivo: null, tipo: null }; // home_office — só informativo
 }
 
+// ---------- atividades não programadas (dia ocioso) ----------
+// pedido do usuário: num dia sem O.S./atendimento marcado pro técnico e sem folga aprovada (ver
+// escalasEfetivasTecnico), o sistema considera o dia "ocioso" e pede pro próprio técnico
+// preencher o que fez — uma ou mais atividades, cada uma com início/fim — pra dar ao
+// administrador um relatório diário de ocupação por técnico (identificar quem está com muito ou
+// pouco serviço).
+
+function diaTemAgendaTecnico(data, empresaId, tecnicoId, diaISO) {
+  return tenant.listar(data, 'agenda', empresaId)
+    .some((a) => a.tecnico_id === tecnicoId && String(a.data_hora_inicio || '').slice(0, 10) === diaISO);
+}
+
+function diaTemFolgaTecnico(data, empresaId, tecnicoId, diaISO) {
+  return escalasEfetivasTecnico(data, empresaId, tecnicoId).some((e) => e.data === diaISO);
+}
+
+// status de um dia específico pro relatório: 'futuro' (ainda não chegou, nada a avaliar), 'os'
+// (tinha atendimento/O.S. marcado), 'folga' (férias/DSR/banco de horas/home office aprovados),
+// 'justificado' (técnico já preencheu atividade não programada) ou 'pendente' (dia ocioso, ainda
+// esperando o técnico preencher).
+function statusDiaTecnico(data, empresaId, tecnicoId, diaISO, hojeISO) {
+  if (diaISO > hojeISO) return 'futuro';
+  if (diaTemAgendaTecnico(data, empresaId, tecnicoId, diaISO)) return 'os';
+  if (diaTemFolgaTecnico(data, empresaId, tecnicoId, diaISO)) return 'folga';
+  const existente = tenant.listar(data, 'atividades_nao_programadas', empresaId)
+    .find((a) => a.usuario_id === tecnicoId && a.data === diaISO);
+  return existente ? 'justificado' : 'pendente';
+}
+
+function hojeBrasiliaISO() {
+  return new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+// todos os dias de um mês (AAAA-MM) pra um técnico, já com status e (quando justificado) as
+// atividades preenchidas — usado tanto na tela do próprio técnico quanto no drill-down do
+// administrador pra um técnico específico.
+function diasDoMesTecnico(data, empresaId, tecnicoId, mesISO) {
+  const hojeISO = hojeBrasiliaISO();
+  const [ano, mes] = mesISO.split('-').map(Number);
+  const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const justificadas = tenant.listar(data, 'atividades_nao_programadas', empresaId).filter((a) => a.usuario_id === tecnicoId);
+  const dias = [];
+  for (let d = 1; d <= ultimoDia; d++) {
+    const diaISO = `${mesISO}-${String(d).padStart(2, '0')}`;
+    const status = statusDiaTecnico(data, empresaId, tecnicoId, diaISO, hojeISO);
+    const registro = status === 'justificado' ? justificadas.find((a) => a.data === diaISO) : null;
+    dias.push({ data: diaISO, status, atividades: registro ? registro.atividades : null });
+  }
+  return dias;
+}
+
+// valida a lista de atividades do POST: cada uma precisa de início/fim (HH:MM, início antes do
+// fim) e uma descrição — e, juntas, não podem se sobrepor (uma atividade por vez, como no dia
+// real de trabalho). Devolve { erro } ou { atividades } já normalizadas e ordenadas por início.
+function validarAtividadesNaoProgramadas(lista) {
+  if (!Array.isArray(lista) || !lista.length) return { erro: 'Informe ao menos uma atividade.' };
+  const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const normalizadas = [];
+  for (const a of lista) {
+    const inicio = String((a || {}).inicio || '');
+    const fim = String((a || {}).fim || '');
+    const descricao = String((a || {}).descricao || '').trim();
+    if (!HORA_RE.test(inicio) || !HORA_RE.test(fim)) return { erro: 'Informe início e fim válidos (HH:MM) em todas as atividades.' };
+    if (inicio >= fim) return { erro: 'O horário de início precisa ser antes do horário de fim em todas as atividades.' };
+    if (!descricao) return { erro: 'Descreva o que foi feito em todas as atividades.' };
+    normalizadas.push({ inicio, fim, descricao });
+  }
+  normalizadas.sort((a, b) => a.inicio.localeCompare(b.inicio));
+  for (let i = 1; i < normalizadas.length; i++) {
+    if (normalizadas[i].inicio < normalizadas[i - 1].fim) return { erro: 'As atividades não podem ter horários sobrepostos.' };
+  }
+  return { atividades: normalizadas };
+}
+
 // reúne os dois motivos que exigem justificativa do administrador antes de salvar uma O.S. com
 // bônus de viagem: (1) esse técnico já passou do limite de diárias no mês, (2) esse técnico não é
 // quem está na vez do rodízio de viagens — a não ser que quem está na vez já tenha outra O.S.
@@ -1765,6 +1839,85 @@ rota('DELETE', /^\/api\/escala-folgas\/(\d+)$/, async (req, res, m) => {
   data.escala_folgas = data.escala_folgas.filter((e) => e.id !== item.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
+});
+
+// ---------- atividades não programadas (dia ocioso) ----------
+
+// GET /api/atividades-nao-programadas?mes=AAAA-MM — o próprio técnico vê o mês: cada dia com seu
+// status (O.S., folga, justificado, pendente ou futuro) e, nos já justificados, as atividades
+// preenchidas.
+rota('GET', /^\/api\/atividades-nao-programadas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const mes = /^\d{4}-\d{2}$/.test(query.mes || '') ? query.mes : new Date().toISOString().slice(0, 7);
+  const data = db.load();
+  const dias = diasDoMesTecnico(data, user.empresa_id, user.id, mes);
+  enviarJSON(res, 200, { mes, dias });
+});
+
+// GET /api/atividades-nao-programadas/equipe?mes=AAAA-MM — resumo da equipe inteira pro
+// administrador identificar quem está com muito ou pouco serviço no mês: quantos dias cada
+// técnico teve com O.S., com folga, já justificados e ainda pendentes de preenchimento.
+rota('GET', /^\/api\/atividades-nao-programadas\/equipe$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const mes = /^\d{4}-\d{2}$/.test(query.mes || '') ? query.mes : new Date().toISOString().slice(0, 7);
+  const data = db.load();
+  const tecnicos = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'suporte' && u.status === 'ativo');
+  const resumo = tecnicos.map((t) => {
+    const dias = diasDoMesTecnico(data, user.empresa_id, t.id, mes);
+    const contagem = { os: 0, folga: 0, justificado: 0, pendente: 0 };
+    for (const d of dias) if (contagem[d.status] !== undefined) contagem[d.status] += 1;
+    return { id: t.id, nome: t.nome, dias_os: contagem.os, dias_folga: contagem.folga, dias_justificados: contagem.justificado, dias_pendentes: contagem.pendente };
+  }).sort((a, b) => b.dias_pendentes - a.dias_pendentes || a.nome.localeCompare(b.nome));
+  enviarJSON(res, 200, { mes, tecnicos: resumo });
+});
+
+// GET /api/atividades-nao-programadas/tecnico/:id?mes=AAAA-MM — drill-down do administrador: o
+// mesmo detalhe dia a dia que o próprio técnico vê, mas pra um técnico específico da equipe.
+rota('GET', /^\/api\/atividades-nao-programadas\/tecnico\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const tecnico = tenant.buscar(data, 'usuarios', Number(m[1]), user.empresa_id);
+  if (!tecnico || tecnico.papel !== 'suporte') return enviarJSON(res, 404, { erro: 'Técnico não encontrado.' });
+  const { query } = url.parse(req.url, true);
+  const mes = /^\d{4}-\d{2}$/.test(query.mes || '') ? query.mes : new Date().toISOString().slice(0, 7);
+  const dias = diasDoMesTecnico(data, user.empresa_id, tecnico.id, mes);
+  enviarJSON(res, 200, { mes, tecnico_nome: tecnico.nome, dias });
+});
+
+// POST /api/atividades-nao-programadas — o técnico preenche (ou corrige) a justificativa de um
+// dia ocioso: uma ou mais atividades, cada uma com início, fim e descrição. Só aceita dias que
+// realmente estão ociosos pra ele (sem O.S./atendimento e sem folga aprovada) e que já chegaram —
+// substitui o preenchimento anterior se o técnico reenviar o mesmo dia.
+rota('POST', /^\/api\/atividades-nao-programadas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico preenche suas próprias atividades.' });
+  const body = await lerCorpo(req);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data.' });
+  const data = db.load();
+  const status = statusDiaTecnico(data, user.empresa_id, user.id, body.data, hojeBrasiliaISO());
+  if (status === 'futuro') return enviarJSON(res, 400, { erro: 'Não é possível preencher um dia que ainda não chegou.' });
+  if (status === 'os') return enviarJSON(res, 400, { erro: 'Esse dia já tem O.S./atendimento marcado — não é um dia ocioso.' });
+  if (status === 'folga') return enviarJSON(res, 400, { erro: 'Esse dia já está marcado como folga — não é um dia ocioso.' });
+  const validacao = validarAtividadesNaoProgramadas(body.atividades);
+  if (validacao.erro) return enviarJSON(res, 400, { erro: validacao.erro });
+  const existente = data.atividades_nao_programadas.find((a) => a.usuario_id === user.id && a.data === body.data && a.empresa_id === user.empresa_id);
+  if (existente) {
+    existente.atividades = validacao.atividades;
+    existente.atualizado_em = new Date().toISOString();
+    db.save(data);
+    return enviarJSON(res, 200, { atividade: existente });
+  }
+  const item = tenant.criar(data, 'atividades_nao_programadas', user.empresa_id, {
+    usuario_id: user.id, data: body.data, atividades: validacao.atividades,
+    criado_em: new Date().toISOString(), atualizado_em: null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { atividade: item });
 });
 
 // ---------- solicitações de RH do técnico (folga, banco de horas, férias, home office) ----------

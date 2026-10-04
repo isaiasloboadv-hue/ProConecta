@@ -241,6 +241,11 @@ function migrar(data) {
   if (!data._seq.feriados) data._seq.feriados = 1;
   if (!data.escala_folgas) data.escala_folgas = [];
   if (!data._seq.escala_folgas) data._seq.escala_folgas = 1;
+  // justificativa de atividade não programada: pedido do usuário — num dia sem O.S./atendimento
+  // e sem folga marcada, o técnico diz o que fez (uma ou mais atividades com início/fim), pra dar
+  // ao administrador um relatório diário de ocupação por técnico (muito ou pouco serviço).
+  if (!data.atividades_nao_programadas) data.atividades_nao_programadas = [];
+  if (!data._seq.atividades_nao_programadas) data._seq.atividades_nao_programadas = 1;
   // prestação de contas (Etapa 6/passo 2 do plano white label) — despesas de viagem/campo que o
   // técnico lança pra aprovação do financeiro/administrador, além do bônus fixo por diária.
   if (!data.prestacoes_contas) data.prestacoes_contas = [];
