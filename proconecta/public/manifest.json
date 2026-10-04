@@ -1,7 +1,7 @@
 {
   "name": "Nexor Connect",
   "short_name": "Nexor Connect",
-  "description": "Conectando pessoas, máquinas e conhecimento — gestão técnica e biblioteca de manutenção de equipamentos",
+  "description": "Gestão técnica e biblioteca de manutenção de equipamentos",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
