@@ -580,6 +580,8 @@ const NAV = {
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
     { key: 'chat-admin', modulo: 'os_chamados', label: 'Chat', page: 'chat-admin' },
     { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
+    // RCM/SAP PM Fase 1, passo 6 — MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva.
+    { key: 'kpis', modulo: 'os_chamados', label: 'Indicadores (KPIs)', page: 'kpis-dashboard' },
     // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
     // tiposRelatorioManual em renderRelatorioManutencao).
@@ -666,6 +668,7 @@ const NAV = {
   // abordagem rápida escolhida agora; esconder esses botões de verdade fica pra um próximo passo.
   supervisor: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
+    { key: 'kpis', modulo: 'os_chamados', label: 'Indicadores (KPIs)', page: 'kpis-dashboard' },
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -834,6 +837,7 @@ async function ir(pagina) {
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
+    if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
     if (pagina === 'fila-atendimento') return renderFilaAtendimento();
@@ -13275,6 +13279,32 @@ async function renderFmeaParetoArea() {
           <td style="min-width:120px;"><div style="background:var(--line); border-radius:4px; height:8px;"><div style="background:var(--blue-bright); border-radius:4px; height:8px; width:${p.percentual}%;"></div></div></td>
         </tr>`).join('')}
     </table>`;
+}
+
+// ---- Dashboard de KPIs (RCM/SAP PM, Fase 1, passo 6) ----
+// MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva — tudo calculado no servidor
+// (GET /api/kpis, função calcularKpis em server.js) a partir das datas/horas que já existem hoje
+// nas O.S. e nos laudos técnicos, sem nenhuma tela ou campo novo de entrada de dados. Ainda sem
+// filtro de período/cliente/equipamento/técnico nem gráficos mensais (isso é o passo 7).
+async function renderKpisDashboard() {
+  const { kpis } = await api('/api/kpis');
+  const main = document.getElementById('main');
+  const card = (titulo, valor, nota) => `
+    <div style="background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px;">
+      <div style="color:var(--ink-soft); font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;">${esc(titulo)}</div>
+      <div style="font-size:28px; font-weight:800; color:var(--navy); margin-top:6px;">${valor}</div>
+      ${nota ? `<div style="color:var(--ink-soft); font-size:12px; margin-top:4px;">${esc(nota)}</div>` : ''}
+    </div>`;
+  main.innerHTML = `
+    <div class="page-head"><h1>Indicadores (KPIs)</h1><p>Calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos. Ainda sem filtro de período — vem no próximo passo.</p></div>
+    <div class="equipe-grid">
+      ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas ainda.')}
+      ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas ainda.')}
+      ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).')}
+      ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`)}
+      ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas.')}
+      ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}
+    </div>`;
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----

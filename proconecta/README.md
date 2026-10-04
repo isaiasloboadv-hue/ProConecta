@@ -556,6 +556,48 @@ cadastrado** (existe mesmo que nunca tenha acontecido uma falha de
 verdade); o Pareto é sobre **falhas que realmente aconteceram**, só
 conta o que apareceu em algum laudo técnico aprovado ou não.
 
+### Passo 6: dashboard de KPIs do administrador
+
+Tela nova **Indicadores (KPIs)** (administrador e supervisor), endpoint
+`GET /api/kpis` → função `calcularKpis` em `server.js`. Todos os
+indicadores vêm das datas/horas que já existiam na Ordem de Serviço e no
+Laudo Técnico — nenhuma coleção nem campo de entrada novo. Ainda sem
+filtro de período/cliente/equipamento/técnico nem gráficos mensais (isso
+é o passo 7, que também traz a exportação Excel) — por enquanto é
+sempre o histórico completo.
+
+Fórmulas usadas (MVP, documentadas aqui porque são uma escolha de design,
+não uma verdade absoluta — podem ser refinadas mais pra frente):
+
+- **MTBF (dias)**: agrupa as O.S. do tipo `corretiva` por equipamento,
+  ordena por `criado_em` e calcula o intervalo de calendário entre cada
+  par de corretivas consecutivas do mesmo equipamento; MTBF é a média de
+  todos esses intervalos (de todos os equipamentos juntos). Equipamento
+  com só 1 corretiva não gera intervalo. Campo pronto pra, no futuro,
+  usar horas reais de operação (integração ESP32/CLP) em vez de tempo de
+  calendário — só troca o que entra no cálculo do intervalo, a fórmula
+  continua a mesma.
+- **MTTR (horas)**: para cada O.S. corretiva com Laudo Técnico
+  preenchido, horas de reparo = `data_conclusao - data_entrada` (os
+  mesmos campos que o técnico já preenche hoje); MTTR é a média dessas
+  horas.
+- **Disponibilidade (%)**: aproximação — soma todas as horas de reparo
+  (mesmas do MTTR) e divide pela soma, por equipamento com pelo menos
+  uma O.S., do tempo de calendário desde a primeira O.S. registrada até
+  agora. `1 - (horas paradas / horas totais da frota)`. É uma
+  aproximação por calendário, não disponibilidade real de operação —
+  mesma ressalva do MTBF.
+- **Backlog**: quantidade de O.S. ainda não finalizadas (`finalizada !==
+  true`) e a soma de quanto tempo (em horas) cada uma já está aberta
+  (desde `criado_em` até agora).
+- **% Preventiva × Corretiva**: proporção simples entre a quantidade de
+  O.S. do tipo `preventiva` e do tipo `corretiva` (os únicos 2 tipos que
+  usam o Laudo Técnico pra manutenção de verdade).
+- **Aderência ao plano**: **indisponível por enquanto** — depende dos
+  Planos de Manutenção, que são Fase 2 (só previstos no banco, ainda não
+  implementados). A tela mostra isso de forma explícita, sem fingir um
+  número que não existe.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

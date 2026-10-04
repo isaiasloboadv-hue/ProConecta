@@ -4277,6 +4277,97 @@ rota('GET', /^\/api\/fmea\/pareto$/, async (req, res) => {
   enviarJSON(res, 200, { pareto, total, agrupado_por: agruparPor });
 });
 
+// KPIs do dashboard do administrador (RCM/SAP PM, Fase 1, passo 6) — MTBF, MTTR, disponibilidade,
+// backlog e % preventiva×corretiva, calculados a partir das datas/horas de entrada e conclusão das
+// próprias O.S./laudos técnicos, sem nenhuma coleção nova. Ainda sem filtro de período/cliente/
+// equipamento/técnico nem gráficos mensais — isso é o passo 7, que também traz a exportação Excel.
+// "Aderência ao plano" fica de fora por enquanto: depende dos Planos de Manutenção (Fase 2, só
+// prevista no banco, ainda não implementada) — a tela mostra isso como indisponível.
+function calcularKpis(data, empresaId) {
+  const agendaEmpresa = tenant.listar(data, 'agenda', empresaId);
+  const agora = Date.now();
+
+  // MTTR: pega o laudo técnico (rodada 1) de cada O.S. corretiva com data de entrada e conclusão
+  // preenchidas — os mesmos campos que o técnico já preenche hoje no Laudo Técnico (ver
+  // validarLaudoTecnico). Horas de reparo = conclusão - entrada; MTTR = média dessas horas.
+  const corretivas = agendaEmpresa.filter((a) => a.tipo === 'corretiva');
+  const horasReparo = [];
+  for (const os of corretivas) {
+    const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
+    const laudo = visita && visita.laudo;
+    if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
+    const horas = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
+    if (Number.isFinite(horas) && horas >= 0) horasReparo.push(horas);
+  }
+  const mttrHoras = horasReparo.length ? horasReparo.reduce((s, h) => s + h, 0) / horasReparo.length : null;
+
+  // MTBF: tempo de CALENDÁRIO entre corretivas consecutivas do mesmo equipamento (campo pronto pra
+  // receber horas reais de operação no futuro — ver README). Agrupa as corretivas por
+  // equipamento, ordena por data de abertura e calcula o intervalo entre cada par consecutivo;
+  // MTBF é a média de todos os intervalos (de todos os equipamentos juntos).
+  const corretivasPorEquipamento = new Map();
+  for (const os of corretivas) {
+    if (!os.equipamento_id) continue;
+    if (!corretivasPorEquipamento.has(os.equipamento_id)) corretivasPorEquipamento.set(os.equipamento_id, []);
+    corretivasPorEquipamento.get(os.equipamento_id).push(os);
+  }
+  const intervalosDias = [];
+  for (const lista of corretivasPorEquipamento.values()) {
+    const ordenada = [...lista].sort((a, b) => new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime());
+    for (let i = 1; i < ordenada.length; i++) {
+      const dias = (new Date(ordenada[i].criado_em).getTime() - new Date(ordenada[i - 1].criado_em).getTime()) / 864e5;
+      if (Number.isFinite(dias) && dias >= 0) intervalosDias.push(dias);
+    }
+  }
+  const mtbfDias = intervalosDias.length ? intervalosDias.reduce((s, d) => s + d, 0) / intervalosDias.length : null;
+
+  // Disponibilidade: aproximação com os mesmos dados (sem horas reais de operação ainda) — horas
+  // paradas = soma de todas as horas de reparo (as mesmas do MTTR); horas totais = soma, por
+  // equipamento com pelo menos uma O.S., do tempo desde a primeira O.S. registrada até agora.
+  const equipamentosComOS = new Set(agendaEmpresa.filter((a) => a.equipamento_id).map((a) => a.equipamento_id));
+  let horasTotaisFrota = 0;
+  for (const equipamentoId of equipamentosComOS) {
+    const primeiraOS = agendaEmpresa.filter((a) => a.equipamento_id === equipamentoId)
+      .reduce((menor, a) => Math.min(menor, new Date(a.criado_em).getTime()), Infinity);
+    if (Number.isFinite(primeiraOS)) horasTotaisFrota += (agora - primeiraOS) / 36e5;
+  }
+  const horasParadas = horasReparo.reduce((s, h) => s + h, 0);
+  const disponibilidadePercentual = horasTotaisFrota > 0
+    ? Math.round(Math.max(0, 1 - horasParadas / horasTotaisFrota) * 1000) / 10
+    : null;
+
+  // Backlog: O.S. ainda não finalizadas — quantidade e quanto tempo (em horas) elas já estão
+  // abertas, somado.
+  const abertas = agendaEmpresa.filter((a) => !a.finalizada);
+  const backlogQtd = abertas.length;
+  const backlogHoras = Math.round(abertas.reduce((s, a) => s + (agora - new Date(a.criado_em).getTime()) / 36e5, 0) * 10) / 10;
+
+  // % preventiva × corretiva: proporção simples entre as O.S. desses 2 tipos (os únicos que hoje
+  // usam o Laudo Técnico de verdade — ver TIPOS_LAUDO_TECNICO).
+  const preventivas = agendaEmpresa.filter((a) => a.tipo === 'preventiva');
+  const totalPC = preventivas.length + corretivas.length;
+  const percentualPreventiva = totalPC ? Math.round((preventivas.length / totalPC) * 1000) / 10 : null;
+  const percentualCorretiva = totalPC ? Math.round((corretivas.length / totalPC) * 1000) / 10 : null;
+
+  return {
+    mtbf_dias: mtbfDias !== null ? Math.round(mtbfDias * 10) / 10 : null,
+    mttr_horas: mttrHoras !== null ? Math.round(mttrHoras * 10) / 10 : null,
+    disponibilidade_percentual: disponibilidadePercentual,
+    backlog_qtd: backlogQtd,
+    backlog_horas: backlogHoras,
+    percentual_preventiva: percentualPreventiva,
+    percentual_corretiva: percentualCorretiva,
+    aderencia_plano: null, // Fase 2 (Planos de Manutenção) ainda não existe — ver README
+  };
+}
+
+rota('GET', /^\/api\/kpis$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const data = db.load();
+  enviarJSON(res, 200, { kpis: calcularKpis(data, user.empresa_id) });
+});
+
 // GET /api/usuarios
 rota('GET', /^\/api\/usuarios$/, async (req, res) => {
   const user = usuarioAutenticado(req);
