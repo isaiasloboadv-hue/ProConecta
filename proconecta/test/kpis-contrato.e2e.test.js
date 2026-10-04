@@ -42,6 +42,12 @@ function dados() {
     _seq: { usuarios: 2, clientes: 2, equipamentos: 12, agenda: 5, visitas: 4 },
     empresas: [{ id: 1, nome: 'Empresa Teste', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#000', cor_secundaria: '#000', versao_id: 1, modulos_ativos: ['os_chamados'], terminologia: {} }],
     versoes: [{ id: 1, nome: 'Manutenção', modulos: ['os_chamados'] }],
+    // passo 11: tem_contrato_manutencao virou tri-estado (null = ainda não informado) — o `false`
+    // deste seed é uma escolha JÁ confirmada (equipamento 11, "sem contrato"), não um default de
+    // passo 10 nunca confirmado, então marca a migração como já feita pra não virar null aqui
+    // (ver _migracaoContratoNaoInformadoV1 em db.js e o teste dedicado em
+    // contrato-manutencao-lock.e2e.test.js).
+    _migracaoContratoNaoInformadoV1: true,
   };
 }
 

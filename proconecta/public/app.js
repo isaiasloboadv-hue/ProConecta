@@ -2158,6 +2158,14 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
           <div id="na-garantia-hint" style="color:var(--ink-soft); font-size:13px; margin-top:-8px; margin-bottom:10px;"></div>
         </div>
         <div class="full ${agendaItem && agendaItem.garantia === 'na' ? '' : 'hidden'}" id="na-garantia-obs-wrap"><label>Especifique*</label><input id="na-garantia-obs" placeholder="Explique o motivo do N/A..." value="${agendaItem ? esc(agendaItem.garantia_obs || '') : ''}"></div>
+        <div class="full" id="na-contrato-wrap">
+          <label>Contrato de manutenção preventiva</label>
+          <div id="na-contrato-editavel" style="display:flex; gap:18px; margin-bottom:6px;">
+            <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-contrato" value="sim" style="width:auto;"> Com contrato</label>
+            <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-contrato" value="nao" style="width:auto;"> Sem contrato</label>
+          </div>
+          <div id="na-contrato-travado" class="hidden" style="color:var(--ink-soft); font-size:13px;"></div>
+        </div>
       </div>
 
       <div id="na-sla-section-wrap">
@@ -2336,6 +2344,57 @@ function preencherNumeroSerieNovaAtividade() {
   document.getElementById('na-data-fabricacao').value = equip ? (equip.data_fabricacao || '—') : '';
   atualizarGarantiaAutomatica(equip ? equip.data_fabricacao : '');
   atualizarSugestaoSlaNovaAtividade();
+  atualizarContratoNovaAtividade(equip);
+  travarPerguntaPreventivaSLA('na', equip ? equip.tem_contrato_manutencao : null);
+}
+
+// contrato de manutenção preventiva (RCM/SAP PM, passo 11) — campo dedicado na abertura da O.S.
+// (um dos 3 lugares onde pode ser definido, junto com Atrelar/Editar equipamento e a pergunta
+// "plano_preventiva_ativo" do SLA, ver travarPerguntaPreventivaSLA). Se o equipamento escolhido
+// já tem essa informação, trava e mostra o valor acinzentado em vez de perguntar de novo.
+function atualizarContratoNovaAtividade(equip) {
+  const wrapEditavel = document.getElementById('na-contrato-editavel');
+  const wrapTravado = document.getElementById('na-contrato-travado');
+  if (!wrapEditavel || !wrapTravado) return;
+  document.querySelectorAll('input[name="na-contrato"]').forEach((r) => { r.checked = false; });
+  const valor = equip ? equip.tem_contrato_manutencao : null;
+  if (valor === true || valor === false) {
+    wrapEditavel.classList.add('hidden');
+    wrapTravado.classList.remove('hidden');
+    wrapTravado.textContent = valor
+      ? 'Com contrato de manutenção preventiva — já definido no cadastro do equipamento.'
+      : 'Sem contrato de manutenção preventiva — já definido no cadastro do equipamento.';
+  } else {
+    wrapEditavel.classList.remove('hidden');
+    wrapTravado.classList.add('hidden');
+  }
+}
+
+// trava e pré-marca a pergunta "O cliente tem plano de manutenção preventiva ativo?" do
+// questionário de SLA quando o equipamento já tem o contrato definido (por qualquer um dos 3
+// lugares) — evita perguntar de novo algo que já foi respondido. prefixo é 'na' (Nova O.S.) ou
+// 'pv' (encaminhamento pro pós-venda), que compartilham a mesma lista PERGUNTAS_SLA.
+function travarPerguntaPreventivaSLA(prefixo, valorAtual) {
+  const radios = document.querySelectorAll(`input[name="${prefixo}-sla-plano_preventiva_ativo"]`);
+  if (!radios.length) return;
+  const hintId = `${prefixo}-sla-plano-preventiva-hint`;
+  let hint = document.getElementById(hintId);
+  if (valorAtual === true || valorAtual === false) {
+    radios.forEach((r) => {
+      r.disabled = true;
+      r.checked = (r.value === 'sim') === valorAtual;
+    });
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.id = hintId;
+      hint.style.cssText = 'color:var(--ink-soft); font-size:12.5px; margin-top:-4px; margin-bottom:6px;';
+      radios[0].closest('.full').appendChild(hint);
+    }
+    hint.textContent = 'Já definido no cadastro do equipamento — travado.';
+  } else {
+    radios.forEach((r) => { r.disabled = false; });
+    if (hint) hint.remove();
+  }
 }
 
 // garantia de fábrica: 1 ano a partir da data de fabricação (MM/AAAA). Dentro desse prazo,
@@ -2458,6 +2517,11 @@ async function salvarNovaAtividade() {
     viagem_dia_fim_previsto: document.getElementById('na-bonus-viagem').checked ? document.getElementById('na-viagem-fim').value : '',
   };
   if (sla_respostas) body.sla_respostas = sla_respostas;
+  // contrato de manutenção preventiva (passo 11) — só existe marcado se o campo estiver
+  // editável (equipamento ainda sem essa informação, ver atualizarContratoNovaAtividade); se
+  // já estiver travado, nenhum rádio fica marcado e nada é enviado (preserva o valor já definido).
+  const contratoMarcado = document.querySelector('input[name="na-contrato"]:checked');
+  if (contratoMarcado) body.tem_contrato_manutencao = contratoMarcado.value === 'sim';
   // Demonstração Técnica nova (não na edição, ver mostrarFormNovaAtividade) já nasce com o
   // briefing do Promotor — evita depender de alguém lembrar de preencher isso depois, separado,
   // em Relatório > Manual > Promotor.
@@ -13407,7 +13471,7 @@ const KPIS_DETALHE_CONFIG = {
     colunas: [
       { label: 'Cliente', chave: 'cliente_nome' },
       { label: 'Equipamento', chave: 'equipamento_descricao' },
-      { label: 'Contrato', chave: 'tem_contrato_manutencao', formatar: (v) => (v ? 'Com contrato' : 'Sem contrato') },
+      { label: 'Contrato', chave: 'tem_contrato_manutencao', formatar: (v) => (v === true ? 'Com contrato' : v === false ? 'Sem contrato' : 'Não informado') },
       { label: 'Horas totais', chave: 'horas_totais', formatar: (v) => `${v} h` },
       { label: 'Horas paradas', chave: 'horas_paradas', formatar: (v) => `${v} h` },
       { label: 'Disponibilidade', chave: 'disponibilidade_percentual', formatar: (v) => (v === null ? '—' : `${v}%`) },
@@ -13558,6 +13622,13 @@ async function exportarKpisExcel() {
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----
+// lê o select tri-estado "" (ainda não informado) / "1" (com contrato) / "0" (sem contrato) e
+// devolve null/true/false — mesmo formato do campo tem_contrato_manutencao no servidor (passo 11).
+function valorContratoSelect(id) {
+  const v = document.getElementById(id).value;
+  return v === '1' ? true : v === '0' ? false : null;
+}
+
 async function renderEquipamentosAtrelar() {
   const [{ equipamentos }, { clientes }] = await Promise.all([api('/api/equipamentos'), api('/api/clientes')]);
   window._clientesCache = clientes;
@@ -13574,7 +13645,13 @@ async function renderEquipamentosAtrelar() {
         <div><label>Número de série*</label><input id="ae-numero-serie"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="ae-data-fabricacao" placeholder="MM/AAAA" maxlength="7"></div>
         <div><label>Localização</label><input id="ae-localizacao" placeholder="ex: Cozinha"></div>
-        <div class="full"><label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="ae-contrato" style="width:auto;"> Tem contrato de manutenção preventiva?</label></div>
+        <div><label>Contrato de manutenção preventiva</label>
+          <select id="ae-contrato">
+            <option value="">Ainda não informado</option>
+            <option value="1">Com contrato</option>
+            <option value="0">Sem contrato</option>
+          </select>
+        </div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarAtrelamento()">Atrelar ao cliente</button>
     </div>
@@ -13584,7 +13661,7 @@ async function renderEquipamentosAtrelar() {
       ${atrelados.length ? atrelados.map((e) => {
         const cliente = clientes.find((c) => c.id === e.cliente_id);
         return `<tr><td data-label="Cliente">${esc(cliente ? cliente.nome_empresa : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº de série">${esc(e.numero_serie)}</td><td data-label="Fabricação">${esc(e.data_fabricacao || '—')}</td>
-        <td data-label="Contrato">${e.tem_contrato_manutencao ? '<span class="tag tag-green">Com contrato</span>' : '<span class="tag tag-amber">Sem contrato</span>'}</td>
+        <td data-label="Contrato">${e.tem_contrato_manutencao === true ? '<span class="tag tag-green">Com contrato</span>' : e.tem_contrato_manutencao === false ? '<span class="tag tag-amber">Sem contrato</span>' : '<span class="tag tag-gray">Não informado</span>'}</td>
         <td class="td-acoes">
           <button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>
           ${USER.papel === 'administrador' ? `
@@ -13610,7 +13687,13 @@ function editarAtrelado(id) {
         <div><label>Número de série*</label><input id="ea-numero-serie" value="${esc(equipamento.numero_serie)}"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="ea-data-fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(equipamento.data_fabricacao || '')}"></div>
         <div><label>Localização</label><input id="ea-localizacao" value="${esc(equipamento.localizacao || '')}"></div>
-        <div class="full"><label style="display:flex; align-items:center; gap:8px; font-weight:400;"><input type="checkbox" id="ea-contrato" style="width:auto;" ${equipamento.tem_contrato_manutencao ? 'checked' : ''}> Tem contrato de manutenção preventiva?</label></div>
+        <div><label>Contrato de manutenção preventiva</label>
+          <select id="ea-contrato">
+            <option value="" ${equipamento.tem_contrato_manutencao === null ? 'selected' : ''}>Ainda não informado</option>
+            <option value="1" ${equipamento.tem_contrato_manutencao === true ? 'selected' : ''}>Com contrato</option>
+            <option value="0" ${equipamento.tem_contrato_manutencao === false ? 'selected' : ''}>Sem contrato</option>
+          </select>
+        </div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarEdicaoAtrelado(${equipamento.id})">Salvar alterações</button>
@@ -13627,7 +13710,7 @@ async function salvarEdicaoAtrelado(id) {
     numero_serie: numeroSerie,
     data_fabricacao: document.getElementById('ea-data-fabricacao').value,
     localizacao: document.getElementById('ea-localizacao').value,
-    tem_contrato_manutencao: document.getElementById('ea-contrato').checked,
+    tem_contrato_manutencao: valorContratoSelect('ea-contrato'),
   };
   try {
     await api(`/api/equipamentos/${id}`, { method: 'PUT', body });
@@ -13647,7 +13730,7 @@ async function salvarAtrelamento() {
     cliente_id: clienteId, numero_serie: numeroSerie,
     data_fabricacao: document.getElementById('ae-data-fabricacao').value,
     localizacao: document.getElementById('ae-localizacao').value,
-    tem_contrato_manutencao: document.getElementById('ae-contrato').checked,
+    tem_contrato_manutencao: valorContratoSelect('ae-contrato'),
   };
   try {
     await api(`/api/equipamentos/${equipamentoId}/atrelar`, { method: 'POST', body });
@@ -14183,7 +14266,16 @@ async function encerrarAtendimento(agendaId) {
 
 // modal de encaminhamento pro pós-venda: motivo + questionário de SLA opcional (o técnico
 // responde aqui antes de encaminhar — a IA do chat não faz mais essas perguntas)
-function encaminharPosVenda(agendaId) {
+async function encaminharPosVenda(agendaId) {
+  // contrato de manutenção preventiva (passo 11): se o equipamento desta O.S. já tiver essa
+  // informação definida (por qualquer um dos outros 2 lugares), a pergunta "plano_preventiva_
+  // ativo" do SLA abaixo entra travada em vez de perguntar de novo.
+  let contratoDoEquipamento = null;
+  try {
+    const { agenda } = await api('/api/agenda');
+    const item = agenda.find((a) => a.id === agendaId);
+    if (item) contratoDoEquipamento = item.equipamento_tem_contrato_manutencao;
+  } catch (e) { /* segue sem travar — pergunta normal */ }
   let modal = document.getElementById('modal-pos-venda');
   if (!modal) {
     modal = document.createElement('div');
@@ -14225,6 +14317,7 @@ function encaminharPosVenda(agendaId) {
         <button class="btn-outline-sm" onclick="document.getElementById('modal-pos-venda').classList.remove('show')">Cancelar</button>
       </div>
     </div>`;
+  travarPerguntaPreventivaSLA('pv', contratoDoEquipamento);
 }
 
 function atualizarSlaPosVenda() {
