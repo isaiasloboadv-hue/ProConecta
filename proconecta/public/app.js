@@ -16439,6 +16439,7 @@ async function renderEscalaFolga() {
       <div><h1>Escala de Folga</h1><p>DSR, compensação de banco de horas, home office e férias da equipe — clique num nome pra ver e marcar os dias dele.</p></div>
       <div style="display:flex; gap:8px; align-items:center;">
         <input type="month" id="escala-mes" value="${escalaFolgaMesAtual}" onchange="mudarMesEscalaFolga()">
+        <button class="btn-outline-sm" onclick="abrirMaoDeObraDaEscala()">MOD (colchão) ↗</button>
         <button class="btn-outline-sm" onclick="ir('equipe')">‹ Equipe</button>
       </div>
     </div>
@@ -16450,6 +16451,16 @@ async function renderEscalaFolga() {
   await carregarEscalaFolga();
 }
 
+// pedido do usuário: "Incluir no menu escala de folga tbm" — acesso ao KPI de MOD (mão de obra /
+// colchão de horas) direto da tela de Escala de Folga, já no mesmo mês que está sendo visto aqui.
+function abrirMaoDeObraDaEscala() {
+  const inicio = `${escalaFolgaMesAtual}-01`;
+  const fim = `${escalaFolgaMesAtual}-${String(new Date(Number(escalaFolgaMesAtual.slice(0, 4)), Number(escalaFolgaMesAtual.slice(5, 7)), 0).getDate()).padStart(2, '0')}`;
+  _kpisFiltros = { periodo_inicio: inicio, periodo_fim: fim };
+  _kpisMaoDeObraCache = null;
+  abrirMaoDeObraDetalhe();
+}
+
 function mudarMesEscalaFolga() {
   escalaFolgaMesAtual = document.getElementById('escala-mes').value;
   carregarEscalaFolga();
@@ -16457,14 +16468,21 @@ function mudarMesEscalaFolga() {
 
 async function carregarEscalaFolga() {
   const ano = escalaFolgaMesAtual.slice(0, 4);
-  const [{ usuarios }, { feriados }, { escalas }] = await Promise.all([
+  const periodoInicio = `${escalaFolgaMesAtual}-01`;
+  const periodoFim = `${escalaFolgaMesAtual}-${String(new Date(Number(ano), Number(escalaFolgaMesAtual.slice(5, 7)), 0).getDate()).padStart(2, '0')}`;
+  const [{ usuarios }, { feriados }, { escalas }, modKpi] = await Promise.all([
     api('/api/usuarios'),
     api(`/api/feriados?ano=${ano}`),
     api(`/api/escala-folgas?mes=${escalaFolgaMesAtual}`),
+    api(`/api/kpis/mao-de-obra?periodo_inicio=${periodoInicio}&periodo_fim=${periodoFim}`).catch(() => null),
   ]);
   const equipe = usuarios.filter((u) => ['suporte', 'administrador'].includes(u.papel) && u.status === 'ativo')
     .sort((a, b) => a.nome.localeCompare(b.nome));
-  window._escalaFolgaCache = { usuarios: equipe, feriados, escalas };
+  // MOD (colchão) é só pra quem bate ponto de O.S./atividade (papel suporte) — admin não entra
+  // nesse cálculo, então nem busca saldo pra ele.
+  const modPorTecnico = {};
+  if (modKpi) for (const l of modKpi.tecnicos) modPorTecnico[l.tecnico_id] = l;
+  window._escalaFolgaCache = { usuarios: equipe, feriados, escalas, modPorTecnico };
   renderListaEquipeEscala();
   renderMiniCalendarioEscala();
   renderFeriadosEscala();
@@ -16512,14 +16530,23 @@ function selecionarPessoaEscala(usuarioId) {
 function renderMiniCalendarioEscala() {
   const alvo = document.getElementById('escala-calendario-wrap');
   if (!alvo) return;
-  const { usuarios, feriados, escalas } = window._escalaFolgaCache;
+  const { usuarios, feriados, escalas, modPorTecnico } = window._escalaFolgaCache;
   const ehGeral = escalaFolgaPessoaId === 'geral';
   const pessoa = ehGeral ? null : usuarios.find((u) => u.id === escalaFolgaPessoaId);
   const selecionado = ehGeral || !!pessoa;
+  // MOD (colchão) só existe pra quem é técnico de campo (papel suporte) — admin não entra nesse
+  // cálculo. Mostra o saldo do mês já visível aqui, sem precisar entrar na tela de MOD pra isso.
+  const modDaPessoa = pessoa && pessoa.papel === 'suporte' ? (modPorTecnico || {})[pessoa.id] : null;
   const dias = diasDoGridEscala(escalaFolgaMesAtual);
   const DIAS_SEMANA = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
   alvo.innerHTML = `
-    <div class="panel-head">${ehGeral ? 'Folga coletiva (todo mundo)' : pessoa ? `Escala de ${esc(pessoa.nome)}` : 'Feriados do mês'}</div>
+    <div class="panel-head">
+      <span>${ehGeral ? 'Folga coletiva (todo mundo)' : pessoa ? `Escala de ${esc(pessoa.nome)}` : 'Feriados do mês'}</span>
+      ${modDaPessoa ? `<span title="MOD do mês: ${modDaPessoa.horas_trabalhadas}h trabalhadas">${tag(
+        modDaPessoa.horas_excedentes > 0 ? `+${modDaPessoa.horas_excedentes}h colchão` : modDaPessoa.horas_paradas > 0 ? `${modDaPessoa.horas_paradas}h parado` : 'em dia',
+        modDaPessoa.horas_excedentes > 0 ? 'teal' : modDaPessoa.horas_paradas > 0 ? 'amber' : 'green'
+      )}</span>` : ''}
+    </div>
     ${!selecionado ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Clique em "Geral" pra marcar uma folga coletiva (ex.: DSR de fim de semana pra equipe inteira), ou num nome pra ver e marcar os dias de alguém.</p>` : ''}
     ${pessoa ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Dias com marcação em cinza mais claro vêm de uma folga coletiva — escolher outro tipo aqui cria uma exceção só pra ${esc(pessoa.nome)}.</p>` : ''}
     <div class="escala-cal-legenda">
@@ -16580,7 +16607,7 @@ function clicarDiaEscala(diaISO) {
       ${!ehGeral && coletivaDoDia && !individualDoDia ? `<p style="color:var(--amber); font-size:12.5px;">Esse dia já é folga coletiva (${esc(LABEL_ESCALA_FOLGA_FRONT[coletivaDoDia.tipo])}). Escolher um tipo aqui cria uma exceção só pra ${esc(pessoa.nome)}.</p>` : ''}
       <div class="escala-opcoes">
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'dsr')">${iconeCarinhaFeliz('#F5A623')} DSR</button>
-        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'banco_horas')">${iconeCarinhaFeliz('#1976D2')} Banco de horas</button>
+        <button class="btn-outline-sm" onclick="abrirPassoBancoEscalaDia('${diaISO}')">${iconeCarinhaFeliz('#1976D2')} Banco de horas</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'home_office')">🏠 Home office</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'ferias')">🏖️ Férias</button>
       </div>
@@ -16589,13 +16616,56 @@ function clicarDiaEscala(diaISO) {
     </div>`;
 }
 
+// pedido do usuário: "se ele recebe uma compensação essas horas também é abatida [do colchão de
+// Mão de Obra] — pode ser compensação de dia inteiro e horas definida parcial" — pra isso o
+// sistema precisa saber COMO vai ser a compensação ao marcar banco de horas direto aqui (sem
+// passar por uma solicitação do técnico), não só o tipo. Segundo passo do modal: escolhe a
+// modalidade (mesma do pedido de solicitação RH) antes de salvar.
+function abrirPassoBancoEscalaDia(diaISO) {
+  const modal = document.getElementById('modal-escala-dia');
+  if (!modal) return;
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:380px;">
+      <h3>Banco de horas — ${fmtData(diaISO)}</h3>
+      <p>Como vai ser a compensação?</p>
+      <div class="form-grid">
+        <div><label>Modalidade</label><select id="escdia-modalidade" onchange="atualizarPreviewBancoEscalaDia()">
+          <option value="dia_inteiro">Dia inteiro (${TURNO_ENTRADA_PADRAO_FRONT}–${TURNO_SAIDA_PADRAO_FRONT})</option>
+          <option value="entrada_atrasada">Entrar mais tarde</option>
+          <option value="saida_antecipada">Sair mais cedo</option>
+        </select></div>
+        <div class="hidden" id="escdia-horario-wrap"><label id="escdia-horario-label">Horário</label><input type="time" id="escdia-horario" oninput="atualizarPreviewBancoEscalaDia()"></div>
+        <div><label>Horas abatidas do saldo</label><input id="escdia-horas-preview" readonly value="${CARGA_HORARIA_DIA_BANCO_FRONT}h"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" style="width:100%; margin-top:10px;" onclick="definirEscalaDia('${diaISO}', 'banco_horas')">Confirmar</button>
+      <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="fecharModalEscalaDia()">Cancelar</button>
+    </div>`;
+}
+
+function atualizarPreviewBancoEscalaDia() {
+  const modalidade = document.getElementById('escdia-modalidade').value;
+  const ehParcial = modalidade !== 'dia_inteiro';
+  document.getElementById('escdia-horario-wrap').classList.toggle('hidden', !ehParcial);
+  document.getElementById('escdia-horario-label').textContent = modalidade === 'entrada_atrasada' ? 'Vai entrar às' : 'Vai sair às';
+  const horario = document.getElementById('escdia-horario').value;
+  const horas = horasBancoDaModalidadeFront(modalidade, horario);
+  document.getElementById('escdia-horas-preview').value = horas !== '' ? `${horas}h` : '—';
+}
+
 async function definirEscalaDia(diaISO, tipo) {
   const ehGeral = escalaFolgaPessoaId === 'geral';
+  const body = ehGeral ? { coletiva: true, data: diaISO, tipo } : { usuario_id: escalaFolgaPessoaId, data: diaISO, tipo };
+  if (tipo === 'banco_horas') {
+    const modalidadeEl = document.getElementById('escdia-modalidade');
+    body.modalidade_banco = modalidadeEl ? modalidadeEl.value : 'dia_inteiro';
+    if (body.modalidade_banco !== 'dia_inteiro') {
+      const horario = document.getElementById('escdia-horario').value;
+      if (!horario) return alert('Informe o horário.');
+      body.horario = horario;
+    }
+  }
   try {
-    await api('/api/escala-folgas', {
-      method: 'POST',
-      body: ehGeral ? { coletiva: true, data: diaISO, tipo } : { usuario_id: escalaFolgaPessoaId, data: diaISO, tipo },
-    });
+    await api('/api/escala-folgas', { method: 'POST', body });
     fecharModalEscalaDia();
     mostrarToast(ehGeral ? 'Folga coletiva atualizada.' : 'Escala atualizada.');
     await carregarEscalaFolga();

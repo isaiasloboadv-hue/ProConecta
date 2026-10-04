@@ -292,10 +292,16 @@ function diasNoIntervaloTecnico(data, empresaId, tecnicoId, inicioISO, fimISO) {
   const fimTs = Date.UTC(...fimEfetivo.split('-').map(Number).map((v, i) => (i === 1 ? v - 1 : v)));
   const dias = [];
   if (!Number.isFinite(inicioTs) || !Number.isFinite(fimTs) || fimTs < inicioTs) return dias;
+  // junto com o status, já traz a marcação de escala do dia (quando for 'folga') — o KPI de Mão de
+  // Obra precisa saber se é banco_horas (pra abater do colchão, ver calcularMaoDeObra) ou outro
+  // tipo (dsr/férias/home_office, que não mexem no saldo).
+  const escalas = escalasEfetivasTecnico(data, empresaId, tecnicoId);
   for (let cursor = inicioTs, n = 0; cursor <= fimTs && n < 400; cursor += 24 * 60 * 60 * 1000, n++) {
     const d = new Date(cursor);
     const diaISO = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-    dias.push({ data: diaISO, status: statusDiaTecnico(data, empresaId, tecnicoId, diaISO, hojeISO) });
+    const status = statusDiaTecnico(data, empresaId, tecnicoId, diaISO, hojeISO);
+    const escala = status === 'folga' ? escalas.find((e) => e.data === diaISO) : null;
+    dias.push({ data: diaISO, status, escala });
   }
   return dias;
 }
@@ -1839,6 +1845,25 @@ rota('POST', /^\/api\/escala-folgas$/, async (req, res) => {
   const body = await lerCorpo(req);
   if (!TIPOS_ESCALA_FOLGA.includes(body.tipo)) return enviarJSON(res, 400, { erro: 'Tipo inválido.' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data.' });
+  // banco de horas marcado direto (sem passar por uma solicitação do técnico) também precisa saber
+  // COMO vai ser a compensação — dia inteiro ou um horário parcial de entrada/saída — pro KPI de
+  // Mão de Obra abater a quantidade certa do colchão do técnico (ver calcularMaoDeObra). Mesma
+  // validação já usada em POST /api/solicitacoes-rh pro débito de banco de horas.
+  let modalidadeBanco = null;
+  let horarioBanco = null;
+  if (body.tipo === 'banco_horas') {
+    if (!MODALIDADES_BANCO_HORAS.includes(body.modalidade_banco)) {
+      return enviarJSON(res, 400, { erro: 'Escolha como vai ser a compensação: dia inteiro, entrar mais tarde ou sair mais cedo.' });
+    }
+    modalidadeBanco = body.modalidade_banco;
+    if (modalidadeBanco !== 'dia_inteiro') {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(body.horario || '')) return enviarJSON(res, 400, { erro: 'Informe o horário.' });
+      horarioBanco = body.horario;
+    }
+    if (!(horasBancoDaModalidade(modalidadeBanco, horarioBanco) > 0)) {
+      return enviarJSON(res, 400, { erro: 'Horário fora do expediente (08:00–17:00).' });
+    }
+  }
   const data = db.load();
   let usuarioAlvoId = null;
   if (!body.coletiva) {
@@ -1851,13 +1876,15 @@ rota('POST', /^\/api\/escala-folgas$/, async (req, res) => {
   const existente = data.escala_folgas.find((e) => e.usuario_id === usuarioAlvoId && e.data === body.data && e.empresa_id === user.empresa_id);
   if (existente) {
     existente.tipo = body.tipo;
+    existente.modalidade_banco = modalidadeBanco;
+    existente.horario = horarioBanco;
     existente.definido_por = user.id;
     existente.atualizado_em = new Date().toISOString();
     db.save(data);
     return enviarJSON(res, 200, { escala: existente });
   }
   const item = tenant.criar(data, 'escala_folgas', user.empresa_id, {
-    usuario_id: usuarioAlvoId, data: body.data, tipo: body.tipo,
+    usuario_id: usuarioAlvoId, data: body.data, tipo: body.tipo, modalidade_banco: modalidadeBanco, horario: horarioBanco,
     definido_por: user.id, criado_em: new Date().toISOString(), atualizado_em: null,
   });
   db.save(data);
@@ -4787,14 +4814,26 @@ function calcularMaoDeObra(data, empresaId, filtros = {}) {
   // cada dia (horas logadas − jornada, pode ser negativo) é somado ALGEBRICAMENTE no período inteiro
   // antes de separar em paradas (déficit líquido) e excedentes (superávit líquido) — dia bom cobre
   // dia ruim dentro do mesmo recorte.
+  //
+  // E por último: "se ele recebe uma compensação essas horas também é abatida — pode ser
+  // compensação de dia inteiro e horas definida parcial" — um dia marcado na Escala de Folga como
+  // banco_horas é o técnico GASTANDO o colchão (reaproveita horasBancoDaModalidade, a mesma conta
+  // já usada lá: dia inteiro = jornada cheia, entrada/saída parcial = só a diferença do horário
+  // escolhido pro turno padrão). DSR/férias/home_office continuam neutros — não é banco de horas.
   const linhas = tecnicos.map((t) => {
     const dias = diasNoIntervaloTecnico(data, empresaId, t.id, periodoInicio, periodoFim);
     let horasTrabalhadas = 0; // soma bruta logada (informativa — sem compensação entre dias)
-    let saldoLiquido = 0; // soma de (logadas − jornada) de cada dia útil — pode virar negativo ou positivo
+    let saldoLiquido = 0; // soma de (logadas − jornada) de cada dia útil, menos o que já foi gasto em banco_horas — pode virar negativo ou positivo
     let diasUteis = 0;
     let diasPendentes = 0; // dias sem NENHUMA O.S./atividade registrada (métrica à parte, pra "preencheu ou nem abriu o formulário")
     for (const d of dias) {
-      if (d.status === 'folga' || d.status === 'futuro') continue; // folga não é trabalho nem ociosidade; futuro ainda não aconteceu
+      if (d.status === 'futuro') continue; // ainda não aconteceu
+      if (d.status === 'folga') {
+        if (d.escala && d.escala.tipo === 'banco_horas') {
+          saldoLiquido -= horasBancoDaModalidade(d.escala.modalidade_banco, d.escala.horario);
+        }
+        continue; // folga não soma dia útil nem gera déficit — só abate o colchão quando é banco_horas
+      }
       diasUteis++;
       let logadas = 0;
       if (d.status === 'os') {
