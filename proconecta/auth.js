@@ -3,7 +3,16 @@
 
 const crypto = require('crypto');
 
-const SEGREDO = process.env.PROCONECTA_SECRET || 'troque-este-segredo-em-producao';
+// sem PROCONECTA_SECRET configurado, gera um segredo aleatório só pra esse processo — nunca um
+// valor fixo escrito no código, que qualquer um que leia o repositório (ele é público) saberia e
+// poderia usar pra forjar um token válido pra qualquer usuário. É pior que travar o servidor? Não:
+// com o segredo sorteado, continua dando pra testar/rodar local sem configurar nada, só que todo
+// reinício do processo derruba as sessões abertas (nisso mesmo está o aviso: se isso acontecer em
+// produção, o esquecimento fica visível na hora, em vez de ficar um buraco silencioso).
+const SEGREDO = process.env.PROCONECTA_SECRET || (() => {
+  console.warn('[auth] PROCONECTA_SECRET não configurado — usando um segredo aleatório só para este processo. Configure essa variável de ambiente antes de ir para produção (ver README), senão todo reinício do servidor derruba as sessões abertas.');
+  return crypto.randomBytes(32).toString('hex');
+})();
 const VALIDADE_MS = 12 * 60 * 60 * 1000; // 12 horas
 
 function base64url(buf) {
