@@ -576,6 +576,9 @@ const NAV = {
     { key: 'fila-reparo', modulo: 'os_chamados', label: 'Setor Reparo', page: 'fila-reparo' },
     { key: 'minhas-viagens', modulo: 'os_chamados', label: 'Minhas viagens', page: 'minhas-viagens' },
     { key: 'solicitacoes-rh', modulo: 'os_chamados', label: 'Solicitações', page: 'solicitacoes-rh' },
+    // pedido do usuário: em dia sem O.S./atendimento o sistema pede pro técnico justificar o que
+    // fez (ver statusDiaTecnico/diasDoMesTecnico em server.js) — essa é a tela onde ele preenche.
+    { key: 'atividades-dia', modulo: 'os_chamados', label: 'Atividades do Dia', page: 'atividades-dia' },
   ],
   administrador: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
@@ -716,6 +719,7 @@ const ICONE_MENU = {
   'equipe': '👥',
   'minhas-viagens': '✈️',
   'solicitacoes-rh': '🙋',
+  'atividades-dia': '🕒',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -853,6 +857,8 @@ async function ir(pagina) {
     if (pagina === 'tecnicos-acompanhamento') return renderTecnicosAcompanhamento();
     if (pagina === 'minhas-viagens') return renderMinhasViagens();
     if (pagina === 'escala-folga') return renderEscalaFolga();
+    if (pagina === 'atividades-dia') return renderAtividadesNaoProgramadas();
+    if (pagina === 'atividades-equipe') return renderAtividadesEquipe();
     if (pagina === 'tecnicos-solicitacoes') return renderTecnicosSolicitacoes();
     if (pagina === 'solicitacoes-rh') return renderSolicitacoesRH();
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
@@ -15428,11 +15434,12 @@ async function renderEquipe() {
 
   const hojeISO = dataISOLocal(new Date());
   const mesAtual = hojeISO.slice(0, 7);
-  const [solicitacoesResp, escalasResp, tecnicosResp, viagensResp] = await Promise.all([
+  const [solicitacoesResp, escalasResp, tecnicosResp, viagensResp, atividadesResp] = await Promise.all([
     api('/api/solicitacoes-rh?status=pendente'),
     api(`/api/escala-folgas?mes=${mesAtual}`),
     api('/api/usuarios'),
     api(`/api/tecnicos/viagens?mes=${mesAtual}`),
+    api(`/api/atividades-nao-programadas/equipe?mes=${mesAtual}`),
   ]);
 
   const tecnicosAtivos = tecnicosResp.usuarios.filter((u) => u.papel === 'suporte' && u.status === 'ativo');
@@ -15442,6 +15449,7 @@ async function renderEquipe() {
   const coletivaHoje = escalasHoje.some((e) => e.usuario_id === null);
   const foraHoje = coletivaHoje ? tecnicosAtivos.length : new Set(escalasHoje.filter((e) => e.usuario_id !== null).map((e) => e.usuario_id)).size;
   const diariasComBonus = (viagensResp.tecnicos || []).reduce((soma, t) => soma + (t.dias_total || 0), 0);
+  const diasPendentesEquipe = (atividadesResp.tecnicos || []).reduce((soma, t) => soma + (t.dias_pendentes || 0), 0);
 
   const grid = document.getElementById('equipe-grid');
   if (!grid) return;
@@ -15477,6 +15485,14 @@ async function renderEquipe() {
       <div class="equipe-card-titulo">Cadastros</div>
       <div class="stat-valor">${tecnicosAtivos.length}</div>
       <div class="stat-label">ficha(s) cadastral(is)</div>
+    </div>
+    <div class="equipe-card" onclick="ir('atividades-equipe')">
+      <div class="equipe-card-icone" style="background:var(--amber-bg);">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      </div>
+      <div class="equipe-card-titulo">Atividades do Dia</div>
+      <div class="stat-valor">${diasPendentesEquipe}</div>
+      <div class="stat-label">dia(s) ocioso(s) pendente(s) este mês</div>
     </div>`;
 }
 
@@ -15974,6 +15990,80 @@ async function abrirOSDeViagem(id) {
   abrirDetalheOS(id);
 }
 
+// ---------- Atividades do Dia (administrador): relatório de ocupação por técnico ----------
+// pedido do usuário: "o sistema criará um relatório de atividade diária de cada técnico [para]
+// identificar se o técnico está com muito ou pouco serviços" — esse resumo mensal é esse
+// relatório; o drill-down abaixo mostra o detalhe dia a dia (com o que cada atividade justificada
+// diz) pra um técnico específico.
+const TAG_STATUS_ATIVIDADE = {
+  os: ['O.S. agendada', 'blue'], folga: ['Folga', 'purple'], justificado: ['Justificado', 'green'],
+  pendente: ['Pendente', 'amber'], futuro: ['—', 'gray'],
+};
+
+let atividadesEquipeMesAtual = new Date().toISOString().slice(0, 7);
+
+async function renderAtividadesEquipe() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atividades do Dia</h1><p>Dias sem O.S./atendimento de cada técnico — quantos já foram justificados e quantos ainda estão pendentes, pra identificar quem está com muito ou pouco serviço.</p></div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="month" id="atv-equipe-mes" value="${atividadesEquipeMesAtual}" onchange="mudarMesAtividadesEquipe()">
+        <button class="btn-outline-sm" onclick="ir('equipe')">‹ Equipe</button>
+      </div>
+    </div>
+    <div id="atv-equipe-lista"><div class="empty">Carregando...</div></div>`;
+  await carregarAtividadesEquipe();
+}
+
+function mudarMesAtividadesEquipe() {
+  atividadesEquipeMesAtual = document.getElementById('atv-equipe-mes').value;
+  carregarAtividadesEquipe();
+}
+
+async function carregarAtividadesEquipe() {
+  const { tecnicos } = await api(`/api/atividades-nao-programadas/equipe?mes=${atividadesEquipeMesAtual}`);
+  const alvo = document.getElementById('atv-equipe-lista');
+  if (!alvo) return;
+  alvo.innerHTML = tecnicos.length ? `
+    <div class="panel"><table>
+      <tr><th>Técnico</th><th>Dias com O.S.</th><th>Dias de folga</th><th>Justificados</th><th>Pendentes</th><th></th></tr>
+      ${tecnicos.map((t) => `
+        <tr>
+          <td data-label="Técnico">${esc(t.nome)}</td>
+          <td data-label="Dias com O.S.">${t.dias_os}</td>
+          <td data-label="Dias de folga">${t.dias_folga}</td>
+          <td data-label="Justificados">${t.dias_justificados}</td>
+          <td data-label="Pendentes">${t.dias_pendentes ? tag(t.dias_pendentes, 'amber') : t.dias_pendentes}</td>
+          <td><button class="btn-outline-sm" onclick="abrirDetalheAtividadesTecnico(${t.id}, '${esc(t.nome).replace(/'/g, "\\'")}')">Ver detalhe</button></td>
+        </tr>`).join('')}
+    </table></div>` : `<p class="empty">Nenhum técnico ativo nessa equipe.</p>`;
+}
+
+async function abrirDetalheAtividadesTecnico(tecnicoId, tecnicoNome) {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atividades de ${esc(tecnicoNome)}</h1><p>Carregando...</p></div>
+      <button class="btn-outline-sm" onclick="renderAtividadesEquipe()">‹ Voltar</button>
+    </div>`;
+  const { dias } = await api(`/api/atividades-nao-programadas/tecnico/${tecnicoId}?mes=${atividadesEquipeMesAtual}`);
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atividades de ${esc(tecnicoNome)}</h1><p>${atividadesEquipeMesAtual.split('-').reverse().join('/')}</p></div>
+      <button class="btn-outline-sm" onclick="renderAtividadesEquipe()">‹ Voltar</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Dia</th><th>Status</th><th>Atividades</th></tr>
+      ${dias.filter((d) => d.status !== 'futuro').map((d) => `
+        <tr>
+          <td data-label="Dia">${fmtData(d.data)}</td>
+          <td data-label="Status">${tag(TAG_STATUS_ATIVIDADE[d.status][0], TAG_STATUS_ATIVIDADE[d.status][1])}</td>
+          <td data-label="Atividades">${d.atividades ? d.atividades.map((a) => `<div>${esc(a.inicio)}–${esc(a.fim)} — ${esc(a.descricao)}</div>`).join('') : '—'}</td>
+        </tr>`).join('')}
+    </table></div>`;
+}
+
 // ---------- Escala de Folga: feriados + DSR/banco de horas/home office/férias da equipe ----------
 // tela em duas colunas: a lista de toda a equipe (técnicos + administradores) à esquerda, e um
 // mini calendário à direita — sem ninguém selecionado, mostra só os feriados; ao clicar num nome,
@@ -16358,6 +16448,132 @@ async function decidirSolicitacaoRH(id, status) {
     await api(`/api/solicitacoes-rh/${id}/decidir`, { method: 'POST', body: { status, resposta_admin: resposta } });
     mostrarToast(status === 'aprovado' ? 'Solicitação aprovada.' : 'Solicitação reprovada.');
     carregarSolicitacoesRH();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- Atividades do Dia (técnico): justificar dia ocioso ----------
+// pedido do usuário: "o sistema identificará dia ocioso e solicitará preenchimento de atividade
+// não programada. O técnico abre esse menu adiciona a atividade início e fim não se limitando a
+// apenas uma [podendo] selecionar opção de incluir mais atividades." Lista o mês com o status de
+// cada dia (ver statusDiaTecnico no server.js) e, nos dias pendentes/já justificados, abre um
+// formulário com linhas repetíveis de início/fim/descrição.
+
+let atividadesMesAtual = new Date().toISOString().slice(0, 7);
+let atividadesDiaAberto = null;
+let atividadesDraftLinhas = [];
+
+async function renderAtividadesNaoProgramadas() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atividades do Dia</h1><p>Em dias sem O.S./atendimento marcado e sem folga, conte o que você fez — uma ou mais atividades, com início e fim de cada uma.</p></div>
+      <input type="month" id="atv-mes" value="${atividadesMesAtual}" onchange="mudarMesAtividades()">
+    </div>
+    <div id="atividades-lista"><div class="empty">Carregando...</div></div>`;
+  atividadesDiaAberto = null;
+  await carregarAtividadesNaoProgramadas();
+}
+
+function mudarMesAtividades() {
+  atividadesMesAtual = document.getElementById('atv-mes').value;
+  atividadesDiaAberto = null;
+  carregarAtividadesNaoProgramadas();
+}
+
+async function carregarAtividadesNaoProgramadas() {
+  const { dias } = await api(`/api/atividades-nao-programadas?mes=${atividadesMesAtual}`);
+  window._atividadesCache = dias.filter((d) => d.status !== 'futuro').reverse();
+  renderListaAtividades();
+}
+
+function renderListaAtividades() {
+  const lista = document.getElementById('atividades-lista');
+  if (!lista) return;
+  const dias = window._atividadesCache || [];
+  lista.innerHTML = dias.length ? dias.map((d) => linhaAtividadeDia(d)).join('') : '<p class="empty">Nenhum dia neste mês ainda.</p>';
+}
+
+function linhaAtividadeDia(d) {
+  const [tagTexto, tagCor] = TAG_STATUS_ATIVIDADE[d.status];
+  const aberto = atividadesDiaAberto === d.data;
+  const diaSemana = new Date(`${d.data}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'short' });
+  const acao = d.status === 'pendente'
+    ? `<button class="btn btn-primary btn-sm" onclick="abrirFormAtividade('${d.data}')">Preencher</button>`
+    : d.status === 'justificado'
+      ? `<button class="btn-outline-sm" onclick="abrirFormAtividade('${d.data}')">Editar</button>`
+      : '';
+  return `
+    <div class="panel" style="margin-bottom:10px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <strong>${fmtData(d.data)}</strong>
+        <span style="color:var(--ink-soft); text-transform:capitalize; font-size:13px;">${esc(diaSemana.replace('.', ''))}</span>
+        ${tag(tagTexto, tagCor)}
+        <span style="flex:1;"></span>
+        ${acao}
+      </div>
+      ${d.status === 'justificado' && d.atividades && !aberto ? `
+        <div style="margin-top:8px; font-size:13px; color:var(--ink-soft);">
+          ${d.atividades.map((a) => `<div>${esc(a.inicio)}–${esc(a.fim)} — ${esc(a.descricao)}</div>`).join('')}
+        </div>` : ''}
+      ${aberto ? formAtividadeHtml(d.data) : ''}
+    </div>`;
+}
+
+function abrirFormAtividade(diaISO) {
+  const dia = (window._atividadesCache || []).find((d) => d.data === diaISO);
+  atividadesDiaAberto = diaISO;
+  atividadesDraftLinhas = dia && dia.atividades && dia.atividades.length
+    ? dia.atividades.map((a) => ({ ...a }))
+    : [{ inicio: '', fim: '', descricao: '' }];
+  renderListaAtividades();
+}
+
+function fecharFormAtividade() {
+  atividadesDiaAberto = null;
+  renderListaAtividades();
+}
+
+function formAtividadeHtml(diaISO) {
+  return `
+    <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line);">
+      <div id="atividade-linhas">${renderLinhasAtividade()}</div>
+      <button class="btn-outline-sm" style="margin-top:8px;" onclick="adicionarLinhaAtividade()">+ Adicionar atividade</button>
+      <div style="margin-top:12px; display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarAtividadeDia('${diaISO}')">Salvar</button>
+        <button class="btn btn-ghost btn-sm" onclick="fecharFormAtividade()">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+function renderLinhasAtividade() {
+  return atividadesDraftLinhas.map((a, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input type="time" value="${esc(a.inicio || '')}" style="flex:0 0 110px;" oninput="atividadesDraftLinhas[${i}].inicio=this.value;">
+        <input type="time" value="${esc(a.fim || '')}" style="flex:0 0 110px;" oninput="atividadesDraftLinhas[${i}].fim=this.value;">
+        <input placeholder="O que você fez" value="${esc(a.descricao || '')}" style="flex:2;" oninput="atividadesDraftLinhas[${i}].descricao=this.value;">
+        ${atividadesDraftLinhas.length > 1 ? `<button class="step-rm" onclick="removerLinhaAtividade(${i})">×</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function adicionarLinhaAtividade() {
+  atividadesDraftLinhas.push({ inicio: '', fim: '', descricao: '' });
+  document.getElementById('atividade-linhas').innerHTML = renderLinhasAtividade();
+}
+
+function removerLinhaAtividade(i) {
+  atividadesDraftLinhas.splice(i, 1);
+  document.getElementById('atividade-linhas').innerHTML = renderLinhasAtividade();
+}
+
+async function salvarAtividadeDia(diaISO) {
+  try {
+    await api('/api/atividades-nao-programadas', { method: 'POST', body: { data: diaISO, atividades: atividadesDraftLinhas } });
+    atividadesDiaAberto = null;
+    mostrarToast('Atividades salvas.');
+    await carregarAtividadesNaoProgramadas();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
