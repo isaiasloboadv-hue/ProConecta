@@ -4714,6 +4714,33 @@ function horasEntreHoraSoDia(diaISO, horaInicio, horaFim) {
   return horasEntreDatasHora(`${diaISO}T${horaInicio}`, `${diaISO}T${horaFim}`);
 }
 
+// horas de O.S. do técnico num dia específico (dentro do recorte de filtros já aplicado).
+function horasOSDoTecnicoNoDia(agendaFiltrada, tecnicoId, diaISO) {
+  return agendaFiltrada.filter((a) => a.tecnico_id === tecnicoId && String(a.data_hora_inicio || '').slice(0, 10) === diaISO)
+    .reduce((s, a) => s + horasEntreDatasHora(a.data_hora_inicio, a.data_hora_fim), 0);
+}
+
+// horas de atividade não programada do técnico num dia específico — "em andamento" sem fim conta
+// até agora (se for hoje) ou até o fim daquele dia (se for um dia passado que o técnico nunca
+// voltou a marcar como concluído), nunca deixando uma atividade esquecida inflar as horas
+// trabalhadas indefinidamente.
+function horasAtividadesDoTecnicoNoDia(registro, diaISO, hojeISO, agora) {
+  if (!registro) return 0;
+  let horas = 0;
+  for (const at of (registro.atividades || [])) {
+    if (at.status === 'concluido' && at.inicio && at.fim) {
+      horas += horasEntreHoraSoDia(diaISO, at.inicio, at.fim);
+    } else if (at.status === 'em_andamento' && at.inicio) {
+      const inicioMs = horarioBrasiliaParaData(`${diaISO}T${at.inicio}`);
+      if (!inicioMs) continue;
+      const tetoMs = diaISO === hojeISO ? agora : (horarioBrasiliaParaData(`${diaISO}T23:59`) || agora).getTime();
+      const h = (Math.min(agora, tetoMs) - inicioMs.getTime()) / 36e5;
+      if (Number.isFinite(h) && h > 0) horas += h;
+    }
+  }
+  return horas;
+}
+
 function calcularMaoDeObra(data, empresaId, filtros = {}) {
   const hojeISO = hojeBrasiliaISO();
   const periodoInicio = filtros.periodoInicio || `${hojeISO.slice(0, 7)}-01`;
@@ -4727,33 +4754,33 @@ function calcularMaoDeObra(data, empresaId, filtros = {}) {
   if (filtros.tecnicoId) tecnicos = tecnicos.filter((u) => u.id === filtros.tecnicoId);
 
   const agora = Date.now();
+  // pedido do usuário: "as horas trabalhadas são 8 horas diárias pra cada técnico, evitar se ele
+  // justificar 3 horas, 5 horas está ocioso" — ou seja, a jornada de referência é checada DIA A
+  // DIA, não só no agregado do período: um dia com 3h de atividade registrada (concluída) ainda
+  // sobra 5h de "parado" nesse mesmo dia, mesmo ele não sendo mais um dia 'pendente' (sem
+  // justificativa nenhuma) pra tela de Atividades do Dia. Por isso o cálculo percorre cada dia do
+  // período (diasNoIntervaloTecnico) em vez de só somar o total de horas logadas no período.
   const linhas = tecnicos.map((t) => {
-    const horasOS = agendaFiltrada.filter((a) => a.tecnico_id === t.id)
-      .reduce((s, a) => s + horasEntreDatasHora(a.data_hora_inicio, a.data_hora_fim), 0);
-
-    let horasAtividades = 0;
-    for (const registro of atividadesNoPeriodo) {
-      if (registro.usuario_id !== t.id) continue;
-      for (const at of (registro.atividades || [])) {
-        if (at.status === 'concluido' && at.inicio && at.fim) {
-          horasAtividades += horasEntreHoraSoDia(registro.data, at.inicio, at.fim);
-        } else if (at.status === 'em_andamento' && at.inicio) {
-          // "em andamento" sem fim: conta até agora (se for hoje) ou até o fim daquele dia (se for
-          // um dia passado que o técnico nunca voltou a marcar como concluído) — nunca deixa uma
-          // atividade esquecida inflar as horas trabalhadas indefinidamente.
-          const inicioMs = horarioBrasiliaParaData(`${registro.data}T${at.inicio}`);
-          if (!inicioMs) continue;
-          const tetoMs = registro.data === hojeISO ? agora : (horarioBrasiliaParaData(`${registro.data}T23:59`) || agora).getTime();
-          const h = (Math.min(agora, tetoMs) - inicioMs.getTime()) / 36e5;
-          if (Number.isFinite(h) && h > 0) horasAtividades += h;
-        }
+    const dias = diasNoIntervaloTecnico(data, empresaId, t.id, periodoInicio, periodoFim);
+    let horasTrabalhadas = 0;
+    let horasParadas = 0;
+    let diasPendentes = 0; // dias sem NENHUMA O.S./atividade registrada (métrica à parte, pra "preencheu ou nem abriu o formulário")
+    for (const d of dias) {
+      if (d.status === 'folga' || d.status === 'futuro') continue; // folga não é trabalho nem ociosidade; futuro ainda não aconteceu
+      let logadas = 0;
+      if (d.status === 'os') {
+        logadas = horasOSDoTecnicoNoDia(agendaFiltrada, t.id, d.data);
+      } else if (d.status === 'justificado') {
+        const registro = atividadesNoPeriodo.find((a) => a.usuario_id === t.id && a.data === d.data);
+        logadas = horasAtividadesDoTecnicoNoDia(registro, d.data, hojeISO, agora);
+      } else {
+        diasPendentes++; // 'pendente' — nada registrado nesse dia
       }
+      horasTrabalhadas += logadas;
+      horasParadas += Math.max(0, JORNADA_PADRAO_HORAS - logadas);
     }
-
-    const diasPendentes = diasNoIntervaloTecnico(data, empresaId, t.id, periodoInicio, periodoFim)
-      .filter((d) => d.status === 'pendente').length;
-    const horasParadas = Math.round(diasPendentes * JORNADA_PADRAO_HORAS * 10) / 10;
-    const horasTrabalhadas = Math.round((horasOS + horasAtividades) * 10) / 10;
+    horasTrabalhadas = Math.round(horasTrabalhadas * 10) / 10;
+    horasParadas = Math.round(horasParadas * 10) / 10;
     const totalHoras = horasTrabalhadas + horasParadas;
     const percentualOcupacao = totalHoras > 0 ? Math.round((horasTrabalhadas / totalHoras) * 1000) / 10 : null;
 

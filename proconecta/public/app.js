@@ -13618,7 +13618,7 @@ async function abrirMaoDeObraDetalhe() {
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Mão de Obra</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. "Parado" é uma aproximação: cada dia sem O.S./atendimento e sem atividade registrada conta como uma jornada de ${resp.jornada_padrao_horas}h.</p></div>
+      <div><h1>Mão de Obra</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. A jornada de referência é de ${resp.jornada_padrao_horas}h por dia útil — o que não está coberto por O.S./atendimento nem por atividade registrada naquele dia conta como parado, mesmo num dia parcialmente justificado (ex.: só 3h registradas sobram ${resp.jornada_padrao_horas - 3}h paradas nesse mesmo dia).</p></div>
       <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
     </div>
     <div class="kpis-row-donut">
