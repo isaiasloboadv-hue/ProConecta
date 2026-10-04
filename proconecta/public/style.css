@@ -87,9 +87,11 @@ header{
 @media (max-width:640px){
   #authView::before, #splashView::before, #app-screen.auth-mode::before{
     height:44vh;
+    /* o braço robótico fica perto da borda esquerda da foto (~15% da largura) — ancora o recorte
+       ali em vez de centralizado, senão ele fica fora da fatia visível nessa faixa estreita */
     background:
       linear-gradient(180deg, rgba(7,20,40,.25) 0%, rgba(9,30,56,.5) 60%, var(--navy-deep) 100%),
-      url('/img/login-bg.jpg') center 42% / cover no-repeat;
+      url('/img/login-bg.jpg') 0% center / cover no-repeat;
   }
 }
 #authView>*, #splashView>*, #app-screen.auth-mode>*{position:relative;z-index:1;}
