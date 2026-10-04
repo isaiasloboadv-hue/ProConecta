@@ -13281,30 +13281,108 @@ async function renderFmeaParetoArea() {
     </table>`;
 }
 
-// ---- Dashboard de KPIs (RCM/SAP PM, Fase 1, passo 6) ----
-// MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva — tudo calculado no servidor
-// (GET /api/kpis, função calcularKpis em server.js) a partir das datas/horas que já existem hoje
-// nas O.S. e nos laudos técnicos, sem nenhuma tela ou campo novo de entrada de dados. Ainda sem
-// filtro de período/cliente/equipamento/técnico nem gráficos mensais (isso é o passo 7).
+// ---- Dashboard de KPIs (RCM/SAP PM, Fase 1, passos 6-7) ----
+// MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva, filtros (período/cliente/
+// equipamento/técnico) e gráficos mensais — tudo calculado no servidor (GET /api/kpis e GET
+// /api/kpis/mensal, funções calcularKpis/calcularKpisMensais em server.js) a partir das datas/
+// horas que já existem hoje nas O.S. e nos laudos técnicos, sem nenhuma tela ou campo novo de
+// entrada de dados. Exportação Excel ainda não — isso é o passo 8.
+let _kpisFiltros = {};
+let _kpisChartTipos = null;
+let _kpisChartMttr = null;
+
 async function renderKpisDashboard() {
-  const { kpis } = await api('/api/kpis');
+  const [{ clientes }, { equipamentos }, { usuarios }] = await Promise.all([
+    api('/api/clientes'), api('/api/equipamentos'), api('/api/usuarios'),
+  ]);
+  const equipamentosAtrelados = equipamentos.filter((e) => e.cliente_id !== null);
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
+
   const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Indicadores (KPIs)</h1><p>Calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos.</p></div>
+    <div class="filtros-row">
+      <div class="field"><label>Período — de</label><input id="kf-periodo-inicio" type="date" value="${esc(_kpisFiltros.periodo_inicio || '')}"></div>
+      <div class="field"><label>Período — até</label><input id="kf-periodo-fim" type="date" value="${esc(_kpisFiltros.periodo_fim || '')}"></div>
+      <div class="field"><label>Cliente</label><select id="kf-cliente"><option value="">Todos</option>${clientes.map((c) => `<option value="${c.id}" ${String(_kpisFiltros.cliente_id) === String(c.id) ? 'selected' : ''}>${esc(c.nome_empresa)}</option>`).join('')}</select></div>
+      <div class="field"><label>${t('equipamento', 'Equipamento')}</label><select id="kf-equipamento"><option value="">Todos</option>${equipamentosAtrelados.map((e) => `<option value="${e.id}" ${String(_kpisFiltros.equipamento_id) === String(e.id) ? 'selected' : ''}>${esc(e.tipo)} ${esc(e.modelo)}${e.numero_serie ? ` (${esc(e.numero_serie)})` : ''}</option>`).join('')}</select></div>
+      <div class="field"><label>Técnico</label><select id="kf-tecnico"><option value="">Todos</option>${tecnicos.map((u) => `<option value="${u.id}" ${String(_kpisFiltros.tecnico_id) === String(u.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
+      <button class="btn btn-primary btn-sm" onclick="aplicarFiltrosKpis()">Aplicar filtros</button>
+      <button class="btn-outline-sm" onclick="limparFiltrosKpis()">Limpar</button>
+    </div>
+    <div class="equipe-grid" id="kpis-cards"><div class="empty">Carregando...</div></div>
+    <div class="panel"><div class="panel-head">Preventiva × Corretiva por mês</div><canvas id="kpis-chart-tipos" height="90"></canvas></div>
+    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
+  await atualizarKpisDashboard();
+}
+
+function filtrosKpisDaTela() {
+  const periodoInicio = document.getElementById('kf-periodo-inicio').value;
+  const periodoFim = document.getElementById('kf-periodo-fim').value;
+  const clienteId = document.getElementById('kf-cliente').value;
+  const equipamentoId = document.getElementById('kf-equipamento').value;
+  const tecnicoId = document.getElementById('kf-tecnico').value;
+  return {
+    ...(periodoInicio ? { periodo_inicio: periodoInicio } : {}),
+    ...(periodoFim ? { periodo_fim: periodoFim } : {}),
+    ...(clienteId ? { cliente_id: clienteId } : {}),
+    ...(equipamentoId ? { equipamento_id: equipamentoId } : {}),
+    ...(tecnicoId ? { tecnico_id: tecnicoId } : {}),
+  };
+}
+async function aplicarFiltrosKpis() {
+  _kpisFiltros = filtrosKpisDaTela();
+  await atualizarKpisDashboard();
+}
+async function limparFiltrosKpis() {
+  _kpisFiltros = {};
+  ['kf-periodo-inicio', 'kf-periodo-fim', 'kf-cliente', 'kf-equipamento', 'kf-tecnico'].forEach((id) => { document.getElementById(id).value = ''; });
+  await atualizarKpisDashboard();
+}
+
+async function atualizarKpisDashboard() {
+  const params = new URLSearchParams(_kpisFiltros).toString();
+  const sufixo = params ? `?${params}` : '';
+  const [{ kpis }, { meses }] = await Promise.all([api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`)]);
   const card = (titulo, valor, nota) => `
     <div style="background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px;">
       <div style="color:var(--ink-soft); font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;">${esc(titulo)}</div>
       <div style="font-size:28px; font-weight:800; color:var(--navy); margin-top:6px;">${valor}</div>
       ${nota ? `<div style="color:var(--ink-soft); font-size:12px; margin-top:4px;">${esc(nota)}</div>` : ''}
     </div>`;
-  main.innerHTML = `
-    <div class="page-head"><h1>Indicadores (KPIs)</h1><p>Calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos. Ainda sem filtro de período — vem no próximo passo.</p></div>
-    <div class="equipe-grid">
-      ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas ainda.')}
-      ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas ainda.')}
-      ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).')}
-      ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`)}
-      ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas.')}
-      ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}
-    </div>`;
+  document.getElementById('kpis-cards').innerHTML = `
+    ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas no recorte atual.')}
+    ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas no recorte atual.')}
+    ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).')}
+    ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`)}
+    ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas no recorte atual.')}
+    ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}`;
+  desenharGraficosKpis(meses);
+}
+
+// Chart.js (CDN, ver index.html) — se o CDN estiver bloqueado/offline a tela continua útil sem os
+// gráficos (cards + tabela de filtros funcionam igual); por isso o guard no topo da função.
+function desenharGraficosKpis(meses) {
+  if (typeof Chart === 'undefined') return;
+  const labels = meses.map((m) => m.mes);
+  if (_kpisChartTipos) _kpisChartTipos.destroy();
+  _kpisChartTipos = new Chart(document.getElementById('kpis-chart-tipos'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Preventiva', data: meses.map((m) => m.preventivas), backgroundColor: '#177245' },
+        { label: 'Corretiva', data: meses.map((m) => m.corretivas), backgroundColor: '#B3261E' },
+      ],
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+  if (_kpisChartMttr) _kpisChartMttr.destroy();
+  _kpisChartMttr = new Chart(document.getElementById('kpis-chart-mttr'), {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'MTTR (h)', data: meses.map((m) => m.mttr_horas), borderColor: '#1467D6', backgroundColor: 'rgba(20,103,214,.15)', fill: true, spanGaps: true }] },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } },
+  });
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----

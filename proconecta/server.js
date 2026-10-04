@@ -4277,34 +4277,61 @@ rota('GET', /^\/api\/fmea\/pareto$/, async (req, res) => {
   enviarJSON(res, 200, { pareto, total, agrupado_por: agruparPor });
 });
 
-// KPIs do dashboard do administrador (RCM/SAP PM, Fase 1, passo 6) — MTBF, MTTR, disponibilidade,
-// backlog e % preventiva×corretiva, calculados a partir das datas/horas de entrada e conclusão das
-// próprias O.S./laudos técnicos, sem nenhuma coleção nova. Ainda sem filtro de período/cliente/
-// equipamento/técnico nem gráficos mensais — isso é o passo 7, que também traz a exportação Excel.
+// KPIs do dashboard do administrador (RCM/SAP PM, Fase 1, passos 6-7) — MTBF, MTTR,
+// disponibilidade, backlog, % preventiva×corretiva e gráficos mensais, calculados a partir das
+// datas/horas de entrada e conclusão das próprias O.S./laudos técnicos, sem nenhuma coleção nova.
 // "Aderência ao plano" fica de fora por enquanto: depende dos Planos de Manutenção (Fase 2, só
 // prevista no banco, ainda não implementada) — a tela mostra isso como indisponível.
-function calcularKpis(data, empresaId) {
-  const agendaEmpresa = tenant.listar(data, 'agenda', empresaId);
+
+// filtros = { periodoInicio, periodoFim (strings "AAAA-MM-DD" ou null), clienteId, equipamentoId,
+// tecnicoId (number ou null) } — os 4 filtros do passo 7 (período/cliente/equipamento/técnico),
+// aplicados sempre na mesma função pra garantir que o dashboard e os gráficos mensais nunca
+// divirjam na definição de "quais O.S. entram na conta".
+function filtrarAgendaKpis(agendaEmpresa, filtros) {
+  let lista = agendaEmpresa;
+  if (filtros.periodoInicio) {
+    const inicioMs = new Date(`${filtros.periodoInicio}T00:00:00`).getTime();
+    if (Number.isFinite(inicioMs)) lista = lista.filter((a) => new Date(a.criado_em).getTime() >= inicioMs);
+  }
+  if (filtros.periodoFim) {
+    const fimMs = new Date(`${filtros.periodoFim}T23:59:59.999`).getTime();
+    if (Number.isFinite(fimMs)) lista = lista.filter((a) => new Date(a.criado_em).getTime() <= fimMs);
+  }
+  if (filtros.clienteId) lista = lista.filter((a) => a.cliente_id === filtros.clienteId);
+  if (filtros.equipamentoId) lista = lista.filter((a) => a.equipamento_id === filtros.equipamentoId);
+  if (filtros.tecnicoId) lista = lista.filter((a) => a.tecnico_id === filtros.tecnicoId);
+  return lista;
+}
+
+// horas de reparo (conclusão - entrada do Laudo Técnico, rodada 1) de cada O.S. corretiva da lista
+// — usado tanto pelo MTTR quanto pela disponibilidade (mesma base, sem duplicar a lógica).
+function horasReparoDeCorretivas(data, empresaId, corretivas) {
+  const horas = [];
+  for (const os of corretivas) {
+    const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
+    const laudo = visita && visita.laudo;
+    if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
+    const h = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
+    if (Number.isFinite(h) && h >= 0) horas.push(h);
+  }
+  return horas;
+}
+
+function calcularKpis(data, empresaId, filtros = {}) {
+  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), filtros);
   const agora = Date.now();
 
   // MTTR: pega o laudo técnico (rodada 1) de cada O.S. corretiva com data de entrada e conclusão
   // preenchidas — os mesmos campos que o técnico já preenche hoje no Laudo Técnico (ver
   // validarLaudoTecnico). Horas de reparo = conclusão - entrada; MTTR = média dessas horas.
   const corretivas = agendaEmpresa.filter((a) => a.tipo === 'corretiva');
-  const horasReparo = [];
-  for (const os of corretivas) {
-    const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
-    const laudo = visita && visita.laudo;
-    if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
-    const horas = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
-    if (Number.isFinite(horas) && horas >= 0) horasReparo.push(horas);
-  }
+  const horasReparo = horasReparoDeCorretivas(data, empresaId, corretivas);
   const mttrHoras = horasReparo.length ? horasReparo.reduce((s, h) => s + h, 0) / horasReparo.length : null;
 
-  // MTBF: tempo de CALENDÁRIO entre corretivas consecutivas do mesmo equipamento (campo pronto pra
-  // receber horas reais de operação no futuro — ver README). Agrupa as corretivas por
-  // equipamento, ordena por data de abertura e calcula o intervalo entre cada par consecutivo;
-  // MTBF é a média de todos os intervalos (de todos os equipamentos juntos).
+  // MTBF: tempo de CALENDÁRIO entre corretivas consecutivas do mesmo equipamento, dentro do
+  // recorte filtrado (campo pronto pra receber horas reais de operação no futuro — ver README).
+  // Agrupa as corretivas por equipamento, ordena por data de abertura e calcula o intervalo entre
+  // cada par consecutivo; MTBF é a média de todos os intervalos (de todos os equipamentos juntos).
   const corretivasPorEquipamento = new Map();
   for (const os of corretivas) {
     if (!os.equipamento_id) continue;
@@ -4323,13 +4350,22 @@ function calcularKpis(data, empresaId) {
 
   // Disponibilidade: aproximação com os mesmos dados (sem horas reais de operação ainda) — horas
   // paradas = soma de todas as horas de reparo (as mesmas do MTTR); horas totais = soma, por
-  // equipamento com pelo menos uma O.S., do tempo desde a primeira O.S. registrada até agora.
+  // equipamento com pelo menos uma O.S. no recorte filtrado, do tempo de calendário dentro da
+  // janela analisada. Sem filtro de período, a janela é "desde a primeira O.S. até agora" (mesma
+  // conta do passo 6); com período, fica limitada a esse intervalo.
+  const fimJanela = filtros.periodoFim
+    ? Math.min(new Date(`${filtros.periodoFim}T23:59:59.999`).getTime(), agora)
+    : agora;
   const equipamentosComOS = new Set(agendaEmpresa.filter((a) => a.equipamento_id).map((a) => a.equipamento_id));
   let horasTotaisFrota = 0;
   for (const equipamentoId of equipamentosComOS) {
     const primeiraOS = agendaEmpresa.filter((a) => a.equipamento_id === equipamentoId)
       .reduce((menor, a) => Math.min(menor, new Date(a.criado_em).getTime()), Infinity);
-    if (Number.isFinite(primeiraOS)) horasTotaisFrota += (agora - primeiraOS) / 36e5;
+    if (!Number.isFinite(primeiraOS)) continue;
+    const inicioJanela = filtros.periodoInicio
+      ? Math.max(new Date(`${filtros.periodoInicio}T00:00:00`).getTime(), primeiraOS)
+      : primeiraOS;
+    if (fimJanela > inicioJanela) horasTotaisFrota += (fimJanela - inicioJanela) / 36e5;
   }
   const horasParadas = horasReparo.reduce((s, h) => s + h, 0);
   const disponibilidadePercentual = horasTotaisFrota > 0
@@ -4361,11 +4397,76 @@ function calcularKpis(data, empresaId) {
   };
 }
 
+// Série mensal pros gráficos (passo 7): qtd de preventivas/corretivas e MTTR médio, mês a mês. Sem
+// filtro de período informado, cobre os últimos 12 meses (até o mês atual); com período, cobre os
+// meses dentro do intervalo pedido, limitado a 24 meses pra não gerar uma série enorme por engano.
+// Os filtros de cliente/equipamento/técnico se aplicam normalmente — só o período decide quais
+// meses existem na série, não filtra as O.S. dentro de cada mês (isso seria redundante).
+function calcularKpisMensais(data, empresaId, filtros = {}) {
+  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), {
+    clienteId: filtros.clienteId, equipamentoId: filtros.equipamentoId, tecnicoId: filtros.tecnicoId,
+  });
+  const fimRef = filtros.periodoFim ? new Date(`${filtros.periodoFim}T00:00:00`) : new Date();
+  const inicioRef = filtros.periodoInicio
+    ? new Date(`${filtros.periodoInicio}T00:00:00`)
+    : new Date(fimRef.getFullYear(), fimRef.getMonth() - 11, 1);
+
+  const chaves = [];
+  const cursor = new Date(inicioRef.getFullYear(), inicioRef.getMonth(), 1);
+  const limite = new Date(fimRef.getFullYear(), fimRef.getMonth(), 1);
+  while (cursor <= limite && chaves.length < 500) {
+    chaves.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  const chavesLimitadas = chaves.slice(-24);
+
+  return chavesLimitadas.map((chave) => {
+    const [ano, mes] = chave.split('-').map(Number);
+    const itensDoMes = agendaEmpresa.filter((a) => {
+      const d = new Date(a.criado_em);
+      return d.getFullYear() === ano && d.getMonth() + 1 === mes;
+    });
+    const corretivasMes = itensDoMes.filter((a) => a.tipo === 'corretiva');
+    const preventivasMes = itensDoMes.filter((a) => a.tipo === 'preventiva');
+    const horasReparoMes = horasReparoDeCorretivas(data, empresaId, corretivasMes);
+    return {
+      mes: chave,
+      preventivas: preventivasMes.length,
+      corretivas: corretivasMes.length,
+      mttr_horas: horasReparoMes.length ? Math.round((horasReparoMes.reduce((s, h) => s + h, 0) / horasReparoMes.length) * 10) / 10 : null,
+    };
+  });
+}
+
+// lê e normaliza os 4 filtros (período/cliente/equipamento/técnico) da query string — mesma leitura
+// pros 2 endpoints (dashboard e série mensal), pra nunca interpretarem o mesmo filtro de jeitos
+// diferentes.
+function filtrosKpisDaQuery(query) {
+  return {
+    periodoInicio: query.periodo_inicio ? String(query.periodo_inicio).slice(0, 10) : null,
+    periodoFim: query.periodo_fim ? String(query.periodo_fim).slice(0, 10) : null,
+    clienteId: query.cliente_id ? Number(query.cliente_id) : null,
+    equipamentoId: query.equipamento_id ? Number(query.equipamento_id) : null,
+    tecnicoId: query.tecnico_id ? Number(query.tecnico_id) : null,
+  };
+}
+
 rota('GET', /^\/api\/kpis$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const filtros = filtrosKpisDaQuery(query);
   const data = db.load();
-  enviarJSON(res, 200, { kpis: calcularKpis(data, user.empresa_id) });
+  enviarJSON(res, 200, { kpis: calcularKpis(data, user.empresa_id, filtros), filtros_aplicados: filtros });
+});
+
+rota('GET', /^\/api\/kpis\/mensal$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const filtros = filtrosKpisDaQuery(query);
+  const data = db.load();
+  enviarJSON(res, 200, { meses: calcularKpisMensais(data, user.empresa_id, filtros) });
 });
 
 // GET /api/usuarios

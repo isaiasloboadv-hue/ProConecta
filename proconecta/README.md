@@ -598,6 +598,28 @@ não uma verdade absoluta — podem ser refinadas mais pra frente):
   implementados). A tela mostra isso de forma explícita, sem fingir um
   número que não existe.
 
+### Passo 7: filtros, gráficos mensais
+
+`GET /api/kpis` ganhou 4 filtros opcionais, todos combináveis entre si —
+`periodo_inicio`/`periodo_fim` (datas `AAAA-MM-DD`), `cliente_id`,
+`equipamento_id`, `tecnico_id` — aplicados sempre pela mesma função
+(`filtrarAgendaKpis`), pra nunca o dashboard e os gráficos discordarem
+sobre "o que entra na conta". Com período informado, a disponibilidade
+também passa a usar esse intervalo como janela (em vez de "desde a
+primeira O.S. até agora") — ver `calcularKpis`.
+
+Endpoint novo `GET /api/kpis/mensal` (mesmos 4 filtros) devolve uma
+série por mês — `preventivas`, `corretivas` e `mttr_horas` — usada nos 2
+gráficos novos da tela (Preventiva×Corretiva por mês, em barras; MTTR
+por mês, em linha). Sem filtro de período, cobre os últimos 12 meses;
+com período, cobre os meses do intervalo pedido (limite de 24 meses).
+Gráficos via **Chart.js**, carregado por CDN em `index.html` (mesmo
+padrão do jsPDF/jszip/docx já usados nos relatórios) — se o CDN estiver
+bloqueado/indisponível, a tela continua funcionando normalmente (cards e
+filtros), só os 2 gráficos não desenham.
+
+Ainda falta a exportação Excel — isso é o passo 8.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
