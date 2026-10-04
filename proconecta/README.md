@@ -430,6 +430,33 @@ Se `EMAIL_SMTP_USER` estiver configurado, ele tem prioridade sobre o Resend.
 
 Nenhuma outra mudança é necessária — veja `email.js`.
 
+## FMEA — catálogo de falhas por modelo de equipamento (RCM/SAP PM, Fase 1 em andamento)
+
+Primeiro passo da evolução de "registro" pra "análise de manutenção"
+(aprovada depois de um relatório de impacto próprio — branch
+`feature/rcm-fmea`). Fundação de dados só, ainda sem tela nem uso em
+nenhuma O.S./laudo: 4 coleções novas, cadastráveis pelo administrador em
+cascata —
+
+```
+Componente (preso a um modelo do catálogo de equipamentos)
+  → Modo de falha (severidade/ocorrência/detecção, 1-10 — RPN = S×O×D)
+    → Causa
+      → Efeito
+```
+
+"Modelo do catálogo" é o mesmo conceito que já existe em Equipamentos: um
+item com `cliente_id` nulo (o catálogo reutilizável, não uma unidade já
+atrelada a um cliente específico). Qualquer autenticado da empresa lê
+(`GET /api/fmea/componentes`, `/modos-falha`, `/causas`, `/efeitos`, cada
+um filtrável pelo pai via query string — `?catalogo_id=`, `?componente_id=`
+etc.); só o administrador cadastra/edita/exclui. Exclusão é bloqueada
+quando já existe filho cadastrado embaixo (mesmo padrão de proteção já
+usado em Equipamentos/O.S.). RPN é sempre recalculado no servidor, nunca
+confiado ao que o cliente manda.
+
+Teste: `fmea-catalogo.e2e.test.js`.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

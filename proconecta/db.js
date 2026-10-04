@@ -75,13 +75,21 @@ function seed() {
     feriados: [],
     escala_folgas: [],
     prestacoes_contas: [],
+    // FMEA (RCM/SAP PM, Fase 1 passo 1): catálogo cadastrável pelo administrador, em cascata —
+    // Componente (preso a um modelo do catálogo de equipamentos) → Modo de falha (com
+    // severidade/ocorrência/detecção, 1-10, pra calcular RPN) → Causa → Efeito. Ainda não é usado
+    // em nenhuma O.S./laudo (isso é o passo 3) — este passo só cria a fundação de dados.
+    fmea_componentes: [],
+    fmea_modos_falha: [],
+    fmea_causas: [],
+    fmea_efeitos: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
     versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -237,6 +245,16 @@ function migrar(data) {
   // técnico lança pra aprovação do financeiro/administrador, além do bônus fixo por diária.
   if (!data.prestacoes_contas) data.prestacoes_contas = [];
   if (!data._seq.prestacoes_contas) data._seq.prestacoes_contas = 1;
+  // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
+  // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
+  if (!data.fmea_componentes) data.fmea_componentes = [];
+  if (!data._seq.fmea_componentes) data._seq.fmea_componentes = 1;
+  if (!data.fmea_modos_falha) data.fmea_modos_falha = [];
+  if (!data._seq.fmea_modos_falha) data._seq.fmea_modos_falha = 1;
+  if (!data.fmea_causas) data.fmea_causas = [];
+  if (!data._seq.fmea_causas) data._seq.fmea_causas = 1;
+  if (!data.fmea_efeitos) data.fmea_efeitos = [];
+  if (!data._seq.fmea_efeitos) data._seq.fmea_efeitos = 1;
   // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
   if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];

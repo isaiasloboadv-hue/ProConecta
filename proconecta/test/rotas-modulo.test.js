@@ -28,6 +28,8 @@ test('rotas de agenda/visitas/chamados/equipamentos pertencem a os_chamados', ()
   assert.equal(moduloDaRota(/^\/api\/tecnicos\/viagens$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/tecnico\/online$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/relatorios-manutencao\/(\d+)$/), 'os_chamados');
+  assert.equal(moduloDaRota(/^\/api\/fmea\/componentes$/), 'os_chamados');
+  assert.equal(moduloDaRota(/^\/api\/fmea\/modos-falha\/(\d+)$/), 'os_chamados');
 });
 
 test('rotas de registros pertencem a biblioteca', () => {

@@ -3902,6 +3902,261 @@ rota('GET', /^\/api\/equipamentos\/(\d+)\/historico$/, async (req, res, m) => {
   enviarJSON(res, 200, { agenda: agendaItens, visitas: visitasItens });
 });
 
+// ---------- FMEA (RCM/SAP PM, Fase 1 passo 1 do plano aprovado) ----------
+// catálogo em cascata cadastrado pelo administrador — Componente (preso a um modelo do catálogo
+// de equipamentos, ou seja, um "equipamentos" com cliente_id null) → Modo de falha
+// (severidade/ocorrência/detecção, 1-10, RPN = S×O×D) → Causa → Efeito. Ainda não é usado em
+// nenhuma O.S./laudo (isso é o passo 3) — este passo só cria a fundação de dados. Mesmo padrão de
+// permissão já usado nos outros catálogos administrativos (feriados etc.): qualquer autenticado
+// da empresa lê, só o administrador cadastra/edita/exclui.
+
+function calcularRpn(severidade, ocorrencia, deteccao) { return severidade * ocorrencia * deteccao; }
+
+function validarEscalaFmea(valor, campo) {
+  const n = Number(valor);
+  if (!Number.isInteger(n) || n < 1 || n > 10) return `${campo} precisa ser um número inteiro de 1 a 10.`;
+  return null;
+}
+
+// GET /api/fmea/componentes?catalogo_id=X
+rota('GET', /^\/api\/fmea\/componentes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_componentes', user.empresa_id);
+  if (query.catalogo_id) lista = lista.filter((c) => c.catalogo_id === Number(query.catalogo_id));
+  enviarJSON(res, 200, { componentes: lista });
+});
+
+// POST /api/fmea/componentes { catalogo_id, nome }
+rota('POST', /^\/api\/fmea\/componentes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra componentes.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do componente.' });
+  const data = db.load();
+  const catalogoId = Number(body.catalogo_id);
+  const catalogo = tenant.buscar(data, 'equipamentos', catalogoId, user.empresa_id);
+  if (!catalogo || catalogo.cliente_id !== null) {
+    return enviarJSON(res, 400, { erro: 'Modelo do catálogo não encontrado (escolha um equipamento do catálogo, não uma unidade já atrelada a um cliente).' });
+  }
+  const item = tenant.criar(data, 'fmea_componentes', user.empresa_id, {
+    catalogo_id: catalogoId, nome: String(body.nome).trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { componente: item });
+});
+
+// PUT /api/fmea/componentes/:id
+rota('PUT', /^\/api\/fmea\/componentes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita componentes.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do componente.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_componentes', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Componente não encontrado.' });
+  item.nome = String(body.nome).trim();
+  db.save(data);
+  enviarJSON(res, 200, { componente: item });
+});
+
+// DELETE /api/fmea/componentes/:id — bloqueado se já tiver modo de falha cadastrado embaixo
+rota('DELETE', /^\/api\/fmea\/componentes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui componentes.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_componentes', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Componente não encontrado.' });
+  if (tenant.listar(data, 'fmea_modos_falha', user.empresa_id).some((mf) => mf.componente_id === item.id)) {
+    return enviarJSON(res, 400, { erro: 'Existem modos de falha cadastrados neste componente. Exclua-os antes.' });
+  }
+  data.fmea_componentes = data.fmea_componentes.filter((c) => c.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/modos-falha?componente_id=X
+rota('GET', /^\/api\/fmea\/modos-falha$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_modos_falha', user.empresa_id);
+  if (query.componente_id) lista = lista.filter((mf) => mf.componente_id === Number(query.componente_id));
+  enviarJSON(res, 200, { modos_falha: lista });
+});
+
+// POST /api/fmea/modos-falha { componente_id, nome, severidade, ocorrencia, deteccao }
+rota('POST', /^\/api\/fmea\/modos-falha$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra modos de falha.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do modo de falha.' });
+  for (const [valor, campo] of [[body.severidade, 'Severidade'], [body.ocorrencia, 'Ocorrência'], [body.deteccao, 'Detecção']]) {
+    const erro = validarEscalaFmea(valor, campo);
+    if (erro) return enviarJSON(res, 400, { erro });
+  }
+  const data = db.load();
+  const componente = tenant.buscar(data, 'fmea_componentes', Number(body.componente_id), user.empresa_id);
+  if (!componente) return enviarJSON(res, 400, { erro: 'Componente não encontrado.' });
+  const severidade = Number(body.severidade), ocorrencia = Number(body.ocorrencia), deteccao = Number(body.deteccao);
+  const item = tenant.criar(data, 'fmea_modos_falha', user.empresa_id, {
+    componente_id: componente.id, nome: String(body.nome).trim(),
+    severidade, ocorrencia, deteccao, rpn: calcularRpn(severidade, ocorrencia, deteccao),
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { modo_falha: item });
+});
+
+// PUT /api/fmea/modos-falha/:id
+rota('PUT', /^\/api\/fmea\/modos-falha\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita modos de falha.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do modo de falha.' });
+  for (const [valor, campo] of [[body.severidade, 'Severidade'], [body.ocorrencia, 'Ocorrência'], [body.deteccao, 'Detecção']]) {
+    const erro = validarEscalaFmea(valor, campo);
+    if (erro) return enviarJSON(res, 400, { erro });
+  }
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_modos_falha', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Modo de falha não encontrado.' });
+  item.nome = String(body.nome).trim();
+  item.severidade = Number(body.severidade);
+  item.ocorrencia = Number(body.ocorrencia);
+  item.deteccao = Number(body.deteccao);
+  item.rpn = calcularRpn(item.severidade, item.ocorrencia, item.deteccao);
+  db.save(data);
+  enviarJSON(res, 200, { modo_falha: item });
+});
+
+// DELETE /api/fmea/modos-falha/:id — bloqueado se já tiver causa cadastrada embaixo
+rota('DELETE', /^\/api\/fmea\/modos-falha\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui modos de falha.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_modos_falha', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Modo de falha não encontrado.' });
+  if (tenant.listar(data, 'fmea_causas', user.empresa_id).some((c) => c.modo_falha_id === item.id)) {
+    return enviarJSON(res, 400, { erro: 'Existem causas cadastradas neste modo de falha. Exclua-as antes.' });
+  }
+  data.fmea_modos_falha = data.fmea_modos_falha.filter((mf) => mf.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/causas?modo_falha_id=X
+rota('GET', /^\/api\/fmea\/causas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_causas', user.empresa_id);
+  if (query.modo_falha_id) lista = lista.filter((c) => c.modo_falha_id === Number(query.modo_falha_id));
+  enviarJSON(res, 200, { causas: lista });
+});
+
+// POST /api/fmea/causas { modo_falha_id, nome }
+rota('POST', /^\/api\/fmea\/causas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra causas.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome da causa.' });
+  const data = db.load();
+  const modoFalha = tenant.buscar(data, 'fmea_modos_falha', Number(body.modo_falha_id), user.empresa_id);
+  if (!modoFalha) return enviarJSON(res, 400, { erro: 'Modo de falha não encontrado.' });
+  const item = tenant.criar(data, 'fmea_causas', user.empresa_id, {
+    modo_falha_id: modoFalha.id, nome: String(body.nome).trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { causa: item });
+});
+
+// PUT /api/fmea/causas/:id
+rota('PUT', /^\/api\/fmea\/causas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita causas.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome da causa.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_causas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Causa não encontrada.' });
+  item.nome = String(body.nome).trim();
+  db.save(data);
+  enviarJSON(res, 200, { causa: item });
+});
+
+// DELETE /api/fmea/causas/:id — bloqueado se já tiver efeito cadastrado embaixo
+rota('DELETE', /^\/api\/fmea\/causas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui causas.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_causas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Causa não encontrada.' });
+  if (tenant.listar(data, 'fmea_efeitos', user.empresa_id).some((e) => e.causa_id === item.id)) {
+    return enviarJSON(res, 400, { erro: 'Existem efeitos cadastrados nesta causa. Exclua-os antes.' });
+  }
+  data.fmea_causas = data.fmea_causas.filter((c) => c.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/efeitos?causa_id=X
+rota('GET', /^\/api\/fmea\/efeitos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_efeitos', user.empresa_id);
+  if (query.causa_id) lista = lista.filter((e) => e.causa_id === Number(query.causa_id));
+  enviarJSON(res, 200, { efeitos: lista });
+});
+
+// POST /api/fmea/efeitos { causa_id, nome }
+rota('POST', /^\/api\/fmea\/efeitos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra efeitos.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do efeito.' });
+  const data = db.load();
+  const causa = tenant.buscar(data, 'fmea_causas', Number(body.causa_id), user.empresa_id);
+  if (!causa) return enviarJSON(res, 400, { erro: 'Causa não encontrada.' });
+  const item = tenant.criar(data, 'fmea_efeitos', user.empresa_id, {
+    causa_id: causa.id, nome: String(body.nome).trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { efeito: item });
+});
+
+// PUT /api/fmea/efeitos/:id
+rota('PUT', /^\/api\/fmea\/efeitos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita efeitos.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do efeito.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_efeitos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Efeito não encontrado.' });
+  item.nome = String(body.nome).trim();
+  db.save(data);
+  enviarJSON(res, 200, { efeito: item });
+});
+
+// DELETE /api/fmea/efeitos/:id
+rota('DELETE', /^\/api\/fmea\/efeitos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui efeitos.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_efeitos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Efeito não encontrado.' });
+  data.fmea_efeitos = data.fmea_efeitos.filter((e) => e.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // GET /api/usuarios
 rota('GET', /^\/api\/usuarios$/, async (req, res) => {
   const user = usuarioAutenticado(req);
