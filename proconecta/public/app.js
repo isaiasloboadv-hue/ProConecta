@@ -13379,10 +13379,42 @@ function desenharGraficosKpis(meses) {
     options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
   });
   if (_kpisChartMttr) _kpisChartMttr.destroy();
+  const mttrValores = meses.map((m) => m.mttr_horas);
+  // com pouco histórico de corretiva concluída com Laudo Técnico preenchido, a linha vira só 1-2
+  // pontos soltos sem nada pra conectar — difícil de ler como "tem dado ali" à primeira vista.
+  // Nesse caso (poucos pontos com valor) aumenta o ponto e escreve o valor do lado; com mais
+  // meses preenchidos a linha por si só já fica legível, então os rótulos saem do caminho.
+  const mttrComDado = mttrValores.filter((v) => v !== null && v !== undefined).length;
+  const mostrarRotulosMttr = mttrComDado > 0 && mttrComDado <= 3;
+  const rotulosMttrPlugin = {
+    id: 'rotulosMttr',
+    afterDatasetsDraw(chart) {
+      if (!mostrarRotulosMttr) return;
+      const { ctx } = chart;
+      const pontos = chart.getDatasetMeta(0).data;
+      ctx.save();
+      ctx.fillStyle = '#1467D6';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      pontos.forEach((ponto, i) => {
+        const valor = mttrValores[i];
+        if (valor === null || valor === undefined) return;
+        ctx.fillText(`${valor} h`, ponto.x, ponto.y - 12);
+      });
+      ctx.restore();
+    },
+  };
   _kpisChartMttr = new Chart(document.getElementById('kpis-chart-mttr'), {
     type: 'line',
-    data: { labels, datasets: [{ label: 'MTTR (h)', data: meses.map((m) => m.mttr_horas), borderColor: '#1467D6', backgroundColor: 'rgba(20,103,214,.15)', fill: true, spanGaps: true }] },
-    options: { responsive: true, scales: { y: { beginAtZero: true } } },
+    data: {
+      labels,
+      datasets: [{
+        label: 'MTTR (h)', data: mttrValores, borderColor: '#1467D6', backgroundColor: 'rgba(20,103,214,.15)',
+        fill: true, spanGaps: true, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: '#1467D6',
+      }],
+    },
+    options: { responsive: true, layout: { padding: { top: mostrarRotulosMttr ? 20 : 0 } }, scales: { y: { beginAtZero: true } } },
+    plugins: [rotulosMttrPlugin],
   });
 }
 
