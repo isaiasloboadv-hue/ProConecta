@@ -295,6 +295,9 @@ function agendaComDetalhes(data, item) {
     equipamento_modelo: equipamento ? equipamento.modelo : null,
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
     equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
+    // modelo do catálogo de origem (RCM/FMEA, passo 2) — a tela do Laudo Técnico usa pra buscar
+    // só os componentes FMEA cadastrados pra este modelo específico, não de todos os modelos.
+    equipamento_catalogo_id: equipamento ? equipamento.catalogo_id : null,
     os_criada_numero: osCriada ? (osCriada.numero_os || `OS-${String(osCriada.id).padStart(6, '0')}`) : null,
     // quem abriu a O.S. — normalmente o administrador, mas O.S. nascida de um atendimento do chat
     // assumido direto pelo técnico (ver POST /api/chamados/:id/assumir) tem o próprio técnico aqui.
@@ -786,6 +789,54 @@ function validarLaudoTecnico(l) {
   if (!String(l.servico_realizado || '').trim()) return 'Descreva o serviço realizado.';
   if (!Array.isArray(l.fotos) || l.fotos.length === 0) return 'Anexe ao menos uma foto no relatório fotográfico.';
   return null;
+}
+
+// resolve e valida a cascata Componente→Modo de falha→Causa→Efeito escolhida no Laudo Técnico
+// (RCM/FMEA Fase 1, passo 3) — 100% opcional: o técnico pode deixar os 4 em branco e preencher só
+// o laudo em texto livre, exatamente como sempre funcionou (nada aqui bloqueia o fluxo de hoje).
+// Quando algum nível vem preenchido, exige que os de cima também estejam (não dá pra pular
+// Componente e já escolher Causa), que cada um pertença à empresa e ao pai certo, e que o
+// Componente seja de fato de um modelo do catálogo deste equipamento (ver catalogo_id, passo 2).
+// Devolve id E nome já resolvidos pra cada nível (denormalizado, mesmo padrão de agendaComDetalhes),
+// assim a tela de detalhe e o PDF não precisam buscar o catálogo FMEA de novo pra exibir.
+function resolverCascataFmea(data, empresaId, equipamentoCatalogoId, entrada) {
+  const vazio = { componente_id: null, componente_nome: '', modo_falha_id: null, modo_falha_nome: '', causa_id: null, causa_nome: '', efeito_id: null, efeito_nome: '' };
+  if (!entrada || (!entrada.componente_id && !entrada.modo_falha_id && !entrada.causa_id && !entrada.efeito_id)) {
+    return { resultado: vazio };
+  }
+  let componente = null, modoFalha = null, causa = null, efeito = null;
+  if (entrada.componente_id) {
+    if (equipamentoCatalogoId == null) {
+      return { erro: 'Este equipamento não está vinculado a um modelo do catálogo — associe o modelo em Equipamentos antes de classificar a falha.' };
+    }
+    componente = tenant.buscar(data, 'fmea_componentes', Number(entrada.componente_id), empresaId);
+    if (!componente || componente.catalogo_id !== equipamentoCatalogoId) {
+      return { erro: 'Componente FMEA não encontrado para o modelo deste equipamento.' };
+    }
+  }
+  if (entrada.modo_falha_id) {
+    if (!componente) return { erro: 'Escolha o componente antes do modo de falha.' };
+    modoFalha = tenant.buscar(data, 'fmea_modos_falha', Number(entrada.modo_falha_id), empresaId);
+    if (!modoFalha || modoFalha.componente_id !== componente.id) return { erro: 'Modo de falha não encontrado para este componente.' };
+  }
+  if (entrada.causa_id) {
+    if (!modoFalha) return { erro: 'Escolha o modo de falha antes da causa.' };
+    causa = tenant.buscar(data, 'fmea_causas', Number(entrada.causa_id), empresaId);
+    if (!causa || causa.modo_falha_id !== modoFalha.id) return { erro: 'Causa não encontrada para este modo de falha.' };
+  }
+  if (entrada.efeito_id) {
+    if (!causa) return { erro: 'Escolha a causa antes do efeito.' };
+    efeito = tenant.buscar(data, 'fmea_efeitos', Number(entrada.efeito_id), empresaId);
+    if (!efeito || efeito.causa_id !== causa.id) return { erro: 'Efeito não encontrado para esta causa.' };
+  }
+  return {
+    resultado: {
+      componente_id: componente ? componente.id : null, componente_nome: componente ? componente.nome : '',
+      modo_falha_id: modoFalha ? modoFalha.id : null, modo_falha_nome: modoFalha ? modoFalha.nome : '',
+      causa_id: causa ? causa.id : null, causa_nome: causa ? causa.nome : '',
+      efeito_id: efeito ? efeito.id : null, efeito_nome: efeito ? efeito.nome : '',
+    },
+  };
 }
 
 function usuarioPublico(u) {
@@ -2293,6 +2344,10 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     const laudoCompleto = { ...(body.laudo || {}), ...dadosAtendimentoBloqueados(data, agendaItem, user) };
     const erroLaudo = validarLaudoTecnico(laudoCompleto);
     if (erroLaudo) return enviarJSON(res, 400, { erro: erroLaudo });
+    const equipamentoReparo = tenant.buscar(data, 'equipamentos', agendaItem.equipamento_id, agendaItem.empresa_id);
+    const { erro: erroFmeaReparo, resultado: fmeaReparo } = resolverCascataFmea(data, agendaItem.empresa_id, equipamentoReparo ? equipamentoReparo.catalogo_id : null, body.laudo || {});
+    if (erroFmeaReparo) return enviarJSON(res, 400, { erro: erroFmeaReparo });
+    Object.assign(laudoCompleto, fmeaReparo);
     const rodada = data.visitas.filter((v) => v.agenda_id === agendaItem.id && v.empresa_id === agendaItem.empresa_id).length + 1;
     const agora = new Date().toISOString();
     const visitaReparo = tenant.criar(data, 'visitas', agendaItem.empresa_id, {
@@ -2346,7 +2401,10 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     const laudoCompleto = { ...(body.laudo || {}), ...bloqueados };
     const erro = validarLaudoTecnico(laudoCompleto);
     if (erro) return enviarJSON(res, 400, { erro });
-    laudo = laudoCompleto;
+    const equipamentoDaOS = tenant.buscar(data, 'equipamentos', agendaItem.equipamento_id, agendaItem.empresa_id);
+    const { erro: erroFmea, resultado: fmea } = resolverCascataFmea(data, agendaItem.empresa_id, equipamentoDaOS ? equipamentoDaOS.catalogo_id : null, body.laudo || {});
+    if (erroFmea) return enviarJSON(res, 400, { erro: erroFmea });
+    laudo = { ...laudoCompleto, ...fmea };
   } else if (TIPOS_TERMO_ACEITE.includes(agendaItem.tipo)) {
     const relatorioCompleto = { ...(body.relatorio || {}), ...bloqueados };
     const erro = validarRelatorio(relatorioCompleto);
@@ -3815,7 +3873,7 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const erroLimite = erroLimiteEquipamentos(data, user.empresa_id);
   if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
-    cliente_id: null,
+    cliente_id: null, catalogo_id: null, // é o próprio catálogo — não referencia outro (RCM/FMEA, passo 2)
     tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
   });
   db.save(data);
@@ -3881,6 +3939,8 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
   if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: cliente.id,
+    catalogo_id: catalogo.id, // vínculo de verdade com o modelo de origem (RCM/FMEA, passo 2) — não
+    // depende de casar tipo+modelo por texto, como as unidades atreladas antes deste campo existir
     tipo: catalogo.tipo,
     modelo: catalogo.modelo,
     numero_serie: body.numero_serie.trim(),
@@ -3900,6 +3960,513 @@ rota('GET', /^\/api\/equipamentos\/(\d+)\/historico$/, async (req, res, m) => {
   const agendaItens = tenant.listar(data, 'agenda', user.empresa_id).filter((a) => a.equipamento_id === eqId).map((a) => agendaComDetalhes(data, a));
   const visitasItens = data.visitas.filter((v) => v.equipamento_id === eqId && v.empresa_id === user.empresa_id);
   enviarJSON(res, 200, { agenda: agendaItens, visitas: visitasItens });
+});
+
+// ---------- FMEA (RCM/SAP PM, Fase 1 passo 1 do plano aprovado) ----------
+// catálogo em cascata cadastrado pelo administrador — Componente (preso a um modelo do catálogo
+// de equipamentos, ou seja, um "equipamentos" com cliente_id null) → Modo de falha
+// (severidade/ocorrência/detecção, 1-10, RPN = S×O×D) → Causa → Efeito. Ainda não é usado em
+// nenhuma O.S./laudo (isso é o passo 3) — este passo só cria a fundação de dados. Mesmo padrão de
+// permissão já usado nos outros catálogos administrativos (feriados etc.): qualquer autenticado
+// da empresa lê, só o administrador cadastra/edita/exclui.
+
+function calcularRpn(severidade, ocorrencia, deteccao) { return severidade * ocorrencia * deteccao; }
+
+function validarEscalaFmea(valor, campo) {
+  const n = Number(valor);
+  if (!Number.isInteger(n) || n < 1 || n > 10) return `${campo} precisa ser um número inteiro de 1 a 10.`;
+  return null;
+}
+
+// GET /api/fmea/componentes?catalogo_id=X
+rota('GET', /^\/api\/fmea\/componentes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_componentes', user.empresa_id);
+  if (query.catalogo_id) lista = lista.filter((c) => c.catalogo_id === Number(query.catalogo_id));
+  enviarJSON(res, 200, { componentes: lista });
+});
+
+// POST /api/fmea/componentes { catalogo_id, nome }
+rota('POST', /^\/api\/fmea\/componentes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra componentes.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do componente.' });
+  const data = db.load();
+  const catalogoId = Number(body.catalogo_id);
+  const catalogo = tenant.buscar(data, 'equipamentos', catalogoId, user.empresa_id);
+  if (!catalogo || catalogo.cliente_id !== null) {
+    return enviarJSON(res, 400, { erro: 'Modelo do catálogo não encontrado (escolha um equipamento do catálogo, não uma unidade já atrelada a um cliente).' });
+  }
+  const item = tenant.criar(data, 'fmea_componentes', user.empresa_id, {
+    catalogo_id: catalogoId, nome: String(body.nome).trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { componente: item });
+});
+
+// PUT /api/fmea/componentes/:id
+rota('PUT', /^\/api\/fmea\/componentes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita componentes.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do componente.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_componentes', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Componente não encontrado.' });
+  item.nome = String(body.nome).trim();
+  db.save(data);
+  enviarJSON(res, 200, { componente: item });
+});
+
+// DELETE /api/fmea/componentes/:id — bloqueado se já tiver modo de falha cadastrado embaixo
+rota('DELETE', /^\/api\/fmea\/componentes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui componentes.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_componentes', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Componente não encontrado.' });
+  if (tenant.listar(data, 'fmea_modos_falha', user.empresa_id).some((mf) => mf.componente_id === item.id)) {
+    return enviarJSON(res, 400, { erro: 'Existem modos de falha cadastrados neste componente. Exclua-os antes.' });
+  }
+  data.fmea_componentes = data.fmea_componentes.filter((c) => c.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/modos-falha?componente_id=X
+// enriquece com nome do componente, tipo/modelo do catálogo de origem, e ocorrencias_reais —
+// quantas vezes esse modo de falha foi escolhido de verdade num laudo técnico (ver passo 3). Usado
+// tanto pros selects em cascata (ignora os campos extras) quanto pelo ranking RPN e pela sugestão
+// de ocorrência na tela de edição (passo 5) — sem precisar de outro endpoint pra isso.
+function modosFalhaEnriquecidos(data, empresaId, lista) {
+  const visitasComFmea = tenant.listar(data, 'visitas', empresaId).filter((v) => v.laudo && v.laudo.modo_falha_id);
+  return lista.map((mf) => {
+    const componente = data.fmea_componentes.find((c) => c.id === mf.componente_id && c.empresa_id === empresaId);
+    const catalogo = componente ? data.equipamentos.find((e) => e.id === componente.catalogo_id && e.empresa_id === empresaId) : null;
+    return {
+      ...mf,
+      componente_nome: componente ? componente.nome : '',
+      catalogo_tipo: catalogo ? catalogo.tipo : '',
+      catalogo_modelo: catalogo ? catalogo.modelo : '',
+      ocorrencias_reais: visitasComFmea.filter((v) => v.laudo.modo_falha_id === mf.id).length,
+    };
+  });
+}
+
+rota('GET', /^\/api\/fmea\/modos-falha$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_modos_falha', user.empresa_id);
+  if (query.componente_id) lista = lista.filter((mf) => mf.componente_id === Number(query.componente_id));
+  enviarJSON(res, 200, { modos_falha: modosFalhaEnriquecidos(data, user.empresa_id, lista) });
+});
+
+// POST /api/fmea/modos-falha { componente_id, nome, severidade, ocorrencia, deteccao }
+rota('POST', /^\/api\/fmea\/modos-falha$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra modos de falha.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do modo de falha.' });
+  for (const [valor, campo] of [[body.severidade, 'Severidade'], [body.ocorrencia, 'Ocorrência'], [body.deteccao, 'Detecção']]) {
+    const erro = validarEscalaFmea(valor, campo);
+    if (erro) return enviarJSON(res, 400, { erro });
+  }
+  const data = db.load();
+  const componente = tenant.buscar(data, 'fmea_componentes', Number(body.componente_id), user.empresa_id);
+  if (!componente) return enviarJSON(res, 400, { erro: 'Componente não encontrado.' });
+  const severidade = Number(body.severidade), ocorrencia = Number(body.ocorrencia), deteccao = Number(body.deteccao);
+  const item = tenant.criar(data, 'fmea_modos_falha', user.empresa_id, {
+    componente_id: componente.id, nome: String(body.nome).trim(),
+    severidade, ocorrencia, deteccao, rpn: calcularRpn(severidade, ocorrencia, deteccao),
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { modo_falha: item });
+});
+
+// PUT /api/fmea/modos-falha/:id
+rota('PUT', /^\/api\/fmea\/modos-falha\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita modos de falha.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do modo de falha.' });
+  for (const [valor, campo] of [[body.severidade, 'Severidade'], [body.ocorrencia, 'Ocorrência'], [body.deteccao, 'Detecção']]) {
+    const erro = validarEscalaFmea(valor, campo);
+    if (erro) return enviarJSON(res, 400, { erro });
+  }
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_modos_falha', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Modo de falha não encontrado.' });
+  item.nome = String(body.nome).trim();
+  item.severidade = Number(body.severidade);
+  item.ocorrencia = Number(body.ocorrencia);
+  item.deteccao = Number(body.deteccao);
+  item.rpn = calcularRpn(item.severidade, item.ocorrencia, item.deteccao);
+  db.save(data);
+  enviarJSON(res, 200, { modo_falha: item });
+});
+
+// DELETE /api/fmea/modos-falha/:id — bloqueado se já tiver causa cadastrada embaixo
+rota('DELETE', /^\/api\/fmea\/modos-falha\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui modos de falha.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_modos_falha', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Modo de falha não encontrado.' });
+  if (tenant.listar(data, 'fmea_causas', user.empresa_id).some((c) => c.modo_falha_id === item.id)) {
+    return enviarJSON(res, 400, { erro: 'Existem causas cadastradas neste modo de falha. Exclua-as antes.' });
+  }
+  data.fmea_modos_falha = data.fmea_modos_falha.filter((mf) => mf.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/causas?modo_falha_id=X
+rota('GET', /^\/api\/fmea\/causas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_causas', user.empresa_id);
+  if (query.modo_falha_id) lista = lista.filter((c) => c.modo_falha_id === Number(query.modo_falha_id));
+  enviarJSON(res, 200, { causas: lista });
+});
+
+// POST /api/fmea/causas { modo_falha_id, nome }
+rota('POST', /^\/api\/fmea\/causas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra causas.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome da causa.' });
+  const data = db.load();
+  const modoFalha = tenant.buscar(data, 'fmea_modos_falha', Number(body.modo_falha_id), user.empresa_id);
+  if (!modoFalha) return enviarJSON(res, 400, { erro: 'Modo de falha não encontrado.' });
+  const item = tenant.criar(data, 'fmea_causas', user.empresa_id, {
+    modo_falha_id: modoFalha.id, nome: String(body.nome).trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { causa: item });
+});
+
+// PUT /api/fmea/causas/:id
+rota('PUT', /^\/api\/fmea\/causas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita causas.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome da causa.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_causas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Causa não encontrada.' });
+  item.nome = String(body.nome).trim();
+  db.save(data);
+  enviarJSON(res, 200, { causa: item });
+});
+
+// DELETE /api/fmea/causas/:id — bloqueado se já tiver efeito cadastrado embaixo
+rota('DELETE', /^\/api\/fmea\/causas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui causas.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_causas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Causa não encontrada.' });
+  if (tenant.listar(data, 'fmea_efeitos', user.empresa_id).some((e) => e.causa_id === item.id)) {
+    return enviarJSON(res, 400, { erro: 'Existem efeitos cadastrados nesta causa. Exclua-os antes.' });
+  }
+  data.fmea_causas = data.fmea_causas.filter((c) => c.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/efeitos?causa_id=X
+rota('GET', /^\/api\/fmea\/efeitos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'fmea_efeitos', user.empresa_id);
+  if (query.causa_id) lista = lista.filter((e) => e.causa_id === Number(query.causa_id));
+  enviarJSON(res, 200, { efeitos: lista });
+});
+
+// POST /api/fmea/efeitos { causa_id, nome }
+rota('POST', /^\/api\/fmea\/efeitos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra efeitos.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do efeito.' });
+  const data = db.load();
+  const causa = tenant.buscar(data, 'fmea_causas', Number(body.causa_id), user.empresa_id);
+  if (!causa) return enviarJSON(res, 400, { erro: 'Causa não encontrada.' });
+  const item = tenant.criar(data, 'fmea_efeitos', user.empresa_id, {
+    causa_id: causa.id, nome: String(body.nome).trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { efeito: item });
+});
+
+// PUT /api/fmea/efeitos/:id
+rota('PUT', /^\/api\/fmea\/efeitos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita efeitos.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Informe o nome do efeito.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_efeitos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Efeito não encontrado.' });
+  item.nome = String(body.nome).trim();
+  db.save(data);
+  enviarJSON(res, 200, { efeito: item });
+});
+
+// DELETE /api/fmea/efeitos/:id
+rota('DELETE', /^\/api\/fmea\/efeitos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui efeitos.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'fmea_efeitos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Efeito não encontrado.' });
+  data.fmea_efeitos = data.fmea_efeitos.filter((e) => e.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/pareto?agrupar_por=componente|equipamento (padrão: componente) — Fase 1/passo 5.
+// Diferente do ranking RPN (que é o catálogo cadastrado, sem depender de nenhum atendimento ter
+// acontecido), o Pareto conta falhas DE VERDADE: cada laudo técnico (visita) que teve a cascata
+// FMEA preenchida (passo 3) soma 1 na contagem do componente ou do equipamento escolhido ali.
+// Ordenado do mais frequente pro menos, com percentual e percentual acumulado — a curva clássica
+// de Pareto (os ~20% das causas que respondem por ~80% das falhas).
+rota('GET', /^\/api\/fmea\/pareto$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const agruparPor = query.agrupar_por === 'equipamento' ? 'equipamento' : 'componente';
+  const data = db.load();
+  const visitasComFmea = tenant.listar(data, 'visitas', user.empresa_id).filter((v) => v.laudo && v.laudo.componente_id);
+  const contagem = new Map();
+  for (const v of visitasComFmea) {
+    let chave, label;
+    if (agruparPor === 'equipamento') {
+      const eq = data.equipamentos.find((e) => e.id === v.equipamento_id && e.empresa_id === user.empresa_id);
+      chave = `eq-${v.equipamento_id}`;
+      label = eq ? `${eq.tipo} ${eq.modelo}${eq.numero_serie ? ` (${eq.numero_serie})` : ''}` : 'Equipamento removido';
+    } else {
+      chave = `comp-${v.laudo.componente_id}`;
+      label = v.laudo.componente_nome || 'Componente removido';
+    }
+    if (!contagem.has(chave)) contagem.set(chave, { label, qtd: 0 });
+    contagem.get(chave).qtd += 1;
+  }
+  const lista = [...contagem.values()].sort((a, b) => b.qtd - a.qtd);
+  const total = lista.reduce((soma, i) => soma + i.qtd, 0);
+  let acumulado = 0;
+  const pareto = lista.map((i) => {
+    acumulado += i.qtd;
+    return {
+      ...i,
+      percentual: total ? Math.round((i.qtd / total) * 1000) / 10 : 0,
+      percentual_acumulado: total ? Math.round((acumulado / total) * 1000) / 10 : 0,
+    };
+  });
+  enviarJSON(res, 200, { pareto, total, agrupado_por: agruparPor });
+});
+
+// KPIs do dashboard do administrador (RCM/SAP PM, Fase 1, passos 6-7) — MTBF, MTTR,
+// disponibilidade, backlog, % preventiva×corretiva e gráficos mensais, calculados a partir das
+// datas/horas de entrada e conclusão das próprias O.S./laudos técnicos, sem nenhuma coleção nova.
+// "Aderência ao plano" fica de fora por enquanto: depende dos Planos de Manutenção (Fase 2, só
+// prevista no banco, ainda não implementada) — a tela mostra isso como indisponível.
+
+// filtros = { periodoInicio, periodoFim (strings "AAAA-MM-DD" ou null), clienteId, equipamentoId,
+// tecnicoId (number ou null) } — os 4 filtros do passo 7 (período/cliente/equipamento/técnico),
+// aplicados sempre na mesma função pra garantir que o dashboard e os gráficos mensais nunca
+// divirjam na definição de "quais O.S. entram na conta".
+function filtrarAgendaKpis(agendaEmpresa, filtros) {
+  let lista = agendaEmpresa;
+  if (filtros.periodoInicio) {
+    const inicioMs = new Date(`${filtros.periodoInicio}T00:00:00`).getTime();
+    if (Number.isFinite(inicioMs)) lista = lista.filter((a) => new Date(a.criado_em).getTime() >= inicioMs);
+  }
+  if (filtros.periodoFim) {
+    const fimMs = new Date(`${filtros.periodoFim}T23:59:59.999`).getTime();
+    if (Number.isFinite(fimMs)) lista = lista.filter((a) => new Date(a.criado_em).getTime() <= fimMs);
+  }
+  if (filtros.clienteId) lista = lista.filter((a) => a.cliente_id === filtros.clienteId);
+  if (filtros.equipamentoId) lista = lista.filter((a) => a.equipamento_id === filtros.equipamentoId);
+  if (filtros.tecnicoId) lista = lista.filter((a) => a.tecnico_id === filtros.tecnicoId);
+  return lista;
+}
+
+// horas de reparo (conclusão - entrada do Laudo Técnico, rodada 1) de cada O.S. corretiva da lista
+// — usado tanto pelo MTTR quanto pela disponibilidade (mesma base, sem duplicar a lógica).
+function horasReparoDeCorretivas(data, empresaId, corretivas) {
+  const horas = [];
+  for (const os of corretivas) {
+    const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
+    const laudo = visita && visita.laudo;
+    if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
+    const h = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
+    if (Number.isFinite(h) && h >= 0) horas.push(h);
+  }
+  return horas;
+}
+
+function calcularKpis(data, empresaId, filtros = {}) {
+  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), filtros);
+  const agora = Date.now();
+
+  // MTTR: pega o laudo técnico (rodada 1) de cada O.S. corretiva com data de entrada e conclusão
+  // preenchidas — os mesmos campos que o técnico já preenche hoje no Laudo Técnico (ver
+  // validarLaudoTecnico). Horas de reparo = conclusão - entrada; MTTR = média dessas horas.
+  const corretivas = agendaEmpresa.filter((a) => a.tipo === 'corretiva');
+  const horasReparo = horasReparoDeCorretivas(data, empresaId, corretivas);
+  const mttrHoras = horasReparo.length ? horasReparo.reduce((s, h) => s + h, 0) / horasReparo.length : null;
+
+  // MTBF: tempo de CALENDÁRIO entre corretivas consecutivas do mesmo equipamento, dentro do
+  // recorte filtrado (campo pronto pra receber horas reais de operação no futuro — ver README).
+  // Agrupa as corretivas por equipamento, ordena por data de abertura e calcula o intervalo entre
+  // cada par consecutivo; MTBF é a média de todos os intervalos (de todos os equipamentos juntos).
+  const corretivasPorEquipamento = new Map();
+  for (const os of corretivas) {
+    if (!os.equipamento_id) continue;
+    if (!corretivasPorEquipamento.has(os.equipamento_id)) corretivasPorEquipamento.set(os.equipamento_id, []);
+    corretivasPorEquipamento.get(os.equipamento_id).push(os);
+  }
+  const intervalosDias = [];
+  for (const lista of corretivasPorEquipamento.values()) {
+    const ordenada = [...lista].sort((a, b) => new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime());
+    for (let i = 1; i < ordenada.length; i++) {
+      const dias = (new Date(ordenada[i].criado_em).getTime() - new Date(ordenada[i - 1].criado_em).getTime()) / 864e5;
+      if (Number.isFinite(dias) && dias >= 0) intervalosDias.push(dias);
+    }
+  }
+  const mtbfDias = intervalosDias.length ? intervalosDias.reduce((s, d) => s + d, 0) / intervalosDias.length : null;
+
+  // Disponibilidade: aproximação com os mesmos dados (sem horas reais de operação ainda) — horas
+  // paradas = soma de todas as horas de reparo (as mesmas do MTTR); horas totais = soma, por
+  // equipamento com pelo menos uma O.S. no recorte filtrado, do tempo de calendário dentro da
+  // janela analisada. Sem filtro de período, a janela é "desde a primeira O.S. até agora" (mesma
+  // conta do passo 6); com período, fica limitada a esse intervalo.
+  const fimJanela = filtros.periodoFim
+    ? Math.min(new Date(`${filtros.periodoFim}T23:59:59.999`).getTime(), agora)
+    : agora;
+  const equipamentosComOS = new Set(agendaEmpresa.filter((a) => a.equipamento_id).map((a) => a.equipamento_id));
+  let horasTotaisFrota = 0;
+  for (const equipamentoId of equipamentosComOS) {
+    const primeiraOS = agendaEmpresa.filter((a) => a.equipamento_id === equipamentoId)
+      .reduce((menor, a) => Math.min(menor, new Date(a.criado_em).getTime()), Infinity);
+    if (!Number.isFinite(primeiraOS)) continue;
+    const inicioJanela = filtros.periodoInicio
+      ? Math.max(new Date(`${filtros.periodoInicio}T00:00:00`).getTime(), primeiraOS)
+      : primeiraOS;
+    if (fimJanela > inicioJanela) horasTotaisFrota += (fimJanela - inicioJanela) / 36e5;
+  }
+  const horasParadas = horasReparo.reduce((s, h) => s + h, 0);
+  const disponibilidadePercentual = horasTotaisFrota > 0
+    ? Math.round(Math.max(0, 1 - horasParadas / horasTotaisFrota) * 1000) / 10
+    : null;
+
+  // Backlog: O.S. ainda não finalizadas — quantidade e quanto tempo (em horas) elas já estão
+  // abertas, somado.
+  const abertas = agendaEmpresa.filter((a) => !a.finalizada);
+  const backlogQtd = abertas.length;
+  const backlogHoras = Math.round(abertas.reduce((s, a) => s + (agora - new Date(a.criado_em).getTime()) / 36e5, 0) * 10) / 10;
+
+  // % preventiva × corretiva: proporção simples entre as O.S. desses 2 tipos (os únicos que hoje
+  // usam o Laudo Técnico de verdade — ver TIPOS_LAUDO_TECNICO).
+  const preventivas = agendaEmpresa.filter((a) => a.tipo === 'preventiva');
+  const totalPC = preventivas.length + corretivas.length;
+  const percentualPreventiva = totalPC ? Math.round((preventivas.length / totalPC) * 1000) / 10 : null;
+  const percentualCorretiva = totalPC ? Math.round((corretivas.length / totalPC) * 1000) / 10 : null;
+
+  return {
+    mtbf_dias: mtbfDias !== null ? Math.round(mtbfDias * 10) / 10 : null,
+    mttr_horas: mttrHoras !== null ? Math.round(mttrHoras * 10) / 10 : null,
+    disponibilidade_percentual: disponibilidadePercentual,
+    backlog_qtd: backlogQtd,
+    backlog_horas: backlogHoras,
+    percentual_preventiva: percentualPreventiva,
+    percentual_corretiva: percentualCorretiva,
+    aderencia_plano: null, // Fase 2 (Planos de Manutenção) ainda não existe — ver README
+  };
+}
+
+// Série mensal pros gráficos (passo 7): qtd de preventivas/corretivas e MTTR médio, mês a mês. Sem
+// filtro de período informado, cobre os últimos 12 meses (até o mês atual); com período, cobre os
+// meses dentro do intervalo pedido, limitado a 24 meses pra não gerar uma série enorme por engano.
+// Os filtros de cliente/equipamento/técnico se aplicam normalmente — só o período decide quais
+// meses existem na série, não filtra as O.S. dentro de cada mês (isso seria redundante).
+function calcularKpisMensais(data, empresaId, filtros = {}) {
+  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), {
+    clienteId: filtros.clienteId, equipamentoId: filtros.equipamentoId, tecnicoId: filtros.tecnicoId,
+  });
+  const fimRef = filtros.periodoFim ? new Date(`${filtros.periodoFim}T00:00:00`) : new Date();
+  const inicioRef = filtros.periodoInicio
+    ? new Date(`${filtros.periodoInicio}T00:00:00`)
+    : new Date(fimRef.getFullYear(), fimRef.getMonth() - 11, 1);
+
+  const chaves = [];
+  const cursor = new Date(inicioRef.getFullYear(), inicioRef.getMonth(), 1);
+  const limite = new Date(fimRef.getFullYear(), fimRef.getMonth(), 1);
+  while (cursor <= limite && chaves.length < 500) {
+    chaves.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  const chavesLimitadas = chaves.slice(-24);
+
+  return chavesLimitadas.map((chave) => {
+    const [ano, mes] = chave.split('-').map(Number);
+    const itensDoMes = agendaEmpresa.filter((a) => {
+      const d = new Date(a.criado_em);
+      return d.getFullYear() === ano && d.getMonth() + 1 === mes;
+    });
+    const corretivasMes = itensDoMes.filter((a) => a.tipo === 'corretiva');
+    const preventivasMes = itensDoMes.filter((a) => a.tipo === 'preventiva');
+    const horasReparoMes = horasReparoDeCorretivas(data, empresaId, corretivasMes);
+    return {
+      mes: chave,
+      preventivas: preventivasMes.length,
+      corretivas: corretivasMes.length,
+      mttr_horas: horasReparoMes.length ? Math.round((horasReparoMes.reduce((s, h) => s + h, 0) / horasReparoMes.length) * 10) / 10 : null,
+    };
+  });
+}
+
+// lê e normaliza os 4 filtros (período/cliente/equipamento/técnico) da query string — mesma leitura
+// pros 2 endpoints (dashboard e série mensal), pra nunca interpretarem o mesmo filtro de jeitos
+// diferentes.
+function filtrosKpisDaQuery(query) {
+  return {
+    periodoInicio: query.periodo_inicio ? String(query.periodo_inicio).slice(0, 10) : null,
+    periodoFim: query.periodo_fim ? String(query.periodo_fim).slice(0, 10) : null,
+    clienteId: query.cliente_id ? Number(query.cliente_id) : null,
+    equipamentoId: query.equipamento_id ? Number(query.equipamento_id) : null,
+    tecnicoId: query.tecnico_id ? Number(query.tecnico_id) : null,
+  };
+}
+
+rota('GET', /^\/api\/kpis$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const filtros = filtrosKpisDaQuery(query);
+  const data = db.load();
+  enviarJSON(res, 200, { kpis: calcularKpis(data, user.empresa_id, filtros), filtros_aplicados: filtros });
+});
+
+rota('GET', /^\/api\/kpis\/mensal$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const filtros = filtrosKpisDaQuery(query);
+  const data = db.load();
+  enviarJSON(res, 200, { meses: calcularKpisMensais(data, user.empresa_id, filtros) });
 });
 
 // GET /api/usuarios

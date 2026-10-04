@@ -580,6 +580,8 @@ const NAV = {
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
     { key: 'chat-admin', modulo: 'os_chamados', label: 'Chat', page: 'chat-admin' },
     { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
+    // RCM/SAP PM Fase 1, passo 6 — MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva.
+    { key: 'kpis', modulo: 'os_chamados', label: 'Indicadores (KPIs)', page: 'kpis-dashboard' },
     // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
     // tiposRelatorioManual em renderRelatorioManutencao).
@@ -601,6 +603,7 @@ const NAV = {
     { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+      { key: 'fmea-relatorios', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     ]},
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
@@ -665,6 +668,7 @@ const NAV = {
   // abordagem rápida escolhida agora; esconder esses botões de verdade fica pra um próximo passo.
   supervisor: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
+    { key: 'kpis', modulo: 'os_chamados', label: 'Indicadores (KPIs)', page: 'kpis-dashboard' },
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -678,6 +682,7 @@ const NAV = {
     { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+      { key: 'fmea-relatorios', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     ]},
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
@@ -831,6 +836,8 @@ async function ir(pagina) {
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
+    if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
+    if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
     if (pagina === 'fila-atendimento') return renderFilaAtendimento();
@@ -3310,6 +3317,11 @@ function laudoPadrao(item) {
     pecas: [], fotos: [], observacoes: '',
     relevante_biblioteca: false,
     necessidade_retorno: false,
+    // classificação da falha (RCM/FMEA, Fase 1/passo 3) — 100% opcional, cascata em 4 níveis
+    componente_id: null, componente_nome: '',
+    modo_falha_id: null, modo_falha_nome: '',
+    causa_id: null, causa_nome: '',
+    efeito_id: null, efeito_nome: '',
   };
 }
 
@@ -3410,6 +3422,19 @@ async function renderLaudoTecnico(item) {
     </div>
 
     <div class="panel">
+      <h2>Classificação da falha (RCM/FMEA)</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Opcional — ajuda a identificar padrões de falha ao longo do tempo. Só aparece quando o administrador já cadastrou componentes pra este modelo de equipamento.</p>
+      <div id="lt-fmea-bloco">
+        <div class="form-grid">
+          <div><label>Componente</label><select id="lt-fmea-componente" onchange="onTrocarComponenteFmea()"><option value="">Nenhum</option></select></div>
+          <div><label>Modo de falha</label><select id="lt-fmea-modo-falha" onchange="onTrocarModoFalhaFmea()" disabled><option value="">Nenhum</option></select></div>
+          <div><label>Causa</label><select id="lt-fmea-causa" onchange="onTrocarCausaFmea()" disabled><option value="">Nenhuma</option></select></div>
+          <div><label>Efeito</label><select id="lt-fmea-efeito" onchange="onTrocarEfeitoFmea()" disabled><option value="">Nenhum</option></select></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <h2>Serviço realizado*</h2>
       <textarea id="lt-servico_realizado" placeholder="Descreva o que foi feito para solucionar..." oninput="atualizarRascunhoLaudo()"></textarea>
     </div>
@@ -3473,6 +3498,96 @@ async function renderLaudoTecnico(item) {
   preencherCamposLaudo();
   renderPecasLaudo();
   renderFotosLaudo();
+  carregarCascataFmea(item);
+}
+
+// cascata FMEA (RCM/SAP PM Fase 1, passo 3) no Laudo Técnico — 100% opcional: só aparece quando o
+// equipamento desta O.S. está vinculado a um modelo do catálogo (equipamento_catalogo_id, ver
+// passo 2). Cada nível só habilita depois que o de cima foi escolhido, e trocar um nível de cima
+// limpa os de baixo — senão o id salvo poderia não bater mais com o que a tela mostra.
+async function carregarCascataFmea(item) {
+  const bloco = document.getElementById('lt-fmea-bloco');
+  if (!bloco) return;
+  if (!item.equipamento_catalogo_id) {
+    bloco.innerHTML = '<p style="color:var(--ink-soft); font-size:13px;">Este equipamento ainda não está vinculado a um modelo do catálogo — fale com o administrador se quiser classificar a falha.</p>';
+    return;
+  }
+  const { componentes } = await api(`/api/fmea/componentes?catalogo_id=${item.equipamento_catalogo_id}`);
+  const selectComponente = document.getElementById('lt-fmea-componente');
+  if (!selectComponente) return; // tela pode ter trocado antes da resposta chegar
+  selectComponente.innerHTML = '<option value="">Nenhum</option>' + componentes.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('');
+  if (laudoDraft.componente_id) {
+    selectComponente.value = laudoDraft.componente_id;
+    await onTrocarComponenteFmea(true);
+  }
+}
+
+async function onTrocarComponenteFmea(mantendoSelecao) {
+  const componenteId = document.getElementById('lt-fmea-componente').value;
+  if (!mantendoSelecao) { laudoDraft.modo_falha_id = null; laudoDraft.causa_id = null; laudoDraft.efeito_id = null; }
+  laudoDraft.componente_id = componenteId || null;
+  const selectModo = document.getElementById('lt-fmea-modo-falha');
+  const selectCausa = document.getElementById('lt-fmea-causa');
+  const selectEfeito = document.getElementById('lt-fmea-efeito');
+  selectCausa.innerHTML = '<option value="">Nenhuma</option>'; selectCausa.disabled = true;
+  selectEfeito.innerHTML = '<option value="">Nenhum</option>'; selectEfeito.disabled = true;
+  if (!componenteId) {
+    selectModo.innerHTML = '<option value="">Nenhum</option>'; selectModo.disabled = true;
+    atualizarRascunhoLaudo(true);
+    return;
+  }
+  const { modos_falha } = await api(`/api/fmea/modos-falha?componente_id=${componenteId}`);
+  selectModo.innerHTML = '<option value="">Nenhum</option>' + modos_falha.map((m) => `<option value="${m.id}">${esc(m.nome)} (RPN ${m.rpn})</option>`).join('');
+  selectModo.disabled = false;
+  if (mantendoSelecao && laudoDraft.modo_falha_id) {
+    selectModo.value = laudoDraft.modo_falha_id;
+    await onTrocarModoFalhaFmea(true);
+  }
+  atualizarRascunhoLaudo(true);
+}
+
+async function onTrocarModoFalhaFmea(mantendoSelecao) {
+  const modoFalhaId = document.getElementById('lt-fmea-modo-falha').value;
+  if (!mantendoSelecao) { laudoDraft.causa_id = null; laudoDraft.efeito_id = null; }
+  laudoDraft.modo_falha_id = modoFalhaId || null;
+  const selectCausa = document.getElementById('lt-fmea-causa');
+  const selectEfeito = document.getElementById('lt-fmea-efeito');
+  selectEfeito.innerHTML = '<option value="">Nenhum</option>'; selectEfeito.disabled = true;
+  if (!modoFalhaId) {
+    selectCausa.innerHTML = '<option value="">Nenhuma</option>'; selectCausa.disabled = true;
+    atualizarRascunhoLaudo(true);
+    return;
+  }
+  const { causas } = await api(`/api/fmea/causas?modo_falha_id=${modoFalhaId}`);
+  selectCausa.innerHTML = '<option value="">Nenhuma</option>' + causas.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('');
+  selectCausa.disabled = false;
+  if (mantendoSelecao && laudoDraft.causa_id) {
+    selectCausa.value = laudoDraft.causa_id;
+    await onTrocarCausaFmea(true);
+  }
+  atualizarRascunhoLaudo(true);
+}
+
+async function onTrocarCausaFmea(mantendoSelecao) {
+  const causaId = document.getElementById('lt-fmea-causa').value;
+  if (!mantendoSelecao) laudoDraft.efeito_id = null;
+  laudoDraft.causa_id = causaId || null;
+  const selectEfeito = document.getElementById('lt-fmea-efeito');
+  if (!causaId) {
+    selectEfeito.innerHTML = '<option value="">Nenhum</option>'; selectEfeito.disabled = true;
+    atualizarRascunhoLaudo(true);
+    return;
+  }
+  const { efeitos } = await api(`/api/fmea/efeitos?causa_id=${causaId}`);
+  selectEfeito.innerHTML = '<option value="">Nenhum</option>' + efeitos.map((e) => `<option value="${e.id}">${esc(e.nome)}</option>`).join('');
+  selectEfeito.disabled = false;
+  if (mantendoSelecao && laudoDraft.efeito_id) selectEfeito.value = laudoDraft.efeito_id;
+  atualizarRascunhoLaudo(true);
+}
+
+function onTrocarEfeitoFmea() {
+  laudoDraft.efeito_id = document.getElementById('lt-fmea-efeito').value || null;
+  atualizarRascunhoLaudo(true);
 }
 
 function preencherCamposLaudo() {
@@ -3761,6 +3876,13 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     doc.rect(margem, y, largura, altura, 'S');
     doc.text(linhas, margem + 8, y + 14);
     y += altura + 16;
+  }
+
+  if (d.componente_nome) {
+    tituloCentro('Classificação da falha (RCM/FMEA)', null, true);
+    linhaCampos([{ label: 'Componente', valor: d.componente_nome, frac: 0.5 }, { label: 'Modo de falha', valor: d.modo_falha_nome, frac: 0.5 }]);
+    if (d.causa_nome) linhaCampos([{ label: 'Causa', valor: d.causa_nome, frac: 0.5 }, { label: 'Efeito', valor: d.efeito_nome, frac: 0.5 }]);
+    y += 10;
   }
 
   tituloCentro('Serviço realizado', null, true);
@@ -4629,6 +4751,11 @@ function detalheRelatorioVisita(v) {
         <div class="relatorio-secao-titulo">Laudo técnico</div>
         <div class="relatorio-secao-texto">${esc(l.laudo_tecnico || '')}</div>
       </div>
+      ${l.componente_nome ? `<div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Classificação da falha (RCM/FMEA)</div>
+        <div class="kv"><b>Componente:</b> ${esc(l.componente_nome)}${l.modo_falha_nome ? ` <span class="sep">·</span> <b>Modo de falha:</b> ${esc(l.modo_falha_nome)}` : ''}</div>
+        ${l.causa_nome ? `<div class="kv"><b>Causa:</b> ${esc(l.causa_nome)}${l.efeito_nome ? ` <span class="sep">·</span> <b>Efeito:</b> ${esc(l.efeito_nome)}` : ''}</div>` : ''}
+      </div>` : ''}
       <div class="relatorio-secao">
         <div class="relatorio-secao-titulo">Serviço realizado</div>
         <div class="relatorio-secao-texto">${esc(l.servico_realizado || '')}</div>
@@ -12767,6 +12894,7 @@ async function renderEquipamentosCadastrar() {
       ${catalogo.length ? catalogo.map((e) => `<tr><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td>
         <td class="td-acoes">
           ${USER.papel === 'administrador' ? `
+            <button class="btn-outline-sm" onclick="abrirFmeaComponentes(${e.id})">FMEA</button>
             <button class="btn-outline-sm" onclick="editarEquipamentoCatalogo(${e.id})">Editar</button>
             <button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
           ` : ''}
@@ -12827,6 +12955,480 @@ async function excluirEquipamento(id) {
     if (paginaAtual === 'equipamentos-atrelar') renderEquipamentosAtrelar();
     else renderEquipamentosCadastrar();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- FMEA (RCM/SAP PM Fase 1, passo 4): administração do catálogo em cascata, por modelo de
+// equipamento. Drill-down de 4 telas (mesmo padrão de navegação já usado em Plataforma >
+// Cadastros > empresa individual) — Componentes de um modelo → Modos de falha de um componente →
+// Causas de um modo de falha → Efeitos de uma causa. Só administrador cadastra/edita/exclui (o
+// botão "FMEA" só aparece pra ele, mesmo padrão de Editar/Excluir logo acima); a API já recusa
+// escrita de qualquer outro papel de qualquer forma.
+async function abrirFmeaComponentes(catalogoId) {
+  const catalogo = (window._catalogoCache || []).find((e) => e.id === catalogoId);
+  if (!catalogo) return;
+  const { componentes } = await api(`/api/fmea/componentes?catalogo_id=${catalogoId}`);
+  window._fmeaComponentesCache = componentes;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>FMEA — ${esc(catalogo.tipo)} ${esc(catalogo.modelo)}</h1><p>${componentes.length} componente(s) cadastrado(s)</p></div>
+      <button class="btn-outline-sm" onclick="renderEquipamentosCadastrar()">‹ Equipamentos</button>
+    </div>
+    <p style="color:var(--ink-soft); font-size:13px; margin-top:-14px;">Componentes deste modelo — clique num componente pra ver/cadastrar os modos de falha dele.</p>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Novo componente</label><input id="fc-nome" placeholder="ex.: Fonte de alimentação"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarComponenteFmea(${catalogoId})">+ Adicionar componente</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Componente</th><th></th></tr>
+      ${componentes.length ? componentes.map((c) => `
+        <tr><td data-label="Componente"><a href="#" onclick="abrirFmeaModosFalha(${c.id}); return false;">${esc(c.nome)}</a></td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="renomearComponenteFmea(${c.id})">Renomear</button>
+          <button class="btn-outline-sm" onclick="excluirComponenteFmea(${c.id}, ${catalogoId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhum componente cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+async function criarComponenteFmea(catalogoId) {
+  const nome = document.getElementById('fc-nome').value.trim();
+  if (!nome) return alert('Informe o nome do componente.');
+  try {
+    await api('/api/fmea/componentes', { method: 'POST', body: { catalogo_id: catalogoId, nome } });
+    mostrarToast('Componente cadastrado.');
+    abrirFmeaComponentes(catalogoId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function renomearComponenteFmea(id) {
+  const componente = (window._fmeaComponentesCache || []).find((c) => c.id === id);
+  if (!componente) return;
+  const nome = prompt('Novo nome do componente:', componente.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/fmea/componentes/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Componente renomeado.');
+    abrirFmeaComponentes(componente.catalogo_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirComponenteFmea(id, catalogoId) {
+  if (!(await mostrarConfirmacao('Excluir este componente? Isso só funciona se não houver modos de falha cadastrados nele.'))) return;
+  try {
+    await api(`/api/fmea/componentes/${id}`, { method: 'DELETE' });
+    mostrarToast('Componente excluído.');
+    abrirFmeaComponentes(catalogoId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirFmeaModosFalha(componenteId) {
+  const componente = (window._fmeaComponentesCache || []).find((c) => c.id === componenteId);
+  if (!componente) return;
+  const { modos_falha } = await api(`/api/fmea/modos-falha?componente_id=${componenteId}`);
+  window._fmeaModosFalhaCache = modos_falha;
+  window._fmeaComponenteAtual = componente;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Modos de falha — ${esc(componente.nome)}</h1><p>${modos_falha.length} cadastrado(s)</p></div>
+      <button class="btn-outline-sm" onclick="abrirFmeaComponentes(${componente.catalogo_id})">‹ Componentes</button>
+    </div>
+    <div id="form-modo-falha"></div>
+    <button class="btn btn-primary btn-sm" onclick="mostrarFormModoFalha()" style="margin-bottom:14px;">+ Novo modo de falha</button>
+    <div class="panel"><table>
+      <tr><th>Modo de falha</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th></th></tr>
+      ${modos_falha.length ? modos_falha.map((m) => `
+        <tr><td data-label="Modo de falha"><a href="#" onclick="abrirFmeaCausas(${m.id}); return false;">${esc(m.nome)}</a></td>
+        <td data-label="S">${m.severidade}</td><td data-label="O">${m.ocorrencia}</td><td data-label="D">${m.deteccao}</td><td data-label="RPN"><b>${m.rpn}</b></td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="editarModoFalha(${m.id})">Editar</button>
+          <button class="btn-outline-sm" onclick="excluirModoFalha(${m.id}, ${componenteId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum modo de falha cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+let modoFalhaEmEdicaoId = null;
+function mostrarFormModoFalha(modo) {
+  modoFalhaEmEdicaoId = modo ? modo.id : null;
+  document.getElementById('form-modo-falha').innerHTML = `
+    <div class="panel"><div class="panel-head">${modo ? 'Editar modo de falha' : 'Novo modo de falha'}</div>
+      <div class="form-grid">
+        <div class="full"><label>Nome*</label><input id="mf-nome" value="${modo ? esc(modo.nome) : ''}"></div>
+        <div><label>Severidade (1-10)*</label><input id="mf-severidade" type="number" min="1" max="10" value="${modo ? modo.severidade : ''}"></div>
+        <div><label>Ocorrência (1-10)*</label><input id="mf-ocorrencia" type="number" min="1" max="10" value="${modo ? modo.ocorrencia : ''}">
+          ${modo && modo.ocorrencias_reais > 0 ? `<small style="color:var(--ink-soft);">Sugestão: ${modo.ocorrencias_reais} falha(s) real(is) registrada(s) em laudos técnicos.</small>` : ''}
+        </div>
+        <div><label>Detecção (1-10)*</label><input id="mf-deteccao" type="number" min="1" max="10" value="${modo ? modo.deteccao : ''}"></div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">RPN = Severidade × Ocorrência × Detecção, calculado automaticamente.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarModoFalha()">${modo ? 'Salvar alterações' : 'Salvar'}</button>
+        ${modo ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoModoFalha()">Cancelar</button>` : ''}
+      </div>
+    </div>`;
+}
+function editarModoFalha(id) {
+  const modo = (window._fmeaModosFalhaCache || []).find((m) => m.id === id);
+  if (!modo) return;
+  mostrarFormModoFalha(modo);
+  document.getElementById('form-modo-falha').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function cancelarEdicaoModoFalha() { modoFalhaEmEdicaoId = null; document.getElementById('form-modo-falha').innerHTML = ''; }
+async function salvarModoFalha() {
+  const nome = document.getElementById('mf-nome').value.trim();
+  const severidade = document.getElementById('mf-severidade').value;
+  const ocorrencia = document.getElementById('mf-ocorrencia').value;
+  const deteccao = document.getElementById('mf-deteccao').value;
+  if (!nome) return alert('Informe o nome do modo de falha.');
+  try {
+    if (modoFalhaEmEdicaoId) {
+      await api(`/api/fmea/modos-falha/${modoFalhaEmEdicaoId}`, { method: 'PUT', body: { nome, severidade, ocorrencia, deteccao } });
+      modoFalhaEmEdicaoId = null;
+      mostrarToast('Modo de falha atualizado.');
+    } else {
+      await api('/api/fmea/modos-falha', { method: 'POST', body: { componente_id: window._fmeaComponenteAtual.id, nome, severidade, ocorrencia, deteccao } });
+      mostrarToast('Modo de falha cadastrado.');
+    }
+    abrirFmeaModosFalha(window._fmeaComponenteAtual.id);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function excluirModoFalha(id, componenteId) {
+  if (!(await mostrarConfirmacao('Excluir este modo de falha? Isso só funciona se não houver causas cadastradas nele.'))) return;
+  try {
+    await api(`/api/fmea/modos-falha/${id}`, { method: 'DELETE' });
+    mostrarToast('Modo de falha excluído.');
+    abrirFmeaModosFalha(componenteId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirFmeaCausas(modoFalhaId) {
+  const modo = (window._fmeaModosFalhaCache || []).find((m) => m.id === modoFalhaId);
+  if (!modo) return;
+  const { causas } = await api(`/api/fmea/causas?modo_falha_id=${modoFalhaId}`);
+  window._fmeaCausasCache = causas;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Causas — ${esc(modo.nome)}</h1><p>${causas.length} cadastrada(s)</p></div>
+      <button class="btn-outline-sm" onclick="abrirFmeaModosFalha(${modo.componente_id})">‹ Modos de falha</button>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Nova causa</label><input id="fcs-nome" placeholder="ex.: Sobretensão na rede elétrica"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarCausaFmea(${modoFalhaId})">+ Adicionar causa</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Causa</th><th></th></tr>
+      ${causas.length ? causas.map((c) => `
+        <tr><td data-label="Causa"><a href="#" onclick="abrirFmeaEfeitos(${c.id}); return false;">${esc(c.nome)}</a></td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="renomearCausaFmea(${c.id})">Renomear</button>
+          <button class="btn-outline-sm" onclick="excluirCausaFmea(${c.id}, ${modoFalhaId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhuma causa cadastrada ainda.</td></tr>`}
+    </table></div>`;
+}
+async function criarCausaFmea(modoFalhaId) {
+  const nome = document.getElementById('fcs-nome').value.trim();
+  if (!nome) return alert('Informe o nome da causa.');
+  try {
+    await api('/api/fmea/causas', { method: 'POST', body: { modo_falha_id: modoFalhaId, nome } });
+    mostrarToast('Causa cadastrada.');
+    abrirFmeaCausas(modoFalhaId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function renomearCausaFmea(id) {
+  const causa = (window._fmeaCausasCache || []).find((c) => c.id === id);
+  if (!causa) return;
+  const nome = prompt('Novo nome da causa:', causa.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/fmea/causas/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Causa renomeada.');
+    abrirFmeaCausas(causa.modo_falha_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirCausaFmea(id, modoFalhaId) {
+  if (!(await mostrarConfirmacao('Excluir esta causa? Isso só funciona se não houver efeitos cadastrados nela.'))) return;
+  try {
+    await api(`/api/fmea/causas/${id}`, { method: 'DELETE' });
+    mostrarToast('Causa excluída.');
+    abrirFmeaCausas(modoFalhaId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirFmeaEfeitos(causaId) {
+  const causa = (window._fmeaCausasCache || []).find((c) => c.id === causaId);
+  if (!causa) return;
+  const { efeitos } = await api(`/api/fmea/efeitos?causa_id=${causaId}`);
+  window._fmeaEfeitosCache = efeitos;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Efeitos — ${esc(causa.nome)}</h1><p>${efeitos.length} cadastrado(s)</p></div>
+      <button class="btn-outline-sm" onclick="abrirFmeaCausas(${causa.modo_falha_id})">‹ Causas</button>
+    </div>
+    <div class="panel">
+      <div class="form-grid">
+        <div class="full"><label>Novo efeito</label><input id="fe-nome" placeholder="ex.: Equipamento desliga e não liga mais"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarEfeitoFmea(${causaId})">+ Adicionar efeito</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Efeito</th><th></th></tr>
+      ${efeitos.length ? efeitos.map((e) => `
+        <tr><td data-label="Efeito">${esc(e.nome)}</td>
+        <td class="td-acoes">
+          <button class="btn-outline-sm" onclick="renomearEfeitoFmea(${e.id})">Renomear</button>
+          <button class="btn-outline-sm" onclick="excluirEfeitoFmea(${e.id}, ${causaId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhum efeito cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+async function criarEfeitoFmea(causaId) {
+  const nome = document.getElementById('fe-nome').value.trim();
+  if (!nome) return alert('Informe o nome do efeito.');
+  try {
+    await api('/api/fmea/efeitos', { method: 'POST', body: { causa_id: causaId, nome } });
+    mostrarToast('Efeito cadastrado.');
+    abrirFmeaEfeitos(causaId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function renomearEfeitoFmea(id) {
+  const efeito = (window._fmeaEfeitosCache || []).find((e) => e.id === id);
+  if (!efeito) return;
+  const nome = prompt('Novo nome do efeito:', efeito.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/fmea/efeitos/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Efeito renomeado.');
+    abrirFmeaEfeitos(efeito.causa_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirEfeitoFmea(id, causaId) {
+  if (!(await mostrarConfirmacao('Excluir este efeito?'))) return;
+  try {
+    await api(`/api/fmea/efeitos/${id}`, { method: 'DELETE' });
+    mostrarToast('Efeito excluído.');
+    abrirFmeaEfeitos(causaId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- FMEA: Ranking RPN e Pareto de falhas (passo 5) ----
+// Ranking: reaproveita o próprio GET /api/fmea/modos-falha (já enriquecido no servidor com
+// componente_nome/catalogo_tipo/catalogo_modelo/ocorrencias_reais — ver server.js,
+// modosFalhaEnriquecidos) sem filtro de componente, e ordena por RPN decrescente no cliente — não
+// precisou de outro endpoint só pra isso. Pareto: usa o endpoint novo /api/fmea/pareto, que conta
+// falhas de verdade (laudos técnicos com a cascata FMEA preenchida), com toggle componente/equipamento.
+let _fmeaParetoAgrupamento = 'componente';
+async function renderFmeaRelatorios() {
+  const { modos_falha } = await api('/api/fmea/modos-falha');
+  const ranking = [...modos_falha].sort((a, b) => b.rpn - a.rpn);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>FMEA — Ranking e Pareto</h1><p>Ranking de risco (RPN) do catálogo cadastrado e Pareto das falhas que realmente aconteceram nos laudos técnicos.</p></div>
+    <div class="panel"><div class="panel-head">Ranking por RPN (Severidade × Ocorrência × Detecção)</div>
+      <table>
+        <tr><th>Modelo</th><th>Componente</th><th>Modo de falha</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Ocorrências reais</th></tr>
+        ${ranking.length ? ranking.map((m) => `
+          <tr>
+            <td data-label="Modelo">${esc(m.catalogo_tipo)} ${esc(m.catalogo_modelo)}</td>
+            <td data-label="Componente">${esc(m.componente_nome)}</td>
+            <td data-label="Modo de falha">${esc(m.nome)}</td>
+            <td data-label="S">${m.severidade}</td><td data-label="O">${m.ocorrencia}</td><td data-label="D">${m.deteccao}</td>
+            <td data-label="RPN"><b>${m.rpn}</b></td>
+            <td data-label="Ocorrências reais">${m.ocorrencias_reais}</td>
+          </tr>`).join('') : `<tr><td colspan="8" class="empty">Nenhum modo de falha cadastrado ainda.</td></tr>`}
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>Pareto de falhas</span>
+        <div>
+          <button class="btn-outline-sm" id="fmea-pareto-btn-componente" onclick="trocarParetoAgrupamento('componente')">Por componente</button>
+          <button class="btn-outline-sm" id="fmea-pareto-btn-equipamento" onclick="trocarParetoAgrupamento('equipamento')">Por equipamento</button>
+        </div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-8px;">Conta cada laudo técnico que teve a classificação de falha (RCM/FMEA) preenchida — os ~20% que respondem pela maior parte das falhas aparecem no topo.</p>
+      <div id="fmea-pareto-area"><div class="empty">Carregando...</div></div>
+    </div>`;
+  _fmeaParetoAgrupamento = 'componente';
+  renderFmeaParetoArea();
+}
+async function trocarParetoAgrupamento(modo) {
+  _fmeaParetoAgrupamento = modo;
+  renderFmeaParetoArea();
+}
+async function renderFmeaParetoArea() {
+  const btnComponente = document.getElementById('fmea-pareto-btn-componente');
+  const btnEquipamento = document.getElementById('fmea-pareto-btn-equipamento');
+  const estiloAtivo = { background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' };
+  const estiloInativo = { background: '#fff', color: 'var(--ink-soft)', borderColor: 'var(--line)' };
+  Object.assign(btnComponente.style, _fmeaParetoAgrupamento === 'componente' ? estiloAtivo : estiloInativo);
+  Object.assign(btnEquipamento.style, _fmeaParetoAgrupamento === 'equipamento' ? estiloAtivo : estiloInativo);
+  const area = document.getElementById('fmea-pareto-area');
+  area.innerHTML = `<div class="empty">Carregando...</div>`;
+  const { pareto, total } = await api(`/api/fmea/pareto?agrupar_por=${_fmeaParetoAgrupamento}`);
+  if (!total) { area.innerHTML = `<div class="empty">Nenhuma falha classificada em laudos técnicos ainda.</div>`; return; }
+  area.innerHTML = `
+    <table>
+      <tr><th>${_fmeaParetoAgrupamento === 'componente' ? 'Componente' : 'Equipamento'}</th><th>Qtd.</th><th>%</th><th>% acumulado</th><th></th></tr>
+      ${pareto.map((p) => `
+        <tr>
+          <td data-label="${_fmeaParetoAgrupamento === 'componente' ? 'Componente' : 'Equipamento'}">${esc(p.label)}</td>
+          <td data-label="Qtd.">${p.qtd}</td>
+          <td data-label="%">${p.percentual}%</td>
+          <td data-label="% acumulado">${p.percentual_acumulado}%</td>
+          <td style="min-width:120px;"><div style="background:var(--line); border-radius:4px; height:8px;"><div style="background:var(--blue-bright); border-radius:4px; height:8px; width:${p.percentual}%;"></div></div></td>
+        </tr>`).join('')}
+    </table>`;
+}
+
+// ---- Dashboard de KPIs (RCM/SAP PM, Fase 1, passos 6-7) ----
+// MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva, filtros (período/cliente/
+// equipamento/técnico) e gráficos mensais — tudo calculado no servidor (GET /api/kpis e GET
+// /api/kpis/mensal, funções calcularKpis/calcularKpisMensais em server.js) a partir das datas/
+// horas que já existem hoje nas O.S. e nos laudos técnicos, sem nenhuma tela ou campo novo de
+// entrada de dados. Exportação Excel ainda não — isso é o passo 8.
+let _kpisFiltros = {};
+let _kpisChartTipos = null;
+let _kpisChartMttr = null;
+
+async function renderKpisDashboard() {
+  const [{ clientes }, { equipamentos }, { usuarios }] = await Promise.all([
+    api('/api/clientes'), api('/api/equipamentos'), api('/api/usuarios'),
+  ]);
+  const equipamentosAtrelados = equipamentos.filter((e) => e.cliente_id !== null);
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
+
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Indicadores (KPIs)</h1><p>Calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos.</p></div>
+    <div class="filtros-row">
+      <div class="field"><label>Período — de</label><input id="kf-periodo-inicio" type="date" value="${esc(_kpisFiltros.periodo_inicio || '')}"></div>
+      <div class="field"><label>Período — até</label><input id="kf-periodo-fim" type="date" value="${esc(_kpisFiltros.periodo_fim || '')}"></div>
+      <div class="field"><label>Cliente</label><select id="kf-cliente"><option value="">Todos</option>${clientes.map((c) => `<option value="${c.id}" ${String(_kpisFiltros.cliente_id) === String(c.id) ? 'selected' : ''}>${esc(c.nome_empresa)}</option>`).join('')}</select></div>
+      <div class="field"><label>${t('equipamento', 'Equipamento')}</label><select id="kf-equipamento"><option value="">Todos</option>${equipamentosAtrelados.map((e) => `<option value="${e.id}" ${String(_kpisFiltros.equipamento_id) === String(e.id) ? 'selected' : ''}>${esc(e.tipo)} ${esc(e.modelo)}${e.numero_serie ? ` (${esc(e.numero_serie)})` : ''}</option>`).join('')}</select></div>
+      <div class="field"><label>Técnico</label><select id="kf-tecnico"><option value="">Todos</option>${tecnicos.map((u) => `<option value="${u.id}" ${String(_kpisFiltros.tecnico_id) === String(u.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
+      <button class="btn btn-primary btn-sm" onclick="aplicarFiltrosKpis()">Aplicar filtros</button>
+      <button class="btn-outline-sm" onclick="limparFiltrosKpis()">Limpar</button>
+      <button class="btn-outline-sm" onclick="exportarKpisExcel()">Exportar Excel</button>
+    </div>
+    <div class="equipe-grid" id="kpis-cards"><div class="empty">Carregando...</div></div>
+    <div class="panel"><div class="panel-head">Preventiva × Corretiva por mês</div><canvas id="kpis-chart-tipos" height="90"></canvas></div>
+    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
+  await atualizarKpisDashboard();
+}
+
+function filtrosKpisDaTela() {
+  const periodoInicio = document.getElementById('kf-periodo-inicio').value;
+  const periodoFim = document.getElementById('kf-periodo-fim').value;
+  const clienteId = document.getElementById('kf-cliente').value;
+  const equipamentoId = document.getElementById('kf-equipamento').value;
+  const tecnicoId = document.getElementById('kf-tecnico').value;
+  return {
+    ...(periodoInicio ? { periodo_inicio: periodoInicio } : {}),
+    ...(periodoFim ? { periodo_fim: periodoFim } : {}),
+    ...(clienteId ? { cliente_id: clienteId } : {}),
+    ...(equipamentoId ? { equipamento_id: equipamentoId } : {}),
+    ...(tecnicoId ? { tecnico_id: tecnicoId } : {}),
+  };
+}
+async function aplicarFiltrosKpis() {
+  _kpisFiltros = filtrosKpisDaTela();
+  await atualizarKpisDashboard();
+}
+async function limparFiltrosKpis() {
+  _kpisFiltros = {};
+  ['kf-periodo-inicio', 'kf-periodo-fim', 'kf-cliente', 'kf-equipamento', 'kf-tecnico'].forEach((id) => { document.getElementById(id).value = ''; });
+  await atualizarKpisDashboard();
+}
+
+async function atualizarKpisDashboard() {
+  const params = new URLSearchParams(_kpisFiltros).toString();
+  const sufixo = params ? `?${params}` : '';
+  const [{ kpis }, { meses }] = await Promise.all([api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`)]);
+  const card = (titulo, valor, nota) => `
+    <div style="background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px;">
+      <div style="color:var(--ink-soft); font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;">${esc(titulo)}</div>
+      <div style="font-size:28px; font-weight:800; color:var(--navy); margin-top:6px;">${valor}</div>
+      ${nota ? `<div style="color:var(--ink-soft); font-size:12px; margin-top:4px;">${esc(nota)}</div>` : ''}
+    </div>`;
+  document.getElementById('kpis-cards').innerHTML = `
+    ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas no recorte atual.')}
+    ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas no recorte atual.')}
+    ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).')}
+    ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`)}
+    ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas no recorte atual.')}
+    ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}`;
+  desenharGraficosKpis(meses);
+}
+
+// Chart.js (CDN, ver index.html) — se o CDN estiver bloqueado/offline a tela continua útil sem os
+// gráficos (cards + tabela de filtros funcionam igual); por isso o guard no topo da função.
+function desenharGraficosKpis(meses) {
+  if (typeof Chart === 'undefined') return;
+  const labels = meses.map((m) => m.mes);
+  if (_kpisChartTipos) _kpisChartTipos.destroy();
+  _kpisChartTipos = new Chart(document.getElementById('kpis-chart-tipos'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Preventiva', data: meses.map((m) => m.preventivas), backgroundColor: '#177245' },
+        { label: 'Corretiva', data: meses.map((m) => m.corretivas), backgroundColor: '#B3261E' },
+      ],
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+  });
+  if (_kpisChartMttr) _kpisChartMttr.destroy();
+  _kpisChartMttr = new Chart(document.getElementById('kpis-chart-mttr'), {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'MTTR (h)', data: meses.map((m) => m.mttr_horas), borderColor: '#1467D6', backgroundColor: 'rgba(20,103,214,.15)', fill: true, spanGaps: true }] },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } },
+  });
+}
+
+// Exportação Excel (passo 8) — mesmos dados da tela (indicadores + série mensal), no recorte de
+// filtro atual, em 2 abas. Reaproveita os <select> de filtro já na tela pra pegar o texto legível
+// de cliente/equipamento/técnico escolhido, em vez de só o id. Via SheetJS (CDN, ver index.html),
+// mesmo padrão client-side do jsPDF/docx já usados nos outros relatórios — sem rota nova no
+// servidor, já que GET /api/kpis e GET /api/kpis/mensal já têm tudo que a planilha precisa.
+async function exportarKpisExcel() {
+  if (typeof XLSX === 'undefined') return alert('A biblioteca de exportação não carregou (sem conexão com o CDN). Tente novamente mais tarde.');
+  const textoSelecionado = (id) => {
+    const el = document.getElementById(id);
+    return el && el.selectedOptions[0] ? el.selectedOptions[0].textContent : 'Todos';
+  };
+  const params = new URLSearchParams(_kpisFiltros).toString();
+  const sufixo = params ? `?${params}` : '';
+  const [{ kpis }, { meses }] = await Promise.all([api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`)]);
+
+  const abaIndicadores = XLSX.utils.aoa_to_sheet([
+    ['Filtros aplicados'],
+    ['Período — de', _kpisFiltros.periodo_inicio || 'Todos'],
+    ['Período — até', _kpisFiltros.periodo_fim || 'Todos'],
+    ['Cliente', textoSelecionado('kf-cliente')],
+    [t('equipamento', 'Equipamento'), textoSelecionado('kf-equipamento')],
+    ['Técnico', textoSelecionado('kf-tecnico')],
+    [],
+    ['Indicador', 'Valor', 'Observação'],
+    ['MTBF (dias)', kpis.mtbf_dias ?? '—', 'Tempo médio de calendário entre corretivas do mesmo equipamento'],
+    ['MTTR (horas)', kpis.mttr_horas ?? '—', 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico)'],
+    ['Disponibilidade (%)', kpis.disponibilidade_percentual ?? '—', 'Aproximação por tempo de calendário — sem horas reais de operação ainda'],
+    ['Backlog (qtd. de O.S.)', kpis.backlog_qtd, 'O.S. ainda não finalizadas'],
+    ['Backlog (horas acumuladas)', kpis.backlog_horas, ''],
+    ['% Preventiva', kpis.percentual_preventiva ?? '—', ''],
+    ['% Corretiva', kpis.percentual_corretiva ?? '—', ''],
+    ['Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada)'],
+  ]);
+  const abaMensal = XLSX.utils.aoa_to_sheet([
+    ['Mês', 'Preventivas', 'Corretivas', 'MTTR médio (h)'],
+    ...meses.map((m) => [m.mes, m.preventivas, m.corretivas, m.mttr_horas ?? '—']),
+  ]);
+
+  const livro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(livro, abaIndicadores, 'Indicadores');
+  XLSX.utils.book_append_sheet(livro, abaMensal, 'Mensal');
+  const hoje = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(livro, `indicadores-kpis-${hoje}.xlsx`);
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----

@@ -430,6 +430,223 @@ Se `EMAIL_SMTP_USER` estiver configurado, ele tem prioridade sobre o Resend.
 
 Nenhuma outra mudança é necessária — veja `email.js`.
 
+## FMEA — catálogo de falhas por modelo de equipamento (RCM/SAP PM, Fase 1 em andamento)
+
+Primeiro passo da evolução de "registro" pra "análise de manutenção"
+(aprovada depois de um relatório de impacto próprio — branch
+`feature/rcm-fmea`). Fundação de dados só, ainda sem tela nem uso em
+nenhuma O.S./laudo: 4 coleções novas, cadastráveis pelo administrador em
+cascata —
+
+```
+Componente (preso a um modelo do catálogo de equipamentos)
+  → Modo de falha (severidade/ocorrência/detecção, 1-10 — RPN = S×O×D)
+    → Causa
+      → Efeito
+```
+
+"Modelo do catálogo" é o mesmo conceito que já existe em Equipamentos: um
+item com `cliente_id` nulo (o catálogo reutilizável, não uma unidade já
+atrelada a um cliente específico). Qualquer autenticado da empresa lê
+(`GET /api/fmea/componentes`, `/modos-falha`, `/causas`, `/efeitos`, cada
+um filtrável pelo pai via query string — `?catalogo_id=`, `?componente_id=`
+etc.); só o administrador cadastra/edita/exclui. Exclusão é bloqueada
+quando já existe filho cadastrado embaixo (mesmo padrão de proteção já
+usado em Equipamentos/O.S.). RPN é sempre recalculado no servidor, nunca
+confiado ao que o cliente manda.
+
+Teste: `fmea-catalogo.e2e.test.js`.
+
+### Passo 2: `catalogo_id` nas unidades de equipamento
+
+Até aqui, uma unidade atrelada a um cliente (`equipamentos.cliente_id`
+preenchido) só sabia de qual modelo do catálogo ela veio por texto solto
+— `tipo`+`modelo` copiados na hora de atrelar, sem nenhuma referência de
+volta. Isso deixava o FMEA "por modelo de equipamento" frágil: um nome
+digitado diferente (ou editado depois) quebrava silenciosamente o
+casamento. Agora `POST /api/equipamentos/:id/atrelar` carimba
+`catalogo_id` direto, com o id de verdade do catálogo de origem — e uma
+migração de melhor esforço (idempotente, roda uma vez por registro) casa
+as unidades que já existiam antes desse campo existir, por `tipo`+`modelo`
+(sem diferenciar maiúsculas/minúsculas); quando não acha correspondência,
+fica `null` sem travar nada — a unidade simplesmente não aparece
+vinculada a um modelo específico até o administrador recadastrar.
+
+Teste: `equipamentos-catalogo-id.e2e.test.js`.
+
+### Passo 3: cascata no Laudo Técnico
+
+A cascata Componente→Modo de falha→Causa→Efeito chegou no formulário que
+o técnico preenche pra corretiva/preventiva/atendimento (o "Laudo
+Técnico", tipos listados em `TIPOS_LAUDO_TECNICO`) — **100% opcional**: o
+fluxo de sempre (laudo em texto livre, sem classificar nada) continua
+funcionando exatamente como antes, nada foi tornado obrigatório.
+
+- A tela só mostra os 4 selects quando o equipamento da O.S. está
+  vinculado a um modelo do catálogo (`catalogo_id`, passo 2); sem isso,
+  aparece um aviso explicando o motivo em vez dos campos.
+- Cada nível só habilita depois que o de cima foi escolhido (não dá pra
+  escolher uma Causa sem escolher o Modo de falha antes), e trocar um
+  nível de cima limpa os de baixo.
+- O servidor (`resolverCascataFmea` em `server.js`) valida de novo tudo
+  isso na hora de salvar — nunca confia só na validação da tela — e
+  resolve id **e** nome de cada nível escolhido, gravando os dois
+  (denormalizado, mesmo padrão já usado em todo o sistema pra exibir sem
+  precisar buscar o catálogo de novo).
+- A classificação aparece na tela de detalhe/aprovação da O.S. (entre
+  "Laudo técnico" e "Serviço realizado") e no PDF do laudo, só quando
+  preenchida — relatórios antigos (ou novos sem classificação) continuam
+  idênticos a como sempre foram.
+- Ficou de fora, por decisão já registrada no relatório de impacto: o
+  `relatorios_manutencao` (coleção paralela, sem `agenda_id`) e a
+  Biblioteca de Defeitos/Falhas, que continuam com `causa` em texto livre.
+
+Teste: `fmea-laudo-tecnico.e2e.test.js`.
+
+### Passo 4: telas de administração do catálogo FMEA
+
+Os 3 primeiros passos criaram a API e o uso da cascata no Laudo Técnico,
+mas até aqui só dava pra cadastrar Componente/Modo de falha/Causa/Efeito
+chamando a API direto — sem nenhuma tela. Esse passo fecha essa lacuna.
+
+Entrada: **Equipamentos > Cadastrar equipamento** (catálogo), botão
+**FMEA** em cada modelo (só visível pro administrador, mesmo padrão de
+Editar/Excluir ao lado). Dali em diante é um drill-down de 4 telas, mesmo
+padrão de navegação já usado em Plataforma → Cadastros → empresa
+individual:
+
+```
+Componentes (de um modelo)
+  → Modos de falha (de um componente) — formulário com Severidade/
+    Ocorrência/Detecção (1-10) e RPN calculado e mostrado na hora
+    → Causas (de um modo de falha)
+      → Efeitos (de uma causa)
+```
+
+Cada tela tem cadastrar/renomear/excluir; excluir é bloqueado pelo
+servidor quando já existe algo cadastrado embaixo (mesma regra da API,
+passo 1) — a tela só repassa a mensagem de erro.
+
+### Passo 5: Ranking por RPN e Pareto de falhas
+
+Tela nova **Equipamentos > FMEA — Ranking e Pareto** (administrador e
+supervisor, mesmo padrão de visualização somente leitura do supervisor
+já usado no resto do sistema):
+
+- **Ranking por RPN**: lista todos os modos de falha cadastrados
+  (qualquer modelo/componente), ordenada por RPN decrescente. O
+  servidor (`GET /api/fmea/modos-falha`, função `modosFalhaEnriquecidos`
+  em `server.js`) já devolve cada modo de falha com o nome do
+  componente, tipo/modelo do catálogo de origem e `ocorrencias_reais` —
+  quantos laudos técnicos de verdade (passo 3) usaram aquele modo de
+  falha. Esse mesmo campo agora aparece como sugestão no formulário de
+  edição do modo de falha (passo 4), ao lado do campo Ocorrência,
+  seguindo o pedido original de "Ocorrência pode ser sugerida pelo
+  número de falhas registradas" — é só uma sugestão em texto, o valor
+  do campo continua sendo digitado/ajustado pelo administrador.
+- **Pareto de falhas**: endpoint novo `GET /api/fmea/pareto?agrupar_por=componente|equipamento`,
+  que conta cada laudo técnico com a cascata FMEA preenchida, agrupando
+  por componente (padrão) ou pela unidade de equipamento específica, e
+  calcula percentual e percentual acumulado (a curva clássica de
+  Pareto). A tela tem um alternador Componente/Equipamento que troca o
+  agrupamento sem recarregar a página.
+
+Diferença entre os dois: o Ranking por RPN é sobre o **catálogo
+cadastrado** (existe mesmo que nunca tenha acontecido uma falha de
+verdade); o Pareto é sobre **falhas que realmente aconteceram**, só
+conta o que apareceu em algum laudo técnico aprovado ou não.
+
+### Passo 6: dashboard de KPIs do administrador
+
+Tela nova **Indicadores (KPIs)** (administrador e supervisor), endpoint
+`GET /api/kpis` → função `calcularKpis` em `server.js`. Todos os
+indicadores vêm das datas/horas que já existiam na Ordem de Serviço e no
+Laudo Técnico — nenhuma coleção nem campo de entrada novo. Ainda sem
+filtro de período/cliente/equipamento/técnico nem gráficos mensais (isso
+é o passo 7, que também traz a exportação Excel) — por enquanto é
+sempre o histórico completo.
+
+Fórmulas usadas (MVP, documentadas aqui porque são uma escolha de design,
+não uma verdade absoluta — podem ser refinadas mais pra frente):
+
+- **MTBF (dias)**: agrupa as O.S. do tipo `corretiva` por equipamento,
+  ordena por `criado_em` e calcula o intervalo de calendário entre cada
+  par de corretivas consecutivas do mesmo equipamento; MTBF é a média de
+  todos esses intervalos (de todos os equipamentos juntos). Equipamento
+  com só 1 corretiva não gera intervalo. Campo pronto pra, no futuro,
+  usar horas reais de operação (integração ESP32/CLP) em vez de tempo de
+  calendário — só troca o que entra no cálculo do intervalo, a fórmula
+  continua a mesma.
+- **MTTR (horas)**: para cada O.S. corretiva com Laudo Técnico
+  preenchido, horas de reparo = `data_conclusao - data_entrada` (os
+  mesmos campos que o técnico já preenche hoje); MTTR é a média dessas
+  horas.
+- **Disponibilidade (%)**: aproximação — soma todas as horas de reparo
+  (mesmas do MTTR) e divide pela soma, por equipamento com pelo menos
+  uma O.S., do tempo de calendário desde a primeira O.S. registrada até
+  agora. `1 - (horas paradas / horas totais da frota)`. É uma
+  aproximação por calendário, não disponibilidade real de operação —
+  mesma ressalva do MTBF.
+- **Backlog**: quantidade de O.S. ainda não finalizadas (`finalizada !==
+  true`) e a soma de quanto tempo (em horas) cada uma já está aberta
+  (desde `criado_em` até agora).
+- **% Preventiva × Corretiva**: proporção simples entre a quantidade de
+  O.S. do tipo `preventiva` e do tipo `corretiva` (os únicos 2 tipos que
+  usam o Laudo Técnico pra manutenção de verdade).
+- **Aderência ao plano**: **indisponível por enquanto** — depende dos
+  Planos de Manutenção, que são Fase 2 (só previstos no banco, ainda não
+  implementados). A tela mostra isso de forma explícita, sem fingir um
+  número que não existe.
+
+### Passo 7: filtros, gráficos mensais
+
+`GET /api/kpis` ganhou 4 filtros opcionais, todos combináveis entre si —
+`periodo_inicio`/`periodo_fim` (datas `AAAA-MM-DD`), `cliente_id`,
+`equipamento_id`, `tecnico_id` — aplicados sempre pela mesma função
+(`filtrarAgendaKpis`), pra nunca o dashboard e os gráficos discordarem
+sobre "o que entra na conta". Com período informado, a disponibilidade
+também passa a usar esse intervalo como janela (em vez de "desde a
+primeira O.S. até agora") — ver `calcularKpis`.
+
+Endpoint novo `GET /api/kpis/mensal` (mesmos 4 filtros) devolve uma
+série por mês — `preventivas`, `corretivas` e `mttr_horas` — usada nos 2
+gráficos novos da tela (Preventiva×Corretiva por mês, em barras; MTTR
+por mês, em linha). Sem filtro de período, cobre os últimos 12 meses;
+com período, cobre os meses do intervalo pedido (limite de 24 meses).
+Gráficos via **Chart.js**, carregado por CDN em `index.html` (mesmo
+padrão do jsPDF/jszip/docx já usados nos relatórios) — se o CDN estiver
+bloqueado/indisponível, a tela continua funcionando normalmente (cards e
+filtros), só os 2 gráficos não desenham.
+
+Ainda falta a exportação Excel — isso é o passo 8.
+
+### Passo 8: exportação Excel
+
+Botão **Exportar Excel** na tela de Indicadores (KPIs), ao lado de
+Aplicar filtros/Limpar. 100% client-side via **SheetJS**, carregado por
+CDN em `index.html` (mesmo padrão do jsPDF/jszip/docx já usados nos
+outros relatórios) — sem rota nova no servidor, já que `GET /api/kpis` e
+`GET /api/kpis/mensal` já têm tudo que a planilha usa. Gera um `.xlsx`
+com 2 abas, sempre no recorte de filtro atual (período/cliente/
+equipamento/técnico):
+
+- **Indicadores**: quais filtros estão aplicados (nomes legíveis, lidos
+  direto dos `<select>` da tela) + a mesma tabela de indicadores dos
+  cards (MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva,
+  aderência ao plano).
+- **Mensal**: a mesma série usada nos 2 gráficos (mês, preventivas,
+  corretivas, MTTR médio).
+
+Se o CDN do SheetJS não carregar (bloqueado ou sem internet), o botão
+mostra um aviso em vez de travar a tela — mesmo tratamento já usado pros
+gráficos (`desenharGraficosKpis`) quando o Chart.js não carrega.
+
+Com isso termina a Fase 1 do plano aprovado (FMEA estruturado + KPIs
+completos, com filtros/gráficos/exportação). A Fase 2 (criticidade de
+equipamento, planos de manutenção, custos, alertas, importação/
+exportação padrão SAP PM) fica só prevista no banco, sem implementação —
+conforme o escopo combinado desde a Etapa 0.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
