@@ -15999,6 +15999,15 @@ const TAG_STATUS_ATIVIDADE = {
   os: ['O.S. agendada', 'blue'], folga: ['Folga', 'purple'], justificado: ['Justificado', 'green'],
   pendente: ['Pendente', 'amber'], futuro: ['—', 'gray'],
 };
+// status de cada atividade dentro de um dia justificado (não confundir com o status do dia acima)
+// — pedido do usuário: "tipo da atividade e status se foi concluído, está em andamento ou pendente".
+const TAG_STATUS_ATIVIDADE_ITEM = { pendente: ['Pendente', 'amber'], em_andamento: ['Em andamento', 'blue'], concluido: ['Concluído', 'green'] };
+
+function resumoAtividadeHtml(a) {
+  const [stTexto, stCor] = TAG_STATUS_ATIVIDADE_ITEM[a.status] || ['', 'gray'];
+  const horario = a.inicio && a.fim ? `${esc(a.inicio)}–${esc(a.fim)}` : a.inicio ? `a partir de ${esc(a.inicio)}` : 'sem horário';
+  return `<div style="margin-bottom:4px;">${tag(stTexto, stCor)} <strong>${esc(a.tipo)}</strong> (${horario}) — ${esc(a.descricao)}</div>`;
+}
 
 let atividadesEquipeMesAtual = new Date().toISOString().slice(0, 7);
 
@@ -16059,7 +16068,7 @@ async function abrirDetalheAtividadesTecnico(tecnicoId, tecnicoNome) {
         <tr>
           <td data-label="Dia">${fmtData(d.data)}</td>
           <td data-label="Status">${tag(TAG_STATUS_ATIVIDADE[d.status][0], TAG_STATUS_ATIVIDADE[d.status][1])}</td>
-          <td data-label="Atividades">${d.atividades ? d.atividades.map((a) => `<div>${esc(a.inicio)}–${esc(a.fim)} — ${esc(a.descricao)}</div>`).join('') : '—'}</td>
+          <td data-label="Atividades">${d.atividades ? d.atividades.map((a) => resumoAtividadeHtml(a)).join('') : '—'}</td>
         </tr>`).join('')}
     </table></div>`;
 }
@@ -16513,7 +16522,7 @@ function linhaAtividadeDia(d) {
       </div>
       ${d.status === 'justificado' && d.atividades && !aberto ? `
         <div style="margin-top:8px; font-size:13px; color:var(--ink-soft);">
-          ${d.atividades.map((a) => `<div>${esc(a.inicio)}–${esc(a.fim)} — ${esc(a.descricao)}</div>`).join('')}
+          ${d.atividades.map((a) => resumoAtividadeHtml(a)).join('')}
         </div>` : ''}
       ${aberto ? formAtividadeHtml(d.data) : ''}
     </div>`;
@@ -16524,7 +16533,7 @@ function abrirFormAtividade(diaISO) {
   atividadesDiaAberto = diaISO;
   atividadesDraftLinhas = dia && dia.atividades && dia.atividades.length
     ? dia.atividades.map((a) => ({ ...a }))
-    : [{ inicio: '', fim: '', descricao: '' }];
+    : [{ tipo: '', status: 'concluido', inicio: '', fim: '', descricao: '' }];
   renderListaAtividades();
 }
 
@@ -16550,16 +16559,24 @@ function renderLinhasAtividade() {
     <div class="step-item">
       <div class="step-main">
         <div class="step-num">${i + 1}</div>
+        <input placeholder="Tipo (ex.: Manutenção, Treinamento...)" value="${esc(a.tipo || '')}" style="flex:1.4;" oninput="atividadesDraftLinhas[${i}].tipo=this.value;">
+        <select style="flex:0 0 150px;" onchange="atividadesDraftLinhas[${i}].status=this.value;">
+          <option value="concluido" ${a.status === 'concluido' ? 'selected' : ''}>Concluído</option>
+          <option value="em_andamento" ${a.status === 'em_andamento' ? 'selected' : ''}>Em andamento</option>
+          <option value="pendente" ${a.status === 'pendente' ? 'selected' : ''}>Pendente</option>
+        </select>
+        ${atividadesDraftLinhas.length > 1 ? `<button class="step-rm" onclick="removerLinhaAtividade(${i})">×</button>` : ''}
+      </div>
+      <div class="step-main" style="margin-top:8px;">
         <input type="time" value="${esc(a.inicio || '')}" style="flex:0 0 110px;" oninput="atividadesDraftLinhas[${i}].inicio=this.value;">
         <input type="time" value="${esc(a.fim || '')}" style="flex:0 0 110px;" oninput="atividadesDraftLinhas[${i}].fim=this.value;">
         <input placeholder="O que você fez" value="${esc(a.descricao || '')}" style="flex:2;" oninput="atividadesDraftLinhas[${i}].descricao=this.value;">
-        ${atividadesDraftLinhas.length > 1 ? `<button class="step-rm" onclick="removerLinhaAtividade(${i})">×</button>` : ''}
       </div>
     </div>`).join('');
 }
 
 function adicionarLinhaAtividade() {
-  atividadesDraftLinhas.push({ inicio: '', fim: '', descricao: '' });
+  atividadesDraftLinhas.push({ tipo: '', status: 'concluido', inicio: '', fim: '', descricao: '' });
   document.getElementById('atividade-linhas').innerHTML = renderLinhasAtividade();
 }
 

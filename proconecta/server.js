@@ -281,25 +281,41 @@ function diasDoMesTecnico(data, empresaId, tecnicoId, mesISO) {
   return dias;
 }
 
-// valida a lista de atividades do POST: cada uma precisa de início/fim (HH:MM, início antes do
-// fim) e uma descrição — e, juntas, não podem se sobrepor (uma atividade por vez, como no dia
-// real de trabalho). Devolve { erro } ou { atividades } já normalizadas e ordenadas por início.
+// pedido do usuário: cada atividade também tem um tipo (o que é, ex.: "manutenção", texto livre
+// do técnico) e um status — pendente (ainda não começou), em andamento ou concluído — porque uma
+// atividade não programada (ex.: consertar algo no próprio setor) pode continuar depois do dia em
+// que o técnico está preenchendo. Por isso o horário também muda de exigência conforme o status:
+// concluída pede início e fim; em andamento só pede início (ainda não tem fim); pendente não
+// exige nenhum dos dois (pode nem ter começado).
+const STATUS_ATIVIDADE_NAO_PROGRAMADA = ['pendente', 'em_andamento', 'concluido'];
+
+// valida a lista de atividades do POST: tipo e descrição sempre obrigatórios; início/fim conforme
+// o status (ver comentário acima); entre as que têm início E fim preenchidos, não podem se
+// sobrepor (uma atividade por vez, como no dia real de trabalho). Devolve { erro } ou
+// { atividades } já normalizadas, na mesma ordem em que o técnico informou.
 function validarAtividadesNaoProgramadas(lista) {
   if (!Array.isArray(lista) || !lista.length) return { erro: 'Informe ao menos uma atividade.' };
   const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
   const normalizadas = [];
   for (const a of lista) {
-    const inicio = String((a || {}).inicio || '');
-    const fim = String((a || {}).fim || '');
+    const tipo = String((a || {}).tipo || '').trim();
+    const status = (a || {}).status;
+    const inicio = String((a || {}).inicio || '') || null;
+    const fim = String((a || {}).fim || '') || null;
     const descricao = String((a || {}).descricao || '').trim();
-    if (!HORA_RE.test(inicio) || !HORA_RE.test(fim)) return { erro: 'Informe início e fim válidos (HH:MM) em todas as atividades.' };
-    if (inicio >= fim) return { erro: 'O horário de início precisa ser antes do horário de fim em todas as atividades.' };
+    if (!tipo) return { erro: 'Informe o tipo de cada atividade.' };
+    if (!STATUS_ATIVIDADE_NAO_PROGRAMADA.includes(status)) return { erro: 'Informe o status (pendente, em andamento ou concluído) de cada atividade.' };
     if (!descricao) return { erro: 'Descreva o que foi feito em todas as atividades.' };
-    normalizadas.push({ inicio, fim, descricao });
+    if (inicio && !HORA_RE.test(inicio)) return { erro: 'Horário de início inválido em alguma atividade.' };
+    if (fim && !HORA_RE.test(fim)) return { erro: 'Horário de fim inválido em alguma atividade.' };
+    if (status === 'concluido' && (!inicio || !fim)) return { erro: 'Informe início e fim das atividades já concluídas.' };
+    if (status === 'em_andamento' && !inicio) return { erro: 'Informe ao menos o horário de início das atividades em andamento.' };
+    if (inicio && fim && inicio >= fim) return { erro: 'O horário de início precisa ser antes do horário de fim em todas as atividades.' };
+    normalizadas.push({ tipo, status, inicio, fim, descricao });
   }
-  normalizadas.sort((a, b) => a.inicio.localeCompare(b.inicio));
-  for (let i = 1; i < normalizadas.length; i++) {
-    if (normalizadas[i].inicio < normalizadas[i - 1].fim) return { erro: 'As atividades não podem ter horários sobrepostos.' };
+  const comHorario = normalizadas.filter((a) => a.inicio && a.fim).sort((a, b) => a.inicio.localeCompare(b.inicio));
+  for (let i = 1; i < comHorario.length; i++) {
+    if (comHorario[i].inicio < comHorario[i - 1].fim) return { erro: 'As atividades não podem ter horários sobrepostos.' };
   }
   return { atividades: normalizadas };
 }
