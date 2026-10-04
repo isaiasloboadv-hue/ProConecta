@@ -13,7 +13,7 @@
 //   EMAIL_SMTP_PROVEDOR  (opcional — "gmail" ou "hotmail"; se não definir, é
 //                         adivinhado a partir do domínio do EMAIL_SMTP_USER)
 //   EMAIL_REMETENTE      (opcional — nome que aparece pro destinatário, ex:
-//                         "Pro Conecta <contato@hotmail.com>"; usa o próprio
+//                         "Nexor Connect <contato@hotmail.com>"; usa o próprio
 //                         EMAIL_SMTP_USER se não definir)
 //   APP_URL              (ex: "https://proconecta.onrender.com" — sem isso o link do
 //                         convite/ativação aponta pro endereço interno do servidor,
@@ -87,7 +87,7 @@ async function obterTransporte() {
 // do dono do sistema, cada empresa não tem conta de e-mail própria (isso exigiria guardar
 // credencial de e-mail por empresa, um dado sensível) — só aparece com o nome dela na frente.
 function remetente(nomeEmpresa) {
-  const base = process.env.EMAIL_REMETENTE || process.env.EMAIL_SMTP_USER || 'Pro Conecta <onboarding@proconecta.com.br>';
+  const base = process.env.EMAIL_REMETENTE || process.env.EMAIL_SMTP_USER || 'Nexor Connect <onboarding@proconecta.com.br>';
   if (!nomeEmpresa) return base;
   const m = /^(.*)<(.+)>$/.exec(base);
   const endereco = m ? m[2].trim() : base.trim();
@@ -170,10 +170,10 @@ async function enviar({ to, assunto, corpoHtml, attachments, logSimulado, nomeEm
 // nomeEmpresa (opcional): nome que aparece como remetente pro destinatário — ver remetente()
 // acima. Quem chama (server.js) passa o nome da empresa de quem está convidando/enviando.
 async function enviarConvite({ nome, email, link, nomeEmpresa }) {
-  const assunto = 'Seu acesso ao Pro Conecta';
+  const assunto = 'Seu acesso ao Nexor Connect';
   const corpoHtml = `
     <p>Olá, ${nome}.</p>
-    <p>Você foi cadastrado(a) no <b>Pro Conecta</b>. Para ativar sua conta e definir sua senha, acesse o link abaixo:</p>
+    <p>Você foi cadastrado(a) no <b>Nexor Connect</b>. Para ativar sua conta e definir sua senha, acesse o link abaixo:</p>
     <p><a href="${link}">${link}</a></p>
     <p>Se você não esperava este e-mail, pode ignorá-lo.</p>
   `;
@@ -185,7 +185,7 @@ async function enviarConvite({ nome, email, link, nomeEmpresa }) {
 }
 
 async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa }) {
-  const assunto = 'Relatório técnico — Pro Conecta';
+  const assunto = 'Relatório técnico — Nexor Connect';
   const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>`;
   const resultado = await enviar({
     to: emails, assunto, corpoHtml, nomeEmpresa,

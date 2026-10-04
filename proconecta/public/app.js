@@ -1,4 +1,4 @@
-// app.js — frontend real do Pro Conecta. Tudo aqui chama a API de verdade (fetch),
+// app.js — frontend real do Nexor Connect. Tudo aqui chama a API de verdade (fetch),
 // sem dados inventados: o que aparece na tela veio do servidor.
 
 let TOKEN = localStorage.getItem('pc_token') || null;
@@ -1035,7 +1035,7 @@ function conteudoEmpresaPlataforma(e) {
         <div><label>Site</label><input id="pe-dados-site-${e.id}" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
         <div><label>WhatsApp</label><input id="pe-dados-whatsapp-${e.id}" value="${esc(e.whatsapp || '')}"></div>
         <div><label>Telefone</label><input id="pe-dados-telefone-${e.id}" value="${esc(e.telefone || '')}"></div>
-        <div><label>Cor primária</label><input type="color" id="pe-dados-corprim-${e.id}" value="${esc(e.cor_primaria || '#0A2647')}"></div>
+        <div><label>Cor primária</label><input type="color" id="pe-dados-corprim-${e.id}" value="${esc(e.cor_primaria || '#0B2D4F')}"></div>
         <div><label>Cor secundária</label><input type="color" id="pe-dados-corsec-${e.id}" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
         <div><label>Bônus de viagem — valor/diária (R$)</label><input type="number" min="0" step="0.01" id="pe-dados-valorbonus-${e.id}" value="${esc(e.valor_bonus_viagem ?? 200)}"></div>
         <div><label>Bônus de viagem — limite diárias/mês</label><input type="number" min="0" step="1" id="pe-dados-limitebonus-${e.id}" value="${esc(e.limite_viagens_bonus_mes ?? 7)}"></div>
@@ -1296,7 +1296,7 @@ async function renderMinhaEmpresa() {
         <div><label>Site</label><input id="me-site" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
         <div><label>WhatsApp</label><input id="me-whatsapp" value="${esc(e.whatsapp || '')}"></div>
         <div><label>Telefone</label><input id="me-telefone" value="${esc(e.telefone || '')}"></div>
-        <div><label>Cor primária</label><input type="color" id="me-corprim" value="${esc(e.cor_primaria || '#0A2647')}"></div>
+        <div><label>Cor primária</label><input type="color" id="me-corprim" value="${esc(e.cor_primaria || '#0B2D4F')}"></div>
         <div><label>Cor secundária</label><input type="color" id="me-corsec" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
       </div>
       <h2>Valores padrão de bônus de viagem</h2>
@@ -3115,7 +3115,7 @@ const assinaturaEstado = {};
 function montarAssinatura(chave) {
   const canvas = document.getElementById('rc-canvas-' + chave);
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   assinaturaEstado[chave] = { desenhando: false, temTraco: false };
   if (relatorioDraft['assinatura_' + chave + '_img']) {
     const img = new Image();
@@ -3181,7 +3181,7 @@ function ampliarAssinatura(chave) {
     </div>`;
   const canvas = document.getElementById('modal-canvas');
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   let desenhando = false;
   function pos(e) {
     const r = canvas.getBoundingClientRect();
@@ -3264,7 +3264,7 @@ function gerarPdfRelatorio(d, item) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const margem = 40; let y = 50;
   const largura = doc.internal.pageSize.getWidth() - margem * 2;
-  function titulo(t) { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71); doc.text(t, margem, y); y += 18; doc.setDrawColor(20, 103, 214); doc.line(margem, y - 12, margem + largura, y - 12); }
+  function titulo(t) { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(11, 45, 79); doc.text(t, margem, y); y += 18; doc.setDrawColor(25, 118, 210); doc.line(margem, y - 12, margem + largura, y - 12); }
   function linha(rotulo, valor) {
     if (y > 760) { doc.addPage(); y = 50; }
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(74, 85, 104); doc.text(rotulo + ':', margem, y);
@@ -3273,8 +3273,8 @@ function gerarPdfRelatorio(d, item) {
     doc.text(linhas, margem + 130, y);
     y += Math.max(14, linhas.length * 12);
   }
-  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(10, 38, 71);
-  doc.text('Relatório Técnico — Pro Conecta', margem, y); y += 22;
+  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(11, 45, 79);
+  doc.text('Relatório Técnico — Nexor Connect', margem, y); y += 22;
   doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(74, 85, 104);
   doc.text(`Elaborado: ${new Date().toLocaleDateString('pt-BR')} · Setor: ${USER.setor || 'Suporte Técnico'}`, margem, y); y += 24;
 
@@ -5360,11 +5360,11 @@ async function salvarEdicaoProcedimento(id, i, origem) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
-// paleta da marca Pro Conecta (mesmas cores de style.css), em RGB pra uso no jsPDF
+// paleta da marca Nexor Connect (mesmas cores de style.css), em RGB pra uso no jsPDF
 const PDF_COR = {
-  navy: [10, 38, 71], navyDeep: [7, 26, 51], blue: [20, 103, 214], blueBright: [46, 134, 255],
-  bluePale: [234, 242, 252], ink: [16, 24, 38], inkSoft: [74, 85, 104], line: [220, 228, 239],
-  green: [23, 114, 69], greenBg: [225, 243, 233], red: [179, 38, 30], redBg: [250, 227, 225], white: [255, 255, 255],
+  navy: [11, 45, 79], navyDeep: [8, 32, 57], blue: [25, 118, 210], blueBright: [56, 169, 232],
+  bluePale: [223, 236, 249], ink: [23, 43, 58], inkSoft: [102, 120, 138], line: [217, 225, 232],
+  green: [25, 135, 84], greenBg: [223, 238, 231], red: [214, 69, 69], redBg: [249, 229, 229], white: [255, 255, 255],
   bege: [242, 233, 216],
 };
 
@@ -5402,7 +5402,7 @@ async function abrirPdfBiblioteca(tipo, i) {
   }
 }
 
-// PDF em duas colunas (ficha técnica ilustrada), com a identidade visual do Pro Conecta:
+// PDF em duas colunas (ficha técnica ilustrada), com a identidade visual do Nexor Connect:
 // faixa de cabeçalho com logo + nome, coluna esquerda tintada com foto de destaque/ferramentas/
 // periodicidade/última atualização, coluna direita com o conteúdo completo.
 function gerarPdfBiblioteca(r, tipo, logoDataUri) {
@@ -5424,7 +5424,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   }
   function cor(c) { return c; }
 
-  // ----- moldura + faixa de cabeçalho (navy, com o logo e o nome Pro Conecta) -----
+  // ----- moldura + faixa de cabeçalho (navy, com o logo e o nome Nexor Connect) -----
   doc.setFillColor(...PDF_COR.bluePale);
   doc.rect(0, 0, pageW, pageH, 'F');
   const alturaFaixa = 56;
@@ -5435,9 +5435,9 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   }
   const xNome = logoDataUri ? margem + 42 : margem;
   doc.setFontSize(17); doc.setFont(undefined, 'bold');
-  doc.setTextColor(...PDF_COR.blueBright); doc.text('Pro', xNome, 30);
-  const wPro = doc.getTextWidth('Pro ');
-  doc.setTextColor(...PDF_COR.white); doc.text('Conecta', xNome + wPro, 30);
+  doc.setTextColor(...PDF_COR.blueBright); doc.text('Nexor', xNome, 30);
+  const wPro = doc.getTextWidth('Nexor ');
+  doc.setTextColor(...PDF_COR.white); doc.text('Connect', xNome + wPro, 30);
   doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text('Biblioteca técnica', xNome, 44);
 
@@ -7620,7 +7620,7 @@ const assinaturaEstadoPreventiva = {};
 function montarAssinaturaPreventiva(chave) {
   const canvas = document.getElementById('rp-canvas-' + chave);
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   assinaturaEstadoPreventiva[chave] = { desenhando: false, temTraco: false };
   if (relatorioPreventivaDraft['assinatura_' + chave + '_img']) {
     const img = new Image();
@@ -7684,7 +7684,7 @@ function ampliarAssinaturaPreventiva(chave) {
     </div>`;
   const canvas = document.getElementById('modal-canvas');
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   let desenhando = false;
   function pos(e) {
     const r = canvas.getBoundingClientRect();
@@ -8052,7 +8052,7 @@ const assinaturaEstadoCorretiva = {};
 function montarAssinaturaCorretiva(chave) {
   const canvas = document.getElementById('rcm-canvas-' + chave);
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   assinaturaEstadoCorretiva[chave] = { desenhando: false, temTraco: false };
   if (relatorioCorretivaDraft['assinatura_' + chave + '_img']) {
     const img = new Image();
@@ -8116,7 +8116,7 @@ function ampliarAssinaturaCorretiva(chave) {
     </div>`;
   const canvas = document.getElementById('modal-canvas');
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   let desenhando = false;
   function pos(e) {
     const r = canvas.getBoundingClientRect();
@@ -8963,7 +8963,7 @@ const assinaturaEstadoAceite = {};
 function montarAssinaturaAceite(chave) {
   const canvas = document.getElementById('rae-canvas-' + chave);
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   assinaturaEstadoAceite[chave] = { desenhando: false, temTraco: false };
   if (relatorioAceiteDraft['assinatura_' + chave + '_img']) {
     const img = new Image();
@@ -9027,7 +9027,7 @@ function ampliarAssinaturaAceite(chave) {
     </div>`;
   const canvas = document.getElementById('modal-canvas');
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   let desenhando = false;
   function pos(e) {
     const r = canvas.getBoundingClientRect();
@@ -9472,7 +9472,7 @@ const assinaturaEstadoEntregaTeste = {};
 function montarAssinaturaEntregaTeste() {
   const canvas = document.getElementById('ret-canvas-cliente');
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   assinaturaEstadoEntregaTeste.temTraco = false;
   if (relatorioEntregaTesteDraft.assinatura_cliente_img) {
     const img = new Image();
@@ -9536,7 +9536,7 @@ function ampliarAssinaturaEntregaTeste() {
     </div>`;
   const canvas = document.getElementById('modal-canvas');
   const ctx = canvas.getContext('2d');
-  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0A2647';
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
   let desenhando = false;
   function pos(e) {
     const r = canvas.getBoundingClientRect();
@@ -13684,8 +13684,8 @@ function desenharGraficosKpis(meses, kpis) {
     data: {
       labels,
       datasets: [
-        { label: 'Preventiva', data: meses.map((m) => m.preventivas), backgroundColor: '#C15A22' },
-        { label: 'Corretiva', data: meses.map((m) => m.corretivas), backgroundColor: '#1467D6' },
+        { label: 'Preventiva', data: meses.map((m) => m.preventivas), backgroundColor: '#E67E22' },
+        { label: 'Corretiva', data: meses.map((m) => m.corretivas), backgroundColor: '#1976D2' },
       ],
     },
     options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
@@ -13704,7 +13704,7 @@ function desenharGraficosKpis(meses, kpis) {
         labels: ['Preventiva', 'Corretiva'],
         datasets: [{
           data: [kpis.percentual_preventiva, kpis.percentual_corretiva],
-          backgroundColor: ['#C15A22', '#1467D6'],
+          backgroundColor: ['#E67E22', '#1976D2'],
           borderColor: '#fff',
           borderWidth: 2,
         }],
@@ -13734,7 +13734,7 @@ function desenharGraficosKpis(meses, kpis) {
       const { ctx } = chart;
       const pontos = chart.getDatasetMeta(0).data;
       ctx.save();
-      ctx.fillStyle = '#1467D6';
+      ctx.fillStyle = '#1976D2';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
       pontos.forEach((ponto, i) => {
@@ -13750,8 +13750,8 @@ function desenharGraficosKpis(meses, kpis) {
     data: {
       labels,
       datasets: [{
-        label: 'MTTR (h)', data: mttrValores, borderColor: '#1467D6', backgroundColor: 'rgba(20,103,214,.15)',
-        fill: true, spanGaps: true, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: '#1467D6',
+        label: 'MTTR (h)', data: mttrValores, borderColor: '#1976D2', backgroundColor: 'rgba(25,118,210,.15)',
+        fill: true, spanGaps: true, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: '#1976D2',
       }],
     },
     options: { responsive: true, layout: { padding: { top: mostrarRotulosMttr ? 20 : 0 } }, scales: { y: { beginAtZero: true } } },
@@ -16015,7 +16015,7 @@ function iconeCarinhaFeliz(cor) {
 }
 function iconeEscala(tipo) {
   if (tipo === 'dsr') return iconeCarinhaFeliz('#F5A623');
-  if (tipo === 'banco_horas') return iconeCarinhaFeliz('#1467D6');
+  if (tipo === 'banco_horas') return iconeCarinhaFeliz('#1976D2');
   if (tipo === 'home_office') return '🏠';
   if (tipo === 'ferias') return '🏖️';
   return '';
@@ -16129,7 +16129,7 @@ function renderMiniCalendarioEscala() {
     ${pessoa ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-10px;">Dias com marcação em cinza mais claro vêm de uma folga coletiva — escolher outro tipo aqui cria uma exceção só pra ${esc(pessoa.nome)}.</p>` : ''}
     <div class="escala-cal-legenda">
       <span>${iconeCarinhaFeliz('#F5A623')} DSR</span>
-      <span>${iconeCarinhaFeliz('#1467D6')} Banco de horas</span>
+      <span>${iconeCarinhaFeliz('#1976D2')} Banco de horas</span>
       <span>🏠 Home office</span>
       <span>🏖️ Férias</span>
       <span class="escala-cal-legenda-feriado">Feriado</span>
@@ -16185,7 +16185,7 @@ function clicarDiaEscala(diaISO) {
       ${!ehGeral && coletivaDoDia && !individualDoDia ? `<p style="color:var(--amber); font-size:12.5px;">Esse dia já é folga coletiva (${esc(LABEL_ESCALA_FOLGA_FRONT[coletivaDoDia.tipo])}). Escolher um tipo aqui cria uma exceção só pra ${esc(pessoa.nome)}.</p>` : ''}
       <div class="escala-opcoes">
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'dsr')">${iconeCarinhaFeliz('#F5A623')} DSR</button>
-        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'banco_horas')">${iconeCarinhaFeliz('#1467D6')} Banco de horas</button>
+        <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'banco_horas')">${iconeCarinhaFeliz('#1976D2')} Banco de horas</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'home_office')">🏠 Home office</button>
         <button class="btn-outline-sm" onclick="definirEscalaDia('${diaISO}', 'ferias')">🏖️ Férias</button>
       </div>

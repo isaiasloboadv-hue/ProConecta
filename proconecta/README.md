@@ -1,4 +1,4 @@
-# Pro Conecta — Fase 1 (backend real)
+# Nexor Connect — Fase 1 (backend real)
 
 Sistema real (não é mais protótipo clicável): login de verdade, banco de dados
 que persiste em disco, e as regras de permissão por papel realmente aplicadas
@@ -77,7 +77,7 @@ lugar público (um commit antigo, um chat, etc.).
   - **Ver relatório antes de aprovar**: na tela Ordem de Serviço, clicar num card abre o conteúdo completo (dados do atendimento, checklist item a item, observações, aceite, avaliação e as assinaturas do cliente e do técnico). Quando o técnico marcou o atendimento como relevante para a biblioteca, isso fica destacado ali e aparece a opção "Aprovar e incluir na biblioteca" — ver detalhes em Ordem de Serviço, acima.
 - **Biblioteca técnica (Manual de Procedimentos e Defeitos/Falhas)**: técnico ou administrador envia um registro → fica "Em análise". Na fila de aprovação, cada item pendente aparece fechado, mostrando só um botão **Abrir** — clicar nele expande o conteúdo completo (nos procedimentos, com as fotos de cada etapa, não só a contagem) e três ações: **Aprovar** (publica), **Excluir** (remove definitivamente) ou **Sugerir edição** (comentário obrigatório, volta pro autor com status "Alteração sugerida" até ser corrigido e reenviado). Procedimentos têm passo a passo numerado com uma ou mais fotos por etapa. Cada caso mostra o autor no rodapé, e há um **ranking de técnicos** (submenu da Biblioteca) com quem mais contribuiu com casos e procedimentos aprovados.
 - **Acessar biblioteca (busca primeiro)**: tanto em Defeitos/Falhas quanto em Manual de Procedimentos, a tela abre só com os campos de pesquisa (equipamento, palavra-chave e, nos defeitos, número de série) — nenhum resultado aparece antes de preencher algo e clicar em **Buscar**. Depois de buscar, aparece uma lista compacta (apenas título, equipamento e, nos defeitos, número de série); clicar num item abre uma **tela separada** com a informação individual completa (nos defeitos: sintoma/causa/solução; nos procedimentos: precauções, ferramentas e o passo a passo com as fotos de cada etapa). O botão "‹ Voltar" retorna pra lista mantendo o filtro preenchido. Quando um caso de Defeitos/Falhas é criado a partir de um Laudo Técnico aprovado ("Aprovar e incluir na biblioteca"), as fotos do relatório fotográfico do laudo agora acompanham o caso e aparecem na tela de detalhe. Na lista compacta, o administrador também vê um botão **Excluir** ao lado do "Abrir" (remove o caso definitivamente, sem precisar abrir o detalhe) — técnico e cliente veem só o "Abrir".
-  - **Abrir PDF**: em ambas as telas, gera na hora (com `jsPDF`, no navegador) uma ficha técnica ilustrada de duas colunas com a identidade visual do Pro Conecta — faixa de cabeçalho azul-marinho com o logo e o nome "Pro Conecta" e uma tag colorida (vermelha para defeito, verde para procedimento); coluna esquerda tintada com foto de destaque, ferramentas/periodicidade (procedimento) ou nº de série (defeito), e a **última atualização** (data e quem atualizou); coluna direita com o conteúdo completo, títulos de seção com o mesmo azul da marca e as fotos de cada etapa/relatório fotográfico. Abre numa nova aba.
+  - **Abrir PDF**: em ambas as telas, gera na hora (com `jsPDF`, no navegador) uma ficha técnica ilustrada de duas colunas com a identidade visual do Nexor Connect — faixa de cabeçalho azul-marinho com o logo e o nome "Nexor Connect" e uma tag colorida (vermelha para defeito, verde para procedimento); coluna esquerda tintada com foto de destaque, ferramentas/periodicidade (procedimento) ou nº de série (defeito), e a **última atualização** (data e quem atualizou); coluna direita com o conteúdo completo, títulos de seção com o mesmo azul da marca e as fotos de cada etapa/relatório fotográfico. Abre numa nova aba.
   - **Editar / Solicitar edição**: o administrador vê um botão **Editar** ao lado do "Abrir PDF" — altera o caso já publicado diretamente, sem passar pela fila de aprovação, e atualiza a data/autor da última atualização (mostrada no PDF). Qualquer técnico, por não ser dono do caso, vê em vez disso um botão **Solicitar edição** — descreve o que precisa ser corrigido e o administrador é notificado no sino; a tela **Biblioteca > Solicitações de edição** (só administrador) lista os pedidos pendentes com o comentário de quem pediu, e abrir um deles já mostra o botão Editar com o pedido destacado.
 - **Cadastro de usuários por convite**: administrador cadastra nome/cargo/setor/e-mail/papel — o sistema gera um link de primeiro acesso (`/ativar.html?token=...`) onde a pessoa define a própria senha e ativa a conta (status "convite enviado" → "ativo"). Sem provedor de e-mail configurado, o link fica visível na tela para o admin copiar/repassar; veja `email.js` para plugar um provedor real.
 - **Abertura de chamado**: cliente escolhe tipo de serviço, equipamento e descreve o problema; fica com status "Aberto" e aparece na lista dos próprios chamados.
@@ -415,7 +415,7 @@ gerada separadamente:
 - **Gmail**: a conta precisa ter a verificação em duas etapas ativada
   (myaccount.google.com → Segurança). Depois, em
   [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords),
-  crie uma senha de app (qualquer nome, ex: "Pro Conecta") — copie os 16
+  crie uma senha de app (qualquer nome, ex: "Nexor Connect") — copie os 16
   caracteres gerados, sem espaços.
 - **Hotmail/Outlook**: em
   [account.microsoft.com/security](https://account.microsoft.com/security) →
@@ -752,7 +752,7 @@ a partir de Solicitação de Atendimento.
 
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
-O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
+O cliente inicia um atendimento pelo chat dentro do Nexor Connect (menu **Atendimento**) ou
 mandando mensagem no WhatsApp da empresa — os dois caem no mesmo "chamado" e na mesma conversa.
 Um assistente de IA responde primeiro, consultando a Biblioteca de Defeitos/Falhas e
 Procedimentos já aprovada no sistema (nunca inventa solução fora dela — ver `ia.js`); se não

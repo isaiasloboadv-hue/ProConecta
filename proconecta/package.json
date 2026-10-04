@@ -1,7 +1,7 @@
 {
   "name": "proconecta",
   "version": "1.0.0",
-  "description": "Pro Conecta - Fase 1 (sem dependências no modo arquivo; usa 'pg' só quando DATABASE_URL está configurada)",
+  "description": "Nexor Connect - Fase 1 (sem dependências no modo arquivo; usa 'pg' só quando DATABASE_URL está configurada)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -1,5 +1,5 @@
 // ia.js — assistente de primeiro nível do atendimento: recebe a mensagem do cliente (vinda do
-// chat dentro do ProConecta ou do WhatsApp — o chamado é o mesmo objeto nos dois casos), consulta
+// chat dentro do Nexor Connect ou do WhatsApp — o chamado é o mesmo objeto nos dois casos), consulta
 // a Biblioteca de Defeitos/Procedimentos já aprovada (nunca inventa solução) e conduz passo a
 // passo usando a API da Anthropic (Claude). Se não resolver, escala pra fila de atendimento
 // técnico. Módulo à parte, reaproveitado tanto pelo chat do app (server.js) quanto pelo
@@ -123,7 +123,7 @@ const FERRAMENTAS = [
 ];
 
 function montarSystemPrompt(nomeEmpresa) {
-  return `Você é o assistente de suporte técnico da ${nomeEmpresa}, atendendo o cliente pelo chat do Pro Conecta (pode ser o app ou o WhatsApp — não faz diferença pra você).
+  return `Você é o assistente de suporte técnico da ${nomeEmpresa}, atendendo o cliente pelo chat do Nexor Connect (pode ser o app ou o WhatsApp — não faz diferença pra você).
 
 Seu trabalho: ajudar o cliente a resolver o problema do equipamento dele, passo a passo, consultando a ferramenta buscar_biblioteca — que é a base de conhecimento real da empresa (defeitos, causas e soluções já registrados pelos técnicos). NUNCA invente uma causa ou solução que não esteja na biblioteca.
 

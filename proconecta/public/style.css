@@ -1,29 +1,33 @@
 :root{
-  --navy:#0A2647;
-  --navy-deep:#071A33;
-  --blue:#1467D6;
-  --blue-bright:#2E86FF;
-  --blue-pale:#EAF2FC;
-  --blue-pale-2:#F5F9FE;
-  --ink:#101826;
-  --ink-soft:#4A5568;
-  --line:#DCE4EF;
+  /* rebranding Pro Conecta -> Nexor Connect: valores trocados pelos da identidade nova (ver
+     brand board enviado pelo usuário), nomes das vars mantidos de propósito pra não exigir
+     tocar em cada ponto de uso no resto do CSS/JS — só a cor por trás muda. */
+  --navy:#0B2D4F;
+  --navy-deep:#082039;
+  --blue:#1976D2;
+  --blue-bright:#38A9E8;
+  --blue-pale:#DFECF9;
+  --blue-pale-2:#F5F7FA;
+  --ink:#172B3A;
+  --ink-soft:#66788A;
+  --line:#D9E1E8;
   --white:#FFFFFF;
   --amber:#C7860A;
   --amber-bg:#FCF1DA;
-  --green:#177245;
-  --green-bg:#E1F3E9;
-  --orange:#C15A22;
-  --orange-bg:#FBE8DA;
-  --red:#B3261E;
-  --red-bg:#FBE4E2;
+  --green:#198754;
+  --green-bg:#DFEEE7;
+  --orange:#E67E22;
+  --orange-bg:#FCEDE0;
+  --red:#D64545;
+  --red-bg:#F9E5E5;
   /* paleta de tipo de serviço (passo "estilo sistema") — validada contra daltonismo
      (checador de contraste/CVD rodado no conjunto azul/verde/âmbar/ciano/roxo/laranja,
-     nessa ordem, pra não ficar par adjacente parecido) */
+     nessa ordem, pra não ficar par adjacente parecido; revalidada com os hex novos da Nexor
+     Connect — continua passando em todos os critérios) */
   --teal:#0891B2;
   --teal-bg:#E0F3F7;
-  --purple:#6B4FA0;
-  --purple-bg:#EDE7F6;
+  --purple:#6F52A8;
+  --purple-bg:#EBE7F3;
   --pink:#B23A6B;
 }
 *{box-sizing:border-box;}
@@ -48,11 +52,12 @@ header{
 .brand-mark.chip{background:#fff;border-radius:11px;padding:5px;box-shadow:0 2px 8px rgba(0,0,0,.18);}
 .wordmark{font-family:'Montserrat',sans-serif;font-weight:800;line-height:1;text-transform:uppercase;}
 .wordmark.stacked{display:flex;flex-direction:column;gap:2px;align-items:center;}
-.wordmark.stacked .pro{color:#2FA8DE;font-size:28px;letter-spacing:1.5px;}
+.wordmark.stacked .pro{color:var(--blue-bright);font-size:28px;letter-spacing:1.5px;}
 .wordmark.stacked .conecta{color:var(--navy);font-size:28px;letter-spacing:1.5px;}
 .wordmark.inline{display:flex;align-items:baseline;gap:6px;}
-.wordmark.inline .pro{color:#5FC1EE;font-size:17px;letter-spacing:.8px;}
+.wordmark.inline .pro{color:var(--blue-bright);font-size:17px;letter-spacing:.8px;}
 .wordmark.inline .conecta{color:#fff;font-size:17px;letter-spacing:.8px;}
+.brand-tagline{margin-top:6px;font-size:11px;font-weight:600;color:var(--ink-soft);letter-spacing:.4px;text-transform:uppercase;text-align:center;}
 .empresa-tag{margin-left:4px;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
 .empresa-tag:empty{display:none;}
 
