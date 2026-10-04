@@ -4038,6 +4038,25 @@ rota('DELETE', /^\/api\/fmea\/componentes\/(\d+)$/, async (req, res, m) => {
 });
 
 // GET /api/fmea/modos-falha?componente_id=X
+// enriquece com nome do componente, tipo/modelo do catálogo de origem, e ocorrencias_reais —
+// quantas vezes esse modo de falha foi escolhido de verdade num laudo técnico (ver passo 3). Usado
+// tanto pros selects em cascata (ignora os campos extras) quanto pelo ranking RPN e pela sugestão
+// de ocorrência na tela de edição (passo 5) — sem precisar de outro endpoint pra isso.
+function modosFalhaEnriquecidos(data, empresaId, lista) {
+  const visitasComFmea = tenant.listar(data, 'visitas', empresaId).filter((v) => v.laudo && v.laudo.modo_falha_id);
+  return lista.map((mf) => {
+    const componente = data.fmea_componentes.find((c) => c.id === mf.componente_id && c.empresa_id === empresaId);
+    const catalogo = componente ? data.equipamentos.find((e) => e.id === componente.catalogo_id && e.empresa_id === empresaId) : null;
+    return {
+      ...mf,
+      componente_nome: componente ? componente.nome : '',
+      catalogo_tipo: catalogo ? catalogo.tipo : '',
+      catalogo_modelo: catalogo ? catalogo.modelo : '',
+      ocorrencias_reais: visitasComFmea.filter((v) => v.laudo.modo_falha_id === mf.id).length,
+    };
+  });
+}
+
 rota('GET', /^\/api\/fmea\/modos-falha$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
@@ -4045,7 +4064,7 @@ rota('GET', /^\/api\/fmea\/modos-falha$/, async (req, res) => {
   const data = db.load();
   let lista = tenant.listar(data, 'fmea_modos_falha', user.empresa_id);
   if (query.componente_id) lista = lista.filter((mf) => mf.componente_id === Number(query.componente_id));
-  enviarJSON(res, 200, { modos_falha: lista });
+  enviarJSON(res, 200, { modos_falha: modosFalhaEnriquecidos(data, user.empresa_id, lista) });
 });
 
 // POST /api/fmea/modos-falha { componente_id, nome, severidade, ocorrencia, deteccao }
@@ -4215,6 +4234,47 @@ rota('DELETE', /^\/api\/fmea\/efeitos\/(\d+)$/, async (req, res, m) => {
   data.fmea_efeitos = data.fmea_efeitos.filter((e) => e.id !== item.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/fmea/pareto?agrupar_por=componente|equipamento (padrão: componente) — Fase 1/passo 5.
+// Diferente do ranking RPN (que é o catálogo cadastrado, sem depender de nenhum atendimento ter
+// acontecido), o Pareto conta falhas DE VERDADE: cada laudo técnico (visita) que teve a cascata
+// FMEA preenchida (passo 3) soma 1 na contagem do componente ou do equipamento escolhido ali.
+// Ordenado do mais frequente pro menos, com percentual e percentual acumulado — a curva clássica
+// de Pareto (os ~20% das causas que respondem por ~80% das falhas).
+rota('GET', /^\/api\/fmea\/pareto$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const { query } = url.parse(req.url, true);
+  const agruparPor = query.agrupar_por === 'equipamento' ? 'equipamento' : 'componente';
+  const data = db.load();
+  const visitasComFmea = tenant.listar(data, 'visitas', user.empresa_id).filter((v) => v.laudo && v.laudo.componente_id);
+  const contagem = new Map();
+  for (const v of visitasComFmea) {
+    let chave, label;
+    if (agruparPor === 'equipamento') {
+      const eq = data.equipamentos.find((e) => e.id === v.equipamento_id && e.empresa_id === user.empresa_id);
+      chave = `eq-${v.equipamento_id}`;
+      label = eq ? `${eq.tipo} ${eq.modelo}${eq.numero_serie ? ` (${eq.numero_serie})` : ''}` : 'Equipamento removido';
+    } else {
+      chave = `comp-${v.laudo.componente_id}`;
+      label = v.laudo.componente_nome || 'Componente removido';
+    }
+    if (!contagem.has(chave)) contagem.set(chave, { label, qtd: 0 });
+    contagem.get(chave).qtd += 1;
+  }
+  const lista = [...contagem.values()].sort((a, b) => b.qtd - a.qtd);
+  const total = lista.reduce((soma, i) => soma + i.qtd, 0);
+  let acumulado = 0;
+  const pareto = lista.map((i) => {
+    acumulado += i.qtd;
+    return {
+      ...i,
+      percentual: total ? Math.round((i.qtd / total) * 1000) / 10 : 0,
+      percentual_acumulado: total ? Math.round((acumulado / total) * 1000) / 10 : 0,
+    };
+  });
+  enviarJSON(res, 200, { pareto, total, agrupado_por: agruparPor });
 });
 
 // GET /api/usuarios

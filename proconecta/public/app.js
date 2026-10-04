@@ -601,6 +601,7 @@ const NAV = {
     { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+      { key: 'fmea-relatorios', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     ]},
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
@@ -678,6 +679,7 @@ const NAV = {
     { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
+      { key: 'fmea-relatorios', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     ]},
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
@@ -831,6 +833,7 @@ async function ir(pagina) {
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
+    if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'usuarios') return renderUsuarios();
     if (pagina === 'chamados') return renderChamados();
     if (pagina === 'fila-atendimento') return renderFilaAtendimento();
@@ -13046,7 +13049,9 @@ function mostrarFormModoFalha(modo) {
       <div class="form-grid">
         <div class="full"><label>Nome*</label><input id="mf-nome" value="${modo ? esc(modo.nome) : ''}"></div>
         <div><label>Severidade (1-10)*</label><input id="mf-severidade" type="number" min="1" max="10" value="${modo ? modo.severidade : ''}"></div>
-        <div><label>Ocorrência (1-10)*</label><input id="mf-ocorrencia" type="number" min="1" max="10" value="${modo ? modo.ocorrencia : ''}"></div>
+        <div><label>Ocorrência (1-10)*</label><input id="mf-ocorrencia" type="number" min="1" max="10" value="${modo ? modo.ocorrencia : ''}">
+          ${modo && modo.ocorrencias_reais > 0 ? `<small style="color:var(--ink-soft);">Sugestão: ${modo.ocorrencias_reais} falha(s) real(is) registrada(s) em laudos técnicos.</small>` : ''}
+        </div>
         <div><label>Detecção (1-10)*</label><input id="mf-deteccao" type="number" min="1" max="10" value="${modo ? modo.deteccao : ''}"></div>
       </div>
       <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">RPN = Severidade × Ocorrência × Detecção, calculado automaticamente.</p>
@@ -13200,6 +13205,76 @@ async function excluirEfeitoFmea(id, causaId) {
     mostrarToast('Efeito excluído.');
     abrirFmeaEfeitos(causaId);
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- FMEA: Ranking RPN e Pareto de falhas (passo 5) ----
+// Ranking: reaproveita o próprio GET /api/fmea/modos-falha (já enriquecido no servidor com
+// componente_nome/catalogo_tipo/catalogo_modelo/ocorrencias_reais — ver server.js,
+// modosFalhaEnriquecidos) sem filtro de componente, e ordena por RPN decrescente no cliente — não
+// precisou de outro endpoint só pra isso. Pareto: usa o endpoint novo /api/fmea/pareto, que conta
+// falhas de verdade (laudos técnicos com a cascata FMEA preenchida), com toggle componente/equipamento.
+let _fmeaParetoAgrupamento = 'componente';
+async function renderFmeaRelatorios() {
+  const { modos_falha } = await api('/api/fmea/modos-falha');
+  const ranking = [...modos_falha].sort((a, b) => b.rpn - a.rpn);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>FMEA — Ranking e Pareto</h1><p>Ranking de risco (RPN) do catálogo cadastrado e Pareto das falhas que realmente aconteceram nos laudos técnicos.</p></div>
+    <div class="panel"><div class="panel-head">Ranking por RPN (Severidade × Ocorrência × Detecção)</div>
+      <table>
+        <tr><th>Modelo</th><th>Componente</th><th>Modo de falha</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Ocorrências reais</th></tr>
+        ${ranking.length ? ranking.map((m) => `
+          <tr>
+            <td data-label="Modelo">${esc(m.catalogo_tipo)} ${esc(m.catalogo_modelo)}</td>
+            <td data-label="Componente">${esc(m.componente_nome)}</td>
+            <td data-label="Modo de falha">${esc(m.nome)}</td>
+            <td data-label="S">${m.severidade}</td><td data-label="O">${m.ocorrencia}</td><td data-label="D">${m.deteccao}</td>
+            <td data-label="RPN"><b>${m.rpn}</b></td>
+            <td data-label="Ocorrências reais">${m.ocorrencias_reais}</td>
+          </tr>`).join('') : `<tr><td colspan="8" class="empty">Nenhum modo de falha cadastrado ainda.</td></tr>`}
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>Pareto de falhas</span>
+        <div>
+          <button class="btn-outline-sm" id="fmea-pareto-btn-componente" onclick="trocarParetoAgrupamento('componente')">Por componente</button>
+          <button class="btn-outline-sm" id="fmea-pareto-btn-equipamento" onclick="trocarParetoAgrupamento('equipamento')">Por equipamento</button>
+        </div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-8px;">Conta cada laudo técnico que teve a classificação de falha (RCM/FMEA) preenchida — os ~20% que respondem pela maior parte das falhas aparecem no topo.</p>
+      <div id="fmea-pareto-area"><div class="empty">Carregando...</div></div>
+    </div>`;
+  _fmeaParetoAgrupamento = 'componente';
+  renderFmeaParetoArea();
+}
+async function trocarParetoAgrupamento(modo) {
+  _fmeaParetoAgrupamento = modo;
+  renderFmeaParetoArea();
+}
+async function renderFmeaParetoArea() {
+  const btnComponente = document.getElementById('fmea-pareto-btn-componente');
+  const btnEquipamento = document.getElementById('fmea-pareto-btn-equipamento');
+  const estiloAtivo = { background: 'var(--blue)', color: '#fff', borderColor: 'var(--blue)' };
+  const estiloInativo = { background: '#fff', color: 'var(--ink-soft)', borderColor: 'var(--line)' };
+  Object.assign(btnComponente.style, _fmeaParetoAgrupamento === 'componente' ? estiloAtivo : estiloInativo);
+  Object.assign(btnEquipamento.style, _fmeaParetoAgrupamento === 'equipamento' ? estiloAtivo : estiloInativo);
+  const area = document.getElementById('fmea-pareto-area');
+  area.innerHTML = `<div class="empty">Carregando...</div>`;
+  const { pareto, total } = await api(`/api/fmea/pareto?agrupar_por=${_fmeaParetoAgrupamento}`);
+  if (!total) { area.innerHTML = `<div class="empty">Nenhuma falha classificada em laudos técnicos ainda.</div>`; return; }
+  area.innerHTML = `
+    <table>
+      <tr><th>${_fmeaParetoAgrupamento === 'componente' ? 'Componente' : 'Equipamento'}</th><th>Qtd.</th><th>%</th><th>% acumulado</th><th></th></tr>
+      ${pareto.map((p) => `
+        <tr>
+          <td data-label="${_fmeaParetoAgrupamento === 'componente' ? 'Componente' : 'Equipamento'}">${esc(p.label)}</td>
+          <td data-label="Qtd.">${p.qtd}</td>
+          <td data-label="%">${p.percentual}%</td>
+          <td data-label="% acumulado">${p.percentual_acumulado}%</td>
+          <td style="min-width:120px;"><div style="background:var(--line); border-radius:4px; height:8px;"><div style="background:var(--blue-bright); border-radius:4px; height:8px; width:${p.percentual}%;"></div></div></td>
+        </tr>`).join('')}
+    </table>`;
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----

@@ -527,6 +527,35 @@ Cada tela tem cadastrar/renomear/excluir; excluir é bloqueado pelo
 servidor quando já existe algo cadastrado embaixo (mesma regra da API,
 passo 1) — a tela só repassa a mensagem de erro.
 
+### Passo 5: Ranking por RPN e Pareto de falhas
+
+Tela nova **Equipamentos > FMEA — Ranking e Pareto** (administrador e
+supervisor, mesmo padrão de visualização somente leitura do supervisor
+já usado no resto do sistema):
+
+- **Ranking por RPN**: lista todos os modos de falha cadastrados
+  (qualquer modelo/componente), ordenada por RPN decrescente. O
+  servidor (`GET /api/fmea/modos-falha`, função `modosFalhaEnriquecidos`
+  em `server.js`) já devolve cada modo de falha com o nome do
+  componente, tipo/modelo do catálogo de origem e `ocorrencias_reais` —
+  quantos laudos técnicos de verdade (passo 3) usaram aquele modo de
+  falha. Esse mesmo campo agora aparece como sugestão no formulário de
+  edição do modo de falha (passo 4), ao lado do campo Ocorrência,
+  seguindo o pedido original de "Ocorrência pode ser sugerida pelo
+  número de falhas registradas" — é só uma sugestão em texto, o valor
+  do campo continua sendo digitado/ajustado pelo administrador.
+- **Pareto de falhas**: endpoint novo `GET /api/fmea/pareto?agrupar_por=componente|equipamento`,
+  que conta cada laudo técnico com a cascata FMEA preenchida, agrupando
+  por componente (padrão) ou pela unidade de equipamento específica, e
+  calcula percentual e percentual acumulado (a curva clássica de
+  Pareto). A tela tem um alternador Componente/Equipamento que troca o
+  agrupamento sem recarregar a página.
+
+Diferença entre os dois: o Ranking por RPN é sobre o **catálogo
+cadastrado** (existe mesmo que nunca tenha acontecido uma falha de
+verdade); o Pareto é sobre **falhas que realmente aconteceram**, só
+conta o que apareceu em algum laudo técnico aprovado ou não.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
