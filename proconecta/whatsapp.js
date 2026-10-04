@@ -1,7 +1,7 @@
-// whatsapp.js — ponte entre o WhatsApp Business e o atendimento por chat do Pro Conecta. Recebe
+// whatsapp.js — ponte entre o WhatsApp Business e o atendimento por chat do Nexor Connect. Recebe
 // a mensagem do cliente, joga ela dentro do mesmo "chamado" (fila de atendimento) que o chat
 // dentro do app usa — a IA (ia.js) responde enquanto o chamado estiver com ela; depois que
-// escala pra um técnico, as mensagens do técnico mandadas pelo chat do Pro Conecta voltam pro
+// escala pra um técnico, as mensagens do técnico mandadas pelo chat do Nexor Connect voltam pro
 // cliente por aqui (enviarMensagemWhatsApp). Módulo à parte pra não inchar o server.js — se as
 // variáveis de ambiente não estiverem configuradas, o webhook simplesmente não faz nada
 // (ativo() = false).
@@ -151,7 +151,7 @@ async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
     await enviarMensagemWhatsApp(telefone, resposta);
   } else {
     // já está com um técnico (ou esperando um) — só guarda a mensagem, o técnico responde
-    // pelo chat do Pro Conecta (que manda de volta pro WhatsApp via enviarMensagemWhatsApp)
+    // pelo chat do Nexor Connect (que manda de volta pro WhatsApp via enviarMensagemWhatsApp)
     chamado.lida_tecnico = false;
     if (enviarPush && chamado.tecnico_id) {
       enviarPush(data, chamado.tecnico_id, { titulo: 'Nova mensagem no atendimento', corpo: texto.slice(0, 120), url: '/' }).catch(() => {});

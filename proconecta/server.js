@@ -1,4 +1,4 @@
-// server.js — Pro Conecta, backend real (Fase 1 + Biblioteca técnica), sem dependências externas.
+// server.js — Nexor Connect, backend real (Fase 1 + Biblioteca técnica), sem dependências externas.
 // Rode com: node server.js
 // Abra: http://localhost:3000
 
@@ -4944,7 +4944,7 @@ rota('DELETE', /^\/api\/competencias\/(\d+)$/, async (req, res, m) => {
 
 // ---------- atendimento por chat (chamados: IA de 1º nível -> fila -> técnico) ----------
 // o mesmo "chamado" é o fio da conversa tanto quando o cliente entra pelo chat dentro do
-// ProConecta quanto quando manda mensagem pelo WhatsApp (ver whatsapp.js) — o técnico responde
+// Nexor Connect quanto quando manda mensagem pelo WhatsApp (ver whatsapp.js) — o técnico responde
 // num lugar só, e se a conversa veio do WhatsApp a resposta dele volta pro WhatsApp do cliente.
 
 // versão pra LISTA (fila, histórico) — sem buscar o histórico de mensagens (mora numa tabela à
@@ -4985,7 +4985,7 @@ function notificarNovoAtendimento(data, chamado) {
   enviarPushTecnicos(data, chamado.empresa_id, { titulo: 'Novo atendimento aguardando técnico', corpo: cliente ? cliente.nome_empresa : 'Um cliente precisa de ajuda.', url: '/' }).catch(() => {});
 }
 
-// POST /api/chamados — o cliente (logado no ProConecta) inicia um atendimento com a primeira
+// POST /api/chamados — o cliente (logado no Nexor Connect) inicia um atendimento com a primeira
 // mensagem. Se a IA estiver configurada ela já responde; senão cai direto pra fila do técnico
 // (a funcionalidade continua utilizável mesmo sem a IA ligada).
 rota('POST', /^\/api\/chamados$/, async (req, res) => {
@@ -5883,7 +5883,7 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
     subdominio,
     site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
     emails: Array.isArray(body.emails) ? body.emails : [],
-    cor_primaria: body.cor_primaria || '#0A2647', cor_secundaria: body.cor_secundaria || '#0E7C86',
+    cor_primaria: body.cor_primaria || '#0B2D4F', cor_secundaria: body.cor_secundaria || '#0891B2',
     versao_id: versao ? versao.id : null,
     modulos_ativos: versao ? [...versao.modulos] : [],
     terminologia: {},
@@ -6187,7 +6187,7 @@ const server = http.createServer(async (req, res) => {
 // pra evitar 502 no Render enquanto a conexão com o banco ainda está sendo estabelecida.
 // as rotas da API individualmente esperam `db.pronto` (acima) antes de processar qualquer coisa.
 server.listen(PORT, () => {
-  console.log(`Pro Conecta rodando em http://localhost:${PORT}`);
+  console.log(`Nexor Connect rodando em http://localhost:${PORT}`);
   if (process.env.ADMIN_EMAIL) console.log(`Conta de administrador: ${process.env.ADMIN_EMAIL}`);
 });
 

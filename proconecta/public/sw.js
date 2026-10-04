@@ -1,4 +1,4 @@
-// Service worker do Pro Conecta — permite instalar como app e funcionar offline
+// Service worker do Nexor Connect — permite instalar como app e funcionar offline
 // pras páginas já visitadas. Estratégia "rede primeiro": sempre busca a versão mais
 // nova quando há internet (pra nunca travar alguém numa versão antiga depois de um
 // deploy), e só usa o que está guardado quando o celular está sem conexão.
@@ -67,7 +67,7 @@ async function obterTokenSalvo() {
 // responder direto da notificação, sem abrir o app (funciona no Android; em navegadores/celulares
 // sem suporte a isso, o toque na notificação simplesmente abre o app normalmente).
 self.addEventListener('push', (event) => {
-  let dados = { titulo: 'Pro Conecta', corpo: 'Você tem uma novidade no Pro Conecta.', url: '/' };
+  let dados = { titulo: 'Nexor Connect', corpo: 'Você tem uma novidade no Nexor Connect.', url: '/' };
   try { dados = { ...dados, ...event.data.json() }; } catch (e) {}
   const opcoes = {
     body: dados.corpo,
