@@ -732,6 +732,24 @@ usado pelos 2 lugares não-admin — `slaDoBody` (SLA) e os handlers de
 `equipamento_tem_contrato_manutencao` pro front saber se trava sem
 round-trip extra.
 
+### Nova/Editar Ordem de Serviço: tela própria
+
+Pedido do usuário: o formulário de Nova/Editar O.S. estava embutido em
+cima do calendário/lista (div `#form-nova-atividade` injetada no topo
+da tela, com o calendário e os cards continuando visíveis logo abaixo
+— rolagem longa e confusa, principalmente com o questionário de SLA
+aberto).
+
+`mostrarFormNovaAtividade` agora substitui o `#main` inteiro (mesmo
+padrão das outras telas de detalhe do app, como `abrirDetalheOS`), com
+cabeçalho próprio e botão "‹ Voltar". Novo `voltarDeNovaOS()` concentra
+o "pra onde volta" (cancelar ou terminar) — mesmo destino que o
+salvamento bem-sucedido já usa (lista de O.S., ou fila do pós-venda
+quando nasce de uma Solicitação de Atendimento). Usado nos 5 lugares
+que abrem esse formulário: Agenda geral, Ordem de Serviço, Editar (a
+partir do detalhe, nos dois fluxos de detalhe que existem) e Criar O.S.
+a partir de Solicitação de Atendimento.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

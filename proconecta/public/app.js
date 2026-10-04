@@ -1839,7 +1839,6 @@ async function renderAgendaCalendario() {
       <div><h1>Agenda geral</h1><p>${(window._agendaCache || []).length} atividade(s) no total — tag verde mostra quem NÃO está disponível naquele dia (folga individual/compensação/home office/férias)</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
-    <div id="form-nova-atividade"></div>
     <div class="panel">
       <div class="cal-head">
         <div class="cal-nav">
@@ -1978,7 +1977,6 @@ function abrirDetalheOSCalendario(id) {
       <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="renderDiaCalendario('${calDiaSelecionado}')">‹ Voltar para o dia</button>
     </div>
-    <div id="form-nova-atividade"></div>
     <div class="panel">
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOS(a, visita)}</div>
       ${detalheCompletoOS(a, visita)}
@@ -2106,8 +2104,15 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
   const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
   window._clientesCache = clientes;
   window._equipamentosCache = equipamentos;
-  document.getElementById('form-nova-atividade').innerHTML = `
-    <div class="panel"><div class="panel-head">${agendaItem ? 'Editar Ordem de Serviço' : origemSolicitacao ? 'Nova O.S. — a partir da Solicitação de Atendimento' : 'Nova Ordem de Serviço'}</div>
+  // tela própria (passo seguinte ao pedido do usuário: a criação/edição de O.S. não pode mais
+  // ficar embutida em cima do calendário/lista — substitui o #main inteiro, como as outras
+  // telas de detalhe do app) — volta pra onde o salvamento já volta hoje (ver voltarDeNovaOS).
+  document.getElementById('main').innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${agendaItem ? 'Editar Ordem de Serviço' : origemSolicitacao ? 'Nova O.S. — a partir da Solicitação de Atendimento' : 'Nova Ordem de Serviço'}</h1></div>
+      <button class="btn-outline-sm" onclick="voltarDeNovaOS()">‹ Voltar</button>
+    </div>
+    <div class="panel">
       <h2 style="margin-top:0;">Tipo de serviço</h2>
       <div class="form-grid">
         <div><label>Nº da O.S.</label><input id="na-numero-os" value="${esc(agendaItem ? numeroOS(agendaItem) : sugestaoNumero.numero)}"></div>
@@ -2261,7 +2266,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
 
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarNovaAtividade()">${agendaItem ? 'Salvar alterações' : 'Salvar Ordem de Serviço'}</button>
-        ${agendaItem ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoOS()">Cancelar</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="voltarDeNovaOS()">Cancelar</button>
       </div>
     </div>`;
   if (agendaItem) {
@@ -2305,9 +2310,13 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
   if (agendaItem && agendaItem.bonus_viagem) atualizarPreviewBonusViagem();
 }
 
-function cancelarEdicaoOS() {
+// pra onde a Nova/Editar O.S. volta ao cancelar — mesmo destino que o salvamento bem-sucedido
+// já usa hoje (ver salvarNovaAtividadeExecutar), pra não inventar um 2º comportamento de "voltar".
+function voltarDeNovaOS() {
   agendaEmEdicaoId = null;
-  document.getElementById('form-nova-atividade').innerHTML = '';
+  if (window._origemSolicitacaoId) { window._origemSolicitacaoId = null; return ir('chat-admin'); }
+  if (paginaAtual === 'aprovacoes-visitas') return renderAprovacoesVisitas();
+  renderAgenda();
 }
 
 function atualizarTipoNovaAtividade() {
@@ -4232,7 +4241,6 @@ function desenharOrdemServico() {
       <div><h1>Ordem de Serviço</h1><p>${osSomenteHoje ? `${doMes.length} O.S. hoje` : `${doMes.length} O.S. em ${MES_LABEL[osMes]} de ${osAno}`}</p></div>
       <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaAtividade()">+ Nova Ordem de Serviço</button>
     </div>
-    <div id="form-nova-atividade"></div>
     <div class="panel" style="padding:14px 18px; margin-bottom:22px;">
       <div class="cal-head" style="margin-bottom:0;">
         <div class="cal-nav">
@@ -4459,7 +4467,6 @@ function abrirDetalheOS(id) {
       <div><h1>${esc(numeroOS(a))}</h1><p>${esc(a.cliente_nome || '—')}</p></div>
       <button class="btn-outline-sm" onclick="desenharOrdemServico()">‹ Voltar</button>
     </div>
-    <div id="form-nova-atividade"></div>
     <div class="panel">
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">${acoesOS(a, visita)}</div>
       ${detalheCompletoOS(a, visita)}
@@ -4470,7 +4477,6 @@ function editarOS(id) {
   const item = (window._agendaCache || []).find((a) => a.id === id);
   if (!item) return;
   mostrarFormNovaAtividade(item);
-  document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function excluirOS(id) {
@@ -14424,8 +14430,7 @@ async function renderChatAdmin() {
           ${tecnicosOrdenados.length ? tecnicosOrdenados.map((t) => linhaTecnicoAdmin(t, contagemPorTecnico[t.id] || 0)).join('') : '<p class="empty">Nenhum técnico cadastrado ainda.</p>'}
         </div>
       </div>
-    </div>
-    <div id="form-nova-atividade"></div>`;
+    </div>`;
 }
 
 function cardAtendimentoAdmin(c) {
@@ -15107,7 +15112,6 @@ function abrirCriarOSDeSolicitacao(id) {
   const item = (window._agendaCache || []).find((a) => a.id === id);
   if (!item) return;
   mostrarFormNovaAtividade(null, item);
-  document.getElementById('form-nova-atividade').scrollIntoView({ behavior: 'smooth' });
 }
 
 // ---------- toast ----------
