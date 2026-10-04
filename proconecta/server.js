@@ -295,6 +295,9 @@ function agendaComDetalhes(data, item) {
     equipamento_modelo: equipamento ? equipamento.modelo : null,
     equipamento_serie: equipamento ? equipamento.numero_serie : null,
     equipamento_data_fabricacao: equipamento ? equipamento.data_fabricacao : null,
+    // modelo do catálogo de origem (RCM/FMEA, passo 2) — a tela do Laudo Técnico usa pra buscar
+    // só os componentes FMEA cadastrados pra este modelo específico, não de todos os modelos.
+    equipamento_catalogo_id: equipamento ? equipamento.catalogo_id : null,
     os_criada_numero: osCriada ? (osCriada.numero_os || `OS-${String(osCriada.id).padStart(6, '0')}`) : null,
     // quem abriu a O.S. — normalmente o administrador, mas O.S. nascida de um atendimento do chat
     // assumido direto pelo técnico (ver POST /api/chamados/:id/assumir) tem o próprio técnico aqui.
@@ -786,6 +789,54 @@ function validarLaudoTecnico(l) {
   if (!String(l.servico_realizado || '').trim()) return 'Descreva o serviço realizado.';
   if (!Array.isArray(l.fotos) || l.fotos.length === 0) return 'Anexe ao menos uma foto no relatório fotográfico.';
   return null;
+}
+
+// resolve e valida a cascata Componente→Modo de falha→Causa→Efeito escolhida no Laudo Técnico
+// (RCM/FMEA Fase 1, passo 3) — 100% opcional: o técnico pode deixar os 4 em branco e preencher só
+// o laudo em texto livre, exatamente como sempre funcionou (nada aqui bloqueia o fluxo de hoje).
+// Quando algum nível vem preenchido, exige que os de cima também estejam (não dá pra pular
+// Componente e já escolher Causa), que cada um pertença à empresa e ao pai certo, e que o
+// Componente seja de fato de um modelo do catálogo deste equipamento (ver catalogo_id, passo 2).
+// Devolve id E nome já resolvidos pra cada nível (denormalizado, mesmo padrão de agendaComDetalhes),
+// assim a tela de detalhe e o PDF não precisam buscar o catálogo FMEA de novo pra exibir.
+function resolverCascataFmea(data, empresaId, equipamentoCatalogoId, entrada) {
+  const vazio = { componente_id: null, componente_nome: '', modo_falha_id: null, modo_falha_nome: '', causa_id: null, causa_nome: '', efeito_id: null, efeito_nome: '' };
+  if (!entrada || (!entrada.componente_id && !entrada.modo_falha_id && !entrada.causa_id && !entrada.efeito_id)) {
+    return { resultado: vazio };
+  }
+  let componente = null, modoFalha = null, causa = null, efeito = null;
+  if (entrada.componente_id) {
+    if (equipamentoCatalogoId == null) {
+      return { erro: 'Este equipamento não está vinculado a um modelo do catálogo — associe o modelo em Equipamentos antes de classificar a falha.' };
+    }
+    componente = tenant.buscar(data, 'fmea_componentes', Number(entrada.componente_id), empresaId);
+    if (!componente || componente.catalogo_id !== equipamentoCatalogoId) {
+      return { erro: 'Componente FMEA não encontrado para o modelo deste equipamento.' };
+    }
+  }
+  if (entrada.modo_falha_id) {
+    if (!componente) return { erro: 'Escolha o componente antes do modo de falha.' };
+    modoFalha = tenant.buscar(data, 'fmea_modos_falha', Number(entrada.modo_falha_id), empresaId);
+    if (!modoFalha || modoFalha.componente_id !== componente.id) return { erro: 'Modo de falha não encontrado para este componente.' };
+  }
+  if (entrada.causa_id) {
+    if (!modoFalha) return { erro: 'Escolha o modo de falha antes da causa.' };
+    causa = tenant.buscar(data, 'fmea_causas', Number(entrada.causa_id), empresaId);
+    if (!causa || causa.modo_falha_id !== modoFalha.id) return { erro: 'Causa não encontrada para este modo de falha.' };
+  }
+  if (entrada.efeito_id) {
+    if (!causa) return { erro: 'Escolha a causa antes do efeito.' };
+    efeito = tenant.buscar(data, 'fmea_efeitos', Number(entrada.efeito_id), empresaId);
+    if (!efeito || efeito.causa_id !== causa.id) return { erro: 'Efeito não encontrado para esta causa.' };
+  }
+  return {
+    resultado: {
+      componente_id: componente ? componente.id : null, componente_nome: componente ? componente.nome : '',
+      modo_falha_id: modoFalha ? modoFalha.id : null, modo_falha_nome: modoFalha ? modoFalha.nome : '',
+      causa_id: causa ? causa.id : null, causa_nome: causa ? causa.nome : '',
+      efeito_id: efeito ? efeito.id : null, efeito_nome: efeito ? efeito.nome : '',
+    },
+  };
 }
 
 function usuarioPublico(u) {
@@ -2293,6 +2344,10 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     const laudoCompleto = { ...(body.laudo || {}), ...dadosAtendimentoBloqueados(data, agendaItem, user) };
     const erroLaudo = validarLaudoTecnico(laudoCompleto);
     if (erroLaudo) return enviarJSON(res, 400, { erro: erroLaudo });
+    const equipamentoReparo = tenant.buscar(data, 'equipamentos', agendaItem.equipamento_id, agendaItem.empresa_id);
+    const { erro: erroFmeaReparo, resultado: fmeaReparo } = resolverCascataFmea(data, agendaItem.empresa_id, equipamentoReparo ? equipamentoReparo.catalogo_id : null, body.laudo || {});
+    if (erroFmeaReparo) return enviarJSON(res, 400, { erro: erroFmeaReparo });
+    Object.assign(laudoCompleto, fmeaReparo);
     const rodada = data.visitas.filter((v) => v.agenda_id === agendaItem.id && v.empresa_id === agendaItem.empresa_id).length + 1;
     const agora = new Date().toISOString();
     const visitaReparo = tenant.criar(data, 'visitas', agendaItem.empresa_id, {
@@ -2346,7 +2401,10 @@ rota('POST', /^\/api\/visitas$/, async (req, res) => {
     const laudoCompleto = { ...(body.laudo || {}), ...bloqueados };
     const erro = validarLaudoTecnico(laudoCompleto);
     if (erro) return enviarJSON(res, 400, { erro });
-    laudo = laudoCompleto;
+    const equipamentoDaOS = tenant.buscar(data, 'equipamentos', agendaItem.equipamento_id, agendaItem.empresa_id);
+    const { erro: erroFmea, resultado: fmea } = resolverCascataFmea(data, agendaItem.empresa_id, equipamentoDaOS ? equipamentoDaOS.catalogo_id : null, body.laudo || {});
+    if (erroFmea) return enviarJSON(res, 400, { erro: erroFmea });
+    laudo = { ...laudoCompleto, ...fmea };
   } else if (TIPOS_TERMO_ACEITE.includes(agendaItem.tipo)) {
     const relatorioCompleto = { ...(body.relatorio || {}), ...bloqueados };
     const erro = validarRelatorio(relatorioCompleto);

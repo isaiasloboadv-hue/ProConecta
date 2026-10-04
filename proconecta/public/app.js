@@ -3310,6 +3310,11 @@ function laudoPadrao(item) {
     pecas: [], fotos: [], observacoes: '',
     relevante_biblioteca: false,
     necessidade_retorno: false,
+    // classificação da falha (RCM/FMEA, Fase 1/passo 3) — 100% opcional, cascata em 4 níveis
+    componente_id: null, componente_nome: '',
+    modo_falha_id: null, modo_falha_nome: '',
+    causa_id: null, causa_nome: '',
+    efeito_id: null, efeito_nome: '',
   };
 }
 
@@ -3410,6 +3415,19 @@ async function renderLaudoTecnico(item) {
     </div>
 
     <div class="panel">
+      <h2>Classificação da falha (RCM/FMEA)</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Opcional — ajuda a identificar padrões de falha ao longo do tempo. Só aparece quando o administrador já cadastrou componentes pra este modelo de equipamento.</p>
+      <div id="lt-fmea-bloco">
+        <div class="form-grid">
+          <div><label>Componente</label><select id="lt-fmea-componente" onchange="onTrocarComponenteFmea()"><option value="">Nenhum</option></select></div>
+          <div><label>Modo de falha</label><select id="lt-fmea-modo-falha" onchange="onTrocarModoFalhaFmea()" disabled><option value="">Nenhum</option></select></div>
+          <div><label>Causa</label><select id="lt-fmea-causa" onchange="onTrocarCausaFmea()" disabled><option value="">Nenhuma</option></select></div>
+          <div><label>Efeito</label><select id="lt-fmea-efeito" onchange="onTrocarEfeitoFmea()" disabled><option value="">Nenhum</option></select></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <h2>Serviço realizado*</h2>
       <textarea id="lt-servico_realizado" placeholder="Descreva o que foi feito para solucionar..." oninput="atualizarRascunhoLaudo()"></textarea>
     </div>
@@ -3473,6 +3491,96 @@ async function renderLaudoTecnico(item) {
   preencherCamposLaudo();
   renderPecasLaudo();
   renderFotosLaudo();
+  carregarCascataFmea(item);
+}
+
+// cascata FMEA (RCM/SAP PM Fase 1, passo 3) no Laudo Técnico — 100% opcional: só aparece quando o
+// equipamento desta O.S. está vinculado a um modelo do catálogo (equipamento_catalogo_id, ver
+// passo 2). Cada nível só habilita depois que o de cima foi escolhido, e trocar um nível de cima
+// limpa os de baixo — senão o id salvo poderia não bater mais com o que a tela mostra.
+async function carregarCascataFmea(item) {
+  const bloco = document.getElementById('lt-fmea-bloco');
+  if (!bloco) return;
+  if (!item.equipamento_catalogo_id) {
+    bloco.innerHTML = '<p style="color:var(--ink-soft); font-size:13px;">Este equipamento ainda não está vinculado a um modelo do catálogo — fale com o administrador se quiser classificar a falha.</p>';
+    return;
+  }
+  const { componentes } = await api(`/api/fmea/componentes?catalogo_id=${item.equipamento_catalogo_id}`);
+  const selectComponente = document.getElementById('lt-fmea-componente');
+  if (!selectComponente) return; // tela pode ter trocado antes da resposta chegar
+  selectComponente.innerHTML = '<option value="">Nenhum</option>' + componentes.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('');
+  if (laudoDraft.componente_id) {
+    selectComponente.value = laudoDraft.componente_id;
+    await onTrocarComponenteFmea(true);
+  }
+}
+
+async function onTrocarComponenteFmea(mantendoSelecao) {
+  const componenteId = document.getElementById('lt-fmea-componente').value;
+  if (!mantendoSelecao) { laudoDraft.modo_falha_id = null; laudoDraft.causa_id = null; laudoDraft.efeito_id = null; }
+  laudoDraft.componente_id = componenteId || null;
+  const selectModo = document.getElementById('lt-fmea-modo-falha');
+  const selectCausa = document.getElementById('lt-fmea-causa');
+  const selectEfeito = document.getElementById('lt-fmea-efeito');
+  selectCausa.innerHTML = '<option value="">Nenhuma</option>'; selectCausa.disabled = true;
+  selectEfeito.innerHTML = '<option value="">Nenhum</option>'; selectEfeito.disabled = true;
+  if (!componenteId) {
+    selectModo.innerHTML = '<option value="">Nenhum</option>'; selectModo.disabled = true;
+    atualizarRascunhoLaudo(true);
+    return;
+  }
+  const { modos_falha } = await api(`/api/fmea/modos-falha?componente_id=${componenteId}`);
+  selectModo.innerHTML = '<option value="">Nenhum</option>' + modos_falha.map((m) => `<option value="${m.id}">${esc(m.nome)} (RPN ${m.rpn})</option>`).join('');
+  selectModo.disabled = false;
+  if (mantendoSelecao && laudoDraft.modo_falha_id) {
+    selectModo.value = laudoDraft.modo_falha_id;
+    await onTrocarModoFalhaFmea(true);
+  }
+  atualizarRascunhoLaudo(true);
+}
+
+async function onTrocarModoFalhaFmea(mantendoSelecao) {
+  const modoFalhaId = document.getElementById('lt-fmea-modo-falha').value;
+  if (!mantendoSelecao) { laudoDraft.causa_id = null; laudoDraft.efeito_id = null; }
+  laudoDraft.modo_falha_id = modoFalhaId || null;
+  const selectCausa = document.getElementById('lt-fmea-causa');
+  const selectEfeito = document.getElementById('lt-fmea-efeito');
+  selectEfeito.innerHTML = '<option value="">Nenhum</option>'; selectEfeito.disabled = true;
+  if (!modoFalhaId) {
+    selectCausa.innerHTML = '<option value="">Nenhuma</option>'; selectCausa.disabled = true;
+    atualizarRascunhoLaudo(true);
+    return;
+  }
+  const { causas } = await api(`/api/fmea/causas?modo_falha_id=${modoFalhaId}`);
+  selectCausa.innerHTML = '<option value="">Nenhuma</option>' + causas.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('');
+  selectCausa.disabled = false;
+  if (mantendoSelecao && laudoDraft.causa_id) {
+    selectCausa.value = laudoDraft.causa_id;
+    await onTrocarCausaFmea(true);
+  }
+  atualizarRascunhoLaudo(true);
+}
+
+async function onTrocarCausaFmea(mantendoSelecao) {
+  const causaId = document.getElementById('lt-fmea-causa').value;
+  if (!mantendoSelecao) laudoDraft.efeito_id = null;
+  laudoDraft.causa_id = causaId || null;
+  const selectEfeito = document.getElementById('lt-fmea-efeito');
+  if (!causaId) {
+    selectEfeito.innerHTML = '<option value="">Nenhum</option>'; selectEfeito.disabled = true;
+    atualizarRascunhoLaudo(true);
+    return;
+  }
+  const { efeitos } = await api(`/api/fmea/efeitos?causa_id=${causaId}`);
+  selectEfeito.innerHTML = '<option value="">Nenhum</option>' + efeitos.map((e) => `<option value="${e.id}">${esc(e.nome)}</option>`).join('');
+  selectEfeito.disabled = false;
+  if (mantendoSelecao && laudoDraft.efeito_id) selectEfeito.value = laudoDraft.efeito_id;
+  atualizarRascunhoLaudo(true);
+}
+
+function onTrocarEfeitoFmea() {
+  laudoDraft.efeito_id = document.getElementById('lt-fmea-efeito').value || null;
+  atualizarRascunhoLaudo(true);
 }
 
 function preencherCamposLaudo() {
@@ -3761,6 +3869,13 @@ function gerarPdfLaudo(d, item, logoDataUri) {
     doc.rect(margem, y, largura, altura, 'S');
     doc.text(linhas, margem + 8, y + 14);
     y += altura + 16;
+  }
+
+  if (d.componente_nome) {
+    tituloCentro('Classificação da falha (RCM/FMEA)', null, true);
+    linhaCampos([{ label: 'Componente', valor: d.componente_nome, frac: 0.5 }, { label: 'Modo de falha', valor: d.modo_falha_nome, frac: 0.5 }]);
+    if (d.causa_nome) linhaCampos([{ label: 'Causa', valor: d.causa_nome, frac: 0.5 }, { label: 'Efeito', valor: d.efeito_nome, frac: 0.5 }]);
+    y += 10;
   }
 
   tituloCentro('Serviço realizado', null, true);
@@ -4629,6 +4744,11 @@ function detalheRelatorioVisita(v) {
         <div class="relatorio-secao-titulo">Laudo técnico</div>
         <div class="relatorio-secao-texto">${esc(l.laudo_tecnico || '')}</div>
       </div>
+      ${l.componente_nome ? `<div class="relatorio-secao">
+        <div class="relatorio-secao-titulo">Classificação da falha (RCM/FMEA)</div>
+        <div class="kv"><b>Componente:</b> ${esc(l.componente_nome)}${l.modo_falha_nome ? ` <span class="sep">·</span> <b>Modo de falha:</b> ${esc(l.modo_falha_nome)}` : ''}</div>
+        ${l.causa_nome ? `<div class="kv"><b>Causa:</b> ${esc(l.causa_nome)}${l.efeito_nome ? ` <span class="sep">·</span> <b>Efeito:</b> ${esc(l.efeito_nome)}` : ''}</div>` : ''}
+      </div>` : ''}
       <div class="relatorio-secao">
         <div class="relatorio-secao-titulo">Serviço realizado</div>
         <div class="relatorio-secao-texto">${esc(l.servico_realizado || '')}</div>

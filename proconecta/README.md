@@ -474,6 +474,35 @@ vinculada a um modelo específico até o administrador recadastrar.
 
 Teste: `equipamentos-catalogo-id.e2e.test.js`.
 
+### Passo 3: cascata no Laudo Técnico
+
+A cascata Componente→Modo de falha→Causa→Efeito chegou no formulário que
+o técnico preenche pra corretiva/preventiva/atendimento (o "Laudo
+Técnico", tipos listados em `TIPOS_LAUDO_TECNICO`) — **100% opcional**: o
+fluxo de sempre (laudo em texto livre, sem classificar nada) continua
+funcionando exatamente como antes, nada foi tornado obrigatório.
+
+- A tela só mostra os 4 selects quando o equipamento da O.S. está
+  vinculado a um modelo do catálogo (`catalogo_id`, passo 2); sem isso,
+  aparece um aviso explicando o motivo em vez dos campos.
+- Cada nível só habilita depois que o de cima foi escolhido (não dá pra
+  escolher uma Causa sem escolher o Modo de falha antes), e trocar um
+  nível de cima limpa os de baixo.
+- O servidor (`resolverCascataFmea` em `server.js`) valida de novo tudo
+  isso na hora de salvar — nunca confia só na validação da tela — e
+  resolve id **e** nome de cada nível escolhido, gravando os dois
+  (denormalizado, mesmo padrão já usado em todo o sistema pra exibir sem
+  precisar buscar o catálogo de novo).
+- A classificação aparece na tela de detalhe/aprovação da O.S. (entre
+  "Laudo técnico" e "Serviço realizado") e no PDF do laudo, só quando
+  preenchida — relatórios antigos (ou novos sem classificação) continuam
+  idênticos a como sempre foram.
+- Ficou de fora, por decisão já registrada no relatório de impacto: o
+  `relatorios_manutencao` (coleção paralela, sem `agenda_id`) e a
+  Biblioteca de Defeitos/Falhas, que continuam com `causa` em texto livre.
+
+Teste: `fmea-laudo-tecnico.e2e.test.js`.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
