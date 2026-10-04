@@ -4436,6 +4436,7 @@ function calcularKpis(data, empresaId, filtros = {}) {
     backlog_horas: backlogHoras,
     percentual_preventiva: percentualPreventiva,
     percentual_corretiva: percentualCorretiva,
+    total_os: agendaEmpresa.length, // tile "O.S. no recorte" do dashboard (passo 3 da Opção F)
     aderencia_plano: null, // Fase 2 (Planos de Manutenção) ainda não existe — ver README
   };
 }
@@ -4589,6 +4590,13 @@ function calcularKpiDetalhe(data, empresaId, indicador, filtros) {
       .map((os) => ({ ...contextoOS(data, empresaId, os), tipo: os.tipo, criado_em: os.criado_em }));
   }
 
+  // "O.S. no recorte" (passo 3 da Opção F) — qualquer tipo, não só preventiva/corretiva. Serve a
+  // tile de total e o calendário mensal do dashboard (que pinta os pontos de cada dia a partir
+  // daqui, filtrando o período pro mês em exibição).
+  if (indicador === 'total_os') {
+    return agendaEmpresa.map((os) => ({ ...contextoOS(data, empresaId, os), tipo: os.tipo, criado_em: os.criado_em }));
+  }
+
   if (indicador === 'disponibilidade') {
     const corretivas = agendaEmpresa.filter((a) => a.tipo === 'corretiva');
     const horasReparoPorEquipamento = new Map();
@@ -4656,7 +4664,7 @@ rota('GET', /^\/api\/kpis\/ranking-tecnicos$/, async (req, res) => {
   enviarJSON(res, 200, { ranking: calcularRankingTecnicosKpis(data, user.empresa_id, filtros) });
 });
 
-const INDICADORES_KPI_VALIDOS = ['mtbf', 'mttr', 'disponibilidade', 'backlog', 'preventiva_corretiva'];
+const INDICADORES_KPI_VALIDOS = ['mtbf', 'mttr', 'disponibilidade', 'backlog', 'preventiva_corretiva', 'total_os'];
 // GET /api/kpis/detalhe?indicador=mtbf|mttr|disponibilidade|backlog|preventiva_corretiva (+ mesmos
 // filtros de período/cliente/equipamento/técnico) — passo 9: quais clientes/equipamentos/O.S.
 // formam o número de cada card, pro botão "Ver detalhes" da tela.
