@@ -13363,6 +13363,7 @@ async function renderFmeaParetoArea() {
 let _kpisFiltros = {};
 let _kpisChartTipos = null;
 let _kpisChartMttr = null;
+let _kpisChartDonut = null;
 
 async function renderKpisDashboard() {
   const [{ clientes }, { equipamentos }, { usuarios }] = await Promise.all([
@@ -13390,8 +13391,21 @@ async function renderKpisDashboard() {
       <button class="btn-outline-sm" onclick="exportarKpisExcel()">Exportar Excel</button>
     </div>
     <div class="equipe-grid" id="kpis-cards"><div class="empty">Carregando...</div></div>
-    <div class="panel"><div class="panel-head">Preventiva × Corretiva por mês</div><canvas id="kpis-chart-tipos" height="90"></canvas></div>
-    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
+    <div class="kpis-row-donut">
+      <div class="panel" style="flex:0 0 260px; margin-bottom:0; display:flex; flex-direction:column;">
+        <div class="panel-head">Preventiva × Corretiva</div>
+        <div style="flex:1; display:flex; align-items:center; justify-content:center; min-height:180px;">
+          <canvas id="kpis-chart-donut" width="180" height="180"></canvas>
+          <div id="kpis-donut-vazio" class="empty" style="display:none;">Sem O.S. preventiva/corretiva nesse recorte.</div>
+        </div>
+      </div>
+      <div class="panel" style="flex:1; margin-bottom:0;">
+        <div class="panel-head">Preventiva × Corretiva por mês</div>
+        <canvas id="kpis-chart-tipos" height="90"></canvas>
+      </div>
+    </div>
+    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>
+    <div class="panel"><div class="panel-head">Técnicos — O.S. concluídas no recorte atual</div><div id="kpis-ranking-tecnicos"><div class="empty">Carregando...</div></div></div>`;
   await atualizarKpisDashboard();
 }
 
@@ -13424,7 +13438,9 @@ async function limparFiltrosKpis() {
 async function atualizarKpisDashboard() {
   const params = new URLSearchParams(_kpisFiltros).toString();
   const sufixo = params ? `?${params}` : '';
-  const [{ kpis }, { meses }] = await Promise.all([api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`)]);
+  const [{ kpis }, { meses }, { ranking }] = await Promise.all([
+    api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`), api(`/api/kpis/ranking-tecnicos${sufixo}`),
+  ]);
   // "Ver detalhes" (passo 9) — pedido do usuário pra ver, a partir de cada card, quais clientes/
   // equipamentos/O.S. formam aquele número. Só nos indicadores que têm um indicador_kpi
   // correspondente em INDICADORES_KPI_DETALHE (abrirKpiDetalhe) — Aderência ao plano fica sem
@@ -13443,7 +13459,29 @@ async function atualizarKpisDashboard() {
     ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`, 'backlog')}
     ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas no recorte atual.', 'preventiva_corretiva')}
     ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}`;
-  desenharGraficosKpis(meses);
+  desenharGraficosKpis(meses, kpis);
+  desenharRankingTecnicosKpis(ranking);
+}
+
+// ranking de técnicos por O.S. concluída (passo 2 da Opção F) — barra horizontal proporcional ao
+// maior valor do recorte atual, mesmo padrão visual do mockup aprovado.
+function desenharRankingTecnicosKpis(ranking) {
+  const container = document.getElementById('kpis-ranking-tecnicos');
+  if (!container) return;
+  if (!ranking.length) {
+    container.innerHTML = `<div class="empty">Nenhuma O.S. concluída nesse recorte.</div>`;
+    return;
+  }
+  const maior = Math.max(...ranking.map((r) => r.qtd_os_concluidas));
+  container.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:9px;">
+      ${ranking.map((r) => `
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:140px; font-size:12.5px; font-weight:600; color:#1F2937; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.tecnico_nome)}</div>
+          <div style="flex:1; background:var(--blue-pale); height:16px; border-radius:8px; overflow:hidden;"><div style="width:${Math.round((r.qtd_os_concluidas / maior) * 100)}%; background:var(--blue); height:16px;"></div></div>
+          <div style="width:24px; font-size:12.5px; font-weight:700; color:var(--navy); text-align:right;">${r.qtd_os_concluidas}</div>
+        </div>`).join('')}
+    </div>`;
 }
 
 // Drill-down por indicador (passo 9) — tela própria listando os clientes/equipamentos/O.S. por
@@ -13529,21 +13567,52 @@ async function abrirKpiDetalhe(indicador) {
 
 // Chart.js (CDN, ver index.html) — se o CDN estiver bloqueado/offline a tela continua útil sem os
 // gráficos (cards + tabela de filtros funcionam igual); por isso o guard no topo da função.
-function desenharGraficosKpis(meses) {
+function desenharGraficosKpis(meses, kpis) {
   if (typeof Chart === 'undefined') return;
   const labels = meses.map((m) => m.mes);
+  // mesma dupla azul/laranja das tags de tipo de O.S. (TIPO_OS_COR: corretiva=blue, preventiva=
+  // orange) — pra Preventiva×Corretiva ter sempre o mesmo código de cor em qualquer lugar do app.
   if (_kpisChartTipos) _kpisChartTipos.destroy();
   _kpisChartTipos = new Chart(document.getElementById('kpis-chart-tipos'), {
     type: 'bar',
     data: {
       labels,
       datasets: [
-        { label: 'Preventiva', data: meses.map((m) => m.preventivas), backgroundColor: '#177245' },
-        { label: 'Corretiva', data: meses.map((m) => m.corretivas), backgroundColor: '#B3261E' },
+        { label: 'Preventiva', data: meses.map((m) => m.preventivas), backgroundColor: '#C15A22' },
+        { label: 'Corretiva', data: meses.map((m) => m.corretivas), backgroundColor: '#1467D6' },
       ],
     },
     options: { responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
   });
+
+  if (_kpisChartDonut) _kpisChartDonut.destroy();
+  const donutCanvas = document.getElementById('kpis-chart-donut');
+  const donutVazio = document.getElementById('kpis-donut-vazio');
+  const temDadosDonut = kpis && kpis.percentual_preventiva !== null;
+  donutCanvas.style.display = temDadosDonut ? '' : 'none';
+  donutVazio.style.display = temDadosDonut ? 'none' : '';
+  if (temDadosDonut) {
+    _kpisChartDonut = new Chart(donutCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['Preventiva', 'Corretiva'],
+        datasets: [{
+          data: [kpis.percentual_preventiva, kpis.percentual_corretiva],
+          backgroundColor: ['#C15A22', '#1467D6'],
+          borderColor: '#fff',
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        cutout: '62%',
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 10, padding: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.raw}%` } },
+        },
+      },
+    });
+  }
   if (_kpisChartMttr) _kpisChartMttr.destroy();
   const mttrValores = meses.map((m) => m.mttr_horas);
   // com pouco histórico de corretiva concluída com Laudo Técnico preenchido, a linha vira só 1-2
