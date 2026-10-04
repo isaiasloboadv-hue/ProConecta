@@ -17,7 +17,11 @@
   --orange-bg:#FBE8DA;
   --red:#B3261E;
   --red-bg:#FBE4E2;
-  --teal:#0E7C86;
+  /* paleta de tipo de serviço (passo "estilo sistema") — validada contra daltonismo
+     (checador de contraste/CVD rodado no conjunto azul/verde/âmbar/ciano/roxo/laranja,
+     nessa ordem, pra não ficar par adjacente parecido) */
+  --teal:#0891B2;
+  --teal-bg:#E0F3F7;
   --purple:#6B4FA0;
   --purple-bg:#EDE7F6;
   --pink:#B23A6B;
@@ -313,6 +317,7 @@ textarea{resize:vertical;min-height:64px;}
 .tag-amber{background:var(--amber-bg);color:var(--amber);}
 .tag-orange{background:var(--orange-bg);color:var(--orange);}
 .tag-purple{background:var(--purple-bg);color:var(--purple);}
+.tag-teal{background:var(--teal-bg);color:var(--teal);}
 .tag-gray{background:#EEF1F6;color:var(--ink-soft);}
 .tag-red{background:var(--red-bg);color:var(--red);}
 .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap;}
