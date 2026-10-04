@@ -620,6 +620,33 @@ filtros), só os 2 gráficos não desenham.
 
 Ainda falta a exportação Excel — isso é o passo 8.
 
+### Passo 8: exportação Excel
+
+Botão **Exportar Excel** na tela de Indicadores (KPIs), ao lado de
+Aplicar filtros/Limpar. 100% client-side via **SheetJS**, carregado por
+CDN em `index.html` (mesmo padrão do jsPDF/jszip/docx já usados nos
+outros relatórios) — sem rota nova no servidor, já que `GET /api/kpis` e
+`GET /api/kpis/mensal` já têm tudo que a planilha usa. Gera um `.xlsx`
+com 2 abas, sempre no recorte de filtro atual (período/cliente/
+equipamento/técnico):
+
+- **Indicadores**: quais filtros estão aplicados (nomes legíveis, lidos
+  direto dos `<select>` da tela) + a mesma tabela de indicadores dos
+  cards (MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva,
+  aderência ao plano).
+- **Mensal**: a mesma série usada nos 2 gráficos (mês, preventivas,
+  corretivas, MTTR médio).
+
+Se o CDN do SheetJS não carregar (bloqueado ou sem internet), o botão
+mostra um aviso em vez de travar a tela — mesmo tratamento já usado pros
+gráficos (`desenharGraficosKpis`) quando o Chart.js não carrega.
+
+Com isso termina a Fase 1 do plano aprovado (FMEA estruturado + KPIs
+completos, com filtros/gráficos/exportação). A Fase 2 (criticidade de
+equipamento, planos de manutenção, custos, alertas, importação/
+exportação padrão SAP PM) fica só prevista no banco, sem implementação —
+conforme o escopo combinado desde a Etapa 0.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

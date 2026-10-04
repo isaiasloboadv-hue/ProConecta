@@ -13309,6 +13309,7 @@ async function renderKpisDashboard() {
       <div class="field"><label>Técnico</label><select id="kf-tecnico"><option value="">Todos</option>${tecnicos.map((u) => `<option value="${u.id}" ${String(_kpisFiltros.tecnico_id) === String(u.id) ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
       <button class="btn btn-primary btn-sm" onclick="aplicarFiltrosKpis()">Aplicar filtros</button>
       <button class="btn-outline-sm" onclick="limparFiltrosKpis()">Limpar</button>
+      <button class="btn-outline-sm" onclick="exportarKpisExcel()">Exportar Excel</button>
     </div>
     <div class="equipe-grid" id="kpis-cards"><div class="empty">Carregando...</div></div>
     <div class="panel"><div class="panel-head">Preventiva × Corretiva por mês</div><canvas id="kpis-chart-tipos" height="90"></canvas></div>
@@ -13383,6 +13384,51 @@ function desenharGraficosKpis(meses) {
     data: { labels, datasets: [{ label: 'MTTR (h)', data: meses.map((m) => m.mttr_horas), borderColor: '#1467D6', backgroundColor: 'rgba(20,103,214,.15)', fill: true, spanGaps: true }] },
     options: { responsive: true, scales: { y: { beginAtZero: true } } },
   });
+}
+
+// Exportação Excel (passo 8) — mesmos dados da tela (indicadores + série mensal), no recorte de
+// filtro atual, em 2 abas. Reaproveita os <select> de filtro já na tela pra pegar o texto legível
+// de cliente/equipamento/técnico escolhido, em vez de só o id. Via SheetJS (CDN, ver index.html),
+// mesmo padrão client-side do jsPDF/docx já usados nos outros relatórios — sem rota nova no
+// servidor, já que GET /api/kpis e GET /api/kpis/mensal já têm tudo que a planilha precisa.
+async function exportarKpisExcel() {
+  if (typeof XLSX === 'undefined') return alert('A biblioteca de exportação não carregou (sem conexão com o CDN). Tente novamente mais tarde.');
+  const textoSelecionado = (id) => {
+    const el = document.getElementById(id);
+    return el && el.selectedOptions[0] ? el.selectedOptions[0].textContent : 'Todos';
+  };
+  const params = new URLSearchParams(_kpisFiltros).toString();
+  const sufixo = params ? `?${params}` : '';
+  const [{ kpis }, { meses }] = await Promise.all([api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`)]);
+
+  const abaIndicadores = XLSX.utils.aoa_to_sheet([
+    ['Filtros aplicados'],
+    ['Período — de', _kpisFiltros.periodo_inicio || 'Todos'],
+    ['Período — até', _kpisFiltros.periodo_fim || 'Todos'],
+    ['Cliente', textoSelecionado('kf-cliente')],
+    [t('equipamento', 'Equipamento'), textoSelecionado('kf-equipamento')],
+    ['Técnico', textoSelecionado('kf-tecnico')],
+    [],
+    ['Indicador', 'Valor', 'Observação'],
+    ['MTBF (dias)', kpis.mtbf_dias ?? '—', 'Tempo médio de calendário entre corretivas do mesmo equipamento'],
+    ['MTTR (horas)', kpis.mttr_horas ?? '—', 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico)'],
+    ['Disponibilidade (%)', kpis.disponibilidade_percentual ?? '—', 'Aproximação por tempo de calendário — sem horas reais de operação ainda'],
+    ['Backlog (qtd. de O.S.)', kpis.backlog_qtd, 'O.S. ainda não finalizadas'],
+    ['Backlog (horas acumuladas)', kpis.backlog_horas, ''],
+    ['% Preventiva', kpis.percentual_preventiva ?? '—', ''],
+    ['% Corretiva', kpis.percentual_corretiva ?? '—', ''],
+    ['Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada)'],
+  ]);
+  const abaMensal = XLSX.utils.aoa_to_sheet([
+    ['Mês', 'Preventivas', 'Corretivas', 'MTTR médio (h)'],
+    ...meses.map((m) => [m.mes, m.preventivas, m.corretivas, m.mttr_horas ?? '—']),
+  ]);
+
+  const livro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(livro, abaIndicadores, 'Indicadores');
+  XLSX.utils.book_append_sheet(livro, abaMensal, 'Mensal');
+  const hoje = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(livro, `indicadores-kpis-${hoje}.xlsx`);
 }
 
 // ---- Atrelar equipamento (vincula um item do catálogo a um cliente, com nº de série) ----
