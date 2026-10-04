@@ -77,10 +77,16 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.iife.js"></script>
-<!-- RCM/SAP PM Fase 1, passo 7 — gráficos mensais do dashboard de KPIs (ver renderKpisDashboard) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
-<!-- RCM/SAP PM Fase 1, passo 8 — exportação Excel do dashboard de KPIs (ver exportarKpisExcel) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- RCM/SAP PM Fase 1, passo 7 — gráficos mensais do dashboard de KPIs (ver renderKpisDashboard).
+     Via jsdelivr (mesmo CDN já usado acima pro docx.js) em vez de cdnjs: o caminho exato do
+     arquivo (dist/chart.umd.js) foi conferido direto no pacote publicado no npm — o pacote da
+     Chart.js não publica uma variante .min.js própria, então usamos a não-minificada mesmo, pra
+     garantir que o arquivo existe de verdade nesse caminho. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+<!-- RCM/SAP PM Fase 1, passo 8 — exportação Excel do dashboard de KPIs (ver exportarKpisExcel).
+     Caminho (dist/xlsx.full.min.js) é o mesmo que o próprio pacote "xlsx" no npm indica como seu
+     build pra CDN (campo "jsdelivr" do package.json). -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="/app.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
