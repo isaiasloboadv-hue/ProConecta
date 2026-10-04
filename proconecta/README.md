@@ -653,7 +653,7 @@ Cada card do dashboard de KPIs (exceto Aderência ao plano, que ainda não
 tem dado nenhum por trás) ganhou um botão **Ver detalhes**, que abre uma
 tela listando os clientes/equipamentos/O.S. que formam aquele número —
 sempre no mesmo recorte de filtro já aplicado no dashboard. Endpoint
-novo `GET /api/kpis/detalhe?indicador=...` (mesmos 4 filtros dos outros
+novo `GET /api/kpis/detalhe?indicador=...` (mesmos filtros dos outros
 2 endpoints), função `calcularKpiDetalhe` em `server.js`, reaproveitando
 a mesma `filtrarAgendaKpis` e a mesma base de horas de reparo que
 `calcularKpis` usa — pra nunca a lista de detalhe divergir do número
@@ -667,6 +667,29 @@ A unidade de detalhe muda por indicador, porque o que forma cada número
 - **Backlog**: uma linha por O.S. ainda aberta.
 - **Disponibilidade**: uma linha por *equipamento* (não por O.S.) — horas
   totais, horas paradas e disponibilidade individual de cada um.
+
+### Passo 10: filtro "com contrato" × "sem contrato" de manutenção preventiva
+
+Pedido do usuário: equipamentos com contrato de manutenção preventiva
+tendem a ter padrão diferente de retrabalho/backlog/falha dos sem
+contrato, e isso distorce os indicadores quando misturados — ele queria
+poder isolar cada grupo.
+
+Campo novo `tem_contrato_manutencao` (booleano) nas unidades de
+equipamento atreladas a um cliente (migração aditiva em `db.js`, `false`
+por padrão nas unidades já existentes — o administrador marca
+manualmente as que têm contrato). Editável nas telas **Atrelar
+equipamento** (ao atrelar) e **Editar equipamento atrelado**, com um
+selo "Com contrato"/"Sem contrato" na listagem.
+
+5º filtro no dashboard de KPIs — **Contrato de manutenção** (Todos/Com
+contrato/Sem contrato) — ao lado dos 4 já existentes, aplicado pela
+mesma `filtrarAgendaKpis` nos 3 endpoints (`/api/kpis`, `/api/kpis/
+mensal`, `/api/kpis/detalhe`) e na exportação Excel. Como o contrato
+mora no cadastro do equipamento (não na O.S.), o filtro resolve o
+equipamento de cada O.S. pra decidir se ela entra no recorte. O
+drill-down de Disponibilidade (que já é por equipamento) ganhou uma
+coluna "Contrato" pra deixar visível qual é qual mesmo sem filtrar.
 
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 

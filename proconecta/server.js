@@ -3902,6 +3902,7 @@ rota('PUT', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
     equipamento.numero_serie = body.numero_serie.trim();
     equipamento.data_fabricacao = body.data_fabricacao || '';
     equipamento.localizacao = body.localizacao || '';
+    equipamento.tem_contrato_manutencao = !!body.tem_contrato_manutencao;
   }
   db.save(data);
   enviarJSON(res, 200, { equipamento });
@@ -3946,6 +3947,7 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
     numero_serie: body.numero_serie.trim(),
     data_fabricacao: body.data_fabricacao || '',
     localizacao: body.localizacao || '',
+    tem_contrato_manutencao: !!body.tem_contrato_manutencao,
   });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
@@ -4284,10 +4286,12 @@ rota('GET', /^\/api\/fmea\/pareto$/, async (req, res) => {
 // prevista no banco, ainda não implementada) — a tela mostra isso como indisponível.
 
 // filtros = { periodoInicio, periodoFim (strings "AAAA-MM-DD" ou null), clienteId, equipamentoId,
-// tecnicoId (number ou null) } — os 4 filtros do passo 7 (período/cliente/equipamento/técnico),
-// aplicados sempre na mesma função pra garantir que o dashboard e os gráficos mensais nunca
-// divirjam na definição de "quais O.S. entram na conta".
-function filtrarAgendaKpis(agendaEmpresa, filtros) {
+// tecnicoId, contratoManutencao ("com"|"sem"|null) } — os 5 filtros do dashboard de KPIs
+// (período/cliente/equipamento/técnico/contrato), aplicados sempre na mesma função pra garantir
+// que o dashboard, os gráficos mensais e o drill-down nunca divirjam na definição de "quais O.S.
+// entram na conta". `data` só é usado pelo filtro de contrato, que precisa olhar o equipamento de
+// cada O.S. (o contrato mora no cadastro do equipamento, não na própria O.S.).
+function filtrarAgendaKpis(data, agendaEmpresa, filtros) {
   let lista = agendaEmpresa;
   if (filtros.periodoInicio) {
     const inicioMs = new Date(`${filtros.periodoInicio}T00:00:00`).getTime();
@@ -4300,6 +4304,13 @@ function filtrarAgendaKpis(agendaEmpresa, filtros) {
   if (filtros.clienteId) lista = lista.filter((a) => a.cliente_id === filtros.clienteId);
   if (filtros.equipamentoId) lista = lista.filter((a) => a.equipamento_id === filtros.equipamentoId);
   if (filtros.tecnicoId) lista = lista.filter((a) => a.tecnico_id === filtros.tecnicoId);
+  if (filtros.contratoManutencao === 'com' || filtros.contratoManutencao === 'sem') {
+    lista = lista.filter((a) => {
+      const equipamento = data.equipamentos.find((e) => e.id === a.equipamento_id && e.empresa_id === a.empresa_id);
+      const temContrato = !!(equipamento && equipamento.tem_contrato_manutencao);
+      return filtros.contratoManutencao === 'com' ? temContrato : !temContrato;
+    });
+  }
   return lista;
 }
 
@@ -4318,7 +4329,7 @@ function horasReparoDeCorretivas(data, empresaId, corretivas) {
 }
 
 function calcularKpis(data, empresaId, filtros = {}) {
-  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), filtros);
+  const agendaEmpresa = filtrarAgendaKpis(data, tenant.listar(data, 'agenda', empresaId), filtros);
   const agora = Date.now();
 
   // MTTR: pega o laudo técnico (rodada 1) de cada O.S. corretiva com data de entrada e conclusão
@@ -4403,8 +4414,9 @@ function calcularKpis(data, empresaId, filtros = {}) {
 // Os filtros de cliente/equipamento/técnico se aplicam normalmente — só o período decide quais
 // meses existem na série, não filtra as O.S. dentro de cada mês (isso seria redundante).
 function calcularKpisMensais(data, empresaId, filtros = {}) {
-  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), {
+  const agendaEmpresa = filtrarAgendaKpis(data, tenant.listar(data, 'agenda', empresaId), {
     clienteId: filtros.clienteId, equipamentoId: filtros.equipamentoId, tecnicoId: filtros.tecnicoId,
+    contratoManutencao: filtros.contratoManutencao,
   });
   const fimRef = filtros.periodoFim ? new Date(`${filtros.periodoFim}T00:00:00`) : new Date();
   const inicioRef = filtros.periodoInicio
@@ -4438,9 +4450,9 @@ function calcularKpisMensais(data, empresaId, filtros = {}) {
   });
 }
 
-// lê e normaliza os 4 filtros (período/cliente/equipamento/técnico) da query string — mesma leitura
-// pros 2 endpoints (dashboard e série mensal), pra nunca interpretarem o mesmo filtro de jeitos
-// diferentes.
+// lê e normaliza os 5 filtros (período/cliente/equipamento/técnico/contrato) da query string —
+// mesma leitura pros 3 endpoints (dashboard, série mensal e drill-down), pra nunca interpretarem o
+// mesmo filtro de jeitos diferentes.
 function filtrosKpisDaQuery(query) {
   return {
     periodoInicio: query.periodo_inicio ? String(query.periodo_inicio).slice(0, 10) : null,
@@ -4448,6 +4460,7 @@ function filtrosKpisDaQuery(query) {
     clienteId: query.cliente_id ? Number(query.cliente_id) : null,
     equipamentoId: query.equipamento_id ? Number(query.equipamento_id) : null,
     tecnicoId: query.tecnico_id ? Number(query.tecnico_id) : null,
+    contratoManutencao: query.contrato === 'com' || query.contrato === 'sem' ? query.contrato : null,
   };
 }
 
@@ -4470,7 +4483,7 @@ function contextoOS(data, empresaId, os) {
 // filtragem (filtrarAgendaKpis) e a mesma base de horas de reparo (horasReparoDeCorretivas) que
 // calcularKpis usa, pra nunca a lista de detalhe divergir do número agregado que ela explica.
 function calcularKpiDetalhe(data, empresaId, indicador, filtros) {
-  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), filtros);
+  const agendaEmpresa = filtrarAgendaKpis(data, tenant.listar(data, 'agenda', empresaId), filtros);
   const agora = Date.now();
 
   if (indicador === 'mttr') {
@@ -4550,8 +4563,10 @@ function calcularKpiDetalhe(data, empresaId, indicador, filtros) {
       const horasTotais = fimJanela > inicioJanela ? (fimJanela - inicioJanela) / 36e5 : 0;
       const horasParadas = horasReparoPorEquipamento.get(equipamentoId) || 0;
       const ctx = contextoOS(data, empresaId, itensDoEquipamento[0]);
+      const equipamento = data.equipamentos.find((e) => e.id === equipamentoId && e.empresa_id === empresaId);
       linhas.push({
         cliente_nome: ctx.cliente_nome, equipamento_descricao: ctx.equipamento_descricao,
+        tem_contrato_manutencao: !!(equipamento && equipamento.tem_contrato_manutencao),
         horas_totais: Math.round(horasTotais * 10) / 10, horas_paradas: Math.round(horasParadas * 10) / 10,
         disponibilidade_percentual: horasTotais > 0 ? Math.round(Math.max(0, 1 - horasParadas / horasTotais) * 1000) / 10 : null,
       });
