@@ -57,7 +57,6 @@ header{
 .wordmark.inline{display:flex;align-items:baseline;gap:6px;}
 .wordmark.inline .pro{color:var(--blue-bright);font-size:17px;letter-spacing:.8px;}
 .wordmark.inline .conecta{color:#fff;font-size:17px;letter-spacing:.8px;}
-.brand-tagline{margin-top:6px;font-size:11px;font-weight:600;color:var(--ink-soft);letter-spacing:.4px;text-transform:uppercase;text-align:center;}
 .empresa-tag{margin-left:4px;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
 .empresa-tag:empty{display:none;}
 
