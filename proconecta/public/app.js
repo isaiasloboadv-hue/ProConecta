@@ -33,9 +33,12 @@ const TIPO_OS_LABEL_CURTO = {
   treinamento_presencial: 'Trein. presencial', demonstracao_tecnica: 'Demo. técnica',
   atendimento: 'Atendimento',
 };
+// paleta coordenada (passo "estilo sistema") — validada contra daltonismo, em vez do arco-íris
+// solto de antes. Corretiva/Preventiva usam o mesmo par azul/laranja do donut do dashboard de
+// KPIs (Indicadores > Preventiva × Corretiva), pra ficar o mesmo código de cor nos dois lugares.
 const TIPO_OS_COR = {
-  corretiva: 'falha', preventiva: 'green', treinamento_online: 'blue',
-  treinamento_presencial: 'amber', demonstracao_tecnica: 'orange', atendimento: 'purple',
+  corretiva: 'blue', preventiva: 'orange', treinamento_online: 'green',
+  treinamento_presencial: 'amber', demonstracao_tecnica: 'purple', atendimento: 'teal',
 };
 // treinamento online e atendimento (nascido do chat) não têm deslocamento até o cliente — decide
 // direto pelo tipo (nunca precisa de migração/sincronização) em vez de confiar no campo
