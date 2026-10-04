@@ -3815,7 +3815,7 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const erroLimite = erroLimiteEquipamentos(data, user.empresa_id);
   if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
-    cliente_id: null,
+    cliente_id: null, catalogo_id: null, // é o próprio catálogo — não referencia outro (RCM/FMEA, passo 2)
     tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
   });
   db.save(data);
@@ -3881,6 +3881,8 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
   if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: cliente.id,
+    catalogo_id: catalogo.id, // vínculo de verdade com o modelo de origem (RCM/FMEA, passo 2) — não
+    // depende de casar tipo+modelo por texto, como as unidades atreladas antes deste campo existir
     tipo: catalogo.tipo,
     modelo: catalogo.modelo,
     numero_serie: body.numero_serie.trim(),

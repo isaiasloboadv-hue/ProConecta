@@ -429,6 +429,25 @@ function migrar(data) {
     if (e.cliente_id === undefined) e.cliente_id = null;
     if (e.data_fabricacao === undefined) e.data_fabricacao = '';
   }
+  // catalogo_id (RCM/FMEA Fase 1, passo 2): liga cada unidade atrelada (cliente_id preenchido) de
+  // volta ao item do catálogo (cliente_id null) de onde ela nasceu — hoje esse vínculo só existe
+  // por texto solto (tipo+modelo repetidos, sem referência nenhuma), o que deixa o FMEA "por
+  // modelo de equipamento" frágil (um nome digitado diferente quebra o casamento). Unidades
+  // atreladas a partir de agora (ver POST /api/equipamentos/:id/atrelar) já nascem com o id certo,
+  // carimbado direto; as que já existiam antes desse campo existir ganham aqui um casamento de
+  // melhor esforço por tipo+modelo (case-insensitive, pega o primeiro catálogo que bater — se
+  // houver mais de um catálogo com o mesmo tipo+modelo, tanto faz qual, são o mesmo modelo pro
+  // FMEA) — quando não acha nenhum (nome diferente ou catálogo já apagado), fica null, sem travar
+  // nada: o FMEA só não encontra os componentes daquela unidade específica até o administrador
+  // recadastrar.
+  for (const e of data.equipamentos) {
+    if (e.catalogo_id !== undefined) continue;
+    if (e.cliente_id === null) { e.catalogo_id = null; continue; }
+    const catalogo = data.equipamentos.find((c) => c.empresa_id === e.empresa_id && c.cliente_id === null
+      && String(c.tipo || '').trim().toLowerCase() === String(e.tipo || '').trim().toLowerCase()
+      && String(c.modelo || '').trim().toLowerCase() === String(e.modelo || '').trim().toLowerCase());
+    e.catalogo_id = catalogo ? catalogo.id : null;
+  }
   for (const v of data.visitas) {
     if (v.lida_tecnico === undefined) v.lida_tecnico = false;
     if (v.rodada === undefined) v.rodada = 1;

@@ -457,6 +457,23 @@ confiado ao que o cliente manda.
 
 Teste: `fmea-catalogo.e2e.test.js`.
 
+### Passo 2: `catalogo_id` nas unidades de equipamento
+
+Até aqui, uma unidade atrelada a um cliente (`equipamentos.cliente_id`
+preenchido) só sabia de qual modelo do catálogo ela veio por texto solto
+— `tipo`+`modelo` copiados na hora de atrelar, sem nenhuma referência de
+volta. Isso deixava o FMEA "por modelo de equipamento" frágil: um nome
+digitado diferente (ou editado depois) quebrava silenciosamente o
+casamento. Agora `POST /api/equipamentos/:id/atrelar` carimba
+`catalogo_id` direto, com o id de verdade do catálogo de origem — e uma
+migração de melhor esforço (idempotente, roda uma vez por registro) casa
+as unidades que já existiam antes desse campo existir, por `tipo`+`modelo`
+(sem diferenciar maiúsculas/minúsculas); quando não acha correspondência,
+fica `null` sem travar nada — a unidade simplesmente não aparece
+vinculada a um modelo específico até o administrador recadastrar.
+
+Teste: `equipamentos-catalogo-id.e2e.test.js`.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou
