@@ -15272,25 +15272,33 @@ async function renderEquipe() {
   if (!grid) return;
   grid.innerHTML = `
     <div class="equipe-card" onclick="ir('tecnicos-solicitacoes')">
-      <div class="equipe-card-icone">🙋</div>
+      <div class="equipe-card-icone" style="background:var(--blue-pale);">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </div>
       <div class="equipe-card-titulo">Solicitações</div>
       <div class="stat-valor">${solicitacoesResp.solicitacoes.length}</div>
       <div class="stat-label">pendente(s)</div>
     </div>
     <div class="equipe-card" onclick="ir('escala-folga')">
-      <div class="equipe-card-icone">🗓️</div>
+      <div class="equipe-card-icone" style="background:var(--purple-bg);">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
+      </div>
       <div class="equipe-card-titulo">Escala de Folga</div>
       <div class="stat-valor">${foraHoje}</div>
       <div class="stat-label">de folga hoje</div>
     </div>
     <div class="equipe-card" onclick="ir('tecnicos-acompanhamento')">
-      <div class="equipe-card-icone">✈️</div>
+      <div class="equipe-card-icone" style="background:var(--green-bg);">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-1 .1-1.3.5l-.6.7c-.4.5-.3 1.2.2 1.5l5.7 3.6-2 3.3H3.5c-.4 0-.8.2-1 .5L2 17.3c-.2.4-.1.8.2 1l2.1 1.4 1.4 2.1c.2.3.6.4 1 .2l.7-.5c.3-.2.5-.6.5-1v-3.4l3.3-2 3.6 5.7c.3.5 1 .6 1.5.2l.7-.6c.4-.3.6-.8.5-1.3Z"/></svg>
+      </div>
       <div class="equipe-card-titulo">Acompanhamento de viagens</div>
       <div class="stat-valor">${diariasComBonus}</div>
       <div class="stat-label">diária(s) com bônus este mês</div>
     </div>
     <div class="equipe-card" onclick="ir('cadastros')">
-      <div class="equipe-card-icone">🪪</div>
+      <div class="equipe-card-icone" style="background:var(--orange-bg);">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h3"/><path d="M15 12h3"/><path d="M7 16h10"/></svg>
+      </div>
       <div class="equipe-card-titulo">Cadastros</div>
       <div class="stat-valor">${tecnicosAtivos.length}</div>
       <div class="stat-label">ficha(s) cadastral(is)</div>
