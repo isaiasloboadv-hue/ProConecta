@@ -13345,20 +13345,105 @@ async function atualizarKpisDashboard() {
   const params = new URLSearchParams(_kpisFiltros).toString();
   const sufixo = params ? `?${params}` : '';
   const [{ kpis }, { meses }] = await Promise.all([api(`/api/kpis${sufixo}`), api(`/api/kpis/mensal${sufixo}`)]);
-  const card = (titulo, valor, nota) => `
+  // "Ver detalhes" (passo 9) — pedido do usuário pra ver, a partir de cada card, quais clientes/
+  // equipamentos/O.S. formam aquele número. Só nos indicadores que têm um indicador_kpi
+  // correspondente em INDICADORES_KPI_DETALHE (abrirKpiDetalhe) — Aderência ao plano fica sem
+  // botão porque ainda não existe dado nenhum por trás dela.
+  const card = (titulo, valor, nota, indicador) => `
     <div style="background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px;">
       <div style="color:var(--ink-soft); font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;">${esc(titulo)}</div>
       <div style="font-size:28px; font-weight:800; color:var(--navy); margin-top:6px;">${valor}</div>
       ${nota ? `<div style="color:var(--ink-soft); font-size:12px; margin-top:4px;">${esc(nota)}</div>` : ''}
+      ${indicador ? `<button class="btn-outline-sm" style="margin-top:10px;" onclick="abrirKpiDetalhe('${indicador}')">Ver detalhes</button>` : ''}
     </div>`;
   document.getElementById('kpis-cards').innerHTML = `
-    ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas no recorte atual.')}
-    ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas no recorte atual.')}
-    ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).')}
-    ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`)}
-    ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas no recorte atual.')}
+    ${card('MTBF', kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} dias` : '—', kpis.mtbf_dias !== null ? 'Tempo médio de calendário entre corretivas do mesmo equipamento.' : 'Sem equipamento com 2+ corretivas registradas no recorte atual.', 'mtbf')}
+    ${card('MTTR', kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—', kpis.mttr_horas !== null ? 'Tempo médio de reparo (entrada → conclusão do Laudo Técnico).' : 'Sem laudo técnico com datas preenchidas no recorte atual.', 'mttr')}
+    ${card('Disponibilidade', kpis.disponibilidade_percentual !== null ? `${kpis.disponibilidade_percentual}%` : '—', 'Aproximação por tempo de calendário — ainda sem horas reais de operação (ver README).', 'disponibilidade')}
+    ${card('Backlog', `${kpis.backlog_qtd}`, `${kpis.backlog_horas} h acumuladas em O.S. ainda não finalizadas.`, 'backlog')}
+    ${card('Preventiva × Corretiva', kpis.percentual_preventiva !== null ? `${kpis.percentual_preventiva}% / ${kpis.percentual_corretiva}%` : '—', 'Proporção entre O.S. preventivas e corretivas no recorte atual.', 'preventiva_corretiva')}
     ${card('Aderência ao plano', '—', 'Indisponível: depende dos Planos de Manutenção (Fase 2, ainda não implementada).')}`;
   desenharGraficosKpis(meses);
+}
+
+// Drill-down por indicador (passo 9) — tela própria listando os clientes/equipamentos/O.S. por
+// trás do número do card, no mesmo recorte de filtro já aplicado no dashboard (_kpisFiltros).
+// Cada indicador tem colunas diferentes porque a unidade de detalhe é diferente: MTTR e Preventiva
+// ×Corretiva são por O.S.; MTBF é por intervalo entre 2 O.S. do mesmo equipamento; Disponibilidade
+// é por equipamento (não por O.S.).
+const KPIS_DETALHE_CONFIG = {
+  mtbf: {
+    titulo: 'MTBF — detalhe por intervalo',
+    colunas: [
+      { label: 'Cliente', chave: 'cliente_nome' },
+      { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'O.S. anterior', chave: 'os_anterior' },
+      { label: 'Data anterior', chave: 'data_anterior', formatar: fmtData },
+      { label: 'O.S. atual', chave: 'os_atual' },
+      { label: 'Data atual', chave: 'data_atual', formatar: fmtData },
+      { label: 'Intervalo', chave: 'intervalo_dias', formatar: (v) => `${v} dias` },
+    ],
+  },
+  mttr: {
+    titulo: 'MTTR — detalhe por O.S.',
+    colunas: [
+      { label: 'O.S.', chave: 'numero_os' },
+      { label: 'Cliente', chave: 'cliente_nome' },
+      { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'Entrada', chave: 'data_entrada', formatar: fmtData },
+      { label: 'Conclusão', chave: 'data_conclusao', formatar: fmtData },
+      { label: 'Horas de reparo', chave: 'horas_reparo', formatar: (v) => `${v} h` },
+    ],
+  },
+  disponibilidade: {
+    titulo: 'Disponibilidade — detalhe por equipamento',
+    colunas: [
+      { label: 'Cliente', chave: 'cliente_nome' },
+      { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'Horas totais', chave: 'horas_totais', formatar: (v) => `${v} h` },
+      { label: 'Horas paradas', chave: 'horas_paradas', formatar: (v) => `${v} h` },
+      { label: 'Disponibilidade', chave: 'disponibilidade_percentual', formatar: (v) => (v === null ? '—' : `${v}%`) },
+    ],
+  },
+  backlog: {
+    titulo: 'Backlog — O.S. ainda não finalizadas',
+    colunas: [
+      { label: 'O.S.', chave: 'numero_os' },
+      { label: 'Cliente', chave: 'cliente_nome' },
+      { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'Tipo', chave: 'tipo' },
+      { label: 'Aberta em', chave: 'criado_em', formatar: fmtData },
+      { label: 'Horas em aberto', chave: 'horas_aberta', formatar: (v) => `${v} h` },
+    ],
+  },
+  preventiva_corretiva: {
+    titulo: 'Preventiva × Corretiva — detalhe por O.S.',
+    colunas: [
+      { label: 'O.S.', chave: 'numero_os' },
+      { label: 'Cliente', chave: 'cliente_nome' },
+      { label: 'Equipamento', chave: 'equipamento_descricao' },
+      { label: 'Tipo', chave: 'tipo' },
+      { label: 'Aberta em', chave: 'criado_em', formatar: fmtData },
+    ],
+  },
+};
+async function abrirKpiDetalhe(indicador) {
+  const config = KPIS_DETALHE_CONFIG[indicador];
+  if (!config) return;
+  const params = new URLSearchParams({ ..._kpisFiltros, indicador }).toString();
+  const { linhas } = await api(`/api/kpis/detalhe?${params}`);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>${esc(config.titulo)}</h1><p>${linhas.length} registro(s) no recorte de filtro atual.</p></div>
+      <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
+    </div>
+    <div class="panel"><table>
+      <tr>${config.colunas.map((c) => `<th>${esc(c.label)}</th>`).join('')}</tr>
+      ${linhas.length ? linhas.map((linha) => `
+        <tr>${config.colunas.map((c) => `<td data-label="${esc(c.label)}">${esc(c.formatar ? c.formatar(linha[c.chave]) : (linha[c.chave] ?? '—'))}</td>`).join('')}</tr>`).join('')
+        : `<tr><td colspan="${config.colunas.length}" class="empty">Nenhum registro nesse recorte.</td></tr>`}
+    </table></div>`;
 }
 
 // Chart.js (CDN, ver index.html) — se o CDN estiver bloqueado/offline a tela continua útil sem os

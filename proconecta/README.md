@@ -647,6 +647,27 @@ equipamento, planos de manutenção, custos, alertas, importação/
 exportação padrão SAP PM) fica só prevista no banco, sem implementação —
 conforme o escopo combinado desde a Etapa 0.
 
+### Passo 9: drill-down por indicador (pedido do usuário após a Fase 1)
+
+Cada card do dashboard de KPIs (exceto Aderência ao plano, que ainda não
+tem dado nenhum por trás) ganhou um botão **Ver detalhes**, que abre uma
+tela listando os clientes/equipamentos/O.S. que formam aquele número —
+sempre no mesmo recorte de filtro já aplicado no dashboard. Endpoint
+novo `GET /api/kpis/detalhe?indicador=...` (mesmos 4 filtros dos outros
+2 endpoints), função `calcularKpiDetalhe` em `server.js`, reaproveitando
+a mesma `filtrarAgendaKpis` e a mesma base de horas de reparo que
+`calcularKpis` usa — pra nunca a lista de detalhe divergir do número
+agregado que ela explica.
+
+A unidade de detalhe muda por indicador, porque o que forma cada número
+é diferente:
+- **MTTR** e **Preventiva×Corretiva**: uma linha por O.S.
+- **MTBF**: uma linha por *intervalo* entre 2 corretivas consecutivas do
+  mesmo equipamento (não por O.S. isolada).
+- **Backlog**: uma linha por O.S. ainda aberta.
+- **Disponibilidade**: uma linha por *equipamento* (não por O.S.) — horas
+  totais, horas paradas e disponibilidade individual de cada um.
+
 ## Atendimento por chat (IA de 1º nível -> fila -> técnico)
 
 O cliente inicia um atendimento pelo chat dentro do Pro Conecta (menu **Atendimento**) ou

@@ -4451,6 +4451,117 @@ function filtrosKpisDaQuery(query) {
   };
 }
 
+// cliente/equipamento/nº da O.S. legíveis pra exibir numa linha de detalhe — mesma resolução que
+// agendaComDetalhes já faz, só que sem o resto dos ~15 campos que o detalhe de KPI não usa.
+function contextoOS(data, empresaId, os) {
+  const cliente = data.clientes.find((c) => c.id === os.cliente_id && c.empresa_id === empresaId);
+  const equipamento = data.equipamentos.find((e) => e.id === os.equipamento_id && e.empresa_id === empresaId);
+  return {
+    numero_os: os.numero_os || `OS-${String(os.id).padStart(6, '0')}`,
+    cliente_nome: cliente ? cliente.nome_empresa : (os.cliente_nome_manual || '—'),
+    equipamento_descricao: equipamento
+      ? `${equipamento.tipo} ${equipamento.modelo}${equipamento.numero_serie ? ` (${equipamento.numero_serie})` : ''}`
+      : (os.equipamento_manual || '—'),
+  };
+}
+
+// Drill-down por indicador (passo 9) — quais clientes/equipamentos/O.S. formam o número de cada
+// card do dashboard, no mesmo recorte de filtros já aplicado. Reaproveita exatamente a mesma
+// filtragem (filtrarAgendaKpis) e a mesma base de horas de reparo (horasReparoDeCorretivas) que
+// calcularKpis usa, pra nunca a lista de detalhe divergir do número agregado que ela explica.
+function calcularKpiDetalhe(data, empresaId, indicador, filtros) {
+  const agendaEmpresa = filtrarAgendaKpis(tenant.listar(data, 'agenda', empresaId), filtros);
+  const agora = Date.now();
+
+  if (indicador === 'mttr') {
+    const corretivas = agendaEmpresa.filter((a) => a.tipo === 'corretiva');
+    const linhas = [];
+    for (const os of corretivas) {
+      const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
+      const laudo = visita && visita.laudo;
+      if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
+      const horas = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
+      if (!Number.isFinite(horas) || horas < 0) continue;
+      linhas.push({ ...contextoOS(data, empresaId, os), data_entrada: laudo.data_entrada, data_conclusao: laudo.data_conclusao, horas_reparo: Math.round(horas * 10) / 10 });
+    }
+    return linhas;
+  }
+
+  if (indicador === 'mtbf') {
+    const corretivasPorEquipamento = new Map();
+    for (const os of agendaEmpresa) {
+      if (os.tipo !== 'corretiva' || !os.equipamento_id) continue;
+      if (!corretivasPorEquipamento.has(os.equipamento_id)) corretivasPorEquipamento.set(os.equipamento_id, []);
+      corretivasPorEquipamento.get(os.equipamento_id).push(os);
+    }
+    const linhas = [];
+    for (const lista of corretivasPorEquipamento.values()) {
+      const ordenada = [...lista].sort((a, b) => new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime());
+      for (let i = 1; i < ordenada.length; i++) {
+        const dias = (new Date(ordenada[i].criado_em).getTime() - new Date(ordenada[i - 1].criado_em).getTime()) / 864e5;
+        if (!Number.isFinite(dias) || dias < 0) continue;
+        const ctx = contextoOS(data, empresaId, ordenada[i]);
+        linhas.push({
+          cliente_nome: ctx.cliente_nome, equipamento_descricao: ctx.equipamento_descricao,
+          os_anterior: ordenada[i - 1].numero_os || `OS-${String(ordenada[i - 1].id).padStart(6, '0')}`, data_anterior: ordenada[i - 1].criado_em,
+          os_atual: ctx.numero_os, data_atual: ordenada[i].criado_em,
+          intervalo_dias: Math.round(dias * 10) / 10,
+        });
+      }
+    }
+    return linhas;
+  }
+
+  if (indicador === 'backlog') {
+    return agendaEmpresa.filter((a) => !a.finalizada).map((os) => ({
+      ...contextoOS(data, empresaId, os), tipo: os.tipo, criado_em: os.criado_em,
+      horas_aberta: Math.round(((agora - new Date(os.criado_em).getTime()) / 36e5) * 10) / 10,
+    }));
+  }
+
+  if (indicador === 'preventiva_corretiva') {
+    return agendaEmpresa.filter((a) => a.tipo === 'preventiva' || a.tipo === 'corretiva')
+      .map((os) => ({ ...contextoOS(data, empresaId, os), tipo: os.tipo, criado_em: os.criado_em }));
+  }
+
+  if (indicador === 'disponibilidade') {
+    const corretivas = agendaEmpresa.filter((a) => a.tipo === 'corretiva');
+    const horasReparoPorEquipamento = new Map();
+    for (const os of corretivas) {
+      const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
+      const laudo = visita && visita.laudo;
+      if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
+      const h = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
+      if (!Number.isFinite(h) || h < 0) continue;
+      horasReparoPorEquipamento.set(os.equipamento_id, (horasReparoPorEquipamento.get(os.equipamento_id) || 0) + h);
+    }
+    const fimJanela = filtros.periodoFim
+      ? Math.min(new Date(`${filtros.periodoFim}T23:59:59.999`).getTime(), agora)
+      : agora;
+    const equipamentosComOS = new Set(agendaEmpresa.filter((a) => a.equipamento_id).map((a) => a.equipamento_id));
+    const linhas = [];
+    for (const equipamentoId of equipamentosComOS) {
+      const itensDoEquipamento = agendaEmpresa.filter((a) => a.equipamento_id === equipamentoId);
+      const primeiraOS = itensDoEquipamento.reduce((menor, a) => Math.min(menor, new Date(a.criado_em).getTime()), Infinity);
+      if (!Number.isFinite(primeiraOS)) continue;
+      const inicioJanela = filtros.periodoInicio
+        ? Math.max(new Date(`${filtros.periodoInicio}T00:00:00`).getTime(), primeiraOS)
+        : primeiraOS;
+      const horasTotais = fimJanela > inicioJanela ? (fimJanela - inicioJanela) / 36e5 : 0;
+      const horasParadas = horasReparoPorEquipamento.get(equipamentoId) || 0;
+      const ctx = contextoOS(data, empresaId, itensDoEquipamento[0]);
+      linhas.push({
+        cliente_nome: ctx.cliente_nome, equipamento_descricao: ctx.equipamento_descricao,
+        horas_totais: Math.round(horasTotais * 10) / 10, horas_paradas: Math.round(horasParadas * 10) / 10,
+        disponibilidade_percentual: horasTotais > 0 ? Math.round(Math.max(0, 1 - horasParadas / horasTotais) * 1000) / 10 : null,
+      });
+    }
+    return linhas;
+  }
+
+  return [];
+}
+
 rota('GET', /^\/api\/kpis$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
@@ -4467,6 +4578,23 @@ rota('GET', /^\/api\/kpis\/mensal$/, async (req, res) => {
   const filtros = filtrosKpisDaQuery(query);
   const data = db.load();
   enviarJSON(res, 200, { meses: calcularKpisMensais(data, user.empresa_id, filtros) });
+});
+
+const INDICADORES_KPI_VALIDOS = ['mtbf', 'mttr', 'disponibilidade', 'backlog', 'preventiva_corretiva'];
+// GET /api/kpis/detalhe?indicador=mtbf|mttr|disponibilidade|backlog|preventiva_corretiva (+ mesmos
+// filtros de período/cliente/equipamento/técnico) — passo 9: quais clientes/equipamentos/O.S.
+// formam o número de cada card, pro botão "Ver detalhes" da tela.
+rota('GET', /^\/api\/kpis\/detalhe$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê os indicadores.' });
+  const { query } = url.parse(req.url, true);
+  const indicador = String(query.indicador || '');
+  if (!INDICADORES_KPI_VALIDOS.includes(indicador)) {
+    return enviarJSON(res, 400, { erro: `Indicador inválido. Use um de: ${INDICADORES_KPI_VALIDOS.join(', ')}.` });
+  }
+  const filtros = filtrosKpisDaQuery(query);
+  const data = db.load();
+  enviarJSON(res, 200, { indicador, linhas: calcularKpiDetalhe(data, user.empresa_id, indicador, filtros) });
 });
 
 // GET /api/usuarios
