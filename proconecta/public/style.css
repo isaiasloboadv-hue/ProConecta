@@ -132,12 +132,6 @@ nav.side{
 }
 .hamburger-btn{display:none;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
 .hamburger-btn:hover{background:rgba(255,255,255,0.2);}
-/* pedido do usuário: "coloque opção de voltar a página anterior em todos os menus e submenus" —
-   botão global no cabeçalho (ver voltarPagina() em app.js), visível em qualquer tamanho de tela
-   (diferente do hamburger, que só aparece no mobile) — só fica escondido (.hidden) quando não tem
-   pra onde voltar, ex: assim que loga. */
-.btn-voltar-global{display:flex;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
-.btn-voltar-global:hover{background:rgba(255,255,255,0.2);}
 .nav-backdrop{display:none;}
 nav.side .tag{color:#6E88AE;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;padding:0 12px 10px;display:block;}
 nav.side button{

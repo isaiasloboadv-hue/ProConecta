@@ -5,11 +5,6 @@ let TOKEN = localStorage.getItem('pc_token') || null;
 let USER = null;
 let paginaAtual = null;
 let navAbertos = new Set();
-// pedido do usuário: "coloque opção de voltar a página anterior em todos os menus e submenus" —
-// pilha de navegação genérica (ver ir()/voltarPagina() mais abaixo), pra funcionar em toda tela
-// que troca de página pelo menu, sem precisar de um botão "‹ X" escrito à mão em cada uma.
-let _paginaHistorico = [];
-let _voltandoPagina = false;
 let sinoTimer = null;
 let procDraft = [{ texto: '', fotos: [] }];
 let relatorioDraft = null;
@@ -251,7 +246,6 @@ function mostrarTelaLogin() {
 
 function sair() {
   TOKEN = null; USER = null; navAbertos = new Set();
-  paginaAtual = null; _paginaHistorico = []; _voltandoPagina = false;
   if (sinoTimer) clearInterval(sinoTimer);
   desmontarWidgetChatInterno();
   localStorage.removeItem('pc_token');
@@ -805,22 +799,6 @@ function fecharMenuMobile() {
   aplicarEstadoMenuMobile();
 }
 
-// mostra/esconde o botão "‹ Voltar" global do cabeçalho (ver index.html) — só aparece quando tem
-// pra onde voltar (depois da primeira navegação pós-login).
-function atualizarBotaoVoltarGlobal() {
-  const btn = document.getElementById('btn-voltar-global');
-  if (btn) btn.classList.toggle('hidden', _paginaHistorico.length === 0);
-}
-
-// volta pra última página empilhada (ver ir()) — mesmo botão serve pra qualquer tela do sistema,
-// incluindo as que não têm (ou nunca tiveram) um "‹ X" escrito à mão pra um destino específico.
-function voltarPagina() {
-  if (!_paginaHistorico.length) return;
-  const anterior = _paginaHistorico.pop();
-  _voltandoPagina = true;
-  ir(anterior);
-}
-
 async function ir(pagina) {
   // os pollers dos chats de atendimento (cliente/técnico/pós-venda) só têm sentido enquanto a
   // tela deles está aberta em #main — como #main é substituído embaixo, sem isso eles ficavam
@@ -831,16 +809,6 @@ async function ir(pagina) {
   clearInterval(_atTecPoll);
   clearInterval(_atPvPoll);
   clearInterval(_atAdminPoll);
-  // pedido do usuário: "coloque opção de voltar a página anterior em todos os menus e submenus" —
-  // empilha a página que está sendo deixada pra trás, pra o botão global no cabeçalho (ver
-  // voltarPagina()) poder voltar pra ela depois. Só não empilha quando a própria navegação É um
-  // "voltar" (senão cada clique em voltar empilharia de novo a página que acabou de ser deixada,
-  // e "voltar" duas vezes nunca avançaria na pilha).
-  if (!_voltandoPagina && paginaAtual && paginaAtual !== pagina) {
-    _paginaHistorico.push(paginaAtual);
-    if (_paginaHistorico.length > 50) _paginaHistorico.shift();
-  }
-  _voltandoPagina = false;
   paginaAtual = pagina;
   // lembra a última página visitada pra, ao recarregar/sincronizar (location.reload), voltar
   // pra onde o usuário estava em vez de sempre abrir a página inicial do papel dele (ver uso
@@ -850,7 +818,6 @@ async function ir(pagina) {
   if (caminho) caminho.forEach((k) => navAbertos.add(k));
   fecharMenuMobile();
   montarSidebar();
-  atualizarBotaoVoltarGlobal();
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">Carregando...</div>';
   try {
