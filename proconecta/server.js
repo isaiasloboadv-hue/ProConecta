@@ -6260,14 +6260,16 @@ rota('POST', /^\/api\/prestacao-contas\/(\d+)\/reprovar$/, async (req, res, m) =
 // pedido do usuário: "crie no menu técnico um menu justificar despesa, ao clicar terá uma opção de
 // tirar foto... ou sistema lê automaticamente extraindo data, estabelecimento, valor da compra e
 // descrição... Ou opção de colocar manual... Essa justificativa vai pro financeiro." Um lançamento
-// por despesa (sem categoria, diferente de prestacoes_contas), com campo de estabelecimento — a
-// aprovação segue o mesmo padrão (pendente/aprovado/reprovado, decidido por financeiro/administrador).
+// por despesa (sem categoria, diferente de prestacoes_contas), com campo de estabelecimento. Pedido
+// posterior do usuário: "esse menu precisa ter no acesso do administrador ele também precisa
+// justificar e não aprovar. Quem aprova é o setor financeiro" — administrador lança despesa (igual
+// o técnico), só o papel financeiro decide (pendente/aprovado/reprovado).
 
 // POST /api/despesas-justificadas/ler-recibo { foto } — lê o comprovante via IA, só devolve os
 // dados extraídos pra pré-preencher o formulário (não salva nada aqui, igual ler-etiqueta).
 rota('POST', /^\/api\/despesas-justificadas\/ler-recibo$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico justifica despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só quem justifica despesa (técnico ou administrador) usa a leitura automática.' });
   if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'A leitura automática por IA não está configurada neste sistema.' });
   const body = await lerCorpo(req);
   if (!body.foto) return enviarJSON(res, 400, { erro: 'Envie uma foto do comprovante.' });
@@ -6314,16 +6316,17 @@ function filtrarDespesasPorPeriodo(lista, query) {
   return filtrada;
 }
 
-// GET /api/despesas-justificadas/minhas?periodo_inicio=&periodo_fim=&todas=1 — o técnico só vê as
-// próprias; administrador/financeiro/supervisor veem todas com ?todas=1 (mesmo padrão de
-// prestacao-contas/minhas).
+// GET /api/despesas-justificadas/minhas?periodo_inicio=&periodo_fim=&todas=1 — cada pessoa (técnico
+// ou administrador) só vê as próprias despesas lançadas; só financeiro/supervisor veem todas com
+// ?todas=1 (administrador não decide mais despesa — ver pedido do usuário citado acima — então não
+// precisa enxergar o lançamento alheio, só o próprio, igual o técnico).
 rota('GET', /^\/api\/despesas-justificadas\/minhas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'despesas_justificadas', user.empresa_id);
-  if (!(['administrador', 'financeiro', 'supervisor'].includes(user.papel) && query.todas === '1')) {
+  if (!(['financeiro', 'supervisor'].includes(user.papel) && query.todas === '1')) {
     lista = lista.filter((d) => d.tecnico_id === user.id);
   }
   lista = filtrarDespesasPorPeriodo(lista, query);
@@ -6331,10 +6334,11 @@ rota('GET', /^\/api\/despesas-justificadas\/minhas$/, async (req, res) => {
   enviarJSON(res, 200, { despesas: await hidratarFotosProfundo(lista) });
 });
 
-// GET /api/despesas-justificadas/fila — fila de aprovação (pendentes), pra financeiro/administrador.
+// GET /api/despesas-justificadas/fila — fila de aprovação (pendentes). Pedido do usuário: "quem
+// aprova é o setor financeiro" — só o papel financeiro, administrador não aprova mais.
 rota('GET', /^\/api\/despesas-justificadas\/fila$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador acessam a fila de aprovação.' });
+  if (!exigirPapel(user, ['financeiro'])) return enviarJSON(res, 403, { erro: 'Só o financeiro acessa a fila de aprovação.' });
   const data = db.load();
   const lista = tenant.listar(data, 'despesas_justificadas', user.empresa_id)
     .filter((d) => d.status === 'pendente')
@@ -6342,10 +6346,10 @@ rota('GET', /^\/api\/despesas-justificadas\/fila$/, async (req, res) => {
   enviarJSON(res, 200, { despesas: await hidratarFotosProfundo(lista) });
 });
 
-// POST /api/despesas-justificadas/:id/aprovar
+// POST /api/despesas-justificadas/:id/aprovar — só financeiro (ver pedido do usuário acima).
 rota('POST', /^\/api\/despesas-justificadas\/(\d+)\/aprovar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador decidem despesas justificadas.' });
+  if (!exigirPapel(user, ['financeiro'])) return enviarJSON(res, 403, { erro: 'Só o financeiro decide despesas justificadas.' });
   const data = db.load();
   const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
@@ -6362,10 +6366,11 @@ rota('POST', /^\/api\/despesas-justificadas\/(\d+)\/aprovar$/, async (req, res, 
   enviarJSON(res, 200, { despesa: item });
 });
 
-// POST /api/despesas-justificadas/:id/reprovar { comentario }
+// POST /api/despesas-justificadas/:id/reprovar { comentario } — só financeiro (ver pedido do
+// usuário acima).
 rota('POST', /^\/api\/despesas-justificadas\/(\d+)\/reprovar$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador decidem despesas justificadas.' });
+  if (!exigirPapel(user, ['financeiro'])) return enviarJSON(res, 403, { erro: 'Só o financeiro decide despesas justificadas.' });
   const body = await lerCorpo(req);
   if (!body.comentario || !String(body.comentario).trim()) return enviarJSON(res, 400, { erro: 'Explique o motivo da reprovação.' });
   const data = db.load();

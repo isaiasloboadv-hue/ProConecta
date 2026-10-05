@@ -682,5 +682,8 @@ tr:last-child td{border-bottom:none;}
   #despesas-print-area, #despesas-print-area *{visibility:visible;}
   #despesas-print-area{position:absolute;top:0;left:0;width:100%;}
   .so-impressao{display:block;}
+  /* pedido do usuário: o botão de ver comprovante (🧾) não faz sentido no papel — some do
+     relatório impresso, igual qualquer outro controle interativo da tela. */
+  .sem-impressao{display:none;}
 }
 .chat-admin-linha:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}

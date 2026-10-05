@@ -568,8 +568,9 @@ const NAV = {
     { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     // pedido do usuário: "crie no menu técnico um menu justificar despesa" — comprovante único por
-    // lançamento (foto lida por IA ou manual), vai pra aprovação do financeiro.
-    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Justificar Despesa', page: 'despesas-justificadas' },
+    // lançamento (foto lida por IA ou manual), vai pra aprovação do financeiro. Rótulo "Despesas"
+    // (era "Justificar Despesa") por pedido do usuário.
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas', page: 'despesas-justificadas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -624,7 +625,11 @@ const NAV = {
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
-    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Justificar Despesa — Aprovação', page: 'despesas-justificadas-fila' },
+    // pedido do usuário: "esse menu precisa ter no acesso do administrador ele também precisa
+    // justificar e não aprovar. Quem aprova é o setor financeiro" — administrador usa a MESMA tela
+    // do técnico (renderDespesasJustificadas, lança e vê as próprias despesas), não mais a fila de
+    // aprovação; quem decide é só o papel financeiro (ver exigirPapel nas rotas em server.js).
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas', page: 'despesas-justificadas' },
   ],
   cliente: [
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -693,10 +698,13 @@ const NAV = {
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
   ],
-  // financeiro — Etapa 6/passo 2: aprova as prestações de contas lançadas pelos técnicos.
+  // financeiro — Etapa 6/passo 2: aprova as prestações de contas lançadas pelos técnicos. Pedido do
+  // usuário: "quem aprova é o setor financeiro" / "incluir no menu financeiro despesas se não
+  // tiver" — financeiro é o único papel que decide despesas justificadas (administrador só lança,
+  // igual ao técnico — ver NAV.administrador acima).
   financeiro: [
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
-    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Justificar Despesa — Aprovação', page: 'despesas-justificadas-fila' },
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas — Aprovação', page: 'despesas-justificadas-fila' },
   ],
 };
 
@@ -1577,7 +1585,7 @@ let _despesasCache = [];
 async function renderDespesasJustificadas() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Justificar Despesa</h1><p>Tire uma foto do comprovante (a IA lê os dados pra você revisar) ou preencha na mão. Vai pra aprovação do financeiro.</p></div>
+    <div class="page-head"><h1>Despesas</h1><p>Tire uma foto do comprovante (a IA lê os dados pra você revisar) ou preencha na mão. Vai pra aprovação do financeiro.</p></div>
     <div class="panel" style="text-align:center;">
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         <label class="photo-add" style="display:inline-flex;">
@@ -1586,12 +1594,11 @@ async function renderDespesasJustificadas() {
         </label>
         <button class="btn-outline-sm" onclick="abrirFormDespesaManual()">✍️ Preencher manualmente</button>
       </div>
-      <div id="dj-preview"></div>
       <div id="dj-status" style="margin-top:8px; color:var(--ink-soft); font-size:13px;"></div>
     </div>
     <div id="dj-form"></div>
     <div class="panel">
-      <div class="panel-head"><span>Despesas justificadas</span></div>
+      <div class="panel-head"><span>Despesas lançadas</span></div>
       <div class="filtros-row">
         <div class="field"><label>Período — de</label><input type="date" id="dj-filtro-inicio" value="${esc(_despesasFiltro.periodo_inicio)}"></div>
         <div class="field"><label>Período — até</label><input type="date" id="dj-filtro-fim" value="${esc(_despesasFiltro.periodo_fim)}"></div>
@@ -1644,20 +1651,21 @@ function renderListaDespesasJustificadas() {
   alvo.innerHTML = `
     <div id="despesas-print-area">
       <div class="so-impressao" style="margin-bottom:14px;">
-        <h2 style="margin:0;">Despesas justificadas — ${esc(USER.nome)}</h2>
+        <h2 style="margin:0;">Despesas — ${esc(USER.nome)}</h2>
         <p style="color:var(--ink-soft); font-size:13px;">${esc(periodoTexto)} — impresso em ${fmtData(new Date().toISOString())}</p>
       </div>
       <table>
-        <tr><th>Data</th><th>Estabelecimento</th><th>Descrição</th><th>Valor</th><th>Status</th></tr>
+        <tr><th>Data</th><th>Estabelecimento</th><th>Descrição</th><th>Valor</th><th class="sem-impressao">Comprovante</th><th>Status</th></tr>
         ${_despesasCache.map((d) => `
           <tr>
             <td data-label="Data">${fmtData(d.data)}</td>
             <td data-label="Estabelecimento">${esc(d.estabelecimento)}</td>
             <td data-label="Descrição">${esc(d.descricao || '—')}</td>
             <td data-label="Valor">${fmtMoeda(d.valor)}</td>
+            <td data-label="Comprovante" class="sem-impressao">${d.foto ? `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(d.foto)}')" title="Ver comprovante">🧾</button>` : '—'}</td>
             <td data-label="Status">${statusDespesaTag(d.status)}${d.status === 'reprovado' && d.comentario_financeiro ? `<div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${esc(d.comentario_financeiro)}</div>` : ''}</td>
           </tr>`).join('')}
-        <tr style="font-weight:700;"><td colspan="3" data-label="Total">Total</td><td data-label="Valor">${fmtMoeda(total)}</td><td></td></tr>
+        <tr style="font-weight:700;"><td colspan="3" data-label="Total">Total</td><td data-label="Valor">${fmtMoeda(total)}</td><td class="sem-impressao"></td><td></td></tr>
       </table>
     </div>`;
 }
@@ -1671,9 +1679,7 @@ async function processarFotoDespesa(event) {
   const arquivos = event.target.files;
   if (!arquivos || !arquivos.length) return;
   const [dataUrl] = await lerFotosComoDataUrl(arquivos);
-  const preview = document.getElementById('dj-preview');
   const status = document.getElementById('dj-status');
-  if (preview) preview.innerHTML = `<img src="${dataUrl}" style="max-width:220px; border-radius:10px; border:1px solid var(--line); margin-top:12px;">`;
   if (status) status.textContent = 'Lendo o comprovante...';
   try {
     const { extraido } = await api('/api/despesas-justificadas/ler-recibo', { method: 'POST', body: { foto: dataUrl } });
@@ -1686,9 +1692,37 @@ async function processarFotoDespesa(event) {
 }
 
 function abrirFormDespesaManual() {
-  document.getElementById('dj-preview').innerHTML = '';
   document.getElementById('dj-status').textContent = '';
   abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', foto: null, origem: 'manual' });
+}
+
+// pedido do usuário: "ter opção de anexar a foto do cupom fiscal, não ficar visível, coloque o
+// símbolo nota fiscal só clicar consegue abrir pra ver a foto" — o comprovante nunca aparece
+// grande na tela; vira um botão com o ícone 🧾 que abre o lightbox (mesmo componente usado na
+// Biblioteca — ver abrirLightbox). Serve tanto pro comprovante vindo da leitura por IA quanto pra
+// anexar/trocar manualmente, mesmo em quem escolheu "Preencher manualmente" desde o início.
+function trechoComprovanteDespesa(foto) {
+  if (foto) {
+    return `
+      <button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(foto)}')">🧾 Ver comprovante</button>
+      <button type="button" class="btn-outline-sm" onclick="document.getElementById('dj-anexo-input').click()">Trocar foto</button>
+      <button type="button" class="btn-outline-sm" onclick="removerFotoComprovanteDespesa()">Remover</button>`;
+  }
+  return `<button type="button" class="btn-outline-sm" onclick="document.getElementById('dj-anexo-input').click()">📎 Anexar foto do comprovante (opcional)</button>`;
+}
+
+async function anexarFotoComprovanteDespesa(event) {
+  const arquivos = event.target.files;
+  if (!arquivos || !arquivos.length) return;
+  const [dataUrl] = await lerFotosComoDataUrl(arquivos);
+  window._despesaDraft = { ...(window._despesaDraft || {}), foto: dataUrl };
+  document.getElementById('dj-comprovante-area').innerHTML = trechoComprovanteDespesa(dataUrl);
+  event.target.value = '';
+}
+
+function removerFotoComprovanteDespesa() {
+  window._despesaDraft = { ...(window._despesaDraft || {}), foto: null };
+  document.getElementById('dj-comprovante-area').innerHTML = trechoComprovanteDespesa(null);
 }
 
 // mesmo formulário serve pro resultado da IA (campos pré-preenchidos, o técnico só confere) e pro
@@ -1704,10 +1738,15 @@ function abrirFormDespesa(draft) {
         <div><label>Estabelecimento</label><input id="dj-estabelecimento" value="${esc(draft.estabelecimento || '')}" placeholder="ex: Posto Ipiranga"></div>
         <div><label>Valor (R$)</label><input type="number" min="0" step="0.01" id="dj-valor" value="${draft.valor || ''}"></div>
         <div class="full"><label>Descrição</label><input id="dj-descricao" value="${esc(draft.descricao || '')}" placeholder="ex: Almoço durante atendimento"></div>
+        <div class="full">
+          <label>Comprovante</label><br>
+          <input type="file" id="dj-anexo-input" accept="image/*" capture="environment" style="display:none" onchange="anexarFotoComprovanteDespesa(event)">
+          <div id="dj-comprovante-area">${trechoComprovanteDespesa(draft.foto)}</div>
+        </div>
       </div>
       <div style="margin-top:14px; display:flex; gap:8px;">
         <button class="btn btn-primary btn-sm" onclick="salvarDespesaJustificada()">Salvar</button>
-        <button class="btn-outline-sm" onclick="document.getElementById('dj-form').innerHTML=''; document.getElementById('dj-preview').innerHTML=''; document.getElementById('dj-status').textContent='';">Cancelar</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('dj-form').innerHTML=''; document.getElementById('dj-status').textContent='';">Cancelar</button>
       </div>
     </div>`;
 }
@@ -1727,7 +1766,6 @@ async function salvarDespesaJustificada() {
     });
     mostrarToast('Despesa justificada enviada — aguardando aprovação do financeiro.');
     document.getElementById('dj-form').innerHTML = '';
-    document.getElementById('dj-preview').innerHTML = '';
     document.getElementById('dj-status').textContent = '';
     window._despesaDraft = null;
     await carregarDespesasJustificadas();
@@ -1757,7 +1795,7 @@ async function exportarDespesasJustificadasPdf() {
   const xTexto = margem + (logo ? 36 : 0);
   if (logo) { try { doc.addImage(logo, 'PNG', margem, y - 8, 28, 32); } catch (e) {} }
   doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text('Despesas justificadas', xTexto, y + 10);
+  doc.text('Despesas', xTexto, y + 10);
   doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
   doc.text(limparPdf(`${USER.nome} — ${periodoTexto}`), xTexto, y + 26);
   y += 50;
@@ -1802,13 +1840,14 @@ async function exportarDespesasJustificadasPdf() {
   doc.save(`despesas-justificadas-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
-// ---------- Justificar Despesa — Aprovação (financeiro/administrador) ----------
-// pedido do usuário: "essa justificativa vai pro financeiro" — mesmo papel que decide prestação de
-// contas (ver renderPrestacaoContasFila acima), reaproveitando o mesmo padrão de fila/decisão.
+// ---------- Despesas — Aprovação (só financeiro) ----------
+// pedido do usuário: "essa justificativa vai pro financeiro" / "quem aprova é o setor financeiro" —
+// só o papel financeiro decide (administrador usa a tela de lançamento, igual ao técnico — ver
+// renderDespesasJustificadas e exigirPapel nas rotas de fila/aprovar/reprovar em server.js).
 async function renderDespesasJustificadasFila() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Justificar Despesa — Aprovação</h1><p>Despesas avulsas lançadas pelos técnicos (foto lida por IA ou manual), aguardando decisão.</p></div>
+    <div class="page-head"><h1>Despesas — Aprovação</h1><p>Despesas avulsas lançadas por técnicos e administradores (foto lida por IA ou manual), aguardando decisão.</p></div>
     <div id="dj-fila"><div class="empty">Carregando...</div></div>`;
   const { despesas } = await api('/api/despesas-justificadas/fila');
   const div = document.getElementById('dj-fila');
@@ -1825,12 +1864,12 @@ function renderCardDespesaFila(d) {
         ${statusDespesaTag(d.status)}
       </div>
       <div style="display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap;">
-        ${d.foto ? `<img src="${esc(d.foto)}" style="width:70px; height:70px; object-fit:cover; border-radius:8px; cursor:pointer; flex-shrink:0;" onclick="abrirLightbox('${esc(d.foto)}')">` : ''}
         <div style="flex:1; min-width:200px;">
           <div><b>${esc(d.estabelecimento)}</b> — ${fmtMoeda(d.valor)}</div>
           ${d.descricao ? `<div style="color:var(--ink-soft); font-size:13px; margin-top:2px;">${esc(d.descricao)}</div>` : ''}
           <div style="color:var(--ink-soft); font-size:11.5px; margin-top:4px;">${d.origem === 'ocr' ? 'Lido automaticamente por IA' : 'Preenchido manualmente'}</div>
         </div>
+        ${d.foto ? `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(d.foto)}')" title="Ver comprovante">🧾 Ver comprovante</button>` : ''}
       </div>
       <div style="display:flex; gap:8px; margin-top:12px;">
         <button class="btn btn-primary btn-sm" onclick="aprovarDespesaJustificada(${d.id})">Aprovar</button>
