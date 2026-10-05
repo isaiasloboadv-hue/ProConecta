@@ -440,15 +440,21 @@ function entrarNoApp() {
     }
     return null;
   })(navDoUsuario());
-  const paginaInicial = { administrador: 'agenda', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', estoque: 'fila-estoque' }[USER.papel] || primeiraPaginaPermitida || 'agenda';
+  // pedido do usuário: "coloque como menu inicial ao logar vai abrir sempre nele" — Home (o antigo
+  // "Indicadores (KPIs)") é a página de entrada de administrador/supervisor, os dois papéis que têm
+  // acesso a ela (ver exigirPapel em GET /api/kpis no servidor).
+  const paginaInicial = { administrador: 'kpis-dashboard', supervisor: 'kpis-dashboard', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', estoque: 'fila-estoque' }[USER.papel] || primeiraPaginaPermitida || 'agenda';
   // ao recarregar/sincronizar a página (location.reload), volta pro menu onde o usuário estava
   // em vez de sempre abrir a página inicial do papel — só usa a última página salva se ela
   // ainda existir no menu deste usuário (evita cair numa página que um menu removido apagou).
+  // Home é exceção: "sempre" abre nela, por isso não entra nessa restauração.
   let paginaAoAbrir = paginaInicial;
-  try {
-    const ultima = localStorage.getItem('pc_ultima_pagina');
-    if (ultima && buscarCaminho(navDoUsuario(), ultima, [])) paginaAoAbrir = ultima;
-  } catch (e) {}
+  if (paginaInicial !== 'kpis-dashboard') {
+    try {
+      const ultima = localStorage.getItem('pc_ultima_pagina');
+      if (ultima && buscarCaminho(navDoUsuario(), ultima, [])) paginaAoAbrir = ultima;
+    } catch (e) {}
+  }
   ir(paginaAoAbrir);
 }
 
@@ -587,7 +593,7 @@ const NAV = {
     { key: 'chat-admin', modulo: 'os_chamados', label: 'Chat', page: 'chat-admin' },
     { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
     // RCM/SAP PM Fase 1, passo 6 — MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva.
-    { key: 'kpis', modulo: 'os_chamados', label: 'Indicadores (KPIs)', page: 'kpis-dashboard' },
+    { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
     // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
     // tiposRelatorioManual em renderRelatorioManutencao).
@@ -674,7 +680,7 @@ const NAV = {
   // abordagem rápida escolhida agora; esconder esses botões de verdade fica pra um próximo passo.
   supervisor: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
-    { key: 'kpis', modulo: 'os_chamados', label: 'Indicadores (KPIs)', page: 'kpis-dashboard' },
+    { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -13377,6 +13383,25 @@ let _kpisChartDonut = null;
 let _kpisMaoDeObraCache = null;
 let _kpisChartMaoDeObra = null;
 
+// pedido do usuário: "a data de filtro sempre será o início do mês atual e o final do mês atual" —
+// usado toda vez que a tela Home (ex-KPIs) abre ou quando o admin limpa os filtros, pra nunca cair
+// no "sem período" (que no backend significa "desde sempre", ver filtrarAgendaKpis em server.js).
+function limitesMesAtualISO() {
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mes = hoje.getMonth();
+  const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+  const mm = String(mes + 1).padStart(2, '0');
+  return { inicio: `${ano}-${mm}-01`, fim: `${ano}-${mm}-${String(ultimoDia).padStart(2, '0')}` };
+}
+
+// pequeno "?" que só mostra uma explicação ao passar o cursor (pedido do usuário) — usa o atributo
+// title nativo do navegador (tooltip no hover), sem lib nova. stopPropagation evita que um toque
+// nele em tela sensível ao toque dispare o clique da tile por trás (que abre o drill-down).
+function ajudaKpi(texto) {
+  return `<span class="kpi-help" title="${esc(texto)}" onclick="event.stopPropagation()">?</span>`;
+}
+
 async function renderKpisDashboard() {
   const [{ clientes }, { equipamentos }, { usuarios }] = await Promise.all([
     api('/api/clientes'), api('/api/equipamentos'), api('/api/usuarios'),
@@ -13384,9 +13409,14 @@ async function renderKpisDashboard() {
   const equipamentosAtrelados = equipamentos.filter((e) => e.cliente_id !== null);
   const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
 
+  // "sempre" o mês atual — sobrescreve qualquer período que tivesse ficado de uma visita anterior
+  // nesta mesma sessão, toda vez que a Home é aberta (login, clique no menu, etc.)
+  const { inicio: inicioMesAtual, fim: fimMesAtual } = limitesMesAtualISO();
+  _kpisFiltros = { ..._kpisFiltros, periodo_inicio: inicioMesAtual, periodo_fim: fimMesAtual };
+
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Indicadores (KPIs)</h1><p>Calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos.</p></div>
+    <div class="page-head"><h1>Home</h1><p>Indicadores calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos, de ${fmtData(inicioMesAtual)} a ${fmtData(fimMesAtual)} (mês atual).</p></div>
     <div class="filtros-row">
       <div class="field"><label>Período — de</label><input id="kf-periodo-inicio" type="date" value="${esc(_kpisFiltros.periodo_inicio || '')}"></div>
       <div class="field"><label>Período — até</label><input id="kf-periodo-fim" type="date" value="${esc(_kpisFiltros.periodo_fim || '')}"></div>
@@ -13406,37 +13436,19 @@ async function renderKpisDashboard() {
     <div class="kpis-tiles" id="kpis-cards"><div class="empty">Carregando...</div></div>
     <div class="kpis-row-donut">
       <div class="panel" style="flex:0 0 260px; margin-bottom:0; display:flex; flex-direction:column;">
-        <div class="panel-head">Preventiva × Corretiva</div>
+        <div class="panel-head"><span>Preventiva × Corretiva</span>${ajudaKpi('Proporção entre Ordens de Serviço do tipo Preventiva e Corretiva dentro do período e filtros selecionados.')}</div>
         <div style="flex:1; display:flex; align-items:center; justify-content:center; min-height:180px;">
           <canvas id="kpis-chart-donut" width="180" height="180"></canvas>
           <div id="kpis-donut-vazio" class="empty" style="display:none;">Sem O.S. preventiva/corretiva nesse recorte.</div>
         </div>
       </div>
       <div class="panel" style="flex:1; margin-bottom:0;">
-        <div class="panel-head">Preventiva × Corretiva por mês</div>
+        <div class="panel-head"><span>Preventiva × Corretiva por mês</span>${ajudaKpi('Quantidade de Ordens de Serviço Preventiva e Corretiva, mês a mês, dentro do recorte selecionado.')}</div>
         <canvas id="kpis-chart-tipos" height="90"></canvas>
       </div>
     </div>
-    <div class="panel">
-      <div class="panel-head">Calendário de Ordens de Serviço</div>
-      <div class="cal-head">
-        <div class="cal-nav">
-          <button onclick="mudarMesKpisCalendario(-1)">‹</button>
-          <div class="cal-mes-label" id="kpis-cal-mes-label"></div>
-          <button onclick="mudarMesKpisCalendario(1)">›</button>
-        </div>
-        <button class="btn-outline-sm" onclick="irParaHojeKpisCalendario()">Hoje</button>
-      </div>
-      <div class="cal-grid" id="kpis-cal-grid"></div>
-      <div class="kpis-cal-legenda">
-        <span><span class="kpis-cal-dot" style="background:var(--navy);"></span>Hoje</span>
-        <span><span class="kpis-cal-dot" style="background:var(--blue);"></span>Corretiva</span>
-        <span><span class="kpis-cal-dot" style="background:var(--orange);"></span>Preventiva</span>
-        <span><span class="kpis-cal-dot" style="background:var(--ink-soft);"></span>Outros</span>
-      </div>
-    </div>
-    <div class="panel"><div class="panel-head">Técnicos — O.S. concluídas no recorte atual</div><div id="kpis-ranking-tecnicos"><div class="empty">Carregando...</div></div></div>
-    <div class="panel"><div class="panel-head">MTTR por mês (horas)</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
+    <div class="panel"><div class="panel-head"><span>Técnicos — O.S. concluídas no recorte atual</span>${ajudaKpi('Ranking dos técnicos pela quantidade de Ordens de Serviço concluídas dentro do período e filtros selecionados.')}</div><div id="kpis-ranking-tecnicos"><div class="empty">Carregando...</div></div></div>
+    <div class="panel"><div class="panel-head"><span>MTTR por mês (horas)</span>${ajudaKpi('MTTR — Tempo Médio de Reparo (Mean Time To Repair): quantas horas, em média, leva do início ao fim do reparo de uma O.S. corretiva, mês a mês.')}</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
   await atualizarKpisDashboard();
 }
 
@@ -13461,8 +13473,13 @@ async function aplicarFiltrosKpis() {
   await atualizarKpisDashboard();
 }
 async function limparFiltrosKpis() {
-  _kpisFiltros = {};
-  ['kf-periodo-inicio', 'kf-periodo-fim', 'kf-cliente', 'kf-equipamento', 'kf-tecnico', 'kf-contrato'].forEach((id) => { document.getElementById(id).value = ''; });
+  // "Limpar" não some com o período — ele volta pro padrão (mês atual), só os outros filtros
+  // (cliente/equipamento/técnico/contrato) ficam realmente vazios.
+  const { inicio, fim } = limitesMesAtualISO();
+  _kpisFiltros = { periodo_inicio: inicio, periodo_fim: fim };
+  document.getElementById('kf-periodo-inicio').value = inicio;
+  document.getElementById('kf-periodo-fim').value = fim;
+  ['kf-cliente', 'kf-equipamento', 'kf-tecnico', 'kf-contrato'].forEach((id) => { document.getElementById(id).value = ''; });
   await atualizarKpisDashboard();
 }
 
@@ -13482,102 +13499,27 @@ async function atualizarKpisDashboard() {
       <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="4"/>
       <circle cx="18" cy="18" r="15" fill="none" stroke="#fff" stroke-width="4" stroke-dasharray="${Math.max(0, Math.min(100, pct))} 100" stroke-dashoffset="25" transform="rotate(-90 18 18)" pathLength="100" stroke-linecap="round"/>
     </svg>`;
-  const tile = (titulo, valorHtml, cor, indicador) => `
+  const tile = (titulo, valorHtml, cor, indicador, ajuda) => `
     <div class="kpis-tile" style="background:${cor};" onclick="abrirKpiDetalhe('${indicador}')">
-      <div class="kpis-tile-label">${esc(titulo)}</div>
+      <div class="kpis-tile-label"><span>${esc(titulo)}</span>${ajuda ? ajudaKpi(ajuda) : ''}</div>
       ${valorHtml}
     </div>`;
   document.getElementById('kpis-cards').innerHTML = `
-    ${tile('MTBF', `<div class="kpis-tile-valor">${kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} d` : '—'}</div>`, 'var(--blue)', 'mtbf')}
-    ${tile('MTTR', `<div class="kpis-tile-valor">${kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—'}</div>`, 'var(--purple)', 'mttr')}
+    ${tile('MTBF', `<div class="kpis-tile-valor">${kpis.mtbf_dias !== null ? `${kpis.mtbf_dias} d` : '—'}</div>`, 'var(--blue)', 'mtbf', 'MTBF — Tempo Médio Entre Falhas (Mean Time Between Failures): intervalo médio, em dias, entre o fim de um atendimento e o início do próximo nesse mesmo equipamento. Quanto maior, melhor (o equipamento quebra menos).')}
+    ${tile('MTTR', `<div class="kpis-tile-valor">${kpis.mttr_horas !== null ? `${kpis.mttr_horas} h` : '—'}</div>`, 'var(--purple)', 'mttr', 'MTTR — Tempo Médio de Reparo (Mean Time To Repair): tempo médio, em horas, entre a entrada e a conclusão do reparo nos Laudos Técnicos. Quanto menor, mais rápido o reparo.')}
     ${tile('Disponibilidade', kpis.disponibilidade_percentual !== null
       ? `<div class="kpis-tile-valor-ring">${ringSvg(kpis.disponibilidade_percentual)}<span>${kpis.disponibilidade_percentual}%</span></div>`
-      : `<div class="kpis-tile-valor">—</div>`, 'var(--green)', 'disponibilidade')}
-    ${tile('Backlog', `<div class="kpis-tile-valor">${kpis.backlog_qtd} O.S.</div>`, 'var(--orange)', 'backlog')}
-    ${tile('O.S. no recorte', `<div class="kpis-tile-valor">${kpis.total_os}</div>`, 'var(--amber)', 'total_os')}
+      : `<div class="kpis-tile-valor">—</div>`, 'var(--green)', 'disponibilidade', 'Disponibilidade: percentual do tempo em que os equipamentos ficaram operando normalmente (fora de reparo), dentro do período e filtros selecionados.')}
+    ${tile('Backlog', `<div class="kpis-tile-valor">${kpis.backlog_qtd} O.S.</div>`, 'var(--orange)', 'backlog', 'Backlog: quantidade de Ordens de Serviço ainda não finalizadas (em aberto) no recorte atual.')}
+    ${tile('O.S. no recorte', `<div class="kpis-tile-valor">${kpis.total_os}</div>`, 'var(--amber)', 'total_os', 'O.S. no recorte: quantidade total de Ordens de Serviço abertas dentro do período e filtros selecionados.')}
     <div class="kpis-tile" style="background:var(--teal);" onclick="abrirMaoDeObraDetalhe()">
-      <div class="kpis-tile-label">MOD</div>
+      <div class="kpis-tile-label"><span>MOD</span>${ajudaKpi('MOD — Mão de Obra: percentual de ocupação da equipe técnica (horas trabalhadas dividido pela jornada esperada) no período selecionado. Clique pra ver o detalhe por técnico.')}</div>
       ${maoDeObra.equipe.percentual_ocupacao !== null
         ? `<div class="kpis-tile-valor-ring">${ringSvg(maoDeObra.equipe.percentual_ocupacao)}<span>${maoDeObra.equipe.percentual_ocupacao}%</span></div>`
         : `<div class="kpis-tile-valor">—</div>`}
     </div>`;
   desenharGraficosKpis(meses, kpis);
   desenharRankingTecnicosKpis(ranking);
-  desenharCalendarioKpis();
-}
-
-// calendário mensal do dashboard de KPIs (passo 3 da Opção F) — navegação própria (independente
-// da Agenda geral), ponto colorido por tipo em vez do número de badge que o calendário da Agenda
-// geral usa, porque aqui o que importa é a mistura preventiva/corretiva do mês, não a quantidade
-// total. Reaproveita o indicador 'total_os' do drill-down, só trocando o período pros limites do
-// mês em exibição (sem mexer nos outros filtros do dashboard).
-let _kpisCalAno = new Date().getFullYear();
-let _kpisCalMes = new Date().getMonth();
-
-async function desenharCalendarioKpis() {
-  const label = document.getElementById('kpis-cal-mes-label');
-  if (label) label.textContent = `${MES_LABEL[_kpisCalMes]} de ${_kpisCalAno}`;
-  const grid = document.getElementById('kpis-cal-grid');
-  if (!grid) return;
-
-  const mm = String(_kpisCalMes + 1).padStart(2, '0');
-  const ultimoDiaNum = new Date(_kpisCalAno, _kpisCalMes + 1, 0).getDate();
-  const params = new URLSearchParams({
-    ..._kpisFiltros, indicador: 'total_os',
-    periodo_inicio: `${_kpisCalAno}-${mm}-01`, periodo_fim: `${_kpisCalAno}-${mm}-${String(ultimoDiaNum).padStart(2, '0')}`,
-  }).toString();
-  const { linhas } = await api(`/api/kpis/detalhe?${params}`);
-
-  const porDia = {};
-  linhas.forEach((l) => {
-    const dia = (l.criado_em || '').slice(0, 10);
-    if (!dia) return;
-    if (!porDia[dia]) porDia[dia] = { corretiva: 0, preventiva: 0, outros: 0 };
-    if (l.tipo === 'corretiva') porDia[dia].corretiva++;
-    else if (l.tipo === 'preventiva') porDia[dia].preventiva++;
-    else porDia[dia].outros++;
-  });
-
-  const inicioSemana = new Date(_kpisCalAno, _kpisCalMes, 1).getDay();
-  const hojeISO = dataISOLocal(new Date());
-  const celulas = [];
-  for (let i = 0; i < inicioSemana; i++) celulas.push(new Date(_kpisCalAno, _kpisCalMes, 1 - (inicioSemana - i)));
-  for (let dia = 1; dia <= ultimoDiaNum; dia++) celulas.push(new Date(_kpisCalAno, _kpisCalMes, dia));
-  while (celulas.length % 7 !== 0) {
-    const ultima = celulas[celulas.length - 1];
-    celulas.push(new Date(ultima.getFullYear(), ultima.getMonth(), ultima.getDate() + 1));
-  }
-
-  grid.innerHTML = DOW_LABEL.map((d) => `<div class="cal-dow">${d}</div>`).join('') +
-    celulas.map((data) => {
-      const iso = dataISOLocal(data);
-      const info = porDia[iso];
-      const classes = ['cal-day'];
-      if (data.getMonth() !== _kpisCalMes) classes.push('fora-mes');
-      if (iso === hojeISO) classes.push('hoje');
-      return `<div class="${classes.join(' ')}">
-        <div class="cal-day-topo"><span class="cal-day-num">${data.getDate()}</span></div>
-        ${info ? `<div class="kpis-cal-dots">
-          ${info.corretiva ? `<span class="kpis-cal-dot" style="background:var(--blue);"></span>` : ''}
-          ${info.preventiva ? `<span class="kpis-cal-dot" style="background:var(--orange);"></span>` : ''}
-          ${info.outros ? `<span class="kpis-cal-dot" style="background:var(--ink-soft);"></span>` : ''}
-        </div>` : ''}
-      </div>`;
-    }).join('');
-}
-
-function mudarMesKpisCalendario(delta) {
-  _kpisCalMes += delta;
-  if (_kpisCalMes < 0) { _kpisCalMes = 11; _kpisCalAno--; }
-  if (_kpisCalMes > 11) { _kpisCalMes = 0; _kpisCalAno++; }
-  desenharCalendarioKpis();
-}
-
-function irParaHojeKpisCalendario() {
-  const hoje = new Date();
-  _kpisCalAno = hoje.getFullYear();
-  _kpisCalMes = hoje.getMonth();
-  desenharCalendarioKpis();
 }
 
 // ranking de técnicos por O.S. concluída (passo 2 da Opção F) — barra horizontal proporcional ao
@@ -13619,7 +13561,7 @@ async function abrirMaoDeObraDetalhe() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>MOD</h1><p>Horas trabalhadas × paradas por técnico, de ${fmtData(resp.periodo.inicio)} a ${fmtData(resp.periodo.fim)}. A jornada de referência é de ${resp.jornada_padrao_horas}h por dia útil. Horas de O.S. usam o deslocamento/chegada reais do técnico quando já registrados (não só o horário agendado) — quando um dia passa da jornada, o excedente vira saldo positivo que compensa dias de déficit dentro do mesmo período, e só o que sobra líquido depois dessa compensação conta como parado.</p></div>
-      <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
+      <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Home</button>
     </div>
     <div class="kpis-row-donut">
       <div class="panel" style="flex:0 0 260px; margin-bottom:0; display:flex; flex-direction:column;">
@@ -13779,7 +13721,7 @@ async function abrirKpiDetalhe(indicador) {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
       <div><h1>${esc(config.titulo)}</h1><p>${linhas.length} registro(s) no recorte de filtro atual.</p></div>
-      <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Indicadores (KPIs)</button>
+      <button class="btn-outline-sm" onclick="ir('kpis-dashboard')">‹ Home</button>
     </div>
     <div class="panel"><table>
       <tr>${config.colunas.map((c) => `<th>${esc(c.label)}</th>`).join('')}</tr>

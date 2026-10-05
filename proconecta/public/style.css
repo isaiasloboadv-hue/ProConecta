@@ -623,15 +623,15 @@ tr:last-child td{border-bottom:none;}
 .kpis-tiles{display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap;}
 .kpis-tile{flex:1;min-width:150px;color:#fff;padding:14px 16px;border-radius:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:opacity .15s;}
 .kpis-tile:hover{opacity:.9;}
-.kpis-tile-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;opacity:.9;}
+.kpis-tile-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;opacity:.9;display:flex;align-items:center;justify-content:space-between;gap:6px;}
 .kpis-tile-valor{font-size:22px;font-weight:800;}
 .kpis-tile-valor-ring{display:flex;align-items:center;gap:8px;font-size:22px;font-weight:800;}
 
-.kpis-cal-dots{display:flex;gap:3px;margin-top:4px;flex-wrap:wrap;}
-.kpis-cal-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0;}
-.kpis-cal-legenda{display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--ink-soft);flex-wrap:wrap;}
-.kpis-cal-legenda span{display:flex;align-items:center;gap:5px;}
-.kpis-cal-legenda .kpis-cal-dot{width:7px;height:7px;}
+/* pedido do usuário: "em cada indicador colocar um símbolo bem pequeno de dúvida, só passar o
+   cursor em cima ele mostra o que significa" — bolinha com "?" que usa o tooltip nativo (atributo
+   title) no hover; sem texto normal (text-transform/letter-spacing) do rótulo ao redor. */
+.kpi-help{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;min-width:14px;border-radius:50%;background:rgba(15,23,42,.14);color:var(--ink-soft);font-size:10px;font-weight:700;font-style:normal;text-transform:none;letter-spacing:normal;cursor:help;flex-shrink:0;line-height:1;}
+.kpis-tile-label .kpi-help{background:rgba(255,255,255,.35);color:#fff;}
 
 /* Cadastros (renderCadastros/abrirFichaCadastral) — grid de fichas com foto (ou silhueta padrão
    quando não tem), nome, e-mail e telefone; clica num card pra abrir e editar a ficha completa */
