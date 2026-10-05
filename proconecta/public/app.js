@@ -5084,6 +5084,19 @@ async function registrarChegadaVolta(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
+// pedido do usuário: "coloque individual mesmo" (depois de não gostar do botão global no
+// cabeçalho) — cada antiga página de submenu de Biblioteca/Equipamentos ganha seu próprio "‹ X" no
+// canto, voltando pro menu de widgets (renderBibliotecaMenu/renderEquipamentosMenu). Só aparece pro
+// administrador: é o único papel cujo Biblioteca/Equipamentos virou um item único com essas
+// páginas-menu — os outros papéis (suporte, supervisor, produção) continuam com o submenu aninhado
+// de sempre no NAV, sem 'biblioteca-menu'/'equipamentos-menu' nenhum pra voltar.
+function botaoVoltarBibliotecaMenu() {
+  return USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="ir('biblioteca-menu')">‹ Biblioteca</button>` : '';
+}
+function botaoVoltarEquipamentosMenu() {
+  return USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="ir('equipamentos-menu')">‹ Equipamentos</button>` : '';
+}
+
 // ---------- BIBLIOTECA: menu principal ----------
 // pedido do usuário: "no menu biblioteca... crie só o menu principal... ao clicar no menu
 // biblioteca irá abrir uma página individual com widgets com cores igual o widgets do home. Eles
@@ -5126,7 +5139,10 @@ async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
   window._defeitosFiltros = filtros;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Biblioteca — Defeitos/Falhas</h1><p>Casos aprovados pela liderança, pesquisáveis por equipamento, palavra-chave ou nº de série</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Biblioteca — Defeitos/Falhas</h1><p>Casos aprovados pela liderança, pesquisáveis por equipamento, palavra-chave ou nº de série</p></div>
+      ${botaoVoltarBibliotecaMenu()}
+    </div>
     <div class="filtros-row">
       <div class="field"><label>${t('equipamento', 'Equipamento')}</label><input id="f-equip" value="${esc(filtros.equipamento || '')}" placeholder="ex: Máquina de Gelo"></div>
       <div class="field"><label>Nº de série</label><input id="f-serie" value="${esc(filtros.serie || '')}" placeholder="ex: 2301013587"></div>
@@ -5251,7 +5267,10 @@ async function renderSolicitacoesEdicao() {
   window._solicitacoesCache = registros;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Solicitações de edição</h1><p>Casos já publicados na biblioteca que um técnico pediu para corrigir</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Solicitações de edição</h1><p>Casos já publicados na biblioteca que um técnico pediu para corrigir</p></div>
+      ${botaoVoltarBibliotecaMenu()}
+    </div>
     ${registros.length ? registros.map((r, i) => `
       <div class="item-card">
         <span class="tag ${r.tipo === 'defeito' ? 'tag-falha' : 'tag-preventiva'}">${r.tipo === 'defeito' ? 'Defeito' : 'Procedimento'}</span>
@@ -5279,7 +5298,10 @@ async function renderBibliotecaProcedimentos(filtros = {}, pesquisou = false) {
   window._procedimentosFiltros = filtros;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Biblioteca — Manual de Procedimentos</h1><p>Procedimentos preventivos aprovados, pesquisáveis por equipamento ou título</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Biblioteca — Manual de Procedimentos</h1><p>Procedimentos preventivos aprovados, pesquisáveis por equipamento ou título</p></div>
+      ${botaoVoltarBibliotecaMenu()}
+    </div>
     <div class="filtros-row">
       <div class="field"><label>${t('equipamento', 'Equipamento')}</label><input id="f-equip" value="${esc(filtros.equipamento || '')}" placeholder="ex: Torre de Bebidas"></div>
       <div class="field"><label>Título</label><input id="f-q" value="${esc(filtros.q || '')}" placeholder="título do procedimento"></div>
@@ -12514,7 +12536,10 @@ async function renderRankingTecnicos() {
   const main = document.getElementById('main');
   const medalhas = ['🥇', '🥈', '🥉'];
   main.innerHTML = `
-    <div class="page-head"><h1>Ranking de técnicos</h1><p>Quem mais contribuiu com casos e procedimentos aprovados na biblioteca</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Ranking de técnicos</h1><p>Quem mais contribuiu com casos e procedimentos aprovados na biblioteca</p></div>
+      ${botaoVoltarBibliotecaMenu()}
+    </div>
     ${ranking.length ? ranking.map((r, i) => `
       <div class="item-card" style="display:flex; align-items:center; gap:16px;">
         <div style="font-size:22px; width:34px; text-align:center; flex-shrink:0;">${medalhas[i] || (i + 1) + 'º'}</div>
@@ -12782,7 +12807,10 @@ function desenharFilaBiblioteca() {
   const registros = window._filaBiblioteca || [];
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Aprovação — Biblioteca</h1><p>${registros.length} pendente(s)</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Aprovação — Biblioteca</h1><p>${registros.length} pendente(s)</p></div>
+      ${botaoVoltarBibliotecaMenu()}
+    </div>
     ${registros.length ? registros.map((r) => {
       const aberto = filaAberta.has(r.id);
       return `
@@ -13017,9 +13045,12 @@ async function renderEquipamentosCadastrar() {
   window._catalogoCache = catalogo;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>Cadastrar equipamento</h1><p>${catalogo.length} no catálogo</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormEquipamentoCatalogo()">+ Novo equipamento</button>
+      <div style="display:flex; gap:8px;">
+        ${botaoVoltarEquipamentosMenu()}
+        <button class="btn btn-primary btn-sm" onclick="mostrarFormEquipamentoCatalogo()">+ Novo equipamento</button>
+      </div>
     </div>
     <p style="color:var(--ink-soft); font-size:13px; margin-top:-14px;">Cadastre aqui o tipo/modelo do equipamento. Depois, use "Atrelar equipamento" pra vincular uma unidade dessas a um cliente com o número de série dela.</p>
     <div id="form-equipamento-catalogo"></div>
@@ -13357,7 +13388,10 @@ async function renderFmeaRelatorios() {
   const ranking = [...modos_falha].sort((a, b) => b.rpn - a.rpn);
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>FMEA — Ranking e Pareto</h1><p>Ranking de risco (RPN) do catálogo cadastrado e Pareto das falhas que realmente aconteceram nos laudos técnicos.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>FMEA — Ranking e Pareto</h1><p>Ranking de risco (RPN) do catálogo cadastrado e Pareto das falhas que realmente aconteceram nos laudos técnicos.</p></div>
+      ${botaoVoltarEquipamentosMenu()}
+    </div>
     <div class="panel"><div class="panel-head">Ranking por RPN (Severidade × Ocorrência × Detecção)</div>
       <table>
         <tr><th>Modelo</th><th>Componente</th><th>Modo de falha</th><th>S</th><th>O</th><th>D</th><th>RPN</th><th>Ocorrências reais</th></tr>
@@ -14108,7 +14142,10 @@ async function renderEquipamentosAtrelar() {
   window._atreladosCache = atrelados;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Atrelar equipamento</h1><p>${atrelados.length} atrelado(s) a clientes</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atrelar equipamento</h1><p>${atrelados.length} atrelado(s) a clientes</p></div>
+      ${botaoVoltarEquipamentosMenu()}
+    </div>
     <div class="panel"><div class="panel-head">Atrelar a um cliente</div>
       <div class="form-grid">
         <div><label>Cliente*</label><select id="ae-cliente">${clientes.length ? clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('') : '<option value="">Nenhum cliente cadastrado</option>'}</select></div>
