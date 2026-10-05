@@ -75,6 +75,11 @@ function seed() {
     feriados: [],
     escala_folgas: [],
     prestacoes_contas: [],
+    // despesas avulsas que o técnico justifica em campo (comprovante lido por IA ou preenchido na
+    // mão) — pedido do usuário: "crie no menu técnico um menu justificar despesa". Mais simples que
+    // prestacao_contas (sem categoria, um item por lançamento) e com campo de estabelecimento, que
+    // prestacao_contas não tem. Vai pra aprovação do financeiro, mesmo padrão de status.
+    despesas_justificadas: [],
     // FMEA (RCM/SAP PM, Fase 1 passo 1): catálogo cadastrável pelo administrador, em cascata —
     // Componente (preso a um modelo do catálogo de equipamentos) → Modo de falha (com
     // severidade/ocorrência/detecção, 1-10, pra calcular RPN) → Causa → Efeito. Ainda não é usado
@@ -89,7 +94,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -250,6 +255,10 @@ function migrar(data) {
   // técnico lança pra aprovação do financeiro/administrador, além do bônus fixo por diária.
   if (!data.prestacoes_contas) data.prestacoes_contas = [];
   if (!data._seq.prestacoes_contas) data._seq.prestacoes_contas = 1;
+  // despesa justificada (pedido do usuário: "crie no menu técnico um menu justificar despesa") —
+  // comprovante único por lançamento, com leitura automática por IA ou preenchimento manual.
+  if (!data.despesas_justificadas) data.despesas_justificadas = [];
+  if (!data._seq.despesas_justificadas) data._seq.despesas_justificadas = 1;
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];

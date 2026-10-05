@@ -6239,6 +6239,135 @@ rota('POST', /^\/api\/prestacao-contas\/(\d+)\/reprovar$/, async (req, res, m) =
   enviarJSON(res, 200, { prestacao: item });
 });
 
+// ---------- justificar despesa ----------
+// pedido do usuário: "crie no menu técnico um menu justificar despesa, ao clicar terá uma opção de
+// tirar foto... ou sistema lê automaticamente extraindo data, estabelecimento, valor da compra e
+// descrição... Ou opção de colocar manual... Essa justificativa vai pro financeiro." Um lançamento
+// por despesa (sem categoria, diferente de prestacoes_contas), com campo de estabelecimento — a
+// aprovação segue o mesmo padrão (pendente/aprovado/reprovado, decidido por financeiro/administrador).
+
+// POST /api/despesas-justificadas/ler-recibo { foto } — lê o comprovante via IA, só devolve os
+// dados extraídos pra pré-preencher o formulário (não salva nada aqui, igual ler-etiqueta).
+rota('POST', /^\/api\/despesas-justificadas\/ler-recibo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte'])) return enviarJSON(res, 403, { erro: 'Só o técnico justifica despesa.' });
+  if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'A leitura automática por IA não está configurada neste sistema.' });
+  const body = await lerCorpo(req);
+  if (!body.foto) return enviarJSON(res, 400, { erro: 'Envie uma foto do comprovante.' });
+  try {
+    const extraido = await ia.lerRecibo(body.foto);
+    enviarJSON(res, 200, { extraido });
+  } catch (e) {
+    enviarJSON(res, 502, { erro: e.message });
+  }
+});
+
+// POST /api/despesas-justificadas — cria um lançamento novo (via IA pré-preenchido ou 100% manual,
+// tanto faz pro servidor — ele só recebe os campos finais já revisados pelo técnico).
+rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const valor = Number(body.valor);
+  if (!(valor > 0)) return enviarJSON(res, 400, { erro: 'Informe um valor maior que zero.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data da despesa.' });
+  const estabelecimento = String(body.estabelecimento || '').trim();
+  if (!estabelecimento) return enviarJSON(res, 400, { erro: 'Informe o estabelecimento.' });
+  const data = db.load();
+  const item = tenant.criar(data, 'despesas_justificadas', user.empresa_id, {
+    tecnico_id: user.id, tecnico_nome: user.nome,
+    data: body.data, estabelecimento: estabelecimento.slice(0, 200),
+    descricao: String(body.descricao || '').trim().slice(0, 300),
+    valor, foto: body.foto || null,
+    origem: body.origem === 'ocr' ? 'ocr' : 'manual',
+    status: 'pendente',
+    aprovado_por: null, data_decisao: null, comentario_financeiro: '',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { despesa: item });
+});
+
+// filtro de período por data da despesa (não por criado_em) — é a data que aparece no relatório/
+// impressão/PDF, então o filtro tem que bater com o que a pessoa vê na tela.
+function filtrarDespesasPorPeriodo(lista, query) {
+  let filtrada = lista;
+  if (query.periodo_inicio) filtrada = filtrada.filter((d) => d.data >= String(query.periodo_inicio).slice(0, 10));
+  if (query.periodo_fim) filtrada = filtrada.filter((d) => d.data <= String(query.periodo_fim).slice(0, 10));
+  return filtrada;
+}
+
+// GET /api/despesas-justificadas/minhas?periodo_inicio=&periodo_fim=&todas=1 — o técnico só vê as
+// próprias; administrador/financeiro/supervisor veem todas com ?todas=1 (mesmo padrão de
+// prestacao-contas/minhas).
+rota('GET', /^\/api\/despesas-justificadas\/minhas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'despesas_justificadas', user.empresa_id);
+  if (!(['administrador', 'financeiro', 'supervisor'].includes(user.papel) && query.todas === '1')) {
+    lista = lista.filter((d) => d.tecnico_id === user.id);
+  }
+  lista = filtrarDespesasPorPeriodo(lista, query);
+  lista = [...lista].sort((a, b) => (b.data || '').localeCompare(a.data || '') || (b.criado_em || '').localeCompare(a.criado_em || ''));
+  enviarJSON(res, 200, { despesas: await hidratarFotosProfundo(lista) });
+});
+
+// GET /api/despesas-justificadas/fila — fila de aprovação (pendentes), pra financeiro/administrador.
+rota('GET', /^\/api\/despesas-justificadas\/fila$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador acessam a fila de aprovação.' });
+  const data = db.load();
+  const lista = tenant.listar(data, 'despesas_justificadas', user.empresa_id)
+    .filter((d) => d.status === 'pendente')
+    .sort((a, b) => (a.criado_em || '').localeCompare(b.criado_em || ''));
+  enviarJSON(res, 200, { despesas: await hidratarFotosProfundo(lista) });
+});
+
+// POST /api/despesas-justificadas/:id/aprovar
+rota('POST', /^\/api\/despesas-justificadas\/(\d+)\/aprovar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador decidem despesas justificadas.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Esta despesa já foi decidida.' });
+  item.status = 'aprovado';
+  item.aprovado_por = user.nome;
+  item.data_decisao = new Date().toISOString();
+  db.save(data);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Despesa justificada aprovada',
+    corpo: `Sua despesa de R$ ${item.valor.toFixed(2)} em ${item.estabelecimento} foi aprovada.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { despesa: item });
+});
+
+// POST /api/despesas-justificadas/:id/reprovar { comentario }
+rota('POST', /^\/api\/despesas-justificadas\/(\d+)\/reprovar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['financeiro', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só financeiro ou administrador decidem despesas justificadas.' });
+  const body = await lerCorpo(req);
+  if (!body.comentario || !String(body.comentario).trim()) return enviarJSON(res, 400, { erro: 'Explique o motivo da reprovação.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Esta despesa já foi decidida.' });
+  item.status = 'reprovado';
+  item.aprovado_por = user.nome;
+  item.data_decisao = new Date().toISOString();
+  item.comentario_financeiro = String(body.comentario).trim();
+  db.save(data);
+  enviarPush(data, item.tecnico_id, {
+    titulo: 'Despesa justificada reprovada',
+    corpo: `Sua despesa de R$ ${item.valor.toFixed(2)} em ${item.estabelecimento} foi reprovada: ${item.comentario_financeiro}`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { despesa: item });
+});
+
 // ---------- painel da plataforma (Super Admin) ----------
 // papel `super_admin` é o dono da plataforma, não de uma empresa — não tem empresa_id (fica null
 // de propósito, ver bootstrapSuperAdmin em db.js) e nunca passa pelas coleções tenant-scoped.

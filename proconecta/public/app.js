@@ -567,6 +567,9 @@ const NAV = {
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
+    // pedido do usuário: "crie no menu técnico um menu justificar despesa" — comprovante único por
+    // lançamento (foto lida por IA ou manual), vai pra aprovação do financeiro.
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Justificar Despesa', page: 'despesas-justificadas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
@@ -621,6 +624,7 @@ const NAV = {
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Justificar Despesa — Aprovação', page: 'despesas-justificadas-fila' },
   ],
   cliente: [
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -692,6 +696,7 @@ const NAV = {
   // financeiro — Etapa 6/passo 2: aprova as prestações de contas lançadas pelos técnicos.
   financeiro: [
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Justificar Despesa — Aprovação', page: 'despesas-justificadas-fila' },
   ],
 };
 
@@ -716,6 +721,7 @@ const ICONE_MENU = {
   'minhas-viagens': '✈️',
   'solicitacoes-rh': '🙋',
   'atividades-dia': '🕒',
+  'despesas-justificadas': '🧾',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -868,6 +874,8 @@ async function ir(pagina) {
     if (pagina === 'financeiro-em-breve') return renderModuloEmBreve('financeiro', 'Financeiro');
     if (pagina === 'prestacao-contas-minhas') return renderPrestacaoContasMinhas();
     if (pagina === 'prestacao-contas-fila') return renderPrestacaoContasFila();
+    if (pagina === 'despesas-justificadas') return renderDespesasJustificadas();
+    if (pagina === 'despesas-justificadas-fila') return renderDespesasJustificadasFila();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -1544,6 +1552,310 @@ async function reprovarPrestacaoContas(id) {
     await api(`/api/prestacao-contas/${id}/reprovar`, { method: 'POST', body: { comentario: comentario.trim() } });
     mostrarToast('Prestação de contas reprovada.');
     renderPrestacaoContasFila();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+// ---------- Justificar Despesa (técnico) ----------
+// pedido do usuário: "crie no menu técnico um menu justificar despesa, ao clicar terá uma opção de
+// tirar foto... o sistema lê automaticamente extraindo data, estabelecimento, valor da compra e
+// descrição... Ou opção de colocar manual... lista cada justificativa em linha horizontal contendo
+// data estabelecimento descrição da despesa e valor. Com opção de imprimir... com filtro por data
+// início e fim. E opção de gerar PDF." Essa justificativa vai pro financeiro (ver renderDespesas
+// JustificadasFila mais abaixo) — mesmo fluxo de aprovação de prestacao_contas, só que um
+// lançamento por despesa, com campo de estabelecimento.
+function statusDespesaTag(status) {
+  if (status === 'aprovado') return tag('Aprovado', 'green');
+  if (status === 'reprovado') return tag('Reprovado', 'red');
+  return tag('Pendente', 'amber');
+}
+
+let _despesasFiltro = { periodo_inicio: '', periodo_fim: '' };
+let _despesasCache = [];
+
+async function renderDespesasJustificadas() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Justificar Despesa</h1><p>Tire uma foto do comprovante (a IA lê os dados pra você revisar) ou preencha na mão. Vai pra aprovação do financeiro.</p></div>
+    <div class="panel" style="text-align:center;">
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <label class="photo-add" style="display:inline-flex;">
+          <span class="plus">📷</span>Tirar foto do comprovante
+          <input type="file" accept="image/*" capture="environment" style="display:none" onchange="processarFotoDespesa(event)">
+        </label>
+        <button class="btn-outline-sm" onclick="abrirFormDespesaManual()">✍️ Preencher manualmente</button>
+      </div>
+      <div id="dj-preview"></div>
+      <div id="dj-status" style="margin-top:8px; color:var(--ink-soft); font-size:13px;"></div>
+    </div>
+    <div id="dj-form"></div>
+    <div class="panel">
+      <div class="panel-head"><span>Despesas justificadas</span></div>
+      <div class="filtros-row">
+        <div class="field"><label>Período — de</label><input type="date" id="dj-filtro-inicio" value="${esc(_despesasFiltro.periodo_inicio)}"></div>
+        <div class="field"><label>Período — até</label><input type="date" id="dj-filtro-fim" value="${esc(_despesasFiltro.periodo_fim)}"></div>
+        <button class="btn btn-primary btn-sm" onclick="filtrarDespesasJustificadas()">Filtrar</button>
+        <button class="btn-outline-sm" onclick="limparFiltroDespesas()">Limpar</button>
+        <button class="btn-outline-sm" onclick="imprimirDespesasJustificadas()">🖨️ Imprimir</button>
+        <button class="btn-outline-sm" onclick="exportarDespesasJustificadasPdf()">Gerar PDF</button>
+      </div>
+      <div id="dj-lista"><div class="empty">Carregando...</div></div>
+    </div>`;
+  await carregarDespesasJustificadas();
+}
+
+async function carregarDespesasJustificadas() {
+  const params = new URLSearchParams();
+  if (_despesasFiltro.periodo_inicio) params.set('periodo_inicio', _despesasFiltro.periodo_inicio);
+  if (_despesasFiltro.periodo_fim) params.set('periodo_fim', _despesasFiltro.periodo_fim);
+  const sufixo = params.toString() ? `?${params.toString()}` : '';
+  const { despesas } = await api(`/api/despesas-justificadas/minhas${sufixo}`);
+  _despesasCache = despesas;
+  renderListaDespesasJustificadas();
+}
+
+function filtrarDespesasJustificadas() {
+  _despesasFiltro = {
+    periodo_inicio: document.getElementById('dj-filtro-inicio').value,
+    periodo_fim: document.getElementById('dj-filtro-fim').value,
+  };
+  carregarDespesasJustificadas();
+}
+function limparFiltroDespesas() {
+  _despesasFiltro = { periodo_inicio: '', periodo_fim: '' };
+  document.getElementById('dj-filtro-inicio').value = '';
+  document.getElementById('dj-filtro-fim').value = '';
+  carregarDespesasJustificadas();
+}
+
+// pedido do usuário: "pode deixar na mesma página as despesas justificada uma lista cada
+// justificativa em linha horizontal" — tabela (uma linha = uma despesa), mesmo padrão responsivo
+// (data-label) de toda tabela do sistema. #despesas-print-area é só o que window.print() mostra
+// (ver imprimirDespesasJustificadas) — filtro e botões ficam de fora do papel impresso.
+function renderListaDespesasJustificadas() {
+  const alvo = document.getElementById('dj-lista');
+  if (!alvo) return;
+  if (!_despesasCache.length) { alvo.innerHTML = '<div class="empty">Nenhuma despesa justificada nesse período.</div>'; return; }
+  const total = _despesasCache.reduce((s, d) => s + d.valor, 0);
+  const periodoTexto = _despesasFiltro.periodo_inicio || _despesasFiltro.periodo_fim
+    ? `${_despesasFiltro.periodo_inicio ? 'de ' + fmtData(_despesasFiltro.periodo_inicio) + ' ' : ''}${_despesasFiltro.periodo_fim ? 'até ' + fmtData(_despesasFiltro.periodo_fim) : ''}`
+    : 'todo o período';
+  alvo.innerHTML = `
+    <div id="despesas-print-area">
+      <div class="so-impressao" style="margin-bottom:14px;">
+        <h2 style="margin:0;">Despesas justificadas — ${esc(USER.nome)}</h2>
+        <p style="color:var(--ink-soft); font-size:13px;">${esc(periodoTexto)} — impresso em ${fmtData(new Date().toISOString())}</p>
+      </div>
+      <table>
+        <tr><th>Data</th><th>Estabelecimento</th><th>Descrição</th><th>Valor</th><th>Status</th></tr>
+        ${_despesasCache.map((d) => `
+          <tr>
+            <td data-label="Data">${fmtData(d.data)}</td>
+            <td data-label="Estabelecimento">${esc(d.estabelecimento)}</td>
+            <td data-label="Descrição">${esc(d.descricao || '—')}</td>
+            <td data-label="Valor">${fmtMoeda(d.valor)}</td>
+            <td data-label="Status">${statusDespesaTag(d.status)}${d.status === 'reprovado' && d.comentario_financeiro ? `<div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${esc(d.comentario_financeiro)}</div>` : ''}</td>
+          </tr>`).join('')}
+        <tr style="font-weight:700;"><td colspan="3" data-label="Total">Total</td><td data-label="Valor">${fmtMoeda(total)}</td><td></td></tr>
+      </table>
+    </div>`;
+}
+
+function imprimirDespesasJustificadas() {
+  if (!_despesasCache.length) return mostrarToast('Nenhuma despesa pra imprimir nesse período.');
+  window.print();
+}
+
+async function processarFotoDespesa(event) {
+  const arquivos = event.target.files;
+  if (!arquivos || !arquivos.length) return;
+  const [dataUrl] = await lerFotosComoDataUrl(arquivos);
+  const preview = document.getElementById('dj-preview');
+  const status = document.getElementById('dj-status');
+  if (preview) preview.innerHTML = `<img src="${dataUrl}" style="max-width:220px; border-radius:10px; border:1px solid var(--line); margin-top:12px;">`;
+  if (status) status.textContent = 'Lendo o comprovante...';
+  try {
+    const { extraido } = await api('/api/despesas-justificadas/ler-recibo', { method: 'POST', body: { foto: dataUrl } });
+    if (status) status.textContent = 'Comprovante lido — revise os dados antes de salvar.';
+    abrirFormDespesa({ ...extraido, foto: dataUrl, origem: 'ocr' });
+  } catch (e) {
+    if (status) status.textContent = 'Não consegui ler automaticamente: ' + e.message + ' Revise/preencha os campos abaixo.';
+    abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', foto: dataUrl, origem: 'manual' });
+  }
+}
+
+function abrirFormDespesaManual() {
+  document.getElementById('dj-preview').innerHTML = '';
+  document.getElementById('dj-status').textContent = '';
+  abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', foto: null, origem: 'manual' });
+}
+
+// mesmo formulário serve pro resultado da IA (campos pré-preenchidos, o técnico só confere) e pro
+// preenchimento 100% manual (campos vazios) — ver pedido do usuário citado acima.
+function abrirFormDespesa(draft) {
+  window._despesaDraft = draft;
+  const form = document.getElementById('dj-form');
+  form.innerHTML = `
+    <div class="panel" style="background:var(--blue-pale-2); margin-top:10px;">
+      <div class="panel-head"><span>${draft.origem === 'ocr' ? 'Confira os dados lidos do comprovante' : 'Nova despesa'}</span></div>
+      <div class="form-grid">
+        <div><label>Data</label><input type="date" id="dj-data" value="${esc(draft.data || '')}"></div>
+        <div><label>Estabelecimento</label><input id="dj-estabelecimento" value="${esc(draft.estabelecimento || '')}" placeholder="ex: Posto Ipiranga"></div>
+        <div><label>Valor (R$)</label><input type="number" min="0" step="0.01" id="dj-valor" value="${draft.valor || ''}"></div>
+        <div class="full"><label>Descrição</label><input id="dj-descricao" value="${esc(draft.descricao || '')}" placeholder="ex: Almoço durante atendimento"></div>
+      </div>
+      <div style="margin-top:14px; display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarDespesaJustificada()">Salvar</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('dj-form').innerHTML=''; document.getElementById('dj-preview').innerHTML=''; document.getElementById('dj-status').textContent='';">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function salvarDespesaJustificada() {
+  const data = document.getElementById('dj-data').value;
+  const estabelecimento = document.getElementById('dj-estabelecimento').value.trim();
+  const valor = Number(document.getElementById('dj-valor').value);
+  const descricao = document.getElementById('dj-descricao').value.trim();
+  if (!data) return mostrarToast('Informe a data da despesa.');
+  if (!estabelecimento) return mostrarToast('Informe o estabelecimento.');
+  if (!(valor > 0)) return mostrarToast('Informe um valor maior que zero.');
+  try {
+    await api('/api/despesas-justificadas', {
+      method: 'POST',
+      body: { data, estabelecimento, valor, descricao, foto: (window._despesaDraft || {}).foto || null, origem: (window._despesaDraft || {}).origem || 'manual' },
+    });
+    mostrarToast('Despesa justificada enviada — aguardando aprovação do financeiro.');
+    document.getElementById('dj-form').innerHTML = '';
+    document.getElementById('dj-preview').innerHTML = '';
+    document.getElementById('dj-status').textContent = '';
+    window._despesaDraft = null;
+    await carregarDespesasJustificadas();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+// pedido do usuário: "opção de gerar PDF" — tabela desenhada à mão com jsPDF (mesmo padrão dos
+// outros ~15 geradores de PDF do sistema: PDF_COR/carregarLogoDataUri/limparPdf, ver mais abaixo
+// no arquivo — "const"s de nível de módulo, por isso dá pra usar aqui mesmo definidos depois:
+// essa função só roda quando clicada, bem depois do script inteiro já ter sido avaliado).
+async function exportarDespesasJustificadasPdf() {
+  if (typeof window.jspdf === 'undefined') return alert('A biblioteca de exportação de PDF não carregou (sem conexão com o CDN). Tente novamente mais tarde.');
+  if (!_despesasCache.length) return mostrarToast('Nenhuma despesa pra exportar nesse período.');
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const logo = await carregarLogoDataUri();
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  let y = margem;
+
+  const periodoTexto = _despesasFiltro.periodo_inicio || _despesasFiltro.periodo_fim
+    ? `${_despesasFiltro.periodo_inicio ? 'De ' + fmtData(_despesasFiltro.periodo_inicio) + ' ' : ''}${_despesasFiltro.periodo_fim ? 'até ' + fmtData(_despesasFiltro.periodo_fim) : ''}`.trim()
+    : 'Todo o período';
+  const xTexto = margem + (logo ? 36 : 0);
+  if (logo) { try { doc.addImage(logo, 'PNG', margem, y - 8, 28, 32); } catch (e) {} }
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('Despesas justificadas', xTexto, y + 10);
+  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`${USER.nome} — ${periodoTexto}`), xTexto, y + 26);
+  y += 50;
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(1);
+  doc.line(margem, y, pageW - margem, y);
+  y += 24;
+
+  const colX = { data: margem, estab: margem + 70, desc: margem + 220, valor: pageW - margem - 115, status: pageW - margem - 55 };
+  function cabecalhoTabela() {
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('DATA', colX.data, y);
+    doc.text('ESTABELECIMENTO', colX.estab, y);
+    doc.text('DESCRIÇÃO', colX.desc, y);
+    doc.text('VALOR', colX.valor, y);
+    doc.text('STATUS', colX.status, y);
+    y += 8;
+    doc.setDrawColor(...PDF_COR.line);
+    doc.line(margem, y, pageW - margem, y);
+    y += 16;
+  }
+  cabecalhoTabela();
+
+  let total = 0;
+  for (const d of _despesasCache) {
+    if (y > pageH - margem - 40) { doc.addPage(); y = margem; cabecalhoTabela(); }
+    doc.setFont(undefined, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(fmtData(d.data), colX.data, y);
+    doc.text(limparPdf(d.estabelecimento).slice(0, 26), colX.estab, y);
+    doc.text(limparPdf(d.descricao || '—').slice(0, 30), colX.desc, y);
+    doc.text(fmtMoeda(d.valor), colX.valor, y);
+    doc.text(d.status === 'aprovado' ? 'Aprovado' : d.status === 'reprovado' ? 'Reprovado' : 'Pendente', colX.status, y);
+    total += d.valor;
+    y += 18;
+  }
+  y += 4;
+  doc.setDrawColor(...PDF_COR.line);
+  doc.line(margem, y, pageW - margem, y);
+  y += 18;
+  doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COR.navy);
+  doc.text(`Total: ${fmtMoeda(total)}`, colX.valor, y);
+
+  doc.save(`despesas-justificadas-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+// ---------- Justificar Despesa — Aprovação (financeiro/administrador) ----------
+// pedido do usuário: "essa justificativa vai pro financeiro" — mesmo papel que decide prestação de
+// contas (ver renderPrestacaoContasFila acima), reaproveitando o mesmo padrão de fila/decisão.
+async function renderDespesasJustificadasFila() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Justificar Despesa — Aprovação</h1><p>Despesas avulsas lançadas pelos técnicos (foto lida por IA ou manual), aguardando decisão.</p></div>
+    <div id="dj-fila"><div class="empty">Carregando...</div></div>`;
+  const { despesas } = await api('/api/despesas-justificadas/fila');
+  const div = document.getElementById('dj-fila');
+  div.innerHTML = despesas.length
+    ? despesas.map((d) => renderCardDespesaFila(d)).join('')
+    : '<div class="empty">Nenhuma despesa pendente.</div>';
+}
+
+function renderCardDespesaFila(d) {
+  return `
+    <div class="panel" id="dj-card-${d.id}">
+      <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>${esc(d.tecnico_nome)} — ${fmtData(d.data)}</span>
+        ${statusDespesaTag(d.status)}
+      </div>
+      <div style="display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap;">
+        ${d.foto ? `<img src="${esc(d.foto)}" style="width:70px; height:70px; object-fit:cover; border-radius:8px; cursor:pointer; flex-shrink:0;" onclick="abrirLightbox('${esc(d.foto)}')">` : ''}
+        <div style="flex:1; min-width:200px;">
+          <div><b>${esc(d.estabelecimento)}</b> — ${fmtMoeda(d.valor)}</div>
+          ${d.descricao ? `<div style="color:var(--ink-soft); font-size:13px; margin-top:2px;">${esc(d.descricao)}</div>` : ''}
+          <div style="color:var(--ink-soft); font-size:11.5px; margin-top:4px;">${d.origem === 'ocr' ? 'Lido automaticamente por IA' : 'Preenchido manualmente'}</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <button class="btn btn-primary btn-sm" onclick="aprovarDespesaJustificada(${d.id})">Aprovar</button>
+        <button class="btn-outline-sm" style="color:var(--red); border-color:var(--red);" onclick="reprovarDespesaJustificada(${d.id})">Reprovar</button>
+      </div>
+    </div>`;
+}
+
+async function aprovarDespesaJustificada(id) {
+  try {
+    await api(`/api/despesas-justificadas/${id}/aprovar`, { method: 'POST' });
+    mostrarToast('Despesa aprovada.');
+    renderDespesasJustificadasFila();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+async function reprovarDespesaJustificada(id) {
+  const comentario = prompt('Explique o motivo da reprovação:');
+  if (comentario === null) return;
+  if (!comentario.trim()) return mostrarToast('Informe o motivo da reprovação.');
+  try {
+    await api(`/api/despesas-justificadas/${id}/reprovar`, { method: 'POST', body: { comentario: comentario.trim() } });
+    mostrarToast('Despesa reprovada.');
+    renderDespesasJustificadasFila();
   } catch (e) {
     mostrarToast(e.message);
   }
