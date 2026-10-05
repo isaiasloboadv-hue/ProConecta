@@ -587,36 +587,26 @@ const NAV = {
     { key: 'atividades-dia', modulo: 'os_chamados', label: 'Atividades do Dia', page: 'atividades-dia' },
   ],
   administrador: [
+    // pedido do usuário: "colocar o menu home no topo dos menus" — primeiro item da lista.
+    { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
     { key: 'chat-admin', modulo: 'os_chamados', label: 'Chat', page: 'chat-admin' },
     { key: 'aprovacoes-visitas', modulo: 'os_chamados', label: 'Ordem de Serviço', page: 'aprovacoes-visitas' },
-    // RCM/SAP PM Fase 1, passo 6 — MTBF, MTTR, disponibilidade, backlog, %preventiva×corretiva.
-    { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
     // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
     // tiposRelatorioManual em renderRelatorioManutencao).
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
-    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
-      { key: 'acessar', label: 'Acessar biblioteca', children: [
-        { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
-        { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
-      ]},
-      { key: 'aprovacao', label: 'Aprovação', page: 'aprovacoes-biblioteca' },
-      { key: 'solicitacoes-edicao', label: 'Solicitações de edição', page: 'solicitacoes-edicao-biblioteca' },
-      { key: 'adicionar', label: 'Adicionar', children: [
-        { key: 'adicionar-defeito', label: 'Defeitos/Falhas', page: 'add-defeito' },
-        { key: 'adicionar-procedimento', label: 'Manual de Procedimentos', page: 'add-procedimento' },
-      ]},
-      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
-    ]},
+    // pedido do usuário: "no menu biblioteca e equipamentos crie só o menu principal... ao clicar
+    // irá abrir uma página individual com widgets com cores igual o widgets do home. Eles estão
+    // os submenus" — era uma árvore com filhos (Acessar/Aprovação/Solicitações/Adicionar/Ranking);
+    // virou um item só, que abre renderBibliotecaMenu() com uma tile colorida por antiga página
+    // de submenu (mesmo componente .kpis-tile do Home).
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', page: 'biblioteca-menu' },
     { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
-    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
-      { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
-      { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
-      { key: 'fmea-relatorios', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
-    ]},
+    // mesma ideia da Biblioteca acima: Cadastrar/Atrelar/FMEA viram tiles de renderEquipamentosMenu().
+    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', page: 'equipamentos-menu' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
@@ -837,6 +827,7 @@ async function ir(pagina) {
     if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
     if (pagina === 'aprovacoes-visitas') return renderAprovacoesVisitas();
+    if (pagina === 'biblioteca-menu') return renderBibliotecaMenu();
     if (pagina === 'biblioteca-defeitos') return renderBibliotecaDefeitos();
     if (pagina === 'biblioteca-procedimentos') return renderBibliotecaProcedimentos();
     if (pagina === 'biblioteca-ranking') return renderRankingTecnicos();
@@ -847,6 +838,7 @@ async function ir(pagina) {
     if (pagina === 'solicitacoes-edicao-biblioteca') return renderSolicitacoesEdicao();
     if (pagina === 'clientes') return renderClientes();
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
+    if (pagina === 'equipamentos-menu') return renderEquipamentosMenu();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
@@ -5092,7 +5084,38 @@ async function registrarChegadaVolta(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
-// ---------- BIBLIOTECA: ACESSAR ----------
+// ---------- BIBLIOTECA: menu principal ----------
+// pedido do usuário: "no menu biblioteca... crie só o menu principal... ao clicar no menu
+// biblioteca irá abrir uma página individual com widgets com cores igual o widgets do home. Eles
+// estão os submenus" — cada tile abaixo é uma das antigas páginas do submenu (ver NAV.administrador
+// antes dessa mudança), reaproveitando o mesmo componente visual .kpis-tile do Home.
+async function renderBibliotecaMenu() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Biblioteca</h1><p>Defeitos/Falhas, Manual de Procedimentos, aprovação e ranking de técnicos.</p></div>
+    <div class="kpis-tiles" id="biblioteca-menu-tiles"><div class="empty">Carregando...</div></div>`;
+  // Aprovação e Solicitações de edição já têm endpoint próprio e leve (fila curta) — dá pra mostrar
+  // quantos estão pendentes sem custo. Defeitos/Procedimentos ficam de fora de propósito: a tela
+  // deles é "buscar primeiro" (ver renderBibliotecaDefeitos), carregar tudo só pra contar iria
+  // contra essa decisão de performance.
+  const [fila, solicitacoes] = await Promise.all([
+    api('/api/registros/fila'), api('/api/registros/solicitacoes-edicao'),
+  ]);
+  const tile = (titulo, subtitulo, cor, pagina) => `
+    <div class="kpis-tile" style="background:${cor};" onclick="ir('${pagina}')">
+      <div class="kpis-tile-label"><span>${esc(titulo)}</span></div>
+      <div class="kpis-tile-valor" style="font-size:15px;">${subtitulo}</div>
+    </div>`;
+  document.getElementById('biblioteca-menu-tiles').innerHTML = `
+    ${tile('Defeitos/Falhas', 'Buscar casos aprovados', 'var(--blue)', 'biblioteca-defeitos')}
+    ${tile('Manual de Procedimentos', 'Buscar procedimentos', 'var(--teal)', 'biblioteca-procedimentos')}
+    ${tile('Aprovação', `${fila.registros.length} pendente(s)`, 'var(--orange)', 'aprovacoes-biblioteca')}
+    ${tile('Solicitações de edição', `${solicitacoes.registros.length} pendente(s)`, 'var(--amber)', 'solicitacoes-edicao-biblioteca')}
+    ${tile('Adicionar Defeito/Falha', 'Novo registro', 'var(--green)', 'add-defeito')}
+    ${tile('Adicionar Procedimento', 'Novo registro', 'var(--purple)', 'add-procedimento')}
+    ${tile('Ranking de técnicos', 'Ver ranking', 'var(--navy)', 'biblioteca-ranking')}`;
+}
+
 async function renderBibliotecaDefeitos(filtros = {}, pesquisou = false) {
   let registros = [];
   if (pesquisou) {
@@ -12963,6 +12986,28 @@ async function verHistorico(id) {
       <tr><th>Data</th><th>Tipo</th><th>Status</th></tr>
       ${agenda.length ? agenda.map((a) => `<tr><td data-label="Data">${fmtData(a.data_hora_inicio)}</td><td data-label="Tipo">${TIPO_OS_LABEL[a.tipo] || a.tipo}</td><td data-label="Status">${a.status}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sem histórico ainda.</td></tr>`}
     </table></div>`;
+}
+
+// ---------- EQUIPAMENTOS: menu principal ----------
+// mesma ideia da Biblioteca (ver renderBibliotecaMenu) — Cadastrar/Atrelar/FMEA eram filhos de um
+// submenu só; agora são tiles coloridas de uma página própria.
+async function renderEquipamentosMenu() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Equipamentos</h1><p>Catálogo, atrelamento a clientes e FMEA.</p></div>
+    <div class="kpis-tiles" id="equipamentos-menu-tiles"><div class="empty">Carregando...</div></div>`;
+  const { equipamentos } = await api('/api/equipamentos');
+  const catalogo = equipamentos.filter((e) => e.cliente_id === null).length;
+  const atrelados = equipamentos.filter((e) => e.cliente_id !== null).length;
+  const tile = (titulo, subtitulo, cor, pagina) => `
+    <div class="kpis-tile" style="background:${cor};" onclick="ir('${pagina}')">
+      <div class="kpis-tile-label"><span>${esc(titulo)}</span></div>
+      <div class="kpis-tile-valor" style="font-size:15px;">${subtitulo}</div>
+    </div>`;
+  document.getElementById('equipamentos-menu-tiles').innerHTML = `
+    ${tile('Cadastrar equipamento', `${catalogo} no catálogo`, 'var(--green)', 'equipamentos-cadastrar')}
+    ${tile('Atrelar equipamento', `${atrelados} atrelado(s)`, 'var(--blue)', 'equipamentos-atrelar')}
+    ${tile('FMEA — Ranking e Pareto', 'Ver análise', 'var(--purple)', 'fmea-relatorios')}`;
 }
 
 // ---- Cadastrar equipamento (catálogo: tipo/modelo, sem cliente ainda) ----
