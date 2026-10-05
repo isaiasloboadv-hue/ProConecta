@@ -13409,14 +13409,19 @@ async function renderKpisDashboard() {
   const equipamentosAtrelados = equipamentos.filter((e) => e.cliente_id !== null);
   const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
 
-  // "sempre" o mês atual — sobrescreve qualquer período que tivesse ficado de uma visita anterior
-  // nesta mesma sessão, toda vez que a Home é aberta (login, clique no menu, etc.)
-  const { inicio: inicioMesAtual, fim: fimMesAtual } = limitesMesAtualISO();
-  _kpisFiltros = { ..._kpisFiltros, periodo_inicio: inicioMesAtual, periodo_fim: fimMesAtual };
+  // pedido do usuário: "a data de filtro padrão preenchido é do início ao fim do mês atual,
+  // podendo ser modificado a depender do usuário" — o mês atual é só o PRÉ-PREENCHIMENTO inicial
+  // (primeira vez que a Home abre nesta sessão, ou depois de "Limpar"); se o usuário já aplicou um
+  // período diferente, essa escolha continua valendo ao navegar pra outra tela e voltar pra Home —
+  // não é sobrescrita de novo a cada entrada na tela.
+  if (!_kpisFiltros.periodo_inicio || !_kpisFiltros.periodo_fim) {
+    const { inicio, fim } = limitesMesAtualISO();
+    _kpisFiltros = { ..._kpisFiltros, periodo_inicio: inicio, periodo_fim: fim };
+  }
 
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Home</h1><p>Indicadores calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos, de ${fmtData(inicioMesAtual)} a ${fmtData(fimMesAtual)} (mês atual).</p></div>
+    <div class="page-head"><h1>Home</h1><p>Indicadores calculados a partir das datas/horas das Ordens de Serviço e dos Laudos Técnicos, no período selecionado abaixo.</p></div>
     <div class="filtros-row">
       <div class="field"><label>Período — de</label><input id="kf-periodo-inicio" type="date" value="${esc(_kpisFiltros.periodo_inicio || '')}"></div>
       <div class="field"><label>Período — até</label><input id="kf-periodo-fim" type="date" value="${esc(_kpisFiltros.periodo_fim || '')}"></div>
