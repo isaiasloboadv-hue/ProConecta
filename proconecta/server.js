@@ -4592,14 +4592,23 @@ function filtrarAgendaKpis(data, agendaEmpresa, filtros) {
 
 // horas de reparo (conclusão - entrada do Laudo Técnico, rodada 1) de cada O.S. corretiva da lista
 // — usado tanto pelo MTTR quanto pela disponibilidade (mesma base, sem duplicar a lógica).
-function horasReparoDeCorretivas(data, empresaId, corretivas) {
+// `incluirParcial` (pedido do usuário: "No mttr o gráfico colocar valores parcial atualizado
+// durante o mês") conta também reparos ainda em andamento (entrada preenchida, sem conclusão
+// ainda) usando "agora - entrada" como horas parciais — só usado pelo mês corrente do gráfico
+// mensal, nunca pro indicador MTTR principal nem pros meses já fechados (ver calcularKpisMensais).
+function horasReparoDeCorretivas(data, empresaId, corretivas, { incluirParcial = false, agora = Date.now() } = {}) {
   const horas = [];
   for (const os of corretivas) {
     const visita = data.visitas.find((v) => v.agenda_id === os.id && v.empresa_id === empresaId && (v.rodada || 1) === 1);
     const laudo = visita && visita.laudo;
-    if (!laudo || !laudo.data_entrada || !laudo.data_conclusao) continue;
-    const h = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
-    if (Number.isFinite(h) && h >= 0) horas.push(h);
+    if (!laudo || !laudo.data_entrada) continue;
+    if (laudo.data_conclusao) {
+      const h = (new Date(laudo.data_conclusao).getTime() - new Date(laudo.data_entrada).getTime()) / 36e5;
+      if (Number.isFinite(h) && h >= 0) horas.push(h);
+    } else if (incluirParcial) {
+      const h = (agora - new Date(laudo.data_entrada).getTime()) / 36e5;
+      if (Number.isFinite(h) && h >= 0) horas.push(h);
+    }
   }
   return horas;
 }
@@ -4708,6 +4717,8 @@ function calcularKpisMensais(data, empresaId, filtros = {}) {
     cursor.setMonth(cursor.getMonth() + 1);
   }
   const chavesLimitadas = chaves.slice(-24);
+  const hoje = new Date();
+  const chaveMesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
 
   return chavesLimitadas.map((chave) => {
     const [ano, mes] = chave.split('-').map(Number);
@@ -4717,9 +4728,15 @@ function calcularKpisMensais(data, empresaId, filtros = {}) {
     });
     const corretivasMes = itensDoMes.filter((a) => a.tipo === 'corretiva');
     const preventivasMes = itensDoMes.filter((a) => a.tipo === 'preventiva');
-    const horasReparoMes = horasReparoDeCorretivas(data, empresaId, corretivasMes);
+    // pedido do usuário: "No mttr o gráfico colocar valores parcial atualizado durante o mês" — o
+    // mês corrente entra com reparo em andamento contado parcialmente (agora - entrada), pra não
+    // ficar sem ponto no gráfico até o 1º reparo do mês ser concluído; meses já fechados continuam
+    // só com reparo concluído mesmo (histórico não deve ficar "andando" depois de fechado).
+    const ehMesAtual = chave === chaveMesAtual;
+    const horasReparoMes = horasReparoDeCorretivas(data, empresaId, corretivasMes, { incluirParcial: ehMesAtual });
     return {
       mes: chave,
+      parcial: ehMesAtual,
       preventivas: preventivasMes.length,
       corretivas: corretivasMes.length,
       mttr_horas: horasReparoMes.length ? Math.round((horasReparoMes.reduce((s, h) => s + h, 0) / horasReparoMes.length) * 10) / 10 : null,

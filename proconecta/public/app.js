@@ -13844,7 +13844,7 @@ async function renderKpisDashboard() {
       </div>
     </div>
     <div class="panel"><div class="panel-head"><span>Técnicos — O.S. concluídas no recorte atual</span>${ajudaKpi('Ranking dos técnicos pela quantidade de Ordens de Serviço concluídas dentro do período e filtros selecionados.')}</div><div id="kpis-ranking-tecnicos"><div class="empty">Carregando...</div></div></div>
-    <div class="panel"><div class="panel-head"><span>MTTR por mês (horas)</span>${ajudaKpi('MTTR — Tempo Médio de Reparo (Mean Time To Repair): quantas horas, em média, leva do início ao fim do reparo de uma O.S. corretiva, mês a mês.')}</div><canvas id="kpis-chart-mttr" height="90"></canvas></div>`;
+    <div class="panel"><div class="panel-head"><span>MTTR por mês (horas)</span>${ajudaKpi('MTTR — Tempo Médio de Reparo (Mean Time To Repair): quantas horas, em média, leva do início ao fim do reparo de uma O.S. corretiva, mês a mês.')}</div><canvas id="kpis-chart-mttr" height="90"></canvas><p id="kpis-mttr-nota" style="display:none; margin:8px 0 0; font-size:12px; color:var(--ink-soft);">* mês em andamento — valor parcial, atualiza conforme os reparos avançam.</p></div>`;
   await atualizarKpisDashboard();
 }
 
@@ -14177,6 +14177,15 @@ function desenharGraficosKpis(meses, kpis) {
   }
   if (_kpisChartMttr) _kpisChartMttr.destroy();
   const mttrValores = meses.map((m) => m.mttr_horas);
+  // pedido do usuário: "No mttr o gráfico colocar valores parcial atualizado durante o mês" — o
+  // mês corrente (meses[].parcial, calculado em calcularKpisMensais) entra com reparo em
+  // andamento contado parcialmente, pra não ficar sem ponto até o 1º reparo do mês fechar. Esse
+  // ponto fica com contorno vazado (em vez de preenchido) e tracejado puxando pra ele, pra não ser
+  // lido como um valor fechado igual aos meses anteriores.
+  const indiceParcial = meses.findIndex((m) => m.parcial);
+  const notaMttr = document.getElementById('kpis-mttr-nota');
+  const mostrarNotaParcial = indiceParcial !== -1 && mttrValores[indiceParcial] !== null && mttrValores[indiceParcial] !== undefined;
+  if (notaMttr) notaMttr.style.display = mostrarNotaParcial ? '' : 'none';
   // com pouco histórico de corretiva concluída com Laudo Técnico preenchido, a linha vira só 1-2
   // pontos soltos sem nada pra conectar — difícil de ler como "tem dado ali" à primeira vista.
   // Nesse caso (poucos pontos com valor) aumenta o ponto e escreve o valor do lado; com mais
@@ -14196,7 +14205,7 @@ function desenharGraficosKpis(meses, kpis) {
       pontos.forEach((ponto, i) => {
         const valor = mttrValores[i];
         if (valor === null || valor === undefined) return;
-        ctx.fillText(`${valor} h`, ponto.x, ponto.y - 12);
+        ctx.fillText(`${valor} h${i === indiceParcial ? '*' : ''}`, ponto.x, ponto.y - 12);
       });
       ctx.restore();
     },
@@ -14207,10 +14216,26 @@ function desenharGraficosKpis(meses, kpis) {
       labels,
       datasets: [{
         label: 'MTTR (h)', data: mttrValores, borderColor: '#1976D2', backgroundColor: 'rgba(25,118,210,.15)',
-        fill: true, spanGaps: true, pointRadius: 5, pointHoverRadius: 7, pointBackgroundColor: '#1976D2',
+        fill: true, spanGaps: true, pointHoverRadius: 7,
+        pointRadius: mttrValores.map((v, i) => (v === null || v === undefined ? 0 : i === indiceParcial ? 6 : 5)),
+        pointBackgroundColor: mttrValores.map((v, i) => (i === indiceParcial ? '#fff' : '#1976D2')),
+        pointBorderColor: '#1976D2',
+        pointBorderWidth: mttrValores.map((v, i) => (i === indiceParcial ? 2 : 1)),
+        segment: { borderDash: (ctx) => (ctx.p1DataIndex === indiceParcial ? [6, 4] : undefined) },
       }],
     },
-    options: { responsive: true, layout: { padding: { top: mostrarRotulosMttr ? 20 : 0 } }, scales: { y: { beginAtZero: true } } },
+    options: {
+      responsive: true,
+      layout: { padding: { top: mostrarRotulosMttr ? 20 : 0 } },
+      scales: { y: { beginAtZero: true } },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `MTTR: ${ctx.raw} h${ctx.dataIndex === indiceParcial ? ' (parcial — mês em andamento)' : ''}`,
+          },
+        },
+      },
+    },
     plugins: [rotulosMttrPlugin],
   });
 }
@@ -14251,7 +14276,7 @@ async function exportarKpisExcel() {
   ]);
   const abaMensal = XLSX.utils.aoa_to_sheet([
     ['Mês', 'Preventivas', 'Corretivas', 'MTTR médio (h)'],
-    ...meses.map((m) => [m.mes, m.preventivas, m.corretivas, m.mttr_horas ?? '—']),
+    ...meses.map((m) => [m.mes, m.preventivas, m.corretivas, m.mttr_horas === null || m.mttr_horas === undefined ? '—' : `${m.mttr_horas}${m.parcial ? ' (parcial)' : ''}`]),
   ]);
 
   const livro = XLSX.utils.book_new();
