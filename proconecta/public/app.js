@@ -181,6 +181,7 @@ function aplicarMarcaNaTela() {
   const url = window._empresa && window._empresa.logo_url;
   document.querySelectorAll('.brand-mark-img').forEach((img) => { img.src = url || '/logo.png'; });
   _logoDataUriPromise = null;
+  _logoVariantesPromise = null;
 }
 function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
 function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
@@ -1783,7 +1784,7 @@ async function exportarDespesasJustificadasPdf() {
   if (!_despesasCache.length) return mostrarToast('Nenhuma despesa pra exportar nesse período.');
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const logo = await carregarLogoDataUri();
+  const logo = await carregarLogoVariantes();
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margem = 40;
@@ -1793,7 +1794,7 @@ async function exportarDespesasJustificadasPdf() {
     ? `${_despesasFiltro.periodo_inicio ? 'De ' + fmtData(_despesasFiltro.periodo_inicio) + ' ' : ''}${_despesasFiltro.periodo_fim ? 'até ' + fmtData(_despesasFiltro.periodo_fim) : ''}`.trim()
     : 'Todo o período';
   const xTexto = margem + (logo ? 36 : 0);
-  if (logo) { try { doc.addImage(logo, 'PNG', margem, y - 8, 28, 32); } catch (e) {} }
+  if (logo) { try { doc.addImage(logo.header, 'PNG', margem, y - 8, 28, 32); } catch (e) {} }
   doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text('Despesas', xTexto, y + 10);
   doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -4172,7 +4173,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -4240,7 +4241,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -4403,7 +4404,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -4439,7 +4440,7 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -4489,7 +4490,7 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -4529,7 +4530,7 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -5075,7 +5076,7 @@ function detalheCompletoOS(a, visita) {
 async function baixarPdfDevolutivo(id) {
   try {
     const { relatorio } = await api(`/api/relatorios-manutencao/${id}`);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioDevolutivo(relatorio, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
@@ -5086,7 +5087,7 @@ async function baixarPdfLaudoAprovado(agendaId) {
   const v = (window._visitasPorAgenda || {})[agendaId];
   if (!a || !v || !v.laudo) return alert('Não foi possível localizar o laudo aprovado desta O.S.');
   try {
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfLaudo(v.laudo, a, logo);
     window.open(url, '_blank');
   } catch (e) {
@@ -5099,7 +5100,7 @@ async function baixarPdfRelatorioSimplesAprovado(agendaId) {
   const v = (window._visitasPorAgenda || {})[agendaId];
   if (!a || !v || !v.relatorio_simples) return alert('Não foi possível localizar o relatório aprovado desta O.S.');
   try {
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioSimples(v.relatorio_simples, a, logo);
     window.open(url, '_blank');
   } catch (e) {
@@ -5528,7 +5529,7 @@ async function abrirDetalheDefeito(i, origem) {
   if (!r) return;
   // a lista de busca não traz fotos (economia de banda) — busca o registro completo só agora
   if (!r._completo) { Object.assign(r, (await api(`/api/registros/${r.id}`)).registro); r._completo = true; }
-  carregarLogoDataUri();
+  carregarLogoVariantes();
   const main = document.getElementById('main');
   const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaDefeitos(window._defeitosFiltros || {}, true)';
   main.innerHTML = `
@@ -5685,7 +5686,7 @@ async function abrirDetalheProcedimento(i, origem) {
   if (!r) return;
   // a lista de busca não traz fotos (economia de banda) — busca o registro completo só agora
   if (!r._completo) { Object.assign(r, (await api(`/api/registros/${r.id}`)).registro); r._completo = true; }
-  carregarLogoDataUri();
+  carregarLogoVariantes();
   const main = document.getElementById('main');
   const voltar = origem === 'solicitacoes' ? 'renderSolicitacoesEdicao()' : 'renderBibliotecaProcedimentos(window._procedimentosFiltros || {}, true)';
   main.innerHTML = `
@@ -5802,11 +5803,54 @@ function carregarLogoDataUri() {
   return _logoDataUriPromise;
 }
 
+// o jsPDF deste app não compõe corretamente o canal alpha de PNG com transparência: a área
+// transparente sai como um quadrado preto sólido no PDF — confirmado que acontece em QUALQUER
+// fundo (inclusive branco), não é uma questão de cor errada na borda. Em vez de depender do jsPDF
+// pra isso, "achatamos" a logo contra cada cor de fundo onde ela realmente aparece no PDF (cabeçalho
+// branco, capa navy, página de contato bege) desenhando num <canvas> antes de gerar o PDF — o
+// resultado é um PNG 100% opaco, sem canal alpha nenhum pro jsPDF estragar.
+function flatarLogoSobreCor(dataUri, rgb) {
+  return new Promise((resolve) => {
+    if (!dataUri) return resolve(dataUri);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(dataUri);
+    img.src = dataUri;
+  });
+}
+
+let _logoVariantesPromise = null;
+// mesmo cache/invalidação do carregarLogoDataUri (ver aplicarMarcaNaTela) — só que já devolve as 3
+// versões achatadas prontas pro jsPDF: { header, cover, contato }.
+function carregarLogoVariantes() {
+  if (!_logoVariantesPromise) {
+    _logoVariantesPromise = carregarLogoDataUri().then(async (base) => {
+      if (!base) return null;
+      const [header, cover, contato] = await Promise.all([
+        flatarLogoSobreCor(base, PDF_COR.white),
+        flatarLogoSobreCor(base, PDF_COR.navy),
+        flatarLogoSobreCor(base, PDF_COR.bege),
+      ]);
+      return { header, cover, contato };
+    });
+  }
+  return _logoVariantesPromise;
+}
+
 async function abrirPdfBiblioteca(tipo, i) {
   const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
   if (!r) return;
   try {
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfBiblioteca(r, tipo, logo);
     window.open(url, '_blank');
   } catch (e) {
@@ -5843,7 +5887,7 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, alturaFaixa, 'F');
   if (logoDataUri) {
-    try { doc.addImage(logoDataUri, 'PNG', margem, 11, 32, 37); } catch (e) {}
+    try { doc.addImage(logoDataUri.cover, 'PNG', margem, 11, 32, 37); } catch (e) {}
   }
   const xNome = logoDataUri ? margem + 42 : margem;
   doc.setFontSize(17); doc.setFont(undefined, 'bold');
@@ -6033,7 +6077,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -6096,7 +6140,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -6226,7 +6270,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -6259,7 +6303,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -6322,7 +6366,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -6443,7 +6487,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -7206,7 +7250,7 @@ async function salvarFicha() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfFichaEquipamento(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Ficha atualizada e PDF gerado.' : 'Ficha salva e PDF gerado.');
@@ -7357,7 +7401,7 @@ async function salvarCiclagem() {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfEnsaioCiclagem(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Ensaio atualizado e PDF gerado.' : 'Ensaio salvo e PDF gerado.');
@@ -7698,7 +7742,7 @@ async function salvarRelatorioManutencao() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('completo', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioManutencao(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado.');
@@ -8183,7 +8227,7 @@ async function concluirRelatorioPreventiva() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('preventiva', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioPreventiva(relatorio, logo);
     window.open(url, '_blank');
     const assunto = encodeURIComponent(`Termo de Manutenção Preventiva — ${d.empresa}`);
@@ -8612,7 +8656,7 @@ async function concluirRelatorioCorretiva() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('corretiva', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioCorretiva(relatorio, logo);
     window.open(url, '_blank');
     const assunto = encodeURIComponent(`Termo de Manutenção Corretiva — ${d.empresa}`);
@@ -8861,7 +8905,7 @@ async function concluirRelatorioTecnico() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('relatorio_tecnico', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioTecnico(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado.');
@@ -8891,7 +8935,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -8954,7 +8998,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -9117,7 +9161,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -9526,7 +9570,7 @@ async function concluirRelatorioAceite() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('aceite_entrega', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioAceite(relatorio, logo);
     window.open(url, '_blank');
     const assunto = encodeURIComponent(`Termo de Aceite da Entrega — ${d.empresa}`);
@@ -9559,7 +9603,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -9616,7 +9660,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -9708,7 +9752,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -10004,7 +10048,7 @@ async function concluirRelatorioEntregaTeste() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('entrega_teste', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioEntregaTeste(relatorio, logo);
     window.open(url, '_blank');
     const assunto = encodeURIComponent(`Entrega para Teste — ${d.equipamento}`);
@@ -10028,7 +10072,7 @@ function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -10094,7 +10138,7 @@ function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
@@ -10301,7 +10345,7 @@ async function concluirRelatorioPromotor() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('promotor', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioPromotor(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Briefing atualizado e PDF gerado.' : 'Briefing salvo e PDF gerado.');
@@ -10322,7 +10366,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -10388,7 +10432,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
@@ -10622,7 +10666,7 @@ async function concluirRelatorioDevolutivo() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('devolutivo', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioDevolutivo(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Devolutivo atualizado e PDF gerado.' : 'Devolutivo salvo e PDF gerado.');
@@ -10643,7 +10687,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -10709,7 +10753,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
@@ -10963,7 +11007,7 @@ async function concluirRelatorioLevantamentoTecnico() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('levantamento_tecnico', d.id);
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioLevantamentoTecnico(relatorio, logo);
     window.open(url, '_blank');
     mostrarToast(d.id ? 'Levantamento atualizado e PDF gerado.' : 'Levantamento salvo e PDF gerado.');
@@ -10984,7 +11028,7 @@ function gerarPdfRelatorioLevantamentoTecnico(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -11050,7 +11094,7 @@ function gerarPdfRelatorioLevantamentoTecnico(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
@@ -11126,7 +11170,7 @@ async function abrirPdfRelatorioManutencao(i) {
   const r = await relatorioManutCompleto(i);
   if (!r) return;
   try {
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     window.open(gerarPdfUrlRelatorioManutencao(r, logo), '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
@@ -11134,7 +11178,7 @@ async function abrirPdfRelatorioManutencao(i) {
 // pega o PDF do relatório (já gerado no navegador, mesmo caminho do botão "PDF") como base64,
 // pra mandar em anexo por e-mail
 async function gerarPdfBase64RelatorioManutencao(r) {
-  const logo = await carregarLogoDataUri();
+  const logo = await carregarLogoVariantes();
   const blob = await (await fetch(gerarPdfUrlRelatorioManutencao(r, logo))).blob();
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -11202,7 +11246,7 @@ async function abrirEncaminharRelatorioManutencao(i) {
 }
 
 async function encaminharRelatorioManutencaoWhatsapp(r) {
-  const logo = await carregarLogoDataUri();
+  const logo = await carregarLogoVariantes();
   const blob = await (await fetch(gerarPdfUrlRelatorioManutencao(r, logo))).blob();
   const nomeArquivo = nomeArquivoRelatorioManutencao(r) + '.pdf';
   const texto = `Segue o relatório de ${r.empresa || r.equipamento || 'atendimento'}.`;
@@ -11728,7 +11772,7 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -11778,7 +11822,7 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
   // ===== capa (mesmo estilo navy do relatório completo) =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -11824,7 +11868,7 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -11926,7 +11970,7 @@ function gerarPdfEnsaioCiclagem(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -11997,7 +12041,7 @@ function gerarPdfEnsaioCiclagem(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -12063,7 +12107,7 @@ function gerarPdfEnsaioCiclagem(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -12276,7 +12320,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
     y += 20;
     doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
@@ -12344,7 +12388,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
   doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
@@ -12528,7 +12572,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
@@ -13094,7 +13138,7 @@ async function renderMeusRegistros() {
 function abrirDetalheMeuRegistro(i) {
   const r = (window._meusRegistrosCache || [])[i];
   if (!r) return;
-  carregarLogoDataUri();
+  carregarLogoVariantes();
   const main = document.getElementById('main');
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
@@ -13133,7 +13177,7 @@ async function abrirPdfMeuRegistro(i) {
   const r = (window._meusRegistrosCache || [])[i];
   if (!r) return;
   try {
-    const logo = await carregarLogoDataUri();
+    const logo = await carregarLogoVariantes();
     const url = gerarPdfBiblioteca(r, r.tipo, logo);
     window.open(url, '_blank');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
@@ -14344,7 +14388,7 @@ function gerarPdfDashboardKpis(kpis, maoDeObra, ranking, logoDataUri, imagens, f
 
   function cabecalho(titulo, subtitulo) {
     const xTexto = margem + (logoDataUri ? 34 : 0);
-    if (logoDataUri) { try { doc.addImage(logoDataUri, 'PNG', margem, y - 6, 26, 30); } catch (e) {} }
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, y - 6, 26, 30); } catch (e) {} }
     doc.setFontSize(15); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
     doc.text(limparPdf(titulo), xTexto, y + 10);
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -14469,7 +14513,7 @@ async function exportarKpisDashboardPdf() {
   const [{ kpis }, { ranking }, maoDeObra] = await Promise.all([
     api(`/api/kpis${sufixo}`), api(`/api/kpis/ranking-tecnicos${sufixo}`), api(`/api/kpis/mao-de-obra${sufixo}`),
   ]);
-  const logo = await carregarLogoDataUri();
+  const logo = await carregarLogoVariantes();
 
   const filtroTexto = `Período: ${_kpisFiltros.periodo_inicio || 'todos'} a ${_kpisFiltros.periodo_fim || 'hoje'} · Cliente: ${textoSelecionado('kf-cliente')} · ${t('equipamento', 'Equipamento')}: ${textoSelecionado('kf-equipamento')} · Técnico: ${textoSelecionado('kf-tecnico')}`;
 
