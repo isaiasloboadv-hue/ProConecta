@@ -6697,7 +6697,10 @@ function servirEstatico(req, res, pathname) {
   fs.readFile(filePath, (err, content) => {
     if (err) { res.writeHead(404); return res.end('Não encontrado'); }
     const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': 'no-cache, must-revalidate',
+    });
     res.end(content);
   });
 }
