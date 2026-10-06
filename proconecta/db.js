@@ -132,6 +132,13 @@ function sincronizarEmpresaPadrao(data) {
   // logo própria (Etapa 5/passo 1) — guardada como referência de foto (ver extrairFotosProfundo),
   // null até a empresa subir uma; sem logo própria o front usa a logo padrão do sistema.
   if (empresa.logo_url === undefined) empresa.logo_url = null;
+  // pedido do usuário: "Devolva o logo da Promarking no relatório da empresa Promarking" — a
+  // empresa 1 É a PRO Marking de verdade (ver objeto literal acima). O rebranding da plataforma
+  // pra Nexor Connect trocou a logo PADRÃO do sistema (public/logo.png), mas a logo PRÓPRIA da PRO
+  // Marking (este campo) tinha ficado null, então os relatórios dela passaram a cair na logo nova
+  // da plataforma por engano. Só preenche se ainda estiver vazio — nunca sobrescreve um upload que
+  // o admin já tenha feito em "Minha Empresa" — roda em todo boot, idempotente.
+  if (empresa.id === 1 && !empresa.logo_url) empresa.logo_url = '/img/logo-pro-marking.png';
   // valores padrão que antes eram constante fixa no código (Etapa 5/passo 4) — toda empresa já
   // nasce com o mesmo valor de hoje, só editável a partir de agora pelo administrador/Super Admin.
   if (empresa.valor_bonus_viagem === undefined) empresa.valor_bonus_viagem = 200;

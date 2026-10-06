@@ -2598,8 +2598,8 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
 
       ${!agendaItem ? `
       <div id="na-briefing-wrap" class="hidden">
-        <h2>Briefing Pré-Visita — Promotor</h2>
-        <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">O técnico designado atua como Promotor nessa visita — esse contexto vai junto com a O.S. pra ele se basear na demonstração. Ao concluir a visita, ele registra o resultado num relatório Devolutivo. Campos com * são obrigatórios.</p>
+        <h2>Briefing Pré-Visita — Técnico</h2>
+        <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Esse contexto vai junto com a O.S. pro técnico designado se basear na demonstração. Ao concluir a visita, ele registra o resultado num relatório Devolutivo. Campos com * são obrigatórios.</p>
         <label>Por que estamos indo ao cliente?*</label>
         <textarea id="nb-motivo_visita" placeholder="Ex.: demonstração de equipamento, gravação de peça..."></textarea>
         <label>Como o cliente faz esse processo hoje?*</label>
@@ -2614,7 +2614,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
         <textarea id="nb-duvidas_preocupacoes"></textarea>
         <label>Existe concorrente? Se sim, qual?*</label>
         <textarea id="nb-concorrente"></textarea>
-        <label>O que você quer que o Promotor observe durante a visita?*</label>
+        <label>O que você quer que o Técnico observe durante a visita?*</label>
         <textarea id="nb-o_que_observar"></textarea>
         <label>Objetivo da visita — em uma frase*</label>
         <textarea id="nb-objetivo_visita"></textarea>
@@ -2924,7 +2924,7 @@ function lerCamposBriefingNovaOS() {
   };
   const obrigatorios = ['motivo_visita', 'processo_atual', 'necessidade_informada', 'o_que_demonstrar', 'ponto_importante_demo', 'duvidas_preocupacoes', 'concorrente', 'o_que_observar', 'objetivo_visita', 'ponto_principal_observar'];
   for (const c of obrigatorios) {
-    if (!String(campos[c] || '').trim()) { alert('Preencha todos os campos do Briefing Pré-Visita (Promotor) — role até essa seção.'); return null; }
+    if (!String(campos[c] || '').trim()) { alert('Preencha todos os campos do Briefing Pré-Visita (Técnico) — role até essa seção.'); return null; }
   }
   return campos;
 }
@@ -3115,7 +3115,7 @@ async function salvarNovaAtividadeExecutar(body, briefingPromotor) {
           await api('/api/relatorios-manutencao', { method: 'POST', body: { ...briefingPromotor, tipo: 'promotor', agenda_id: novaOS.id } });
         } catch (e) {
           // a O.S. já foi criada — não desfaz por causa disso, só avisa pra preencher manualmente
-          alert('O.S. criada, mas houve um erro ao salvar o briefing pro Promotor: ' + e.message + ' — preencha manualmente em Relatório > Manual > Promotor, vinculando a esta O.S.');
+          alert('O.S. criada, mas houve um erro ao salvar o briefing pro Técnico: ' + e.message + ' — preencha manualmente em Relatório > Manual > Técnico, vinculando a esta O.S.');
         }
       }
       if (window._origemSolicitacaoId) {
@@ -6576,11 +6576,13 @@ function voltarComRascunho() {
 // Relatório > Manual é um único relatório — o "Tipo de formulário" é escolhido dentro do próprio
 // preenchimento (não numa tela separada): cada tipo continua com sua própria tela/função/
 // validação/PDF já existentes (Completo, Preventiva, Corretiva, Relatório Técnico, Termo de
-// Aceite, Promotor, Devolutivo); trocar o seletor só troca qual dessas telas aparece embaixo dele.
-// Administrador só vê "Promotor" (é quem prepara o briefing antes da visita de demonstração
+// Aceite, Técnico, Devolutivo); trocar o seletor só troca qual dessas telas aparece embaixo dele.
+// Administrador só vê "Técnico" (é quem prepara o briefing antes da visita de demonstração
 // técnica); o técnico vê todos, incluindo o "Devolutivo" que ele preenche depois da visita.
+// (pedido do usuário: "troque o nome de promotor para técnico" — só o rótulo mudou; a chave
+// interna continua 'promotor', ver tipo/fn abaixo.)
 function tiposRelatorioManual() {
-  const promotor = { tipo: 'promotor', label: 'Promotor (Briefing Pré-Visita)', fn: 'mostrarFormRelatorioPromotor' };
+  const promotor = { tipo: 'promotor', label: 'Técnico (Briefing Pré-Visita)', fn: 'mostrarFormRelatorioPromotor' };
   return [
     { tipo: 'completo', label: 'Completo', fn: 'mostrarFormRelatorioManutencao' },
     { tipo: 'preventiva', label: 'Preventiva', fn: 'mostrarFormRelatorioPreventiva' },
@@ -6617,7 +6619,7 @@ function mostrarFormRelatorioManual(tipo) {
 const TIPOS_RELATORIO_MANUT_LABEL = {
   completo: 'Completo', ficha: 'Ficha', ciclagem: 'Ciclagem', preventiva: 'Preventiva',
   corretiva: 'Corretiva', relatorio_tecnico: 'Relatório Técnico', aceite_entrega: 'Termo de Aceite',
-  entrega_teste: 'Entrega para Teste', promotor: 'Promotor', devolutivo: 'Devolutivo',
+  entrega_teste: 'Entrega para Teste', promotor: 'Técnico', devolutivo: 'Devolutivo',
   levantamento_tecnico: 'Levantamento Técnico',
 };
 
@@ -6629,7 +6631,7 @@ function tagTipoRelatorioManut(r) {
   if (r.tipo === 'relatorio_tecnico') return tag('Relatório Técnico', 'purple');
   if (r.tipo === 'aceite_entrega') return tag('Termo de Aceite', 'blue');
   if (r.tipo === 'entrega_teste') return tag(r.status_preenchimento === 'concluido' ? 'Entrega para Teste' : 'Entrega · Aguardando cliente', r.status_preenchimento === 'concluido' ? 'green' : 'amber');
-  if (r.tipo === 'promotor') return tag('Promotor', 'blue');
+  if (r.tipo === 'promotor') return tag('Técnico', 'blue');
   if (r.tipo === 'devolutivo') return tag(r.identificou_oportunidade_adicional ? 'Devolutivo · Oportunidade' : 'Devolutivo', r.identificou_oportunidade_adicional ? 'green' : 'purple');
   if (r.tipo === 'levantamento_tecnico') return tag('Levantamento Técnico', 'amber');
   return tag('Completo', 'green');
@@ -6734,7 +6736,7 @@ function desenharRelatorioManutencao() {
 
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Relatório</h1><p>${podeFiltrar ? 'Relatórios de todos os técnicos, de qualquer tipo. Use os filtros abaixo pra encontrar um específico.' : 'A maioria é avulsa (sem vínculo com O.S.); o Promotor e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.'}</p></div>
+      <div><h1>Relatório</h1><p>${podeFiltrar ? 'Relatórios de todos os técnicos, de qualquer tipo. Use os filtros abaixo pra encontrar um específico.' : 'A maioria é avulsa (sem vínculo com O.S.); o Técnico (Briefing) e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.'}</p></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">Manual</button>
         ${USER.papel === 'suporte' ? `
@@ -6813,7 +6815,7 @@ function descricaoRelatorioManutencao(r) {
     return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">${esc(r.equipamento)} — devolução até ${fmtData(r.data_prevista_devolucao)}</span>`;
   }
   if (r.tipo === 'promotor') {
-    return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">Promotor: ${esc(r.promotor)}</span>`;
+    return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">Técnico: ${esc(r.promotor)}</span>`;
   }
   if (r.tipo === 'devolutivo') {
     return `${esc(r.empresa)} <span style="color:var(--ink-soft); font-size:12.5px;">${esc(r.equipamento_demonstrado)}</span>`;
@@ -10181,7 +10183,7 @@ async function mostrarFormRelatorioPromotor(existente) {
   const osList = await osDemonstracaoTecnica();
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Briefing Pré-Visita — Promotor</h1><p>Preencher antes da visita. Dá ao Promotor contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p></div>
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Briefing Pré-Visita — Técnico</h1><p>Preencher antes da visita. Dá ao Técnico contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p></div>
 
     <div class="panel">
       <h2>1. Identificação</h2>
@@ -10191,7 +10193,7 @@ async function mostrarFormRelatorioPromotor(existente) {
         </div>
         <div><label>Cliente*</label><input id="pm-empresa" value="${esc(d.empresa)}"></div>
         <div><label>Data*</label><input id="pm-data_visita" type="date" value="${esc(d.data_visita)}"></div>
-        <div><label>Promotor*</label><input id="pm-promotor" value="${esc(d.promotor)}"></div>
+        <div><label>Técnico*</label><input id="pm-promotor" value="${esc(d.promotor)}"></div>
         <div><label>Contato / Cargo</label><input id="pm-contato" value="${esc(d.contato)}"></div>
       </div>
     </div>
@@ -10220,12 +10222,12 @@ async function mostrarFormRelatorioPromotor(existente) {
       <textarea id="pm-duvidas_preocupacoes">${esc(d.duvidas_preocupacoes)}</textarea>
       <label>Existe concorrente? Se sim, qual?*</label>
       <textarea id="pm-concorrente">${esc(d.concorrente)}</textarea>
-      <label>O que você quer que o Promotor observe durante a visita?*</label>
+      <label>O que você quer que o Técnico observe durante a visita?*</label>
       <textarea id="pm-o_que_observar">${esc(d.o_que_observar)}</textarea>
     </div>
 
     <div class="panel">
-      <h2>5. Resumo para o Promotor</h2>
+      <h2>5. Resumo para o Técnico</h2>
       <label>Objetivo da visita — em uma frase*</label>
       <textarea id="pm-objetivo_visita">${esc(d.objetivo_visita)}</textarea>
       <label>Ponto principal a observar*</label>
@@ -10326,7 +10328,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
     doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
     y += 15;
     doc.setFontSize(13); doc.setFont(undefined, 'bold');
-    doc.text('Briefing Pré-Visita — Promotor', pageW / 2, y, { align: 'center' });
+    doc.text('Briefing Pré-Visita — Técnico', pageW / 2, y, { align: 'center' });
     y += 10;
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
     doc.line(margem, y, pageW - margem, y);
@@ -10392,7 +10394,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   doc.setFontSize(20); doc.setFont(undefined, 'bold');
   doc.text('BRIEFING PRÉ-VISITA', pageW / 2, 410, { align: 'center' });
   doc.setFontSize(13); doc.setFont(undefined, 'normal');
-  doc.text('VENDEDOR - PROMOTOR', pageW / 2, 434, { align: 'center' });
+  doc.text('VENDEDOR - TÉCNICO', pageW / 2, 434, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
@@ -10403,7 +10405,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
 
   tituloCentro('1. Identificação');
   linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 1 }]);
-  linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Promotor', valor: r.promotor, frac: 0.5 }]);
+  linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Técnico', valor: r.promotor, frac: 0.5 }]);
   linhaCampos([{ label: 'Contato / Cargo', valor: r.contato, frac: 1 }]);
   y += 12;
 
@@ -10419,9 +10421,9 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   tituloCentro('4. Pontos de Atenção');
   paragrafo('Dúvidas, preocupações ou informações já mencionadas pelo cliente', r.duvidas_preocupacoes);
   paragrafo('Concorrente', r.concorrente);
-  paragrafo('O que o Promotor deve observar durante a visita', r.o_que_observar);
+  paragrafo('O que o Técnico deve observar durante a visita', r.o_que_observar);
 
-  tituloCentro('5. Resumo para o Promotor');
+  tituloCentro('5. Resumo para o Técnico');
   paragrafo('Objetivo da visita — em uma frase', r.objetivo_visita);
   paragrafo('Ponto principal a observar', r.ponto_principal_observar);
 
@@ -10486,7 +10488,7 @@ async function mostrarFormRelatorioDevolutivo(existente) {
         </div>
         <div><label>Cliente*</label><input id="dv-empresa" value="${esc(d.empresa)}"></div>
         <div><label>Data*</label><input id="dv-data_visita" type="date" value="${esc(d.data_visita)}"></div>
-        <div><label>Promotor (quem atendeu)*</label><input id="dv-promotor" value="${esc(d.promotor)}"></div>
+        <div><label>Técnico (quem atendeu)*</label><input id="dv-promotor" value="${esc(d.promotor)}"></div>
         <div><label>Contato do cliente</label><input id="dv-contato" value="${esc(d.contato)}"></div>
       </div>
     </div>
@@ -10724,7 +10726,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
 
   tituloCentro('Identificação');
   linhaCampos([{ label: 'Cliente', valor: r.empresa, frac: 1 }]);
-  linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Promotor', valor: r.promotor, frac: 0.5 }]);
+  linhaCampos([{ label: 'Data', valor: fmtData(r.data_visita), frac: 0.5 }, { label: 'Técnico', valor: r.promotor, frac: 0.5 }]);
   linhaCampos([{ label: 'Equipamento demonstrado', valor: r.equipamento_demonstrado, frac: 0.6 }, { label: 'Contato', valor: r.contato, frac: 0.4 }]);
   y += 12;
 
