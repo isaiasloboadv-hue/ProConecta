@@ -3667,7 +3667,7 @@ function gerarPdfRelatorio(d, item) {
   doc.setFontSize(10); doc.setTextColor(16, 24, 38);
   doc.text(limparPdf(`Cliente: ${d.assinatura_cliente_nome}`), margem, y);
   doc.text(limparPdf(`Técnico: ${d.assinatura_tecnico_nome}`), margem + largura / 2, y);
-  y += 8;
+  y += 18;
   try { doc.addImage(d.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
   try { doc.addImage(d.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
 
@@ -6217,7 +6217,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
     doc.text(limparPdf(`Técnico: ${r.assinatura_tecnico_nome}`), margem + largura / 2, y);
-    y += 8;
+    y += 18;
     try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
     try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
   }
@@ -6434,7 +6434,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
     doc.text(limparPdf(`Técnico: ${r.assinatura_tecnico_nome}`), margem + largura / 2, y);
-    y += 8;
+    y += 18;
     try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
     try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
   }
@@ -9699,7 +9699,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
     doc.text(limparPdf(`Técnico: ${r.assinatura_tecnico_nome}`), margem + largura / 2, y);
-    y += 8;
+    y += 18;
     try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
     try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
   }
@@ -10127,7 +10127,7 @@ function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
     const wImg = 260, hImg = 90;
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
-    y += 8;
+    y += 18;
     try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
     y += hImg + 12;
   }
