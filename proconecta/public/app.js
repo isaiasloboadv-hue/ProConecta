@@ -5782,15 +5782,22 @@ const PDF_COR = {
 };
 
 let _logoDataUriPromise = null;
+let _logoDataUriUrl = null;
 // Etapa 5/passo 1: usa a logo própria da empresa (window._empresa.logo_url) quando configurada,
 // senão cai na logo padrão do sistema — mesmo cache de antes (um fetch só, reaproveitado em todo
 // PDF gerado na sessão), invalidado por aplicarMarcaNaTela sempre que a marca muda (login, troca
-// de logo em Minha Empresa).
+// de logo em Minha Empresa). Além disso, guarda qual URL foi buscada (_logoDataUriUrl) e refaz o
+// fetch sozinho se ela mudar — carregarEmpresa() e tentarSessaoExistente() rodam em paralelo no
+// boot do app, e se o PDF for gerado bem cedo (ou se window._empresa ainda não tiver chegado na
+// hora certa por qualquer motivo), sem isso o cache travava na logo padrão (Nexor) pro resto da
+// sessão mesmo depois de window._empresa.logo_url chegar certo.
 function carregarLogoDataUri() {
   const logoEmpresa = window._empresa && window._empresa.logo_url;
   if (logoEmpresa && logoEmpresa.startsWith('data:')) return Promise.resolve(logoEmpresa);
-  if (!_logoDataUriPromise) {
-    _logoDataUriPromise = fetch(logoEmpresa || '/logo.png')
+  const url = logoEmpresa || '/logo.png';
+  if (!_logoDataUriPromise || _logoDataUriUrl !== url) {
+    _logoDataUriUrl = url;
+    _logoDataUriPromise = fetch(url)
       .then((resp) => resp.blob())
       .then((blob) => new Promise((resolve, reject) => {
         const leitor = new FileReader();
@@ -5829,10 +5836,15 @@ function flatarLogoSobreCor(dataUri, rgb) {
 }
 
 let _logoVariantesPromise = null;
-// mesmo cache/invalidação do carregarLogoDataUri (ver aplicarMarcaNaTela) — só que já devolve as 3
-// versões achatadas prontas pro jsPDF: { header, cover, contato }.
+let _logoVariantesUrl = null;
+// mesmo cache/invalidação do carregarLogoDataUri (ver aplicarMarcaNaTela e o comentário lá sobre
+// _logoDataUriUrl) — só que já devolve as 3 versões achatadas prontas pro jsPDF: { header, cover,
+// contato }. Também refaz sozinho se a URL da logo mudou, pelo mesmo motivo.
 function carregarLogoVariantes() {
-  if (!_logoVariantesPromise) {
+  const logoEmpresa = window._empresa && window._empresa.logo_url;
+  const url = (logoEmpresa && logoEmpresa.startsWith('data:')) ? logoEmpresa : (logoEmpresa || '/logo.png');
+  if (!_logoVariantesPromise || _logoVariantesUrl !== url) {
+    _logoVariantesUrl = url;
     _logoVariantesPromise = carregarLogoDataUri().then(async (base) => {
       if (!base) return null;
       const [header, cover, contato] = await Promise.all([
