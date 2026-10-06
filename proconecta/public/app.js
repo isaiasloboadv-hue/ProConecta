@@ -6054,9 +6054,6 @@ function gerarPdfBiblioteca(r, tipo, logoDataUri) {
     }
   }
 
-  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), colDirX, pageH - margem - 10);
-
   return doc.output('bloburl');
 }
 
@@ -6284,8 +6281,6 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   empresaEmails().forEach((email, i) => {
     doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
   });
-  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
 
   return doc.output('bloburl');
 }
@@ -6501,8 +6496,6 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   empresaEmails().forEach((email, i) => {
     doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
   });
-  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
 
   return doc.output('bloburl');
 }
@@ -9175,8 +9168,6 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   empresaEmails().forEach((email, i) => {
     doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
   });
-  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
 
   return doc.output('bloburl');
 }
@@ -9766,8 +9757,6 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   empresaEmails().forEach((email, i) => {
     doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
   });
-  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem - 10, { align: 'center' });
 
   return doc.output('bloburl');
 }
@@ -10176,9 +10165,6 @@ function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
     y += hImg + 12;
   }
 
-  doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), pageW / 2, pageH - margem, { align: 'center' });
-
   return doc.output('bloburl');
 }
 
@@ -10470,10 +10456,6 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   tituloCentro('5. Resumo para o Técnico');
   paragrafo('Objetivo da visita — em uma frase', r.objetivo_visita);
   paragrafo('Ponto principal a observar', r.ponto_principal_observar);
-
-  if (y > pageH - margem - 20) novaPagina();
-  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), margem, pageH - margem);
 
   return doc.output('bloburl');
 }
@@ -10802,10 +10784,6 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
     if (r.proximos_passos) paragrafo('Recomendação / próximos passos', r.proximos_passos);
     if (r.observacoes_finais) paragrafo('Observações finais', r.observacoes_finais);
   }
-
-  if (y > pageH - margem - 20) novaPagina();
-  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), margem, pageH - margem);
 
   return doc.output('bloburl');
 }
@@ -11140,10 +11118,6 @@ function gerarPdfRelatorioLevantamentoTecnico(r, logoDataUri) {
   y += 10;
   if (r.observacoes_tecnicas) paragrafo('Observações técnicas', r.observacoes_tecnicas);
   paragrafo('Próximos passos', r.proximos_passos);
-
-  if (y > pageH - margem - 20) novaPagina();
-  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Autor: ${r.autor_nome || '—'} · ${fmtData(r.criado_em)}`), margem, pageH - margem);
 
   return doc.output('bloburl');
 }
