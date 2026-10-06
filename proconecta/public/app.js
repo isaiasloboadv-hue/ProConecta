@@ -6261,7 +6261,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   tituloCentro('Pesquisa de satisfação');
   linhaCampos([{ label: 'Avaliação', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
   if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário', valor: r.satisfacao_comentario, frac: 1 }]);
-  y += 8;
+  y += 18;
 
   if (y > 560) novaPagina();
   tituloCentro('Assinaturas');
@@ -6476,7 +6476,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   tituloCentro('Pesquisa de satisfação');
   linhaCampos([{ label: 'Avaliação', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
   if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário', valor: r.satisfacao_comentario, frac: 1 }]);
-  y += 8;
+  y += 18;
 
   if (y > 560) novaPagina();
   tituloCentro('Assinaturas');
@@ -9737,7 +9737,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
 
   tituloCentro('Avaliação de desempenho');
   linhaCampos([{ label: 'Avaliação', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.34 }, { label: 'Dúvidas sanadas', valor: r.satisfacao_duvidas === 'sim' ? 'Sim' : 'Não', frac: 0.33 }, { label: 'Apto a operar', valor: r.satisfacao_apto === 'sim' ? 'Sim' : 'Não', frac: 0.33 }]);
-  y += 8;
+  y += 18;
 
   if (y > 560) novaPagina();
   tituloCentro('Assinaturas');
