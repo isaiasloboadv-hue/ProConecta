@@ -1859,7 +1859,7 @@ async function exportarDespesasJustificadasPdf() {
   const largEstab = colX.desc - colX.estab - 10;
   const largDesc = colX.valor - colX.desc - 10;
   function cabecalhoTabela() {
-    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text('DATA', colX.data, y);
     doc.text('ESTABELECIMENTO', colX.estab, y);
     doc.text('DESCRIÇÃO', colX.desc, y);
@@ -1874,10 +1874,10 @@ async function exportarDespesasJustificadasPdf() {
 
   let total = 0;
   for (const d of _despesasCache) {
-    doc.setFontSize(9.5);
+    doc.setFontSize(8.5);
     const linhasEstab = doc.splitTextToSize(limparPdf(d.estabelecimento), largEstab);
     const linhasDesc = doc.splitTextToSize(limparPdf(d.descricao || '—'), largDesc);
-    const alturaLinha = Math.max(linhasEstab.length, linhasDesc.length, 1) * 12 + 6;
+    const alturaLinha = Math.max(linhasEstab.length, linhasDesc.length, 1) * 10.5 + 5;
     if (y + alturaLinha > pageH - margem - 40) { doc.addPage(); y = margem; cabecalhoTabela(); }
     doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(fmtData(d.data), colX.data, y);
