@@ -235,7 +235,7 @@ async function lerRecibo(fotoDataUrl) {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: 'Essa é uma foto de um comprovante, nota fiscal ou recibo de uma despesa paga por um técnico em campo (ex.: alimentação, combustível, estacionamento, material). Leia com atenção e devolva SOMENTE um JSON (sem texto antes ou depois, sem markdown), no formato exato: {"data":"AAAA-MM-DD","estabelecimento":"","valor":0,"descricao":""}. "data" é a data da compra (se o ano não aparecer impresso, use o ano atual); "estabelecimento" é o nome do local/empresa que emitiu o comprovante; "valor" é o valor TOTAL pago, como número puro (sem "R$", vírgula vira ponto decimal); "descricao" é um resumo curto (uma linha) do que foi comprado ou do serviço pago. Se não conseguir ler algum campo com confiança, devolva ele vazio ("" pros textos, 0 pro valor) — nunca invente um dado.' },
+          { type: 'text', text: 'Essa é uma foto de um comprovante, nota fiscal ou recibo de uma despesa paga por um técnico em campo (ex.: alimentação, combustível, estacionamento, material). Leia com atenção e devolva SOMENTE um JSON (sem texto antes ou depois, sem markdown), no formato exato: {"data":"AAAA-MM-DD","estabelecimento":"","valor":0,"descricao":"","categoria":"alimentacao|outros"}. "data" é a data da compra (se o ano não aparecer impresso, use o ano atual); "estabelecimento" é o nome do local/empresa que emitiu o comprovante; "valor" é o valor TOTAL pago, como número puro (sem "R$", vírgula vira ponto decimal); "descricao" é um resumo curto (uma linha) do que foi comprado ou do serviço pago; "categoria" é "alimentacao" se for refeição/restaurante/lanche/mercado de comida, ou "outros" pra qualquer outra coisa (combustível, estacionamento, hospedagem, passagem, material etc.). Se não conseguir ler algum campo com confiança, devolva ele vazio ("" pros textos, 0 pro valor, "outros" pra categoria) — nunca invente um dado.' },
         ],
       }],
     }),
@@ -258,6 +258,7 @@ async function lerRecibo(fotoDataUrl) {
     estabelecimento: String(extraido.estabelecimento || '').trim().slice(0, 200),
     valor: Number(extraido.valor) > 0 ? Number(extraido.valor) : 0,
     descricao: String(extraido.descricao || '').trim().slice(0, 300),
+    categoria: extraido.categoria === 'alimentacao' ? 'alimentacao' : 'outros',
   };
 }
 

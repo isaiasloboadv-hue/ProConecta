@@ -273,6 +273,17 @@ function migrar(data) {
     if (!Array.isArray(d.fotos)) d.fotos = d.foto ? [d.foto] : [];
     delete d.foto;
   });
+  // pedido do usuário: "o que for alimentação, coloque separado como subtotal... igual fatura de
+  // cartão de crédito" — cada lançamento ganha uma categoria ('alimentacao' ou 'outros') pra
+  // agrupar o subtotal na lista/PDF. Lançamentos antigos não tinham esse campo; como boa parte já
+  // registrava "alimentação" na própria descrição/estabelecimento (hábito que motivou o pedido),
+  // migra com esse mesmo texto como pista — o resto cai em 'outros', e dá pra corrigir editando.
+  data.despesas_justificadas.forEach((d) => {
+    if (d.categoria !== 'alimentacao' && d.categoria !== 'outros') {
+      const pista = `${d.estabelecimento || ''} ${d.descricao || ''}`.toLowerCase();
+      d.categoria = pista.includes('aliment') ? 'alimentacao' : 'outros';
+    }
+  });
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];

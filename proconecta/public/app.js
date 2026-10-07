@@ -1649,7 +1649,12 @@ function renderListaDespesasJustificadas() {
   const alvo = document.getElementById('dj-lista');
   if (!alvo) return;
   if (!_despesasCache.length) { alvo.innerHTML = '<div class="empty">Nenhuma despesa justificada nesse período.</div>'; return; }
-  const total = _despesasCache.reduce((s, d) => s + d.valor, 0);
+  // pedido do usuário: "o que for alimentação, coloque separado como subtotal... igual fatura de
+  // cartão de crédito" — agrupa pela categoria escolhida no lançamento (não mais um chute por
+  // palavra na descrição) e mostra as 2 linhas de subtotal + total no rodapé da tabela.
+  const subtotalAlimentacao = _despesasCache.filter((d) => d.categoria === 'alimentacao').reduce((s, d) => s + d.valor, 0);
+  const subtotalComum = _despesasCache.filter((d) => d.categoria !== 'alimentacao').reduce((s, d) => s + d.valor, 0);
+  const total = subtotalComum + subtotalAlimentacao;
   const periodoTexto = _despesasFiltro.periodo_inicio || _despesasFiltro.periodo_fim
     ? `${_despesasFiltro.periodo_inicio ? 'de ' + fmtData(_despesasFiltro.periodo_inicio) + ' ' : ''}${_despesasFiltro.periodo_fim ? 'até ' + fmtData(_despesasFiltro.periodo_fim) : ''}`
     : 'todo o período';
@@ -1678,6 +1683,8 @@ function renderListaDespesasJustificadas() {
               <button type="button" class="btn-outline-sm" onclick="editarDespesaJustificada(${d.id})" title="Editar">✏️</button>
               <button type="button" class="btn-outline-sm" onclick="excluirDespesaJustificada(${d.id})" title="Excluir">🗑️</button>` : '—'}</td>
           </tr>`).join('')}
+        <tr><td colspan="3" data-label="Subtotal">Despesas</td><td data-label="Valor">${fmtMoeda(subtotalComum)}</td><td class="sem-impressao"></td><td></td><td class="sem-impressao"></td></tr>
+        <tr><td colspan="3" data-label="Subtotal">Alimentação</td><td data-label="Valor">${fmtMoeda(subtotalAlimentacao)}</td><td class="sem-impressao"></td><td></td><td class="sem-impressao"></td></tr>
         <tr style="font-weight:700;"><td colspan="3" data-label="Total">Total</td><td data-label="Valor">${fmtMoeda(total)}</td><td class="sem-impressao"></td><td></td><td class="sem-impressao"></td></tr>
       </table>
     </div>`;
@@ -1701,14 +1708,14 @@ async function processarFotoDespesa(event) {
     abrirFormDespesa({ ...extraido, fotos: dataUrls, origem: 'ocr' });
   } catch (e) {
     if (status) status.textContent = 'Não consegui ler automaticamente: ' + e.message + ' Revise/preencha os campos abaixo.';
-    abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', fotos: dataUrls, origem: 'manual' });
+    abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', fotos: dataUrls, categoria: 'outros', origem: 'manual' });
   }
 }
 
 function abrirFormDespesaManual() {
   document.getElementById('dj-status').textContent = '';
   window._despesaEditandoId = null;
-  abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', fotos: [], origem: 'manual' });
+  abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', fotos: [], categoria: 'outros', origem: 'manual' });
 }
 
 // pedido do usuário: "coloque opção de excluir e editar o documento" — reabre o mesmo formulário
@@ -1720,7 +1727,7 @@ function editarDespesaJustificada(id) {
   if (!item) return;
   window._despesaEditandoId = id;
   document.getElementById('dj-status').textContent = '';
-  abrirFormDespesa({ data: item.data, estabelecimento: item.estabelecimento, valor: item.valor, descricao: item.descricao, fotos: item.fotos || [], origem: item.origem });
+  abrirFormDespesa({ data: item.data, estabelecimento: item.estabelecimento, valor: item.valor, descricao: item.descricao, fotos: item.fotos || [], categoria: item.categoria, origem: item.origem });
   document.getElementById('dj-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -1783,6 +1790,10 @@ function abrirFormDespesa(draft) {
         <div><label>Data</label><input type="date" id="dj-data" value="${esc(draft.data || '')}"></div>
         <div><label>Estabelecimento</label><input id="dj-estabelecimento" value="${esc(draft.estabelecimento || '')}" placeholder="ex: Posto Ipiranga"></div>
         <div><label>Valor (R$)</label><input type="number" min="0" step="0.01" id="dj-valor" value="${draft.valor || ''}"></div>
+        <div><label>Categoria</label><select id="dj-categoria">
+          <option value="outros" ${draft.categoria !== 'alimentacao' ? 'selected' : ''}>Despesa comum</option>
+          <option value="alimentacao" ${draft.categoria === 'alimentacao' ? 'selected' : ''}>Alimentação</option>
+        </select></div>
         <div class="full"><label>Descrição</label><input id="dj-descricao" value="${esc(draft.descricao || '')}" placeholder="ex: Almoço durante atendimento"></div>
         <div class="full">
           <label>Comprovante(s)</label><br>
@@ -1802,12 +1813,13 @@ async function salvarDespesaJustificada() {
   const estabelecimento = document.getElementById('dj-estabelecimento').value.trim();
   const valor = Number(document.getElementById('dj-valor').value);
   const descricao = document.getElementById('dj-descricao').value.trim();
+  const categoria = document.getElementById('dj-categoria').value;
   if (!data) return mostrarToast('Informe a data da despesa.');
   if (!estabelecimento) return mostrarToast('Informe o estabelecimento.');
   if (!(valor > 0)) return mostrarToast('Informe um valor maior que zero.');
   const editandoId = window._despesaEditandoId;
   try {
-    const body = { data, estabelecimento, valor, descricao, fotos: (window._despesaDraft || {}).fotos || [], origem: (window._despesaDraft || {}).origem || 'manual' };
+    const body = { data, estabelecimento, valor, descricao, categoria, fotos: (window._despesaDraft || {}).fotos || [], origem: (window._despesaDraft || {}).origem || 'manual' };
     if (editandoId) {
       await api(`/api/despesas-justificadas/${editandoId}`, { method: 'PUT', body });
       mostrarToast('Despesa atualizada.');
@@ -1877,7 +1889,8 @@ async function exportarDespesasJustificadasPdf() {
   }
   cabecalhoTabela();
 
-  let total = 0;
+  let subtotalComum = 0;
+  let subtotalAlimentacao = 0;
   for (const d of _despesasCache) {
     doc.setFontSize(8.5);
     const linhasEstab = doc.splitTextToSize(limparPdf(d.estabelecimento).toLowerCase(), largEstab);
@@ -1890,15 +1903,28 @@ async function exportarDespesasJustificadasPdf() {
     doc.text(linhasDesc, colX.desc, y);
     doc.text(fmtMoeda(d.valor), colX.valor, y);
     doc.text(d.status === 'aprovado' ? 'Aprovado' : d.status === 'reprovado' ? 'Reprovado' : 'Pendente', colX.status, y);
-    total += d.valor;
+    if (d.categoria === 'alimentacao') subtotalAlimentacao += d.valor; else subtotalComum += d.valor;
     y += alturaLinha;
   }
   y += 4;
   doc.setDrawColor(...PDF_COR.line);
   doc.line(margem, y, pageW - margem, y);
   y += 18;
+  // pedido do usuário: "o que for alimentação, coloque separado como subtotal... igual fatura de
+  // cartão de crédito" — 2 linhas de subtotal (por categoria) + 1 linha de total, igual à lista,
+  // com os valores alinhados à direita (padrão de fatura).
+  if (y > pageH - margem - 50) { doc.addPage(); y = margem + 18; }
+  const xValorDireita = pageW - margem;
+  doc.setFont(undefined, 'normal'); doc.setFontSize(10); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text('Despesas:', colX.desc, y);
+  doc.text(fmtMoeda(subtotalComum), xValorDireita, y, { align: 'right' });
+  y += 16;
+  doc.text('Alimentação:', colX.desc, y);
+  doc.text(fmtMoeda(subtotalAlimentacao), xValorDireita, y, { align: 'right' });
+  y += 20;
   doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COR.navy);
-  doc.text(`Total: ${fmtMoeda(total)}`, colX.valor, y);
+  doc.text('Total:', colX.desc, y);
+  doc.text(fmtMoeda(subtotalComum + subtotalAlimentacao), xValorDireita, y, { align: 'right' });
 
   doc.save(`despesas-justificadas-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
