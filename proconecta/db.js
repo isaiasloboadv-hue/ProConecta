@@ -266,6 +266,13 @@ function migrar(data) {
   // comprovante único por lançamento, com leitura automática por IA ou preenchimento manual.
   if (!data.despesas_justificadas) data.despesas_justificadas = [];
   if (!data._seq.despesas_justificadas) data._seq.despesas_justificadas = 1;
+  // pedido do usuário: "coloque opção de colocar mais de um recibo no mesmo justificativa" — o
+  // campo vira array (fotos) em vez de string única (foto). Lançamentos antigos tinham no máximo
+  // uma foto só; migra pra um array de 1 item (ou vazio) e mantém idempotente daqui pra frente.
+  data.despesas_justificadas.forEach((d) => {
+    if (!Array.isArray(d.fotos)) d.fotos = d.foto ? [d.foto] : [];
+    delete d.foto;
+  });
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];

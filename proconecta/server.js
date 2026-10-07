@@ -6297,7 +6297,7 @@ rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
     tecnico_id: user.id, tecnico_nome: user.nome,
     data: body.data, estabelecimento: estabelecimento.slice(0, 200),
     descricao: String(body.descricao || '').trim().slice(0, 300),
-    valor, foto: body.foto || null,
+    valor, fotos: Array.isArray(body.fotos) ? body.fotos : [],
     origem: body.origem === 'ocr' ? 'ocr' : 'manual',
     status: 'pendente',
     aprovado_por: null, data_decisao: null, comentario_financeiro: '',
@@ -6328,7 +6328,7 @@ rota('PUT', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
   item.estabelecimento = estabelecimento.slice(0, 200);
   item.descricao = String(body.descricao || '').trim().slice(0, 300);
   item.valor = valor;
-  item.foto = body.foto || null;
+  item.fotos = Array.isArray(body.fotos) ? body.fotos : [];
   db.save(data);
   enviarJSON(res, 200, { despesa: item });
 });

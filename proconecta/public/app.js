@@ -1595,7 +1595,7 @@ async function renderDespesasJustificadas() {
         </label>
         <label class="photo-add" style="display:inline-flex;">
           <span class="plus">🖼️</span>Escolher da galeria
-          <input type="file" accept="image/*" style="display:none" onchange="processarFotoDespesa(event)">
+          <input type="file" accept="image/*" multiple style="display:none" onchange="processarFotoDespesa(event)">
         </label>
         <button class="btn-outline-sm" onclick="abrirFormDespesaManual()">✍️ Preencher manualmente</button>
       </div>
@@ -1667,7 +1667,7 @@ function renderListaDespesasJustificadas() {
             <td data-label="Estabelecimento">${esc(d.estabelecimento)}</td>
             <td data-label="Descrição">${esc(d.descricao || '—')}</td>
             <td data-label="Valor">${fmtMoeda(d.valor)}</td>
-            <td data-label="Comprovante" class="sem-impressao">${d.foto ? `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(d.foto)}')" title="Ver comprovante">🧾</button>` : '—'}</td>
+            <td data-label="Comprovante" class="sem-impressao">${(d.fotos && d.fotos.length) ? d.fotos.map((f, j) => `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(f)}')" title="Ver recibo ${j + 1}">🧾${d.fotos.length > 1 ? j + 1 : ''}</button>`).join(' ') : '—'}</td>
             <td data-label="Status">${statusDespesaTag(d.status)}${d.status === 'reprovado' && d.comentario_financeiro ? `<div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${esc(d.comentario_financeiro)}</div>` : ''}</td>
             <td data-label="Ações" class="sem-impressao">${d.status === 'pendente' ? `
               <button type="button" class="btn-outline-sm" onclick="editarDespesaJustificada(${d.id})" title="Editar">✏️</button>
@@ -1686,24 +1686,24 @@ function imprimirDespesasJustificadas() {
 async function processarFotoDespesa(event) {
   const arquivos = event.target.files;
   if (!arquivos || !arquivos.length) return;
-  const [dataUrl] = await lerFotosComoDataUrl(arquivos);
+  const dataUrls = await lerFotosComoDataUrl(arquivos);
   const status = document.getElementById('dj-status');
   if (status) status.textContent = 'Lendo o comprovante...';
   window._despesaEditandoId = null;
   try {
-    const { extraido } = await api('/api/despesas-justificadas/ler-recibo', { method: 'POST', body: { foto: dataUrl } });
+    const { extraido } = await api('/api/despesas-justificadas/ler-recibo', { method: 'POST', body: { foto: dataUrls[0] } });
     if (status) status.textContent = 'Comprovante lido — revise os dados antes de salvar.';
-    abrirFormDespesa({ ...extraido, foto: dataUrl, origem: 'ocr' });
+    abrirFormDespesa({ ...extraido, fotos: dataUrls, origem: 'ocr' });
   } catch (e) {
     if (status) status.textContent = 'Não consegui ler automaticamente: ' + e.message + ' Revise/preencha os campos abaixo.';
-    abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', foto: dataUrl, origem: 'manual' });
+    abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', fotos: dataUrls, origem: 'manual' });
   }
 }
 
 function abrirFormDespesaManual() {
   document.getElementById('dj-status').textContent = '';
   window._despesaEditandoId = null;
-  abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', foto: null, origem: 'manual' });
+  abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', fotos: [], origem: 'manual' });
 }
 
 // pedido do usuário: "coloque opção de excluir e editar o documento" — reabre o mesmo formulário
@@ -1715,7 +1715,7 @@ function editarDespesaJustificada(id) {
   if (!item) return;
   window._despesaEditandoId = id;
   document.getElementById('dj-status').textContent = '';
-  abrirFormDespesa({ data: item.data, estabelecimento: item.estabelecimento, valor: item.valor, descricao: item.descricao, foto: item.foto, origem: item.origem });
+  abrirFormDespesa({ data: item.data, estabelecimento: item.estabelecimento, valor: item.valor, descricao: item.descricao, fotos: item.fotos || [], origem: item.origem });
   document.getElementById('dj-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -1734,29 +1734,36 @@ async function excluirDespesaJustificada(id) {
 // símbolo nota fiscal só clicar consegue abrir pra ver a foto" — o comprovante nunca aparece
 // grande na tela; vira um botão com o ícone 🧾 que abre o lightbox (mesmo componente usado na
 // Biblioteca — ver abrirLightbox). Serve tanto pro comprovante vindo da leitura por IA quanto pra
-// anexar/trocar manualmente, mesmo em quem escolheu "Preencher manualmente" desde o início.
-function trechoComprovanteDespesa(foto) {
-  if (foto) {
-    return `
-      <button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(foto)}')">🧾 Ver comprovante</button>
-      <button type="button" class="btn-outline-sm" onclick="document.getElementById('dj-anexo-input').click()">Trocar foto</button>
-      <button type="button" class="btn-outline-sm" onclick="removerFotoComprovanteDespesa()">Remover</button>`;
-  }
-  return `<button type="button" class="btn-outline-sm" onclick="document.getElementById('dj-anexo-input').click()">📎 Anexar foto do comprovante (opcional)</button>`;
+// anexar manualmente, mesmo em quem escolheu "Preencher manualmente" desde o início. Pedido do
+// usuário, depois: "coloque opção de colocar mais de um recibo na mesma justificativa" — fotos é
+// um array agora; cada recibo vira um botão numerado com seu próprio "remover".
+function trechoComprovanteDespesa(fotos) {
+  fotos = fotos || [];
+  const itens = fotos.map((f, j) => `
+    <span style="display:inline-flex; align-items:center; gap:2px;">
+      <button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(f)}')" title="Ver recibo ${j + 1}">🧾 Recibo ${j + 1}</button>
+      <button type="button" class="btn-outline-sm" onclick="removerFotoComprovanteDespesa(${j})" title="Remover este recibo">✕</button>
+    </span>`).join('');
+  const botaoAdicionar = `<button type="button" class="btn-outline-sm" onclick="document.getElementById('dj-anexo-input').click()">${fotos.length ? '+ Adicionar outro recibo' : '📎 Anexar foto do comprovante (opcional)'}</button>`;
+  return `${itens}${itens ? ' ' : ''}${botaoAdicionar}`;
 }
 
 async function anexarFotoComprovanteDespesa(event) {
   const arquivos = event.target.files;
   if (!arquivos || !arquivos.length) return;
-  const [dataUrl] = await lerFotosComoDataUrl(arquivos);
-  window._despesaDraft = { ...(window._despesaDraft || {}), foto: dataUrl };
-  document.getElementById('dj-comprovante-area').innerHTML = trechoComprovanteDespesa(dataUrl);
+  const dataUrls = await lerFotosComoDataUrl(arquivos);
+  const draft = window._despesaDraft || {};
+  draft.fotos = [...(draft.fotos || []), ...dataUrls];
+  window._despesaDraft = draft;
+  document.getElementById('dj-comprovante-area').innerHTML = trechoComprovanteDespesa(draft.fotos);
   event.target.value = '';
 }
 
-function removerFotoComprovanteDespesa() {
-  window._despesaDraft = { ...(window._despesaDraft || {}), foto: null };
-  document.getElementById('dj-comprovante-area').innerHTML = trechoComprovanteDespesa(null);
+function removerFotoComprovanteDespesa(indice) {
+  const draft = window._despesaDraft || {};
+  draft.fotos = (draft.fotos || []).filter((_, j) => j !== indice);
+  window._despesaDraft = draft;
+  document.getElementById('dj-comprovante-area').innerHTML = trechoComprovanteDespesa(draft.fotos);
 }
 
 // mesmo formulário serve pro resultado da IA (campos pré-preenchidos, o técnico só confere) e pro
@@ -1773,9 +1780,9 @@ function abrirFormDespesa(draft) {
         <div><label>Valor (R$)</label><input type="number" min="0" step="0.01" id="dj-valor" value="${draft.valor || ''}"></div>
         <div class="full"><label>Descrição</label><input id="dj-descricao" value="${esc(draft.descricao || '')}" placeholder="ex: Almoço durante atendimento"></div>
         <div class="full">
-          <label>Comprovante</label><br>
-          <input type="file" id="dj-anexo-input" accept="image/*" style="display:none" onchange="anexarFotoComprovanteDespesa(event)">
-          <div id="dj-comprovante-area">${trechoComprovanteDespesa(draft.foto)}</div>
+          <label>Comprovante(s)</label><br>
+          <input type="file" id="dj-anexo-input" accept="image/*" multiple style="display:none" onchange="anexarFotoComprovanteDespesa(event)">
+          <div id="dj-comprovante-area">${trechoComprovanteDespesa(draft.fotos)}</div>
         </div>
       </div>
       <div style="margin-top:14px; display:flex; gap:8px;">
@@ -1795,7 +1802,7 @@ async function salvarDespesaJustificada() {
   if (!(valor > 0)) return mostrarToast('Informe um valor maior que zero.');
   const editandoId = window._despesaEditandoId;
   try {
-    const body = { data, estabelecimento, valor, descricao, foto: (window._despesaDraft || {}).foto || null, origem: (window._despesaDraft || {}).origem || 'manual' };
+    const body = { data, estabelecimento, valor, descricao, fotos: (window._despesaDraft || {}).fotos || [], origem: (window._despesaDraft || {}).origem || 'manual' };
     if (editandoId) {
       await api(`/api/despesas-justificadas/${editandoId}`, { method: 'PUT', body });
       mostrarToast('Despesa atualizada.');
@@ -1908,7 +1915,7 @@ function renderCardDespesaFila(d) {
           ${d.descricao ? `<div style="color:var(--ink-soft); font-size:13px; margin-top:2px;">${esc(d.descricao)}</div>` : ''}
           <div style="color:var(--ink-soft); font-size:11.5px; margin-top:4px;">${d.origem === 'ocr' ? 'Lido automaticamente por IA' : 'Preenchido manualmente'}</div>
         </div>
-        ${d.foto ? `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(d.foto)}')" title="Ver comprovante">🧾 Ver comprovante</button>` : ''}
+        ${(d.fotos && d.fotos.length) ? `<div style="display:flex; gap:6px; flex-wrap:wrap;">${d.fotos.map((f, j) => `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(f)}')" title="Ver recibo ${j + 1}">🧾 Recibo ${j + 1}</button>`).join('')}</div>` : ''}
       </div>
       <div style="display:flex; gap:8px; margin-top:12px;">
         <button class="btn btn-primary btn-sm" onclick="aprovarDespesaJustificada(${d.id})">Aprovar</button>
