@@ -11,8 +11,9 @@ const email = require('./email');
 const ia = require('./ia');
 const whatsapp = require('./whatsapp');
 const outlook = require('./outlook');
+const agendaEmail = require('./agenda-email');
 const webpush = require('web-push');
-const { gerarToken, verificarToken, } = require('./auth');
+const { gerarToken, verificarToken, cifrar, decifrar } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
 const { moduloDaRota } = require('./rotas-modulo');
 const tenant = require('./tenant');
@@ -6540,6 +6541,104 @@ rota('GET', /^\/api\/outlook\/eventos$/, async (req, res) => {
     if (e.status === 401 || e.codigo === 'invalid_grant') {
       u.outlook_conectado = false; u.outlook_refresh_token = null; db.save(data);
       return enviarJSON(res, 400, { erro: 'Sua conexão com o Outlook expirou — conecte de novo.', codigo: 'outlook_desconectado' });
+    }
+    enviarJSON(res, 502, { erro: e.message });
+  }
+});
+
+// ---------- Agendamentos — alternativa via e-mail de cópia (IMAP) ----------
+// pedido do usuário: "a conta do e-mail já é logada no notebook, não tenho a senha... fiz um
+// e-mail em cópia e toda vez que recebo um e-mail no técnico9 recebi uma cópia... pode usar o
+// e-mail em cópia" — pra quem não tem a senha da própria conta Microsoft (login Outlook acima
+// não dá), conecta numa caixa DIFERENTE (usuário+senha comuns, que a pessoa realmente tem em
+// mãos) que já recebe cópia dos convites, e lê os .ics de lá (ver agenda-email.js).
+
+// GET /api/agenda-email/status
+rota('GET', /^\/api\/agenda-email\/status$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  enviarJSON(res, 200, { conectado: !!(u && u.agenda_email_conectado), endereco: (u && u.agenda_email_endereco) || null });
+});
+
+// POST /api/agenda-email/conectar { email, senha, provedor?, host?, porta? } — testa a conexão
+// IMAP na hora (pedido implícito: avisar já se a senha/host estiver errado) antes de salvar.
+rota('POST', /^\/api\/agenda-email\/conectar$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const body = await lerCorpo(req);
+  const email = String(body.email || '').trim();
+  const senha = String(body.senha || '');
+  if (!email || !senha) return enviarJSON(res, 400, { erro: 'Informe o e-mail e a senha.' });
+  let host = String(body.host || '').trim();
+  let porta = Number(body.porta) || 993;
+  if (!host) {
+    const provedor = body.provedor && agendaEmail.PROVEDORES_IMAP[body.provedor] ? body.provedor : agendaEmail.detectarProvedor(email);
+    const preset = provedor && agendaEmail.PROVEDORES_IMAP[provedor];
+    if (!preset) return enviarJSON(res, 400, { erro: 'Não reconheci o provedor desse e-mail — informe o servidor IMAP manualmente.' });
+    host = preset.host; porta = preset.port;
+  }
+  try {
+    await agendaEmail.testarConexao({ host, port: porta, email, senha });
+  } catch (e) {
+    // mensagem mais clara que o texto cru do servidor IMAP pros 2 erros mais comuns
+    const msg = /auth/i.test(e.message || '') ? 'E-mail ou senha incorretos (lembrando: algumas contas pedem uma "senha de app", não a senha normal de login).' : `Não consegui conectar: ${e.message}`;
+    return enviarJSON(res, 400, { erro: msg });
+  }
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  if (!u) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  u.agenda_email_conectado = true;
+  u.agenda_email_endereco = email;
+  u.agenda_email_senha_cifrada = cifrar(senha);
+  u.agenda_email_host = host;
+  u.agenda_email_porta = porta;
+  db.save(data);
+  enviarJSON(res, 200, { ok: true, endereco: email });
+});
+
+// POST /api/agenda-email/desconectar
+rota('POST', /^\/api\/agenda-email\/desconectar$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  if (u) {
+    u.agenda_email_conectado = false; u.agenda_email_endereco = null;
+    u.agenda_email_senha_cifrada = null; u.agenda_email_host = null; u.agenda_email_porta = null;
+    db.save(data);
+  }
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/agenda-email/eventos?inicio=&fim= — mesmo formato de resposta de GET
+// /api/outlook/eventos, pra reaproveitar a mesma tela/renderização no front.
+rota('GET', /^\/api\/agenda-email\/eventos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  if (!u || !u.agenda_email_conectado || !u.agenda_email_senha_cifrada) return enviarJSON(res, 400, { erro: 'Conecte seu e-mail de cópia primeiro.', codigo: 'agenda_email_desconectado' });
+  const { query } = url.parse(req.url, true);
+  const inicio = /^\d{4}-\d{2}-\d{2}$/.test(query.inicio || '') ? query.inicio : new Date().toISOString().slice(0, 10);
+  const fim = /^\d{4}-\d{2}-\d{2}$/.test(query.fim || '') ? query.fim : inicio;
+  let senha;
+  try {
+    senha = decifrar(u.agenda_email_senha_cifrada);
+  } catch (e) {
+    // PROCONECTA_SECRET mudou (ex.: não tinha sido configurado e o processo reiniciou com um
+    // segredo novo sorteado — ver auth.js) — a senha salva nunca mais vai decifrar sozinha.
+    u.agenda_email_conectado = false; db.save(data);
+    return enviarJSON(res, 400, { erro: 'Sua conexão precisa ser refeita.', codigo: 'agenda_email_desconectado' });
+  }
+  try {
+    const eventos = await agendaEmail.buscarEventos({ host: u.agenda_email_host, port: u.agenda_email_porta, email: u.agenda_email_endereco, senha }, inicio, fim);
+    enviarJSON(res, 200, { eventos, email: u.agenda_email_endereco });
+  } catch (e) {
+    if (/auth/i.test(e.message || '')) {
+      u.agenda_email_conectado = false; db.save(data);
+      return enviarJSON(res, 400, { erro: 'A senha desse e-mail mudou ou parou de funcionar — conecte de novo.', codigo: 'agenda_email_desconectado' });
     }
     enviarJSON(res, 502, { erro: e.message });
   }

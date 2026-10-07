@@ -2010,13 +2010,19 @@ async function reprovarDespesaJustificada(id) {
   }
 }
 
-// ---------- Agendamentos — conexão com o Outlook (Microsoft Graph) ----------
+// ---------- Agendamentos — Outlook (login Microsoft) ou e-mail de cópia (IMAP) ----------
 // pedido do usuário: "como conectar minha agenda do outlook, quero criar um menu agendamentos, e
-// puxar tudo que tem na agenda do outlook" — cada técnico/administrador conecta a própria conta
-// Microsoft (OAuth2, mesmo e-mail corporativo onde já recebe e aceita convite de reunião — ver
-// print do usuário) e essa tela só LISTA os compromissos lidos de lá (ver GET /api/outlook/eventos
-// em server.js); nunca cria, edita ou apaga nada no Outlook da pessoa.
+// puxar tudo que tem na agenda do outlook" — cada técnico/administrador conecta sua agenda e essa
+// tela só LISTA os compromissos lidos de lá; nunca cria/edita/apaga nada do lado de fora.
+//
+// pedido posterior do usuário: "a conta do e-mail já é logada no notebook, não tenho a senha...
+// fiz um e-mail em cópia... pode usar o e-mail em cópia" — pra quem não tem a senha da própria
+// conta Microsoft (login Outlook não dá), existe uma SEGUNDA forma de conectar: usuário+senha
+// comuns (IMAP) numa caixa diferente que já recebe cópia dos convites (ver agenda-email.js no
+// servidor). As duas formas alimentam a MESMA lista (renderListaEventosOutlook) — a tela só
+// lembra qual das duas está ativa em _agendaFonte ('outlook' | 'agenda-email').
 let _outlookFiltro = { inicio: '', fim: '' };
+let _agendaFonte = null;
 
 function periodoPadraoOutlook() {
   const hoje = new Date();
@@ -2028,7 +2034,7 @@ function periodoPadraoOutlook() {
 async function renderAgendamentosOutlook() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Agendamentos</h1><p>Compromissos da sua conta do Outlook/Microsoft 365 — conecte sua conta pra ver aqui tudo que você aceitou por lá.</p></div>
+    <div class="page-head"><h1>Agendamentos</h1><p>Compromissos da sua agenda — conecte sua conta pra ver aqui tudo que você aceitou.</p></div>
     <div id="outlook-area"><div class="empty">Carregando...</div></div>`;
   await carregarStatusOutlook();
 }
@@ -2036,49 +2042,115 @@ async function renderAgendamentosOutlook() {
 async function carregarStatusOutlook() {
   const area = document.getElementById('outlook-area');
   if (!area) return;
+  area.innerHTML = '<div class="empty">Carregando...</div>';
   try {
-    const status = await api('/api/outlook/status');
-    if (!status.disponivel) {
-      area.innerHTML = `<div class="panel"><div class="empty">A conexão com o Outlook ainda não foi configurada neste sistema. Fale com o administrador da plataforma.</div></div>`;
-      return;
-    }
-    if (!status.conectado) {
-      area.innerHTML = `
-        <div class="panel" style="text-align:center;">
-          <p style="color:var(--ink-soft); margin-bottom:12px;">Conecte sua conta Microsoft (o mesmo e-mail onde você recebe e aceita os convites de reunião) pra ver seus compromissos aqui.</p>
-          <button class="btn btn-primary btn-sm" onclick="conectarOutlook()">Conectar com Outlook</button>
-        </div>`;
-      return;
-    }
-    if (!_outlookFiltro.inicio) _outlookFiltro = periodoPadraoOutlook();
+    const [statusOutlook, statusEmail] = await Promise.all([
+      api('/api/outlook/status').catch(() => ({ disponivel: false, conectado: false })),
+      api('/api/agenda-email/status').catch(() => ({ conectado: false })),
+    ]);
+    if (statusOutlook.conectado) { _agendaFonte = 'outlook'; return renderAgendaConectada(area, statusOutlook.email); }
+    if (statusEmail.conectado) { _agendaFonte = 'agenda-email'; return renderAgendaConectada(area, statusEmail.endereco); }
+    _agendaFonte = null;
     area.innerHTML = `
+      <div class="panel" style="text-align:center;">
+        <p style="color:var(--ink-soft); margin-bottom:12px;">Conecte sua conta Microsoft (o mesmo e-mail onde você recebe e aceita os convites de reunião) pra ver seus compromissos aqui.</p>
+        ${statusOutlook.disponivel
+          ? `<button class="btn btn-primary btn-sm" onclick="conectarOutlook()">Conectar com Outlook</button>`
+          : `<p style="color:var(--ink-soft); font-size:13px;">(login direto com a Microsoft ainda não foi configurado neste sistema)</p>`}
+      </div>
       <div class="panel">
-        <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-          <span>Conectado como ${esc(status.email || '')}</span>
-          <button class="btn-outline-sm" onclick="desconectarOutlook()">Desconectar</button>
-        </div>
-        <div class="filtros-row">
-          <div class="field"><label>Período — de</label><input type="date" id="outlook-filtro-inicio" value="${esc(_outlookFiltro.inicio)}"></div>
-          <div class="field"><label>Período — até</label><input type="date" id="outlook-filtro-fim" value="${esc(_outlookFiltro.fim)}"></div>
-          <button class="btn btn-primary btn-sm" onclick="filtrarAgendamentosOutlook()">Filtrar</button>
-        </div>
-        <div id="outlook-eventos"><div class="empty">Carregando compromissos...</div></div>
+        <div class="panel-head"><span>Não tem a senha da sua conta Microsoft?</span></div>
+        <p style="color:var(--ink-soft); font-size:13px; margin-bottom:10px;">Se você configurou pra receber uma <b>cópia</b> dos seus convites de reunião em outro e-mail (esse você tem a senha), conecte esse e-mail de cópia aqui — o sistema lê os convites recebidos nele.</p>
+        <div id="agenda-email-form-area"><button class="btn-outline-sm" onclick="mostrarFormAgendaEmail()">Conectar usando e-mail de cópia</button></div>
       </div>`;
-    await carregarEventosOutlook();
   } catch (e) {
     area.innerHTML = `<div class="panel"><div class="empty">Erro: ${esc(e.message)}</div></div>`;
   }
 }
 
+function mostrarFormAgendaEmail() {
+  const area = document.getElementById('agenda-email-form-area');
+  if (!area) return;
+  area.innerHTML = `
+    <div class="form-grid">
+      <div><label>E-mail (de cópia)</label><input id="ae-email" placeholder="seuemail@gmail.com"></div>
+      <div><label>Senha</label><input type="password" id="ae-senha" placeholder="senha ou senha de app"></div>
+      <div><label>Provedor</label><select id="ae-provedor">
+        <option value="">Detectar pelo e-mail</option>
+        <option value="gmail">Gmail</option>
+        <option value="outlook">Outlook / Hotmail / Microsoft 365</option>
+        <option value="yahoo">Yahoo</option>
+        <option value="manual">Outro (informar servidor)</option>
+      </select></div>
+      <div id="ae-manual-area" class="hidden">
+        <label>Servidor IMAP</label><input id="ae-host" placeholder="ex: imap.meuprovedor.com.br">
+        <label style="margin-top:6px; display:block;">Porta</label><input type="number" id="ae-porta" value="993">
+      </div>
+    </div>
+    <p style="color:var(--ink-soft); font-size:12px; margin:8px 0;">Se essa conta tiver verificação em duas etapas, use uma "senha de app" (não a senha normal de login) — o provedor de e-mail explica como gerar uma nas configurações de segurança da conta.</p>
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary btn-sm" onclick="conectarAgendaEmail()">Conectar</button>
+      <button class="btn-outline-sm" onclick="carregarStatusOutlook()">Cancelar</button>
+    </div>
+    <div id="ae-status" style="margin-top:8px; color:var(--ink-soft); font-size:13px;"></div>`;
+  document.getElementById('ae-provedor').addEventListener('change', (ev) => {
+    document.getElementById('ae-manual-area').classList.toggle('hidden', ev.target.value !== 'manual');
+  });
+}
+
+async function conectarAgendaEmail() {
+  const email = document.getElementById('ae-email').value.trim();
+  const senha = document.getElementById('ae-senha').value;
+  const provedor = document.getElementById('ae-provedor').value;
+  const status = document.getElementById('ae-status');
+  if (!email || !senha) return mostrarToast('Informe o e-mail e a senha.');
+  const body = { email, senha };
+  if (provedor === 'manual') {
+    body.host = document.getElementById('ae-host').value.trim();
+    body.porta = document.getElementById('ae-porta').value;
+    if (!body.host) return mostrarToast('Informe o servidor IMAP.');
+  } else if (provedor) {
+    body.provedor = provedor;
+  }
+  if (status) status.textContent = 'Testando a conexão...';
+  try {
+    await api('/api/agenda-email/conectar', { method: 'POST', body });
+    mostrarToast('E-mail conectado.');
+    carregarStatusOutlook();
+  } catch (e) {
+    if (status) status.textContent = e.message;
+  }
+}
+
+function renderAgendaConectada(area, email) {
+  if (!_outlookFiltro.inicio) _outlookFiltro = periodoPadraoOutlook();
+  area.innerHTML = `
+    <div class="panel">
+      <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <span>Conectado como ${esc(email || '')}</span>
+        <button class="btn-outline-sm" onclick="desconectarOutlook()">Desconectar</button>
+      </div>
+      <div class="filtros-row">
+        <div class="field"><label>Período — de</label><input type="date" id="outlook-filtro-inicio" value="${esc(_outlookFiltro.inicio)}"></div>
+        <div class="field"><label>Período — até</label><input type="date" id="outlook-filtro-fim" value="${esc(_outlookFiltro.fim)}"></div>
+        <button class="btn btn-primary btn-sm" onclick="filtrarAgendamentosOutlook()">Filtrar</button>
+      </div>
+      <div id="outlook-eventos"><div class="empty">Carregando compromissos...</div></div>
+    </div>`;
+  carregarEventosOutlook();
+}
+
 async function carregarEventosOutlook() {
   const alvo = document.getElementById('outlook-eventos');
   if (!alvo) return;
+  const rota = _agendaFonte === 'agenda-email' ? '/api/agenda-email/eventos' : '/api/outlook/eventos';
+  const codigoDesconectado = _agendaFonte === 'agenda-email' ? 'agenda_email_desconectado' : 'outlook_desconectado';
   try {
     const params = new URLSearchParams({ inicio: _outlookFiltro.inicio, fim: _outlookFiltro.fim });
-    const { eventos } = await api(`/api/outlook/eventos?${params.toString()}`);
+    const { eventos } = await api(`${rota}?${params.toString()}`);
     renderListaEventosOutlook(eventos);
   } catch (e) {
-    if (e.corpo && e.corpo.codigo === 'outlook_desconectado') { mostrarToast(e.message); return carregarStatusOutlook(); }
+    if (e.corpo && e.corpo.codigo === codigoDesconectado) { mostrarToast(e.message); return carregarStatusOutlook(); }
     alvo.innerHTML = `<div class="empty">Erro ao buscar: ${esc(e.message)}</div>`;
   }
 }
@@ -2139,9 +2211,10 @@ async function conectarOutlook() {
 }
 
 async function desconectarOutlook() {
-  if (!(await mostrarConfirmacao('Desconectar sua conta do Outlook? Você pode conectar de novo quando quiser.'))) return;
+  if (!(await mostrarConfirmacao('Desconectar essa conta? Você pode conectar de novo quando quiser.'))) return;
+  const rota = _agendaFonte === 'agenda-email' ? '/api/agenda-email/desconectar' : '/api/outlook/desconectar';
   try {
-    await api('/api/outlook/desconectar', { method: 'POST' });
+    await api(rota, { method: 'POST' });
     mostrarToast('Conta desconectada.');
     carregarStatusOutlook();
   } catch (e) {

@@ -601,6 +601,18 @@ function migrar(data) {
     if (u.outlook_email === undefined) u.outlook_email = null;
     if (u.outlook_refresh_token === undefined) u.outlook_refresh_token = null;
   });
+  // pedido do usuário: "a conta do e-mail já é logada no notebook, não tenho a senha... fiz um
+  // e-mail em cópia... pode usar o e-mail em cópia" — alternativa ao login Microsoft acima pra
+  // quem não tem a senha da própria conta: conecta (usuário+senha comuns, via IMAP) numa caixa
+  // diferente que já recebe cópia dos convites (ver agenda-email.js). A senha de app fica
+  // cifrada (auth.cifrar), nunca em texto puro no banco.
+  data.usuarios.forEach((u) => {
+    if (u.agenda_email_conectado === undefined) u.agenda_email_conectado = false;
+    if (u.agenda_email_endereco === undefined) u.agenda_email_endereco = null;
+    if (u.agenda_email_senha_cifrada === undefined) u.agenda_email_senha_cifrada = null;
+    if (u.agenda_email_host === undefined) u.agenda_email_host = null;
+    if (u.agenda_email_porta === undefined) u.agenda_email_porta = null;
+  });
   // ficha cadastral ampliada: certificados (arquivo + validade), integrações com empresas-cliente
   // (acesso/credencial pra atuar nelas, com validade) e competências (nível de conhecimento num
   // tipo de equipamento) — cada uma é uma coleção própria, um registro por item, presa ao técnico

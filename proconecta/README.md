@@ -839,6 +839,31 @@ MICROSOFT_CLIENT_SECRET=o_client_secret_copiado_no_passo_6
 Sem essas duas variáveis, o menu Agendamentos mostra um aviso explicando que a conexão ainda não
 foi configurada — o resto do sistema continua funcionando normalmente.
 
+### Alternativa: conectar usando um e-mail de cópia (sem login Microsoft)
+
+Nem todo mundo tem a senha da própria conta Microsoft em mãos — é comum o notebook já entrar
+sozinho na conta (login automático do Windows), sem a pessoa nunca ter digitado a senha. Pra esse
+caso, a tela de Agendamentos tem uma segunda forma de conectar, sem precisar do login Microsoft
+acima: configure uma regra na sua conta pra mandar uma **cópia** de cada convite de reunião pra um
+e-mail diferente (um que você tenha a senha de verdade — Gmail, Outlook.com pessoal etc.), e
+conecte esse e-mail de cópia na tela (usuário + senha comuns, via IMAP — ver `agenda-email.js`).
+O sistema lê os anexos de convite (.ics) desses e-mails e monta a mesma lista de compromissos.
+
+**Dois cuidados importantes:**
+
+1. **A regra de cópia precisa ser do lado da conta, não do aplicativo Outlook instalado.** Uma
+   regra criada dentro do programa Outlook (desktop) só roda enquanto ele está aberto — por isso
+   a cópia só chega depois de ligar o computador. Pra chegar sempre, mesmo com o notebook
+   desligado, crie a regra em **Outlook na Web** (outlook.office.com, ou o portal do Microsoft
+   365 da empresa) → ⚙️ Configurações → E-mail → Regras → Nova regra → "Aplicar a todas as
+   mensagens" → ação "Encaminhar para" (ou "Enviar uma cópia para") o e-mail de cópia.
+2. **Login por usuário/senha (IMAP) pode estar desativado pela Microsoft nessa conta.** Contas
+   Microsoft 365 corporativas vêm, por padrão, com esse tipo de login bloqueado (só aceitam OAuth
+   moderno) — mas isso só afeta a conta de ORIGEM (a do técnico, que já está coberta pela cópia).
+   O e-mail de cópia (geralmente uma conta pessoal — Gmail, Outlook.com) normalmente aceita esse
+   login numa "senha de app": se a conta tiver verificação em duas etapas, gere uma senha de app
+   nas configurações de segurança dela (em vez da senha normal de login) e use essa aqui.
+
 ## Referências do projeto
 
 A pasta `docs/` (na raiz do repositório) guarda o briefing original do
