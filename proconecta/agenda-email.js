@@ -42,10 +42,20 @@ function detectarProvedor(enderecoEmail) {
 // a rede estiver bloqueando a porta do IMAP.
 const TIMEOUT_CONEXAO_MS = 20000;
 
+// o imapflow joga fora o texto de verdade que o servidor IMAP devolveu (ex.: "Application-
+// specific password required", "IMAP access is disabled for your account") e só propaga um erro
+// genérico tipo "Command failed" — o texto real fica guardado à parte, em err.responseText. Sem
+// isso, a pessoa só vê "não consegui conectar" sem nenhuma pista do que corrigir.
+function mensagemClara(e) {
+  return (e && e.responseText) || (e && e.message) || 'Erro desconhecido.';
+}
+
 async function testarConexao({ host, port, email, senha }) {
   const client = new ImapFlow({ host, port, secure: true, auth: { user: email, pass: senha }, logger: false, connectionTimeout: TIMEOUT_CONEXAO_MS });
   try {
     await client.connect();
+  } catch (e) {
+    throw new Error(mensagemClara(e));
   } finally {
     try { await client.logout(); } catch (e) { client.close(); }
   }
@@ -158,7 +168,11 @@ function eventosDoEmail(parsed) {
 async function buscarEventos({ host, port, email, senha }, inicioISO, fimISO, janelaDias = 120) {
   const client = new ImapFlow({ host, port, secure: true, auth: { user: email, pass: senha }, logger: false, connectionTimeout: TIMEOUT_CONEXAO_MS });
   const porUid = new Map();
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (e) {
+    throw new Error(mensagemClara(e));
+  }
   try {
     await client.mailboxOpen('INBOX', { readOnly: true });
     const desde = new Date(Date.now() - janelaDias * 24 * 60 * 60 * 1000);

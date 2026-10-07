@@ -6582,9 +6582,10 @@ rota('POST', /^\/api\/agenda-email\/conectar$/, async (req, res) => {
   try {
     await agendaEmail.testarConexao({ host, port: porta, email, senha });
   } catch (e) {
-    // mensagem mais clara que o texto cru do servidor IMAP pros 2 erros mais comuns
-    const msg = /auth/i.test(e.message || '') ? 'E-mail ou senha incorretos (lembrando: algumas contas pedem uma "senha de app", não a senha normal de login).' : `Não consegui conectar: ${e.message}`;
-    return enviarJSON(res, 400, { erro: msg });
+    // e.message já vem com o texto de verdade que o provedor de e-mail devolveu (ver
+    // mensagemClara em agenda-email.js) — é o que diz exatamente o que está errado (ex.: "senha
+    // de app necessária", "IMAP desativado para esta conta"), então só repassa.
+    return enviarJSON(res, 400, { erro: `Não consegui conectar: ${e.message}` });
   }
   const data = db.load();
   const u = data.usuarios.find((x) => x.id === user.id);
