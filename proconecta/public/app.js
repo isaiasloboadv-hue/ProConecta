@@ -1664,8 +1664,13 @@ function renderListaDespesasJustificadas() {
         ${_despesasCache.map((d) => `
           <tr>
             <td data-label="Data">${fmtData(d.data)}</td>
-            <td data-label="Estabelecimento">${esc(d.estabelecimento)}</td>
-            <td data-label="Descrição">${esc(d.descricao || '—')}</td>
+            <!-- pedido do usuário: "vi escrita em caixa alta coloque para ficar padrão tudo
+            minúsculo" — estabelecimento/descrição (digitados pelo técnico ou lidos por IA de um
+            cupom fiscal, geralmente ele mesmo em caixa alta) saem em minúsculo aqui, na fila do
+            financeiro e no PDF exportado, sem alterar o valor guardado (se um dia quiser ver
+            exatamente como foi digitado, continua intacto no banco). -->
+            <td data-label="Estabelecimento">${esc((d.estabelecimento || '').toLowerCase())}</td>
+            <td data-label="Descrição">${esc((d.descricao || '—').toLowerCase())}</td>
             <td data-label="Valor">${fmtMoeda(d.valor)}</td>
             <td data-label="Comprovante" class="sem-impressao">${(d.fotos && d.fotos.length) ? d.fotos.map((f, j) => `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(f)}')" title="Ver recibo ${j + 1}">🧾${d.fotos.length > 1 ? j + 1 : ''}</button>`).join(' ') : '—'}</td>
             <td data-label="Status">${statusDespesaTag(d.status)}${d.status === 'reprovado' && d.comentario_financeiro ? `<div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${esc(d.comentario_financeiro)}</div>` : ''}</td>
@@ -1875,8 +1880,8 @@ async function exportarDespesasJustificadasPdf() {
   let total = 0;
   for (const d of _despesasCache) {
     doc.setFontSize(8.5);
-    const linhasEstab = doc.splitTextToSize(limparPdf(d.estabelecimento), largEstab);
-    const linhasDesc = doc.splitTextToSize(limparPdf(d.descricao || '—'), largDesc);
+    const linhasEstab = doc.splitTextToSize(limparPdf(d.estabelecimento).toLowerCase(), largEstab);
+    const linhasDesc = doc.splitTextToSize(limparPdf(d.descricao || '—').toLowerCase(), largDesc);
     const alturaLinha = Math.max(linhasEstab.length, linhasDesc.length, 1) * 10.5 + 5;
     if (y + alturaLinha > pageH - margem - 40) { doc.addPage(); y = margem; cabecalhoTabela(); }
     doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -1923,8 +1928,8 @@ function renderCardDespesaFila(d) {
       </div>
       <div style="display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap;">
         <div style="flex:1; min-width:200px;">
-          <div><b>${esc(d.estabelecimento)}</b> — ${fmtMoeda(d.valor)}</div>
-          ${d.descricao ? `<div style="color:var(--ink-soft); font-size:13px; margin-top:2px;">${esc(d.descricao)}</div>` : ''}
+          <div><b>${esc((d.estabelecimento || '').toLowerCase())}</b> — ${fmtMoeda(d.valor)}</div>
+          ${d.descricao ? `<div style="color:var(--ink-soft); font-size:13px; margin-top:2px;">${esc(d.descricao.toLowerCase())}</div>` : ''}
           <div style="color:var(--ink-soft); font-size:11.5px; margin-top:4px;">${d.origem === 'ocr' ? 'Lido automaticamente por IA' : 'Preenchido manualmente'}</div>
         </div>
         ${(d.fotos && d.fotos.length) ? `<div style="display:flex; gap:6px; flex-wrap:wrap;">${d.fotos.map((f, j) => `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(f)}')" title="Ver recibo ${j + 1}">🧾 Recibo ${j + 1}</button>`).join('')}</div>` : ''}
