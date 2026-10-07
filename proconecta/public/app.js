@@ -1850,6 +1850,14 @@ async function exportarDespesasJustificadasPdf() {
   y += 24;
 
   const colX = { data: margem, estab: margem + 70, desc: margem + 220, valor: pageW - margem - 115, status: pageW - margem - 55 };
+  // pedido do usuário, vendo o PDF exportado: "ficou amontoado faça que a escrita continue em
+  // baixo" — estabelecimento/descrição eram cortados num número fixo de caracteres (.slice), que
+  // não tem relação nenhuma com a largura real da coluna; um nome um pouco mais longo "vazava"
+  // visualmente pra cima da coluna vizinha. Troca pra splitTextToSize (quebra pela largura de
+  // verdade, mesmo padrão já usado em linhaCampos nos outros PDFs do sistema) e a altura da linha
+  // passa a acompanhar quantas linhas o texto mais alto da linha realmente precisou.
+  const largEstab = colX.desc - colX.estab - 10;
+  const largDesc = colX.valor - colX.desc - 10;
   function cabecalhoTabela() {
     doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text('DATA', colX.data, y);
@@ -1866,15 +1874,19 @@ async function exportarDespesasJustificadasPdf() {
 
   let total = 0;
   for (const d of _despesasCache) {
-    if (y > pageH - margem - 40) { doc.addPage(); y = margem; cabecalhoTabela(); }
-    doc.setFont(undefined, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...PDF_COR.ink);
+    doc.setFontSize(9.5);
+    const linhasEstab = doc.splitTextToSize(limparPdf(d.estabelecimento), largEstab);
+    const linhasDesc = doc.splitTextToSize(limparPdf(d.descricao || '—'), largDesc);
+    const alturaLinha = Math.max(linhasEstab.length, linhasDesc.length, 1) * 12 + 6;
+    if (y + alturaLinha > pageH - margem - 40) { doc.addPage(); y = margem; cabecalhoTabela(); }
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(fmtData(d.data), colX.data, y);
-    doc.text(limparPdf(d.estabelecimento).slice(0, 26), colX.estab, y);
-    doc.text(limparPdf(d.descricao || '—').slice(0, 30), colX.desc, y);
+    doc.text(linhasEstab, colX.estab, y);
+    doc.text(linhasDesc, colX.desc, y);
     doc.text(fmtMoeda(d.valor), colX.valor, y);
     doc.text(d.status === 'aprovado' ? 'Aprovado' : d.status === 'reprovado' ? 'Reprovado' : 'Pendente', colX.status, y);
     total += d.valor;
-    y += 18;
+    y += alturaLinha;
   }
   y += 4;
   doc.setDrawColor(...PDF_COR.line);
