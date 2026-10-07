@@ -592,6 +592,15 @@ function migrar(data) {
   // ficha cadastral (menu Equipe > Cadastros): foto de perfil opcional — sem ela, o front mostra
   // uma silhueta padrão, então aqui só garante que o campo exista (string vazia) em vez de undefined.
   data.usuarios.forEach((u) => { if (u.foto_perfil === undefined) u.foto_perfil = ''; });
+  // menu Agendamentos (pedido do usuário: "como conectar minha agenda do outlook, quero criar um
+  // menu agendamentos, e puxar tudo que tem na agenda do outlook") — cada técnico/administrador
+  // conecta a própria conta Microsoft (OAuth2, ver outlook.js); só guarda o refresh_token (nunca o
+  // access_token, de vida curta) e o e-mail conectado, pra mostrar "conectado como fulano@...".
+  data.usuarios.forEach((u) => {
+    if (u.outlook_conectado === undefined) u.outlook_conectado = false;
+    if (u.outlook_email === undefined) u.outlook_email = null;
+    if (u.outlook_refresh_token === undefined) u.outlook_refresh_token = null;
+  });
   // ficha cadastral ampliada: certificados (arquivo + validade), integrações com empresas-cliente
   // (acesso/credencial pra atuar nelas, com validade) e competências (nível de conhecimento num
   // tipo de equipamento) — cada uma é uma coleção própria, um registro por item, presa ao técnico

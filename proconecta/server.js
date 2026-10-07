@@ -10,6 +10,7 @@ const db = require('./db');
 const email = require('./email');
 const ia = require('./ia');
 const whatsapp = require('./whatsapp');
+const outlook = require('./outlook');
 const webpush = require('web-push');
 const { gerarToken, verificarToken, } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
@@ -6430,6 +6431,118 @@ rota('POST', /^\/api\/despesas-justificadas\/(\d+)\/reprovar$/, async (req, res,
     url: '/',
   }).catch(() => {});
   enviarJSON(res, 200, { despesa: item });
+});
+
+// ---------- Agendamentos — conexão com o Outlook (Microsoft Graph) ----------
+// pedido do usuário: "como conectar minha agenda do outlook, quero criar um menu agendamentos, e
+// puxar tudo que tem na agenda do outlook" / "cada técnico tem seu email. recebe um e-mail de
+// agendamento eu aceito e já entra no calendário" / "só ler (puxar pra cá)" — cada técnico ou
+// administrador conecta a própria conta Microsoft (OAuth2); o sistema só LÊ os compromissos (ver
+// outlook.js), nunca cria/edita nada no Outlook da pessoa.
+//
+// a URL de callback é FIXA (não depende de subdomínio de empresa) porque é isso que fica
+// registrado no app do Azure AD — o "state" assinado abaixo é quem identifica de qual usuário
+// (de qual empresa) é essa conexão quando a Microsoft devolve o navegador pra cá.
+const OUTLOOK_REDIRECT_URI = `${APP_URL}/api/outlook/callback`;
+
+// GET /api/outlook/status — se a integração está configurada no servidor e se o usuário logado já
+// conectou a própria conta.
+rota('GET', /^\/api\/outlook\/status$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  enviarJSON(res, 200, { disponivel: outlook.ativa(), conectado: !!(u && u.outlook_conectado), email: (u && u.outlook_email) || null });
+});
+
+// GET /api/outlook/conectar — devolve a URL de autorização da Microsoft pro front redirecionar o
+// navegador (não dá pra fazer por fetch/XHR, o consentimento da Microsoft precisa de navegação de
+// verdade). O "state" carrega o id do usuário, assinado (gerarToken, mesmo mecanismo do login) —
+// é assim que o callback (que chega sem Bearer token, só com o parâmetro state) sabe quem conectou.
+rota('GET', /^\/api\/outlook\/conectar$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  if (!outlook.ativa()) return enviarJSON(res, 400, { erro: 'A conexão com o Outlook ainda não foi configurada neste sistema (fale com o administrador da plataforma).' });
+  const state = gerarToken({ outlook_usuario_id: user.id });
+  enviarJSON(res, 200, { url: outlook.urlAutorizacao(OUTLOOK_REDIRECT_URI, state) });
+});
+
+// GET /api/outlook/callback?code&state — rota PÚBLICA (ver rotas-modulo.js): é a Microsoft quem
+// redireciona o navegador pra cá depois do consentimento, sem nenhum Bearer token. Troca o code
+// pelo refresh_token, salva no usuário identificado pelo state, e manda o navegador de volta pro
+// app (que detecta "?outlook=conectado" na URL e abre a tela de Agendamentos — ver app.js).
+rota('GET', /^\/api\/outlook\/callback$/, async (req, res) => {
+  const { query } = url.parse(req.url, true);
+  function voltarComErro(mensagem) {
+    res.writeHead(302, { Location: `${APP_URL}/?outlook=erro&msg=${encodeURIComponent(mensagem)}` });
+    res.end();
+  }
+  const payload = query.state && verificarToken(query.state);
+  if (!payload || !payload.outlook_usuario_id) return voltarComErro('Conexão expirada — tente conectar de novo.');
+  if (query.error) return voltarComErro(query.error_description || 'Você não concluiu a autorização no Microsoft.');
+  if (!query.code) return voltarComErro('Resposta inesperada da Microsoft.');
+  try {
+    const tokens = await outlook.trocarCodigoPorToken(query.code, OUTLOOK_REDIRECT_URI);
+    const emailConectado = await outlook.buscarPerfil(tokens.access_token);
+    const data = db.load();
+    const u = data.usuarios.find((x) => x.id === payload.outlook_usuario_id);
+    if (!u) return voltarComErro('Usuário não encontrado.');
+    u.outlook_conectado = true;
+    u.outlook_email = emailConectado;
+    u.outlook_refresh_token = tokens.refresh_token;
+    db.save(data);
+    res.writeHead(302, { Location: `${APP_URL}/?outlook=conectado` });
+    res.end();
+  } catch (e) {
+    voltarComErro(e.message);
+  }
+});
+
+// POST /api/outlook/desconectar — apaga o refresh_token guardado (não revoga do lado da
+// Microsoft — isso só a própria pessoa faz pelo portal da conta dela — só o sistema para de usar).
+rota('POST', /^\/api\/outlook\/desconectar$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  if (u) { u.outlook_conectado = false; u.outlook_email = null; u.outlook_refresh_token = null; db.save(data); }
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/outlook/eventos?inicio=AAAA-MM-DD&fim=AAAA-MM-DD — busca os compromissos do período na
+// conta Microsoft conectada do usuário logado (renova o access_token a cada chamada — tem vida
+// curta, ~1h; o refresh_token guardado é quem permite renovar sem pedir login de novo).
+rota('GET', /^\/api\/outlook\/eventos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const u = data.usuarios.find((x) => x.id === user.id);
+  if (!u || !u.outlook_conectado || !u.outlook_refresh_token) return enviarJSON(res, 400, { erro: 'Conecte sua conta do Outlook primeiro.', codigo: 'outlook_desconectado' });
+  const { query } = url.parse(req.url, true);
+  const inicio = /^\d{4}-\d{2}-\d{2}$/.test(query.inicio || '') ? query.inicio : new Date().toISOString().slice(0, 10);
+  const fimBase = /^\d{4}-\d{2}-\d{2}$/.test(query.fim || '') ? query.fim : inicio;
+  try {
+    const tokens = await outlook.renovarToken(u.outlook_refresh_token);
+    // a Microsoft normalmente devolve um refresh_token novo a cada renovação (rotação) — se não
+    // guardar o mais recente, a conexão para de funcionar na próxima vez que o antigo expirar.
+    if (tokens.refresh_token && tokens.refresh_token !== u.outlook_refresh_token) {
+      u.outlook_refresh_token = tokens.refresh_token;
+      db.save(data);
+    }
+    const eventos = await outlook.buscarEventos(tokens.access_token, `${inicio}T00:00:00`, `${fimBase}T23:59:59`);
+    enviarJSON(res, 200, { eventos, email: u.outlook_email });
+  } catch (e) {
+    // refresh_token revogado (trocou a senha, desconectou o app pelo portal da Microsoft etc.) —
+    // marca como desconectado aqui pra a tela já oferecer "Conectar" de novo, em vez de ficar
+    // mostrando erro genérico pra sempre. e.codigo vem de outlook.js (campo "error" curto da
+    // resposta da Microsoft — o texto longo de error_description muda a cada chamada, não dá
+    // pra confiar nele pra decidir isso).
+    if (e.status === 401 || e.codigo === 'invalid_grant') {
+      u.outlook_conectado = false; u.outlook_refresh_token = null; db.save(data);
+      return enviarJSON(res, 400, { erro: 'Sua conexão com o Outlook expirou — conecte de novo.', codigo: 'outlook_desconectado' });
+    }
+    enviarJSON(res, 502, { erro: e.message });
+  }
 });
 
 // ---------- painel da plataforma (Super Admin) ----------

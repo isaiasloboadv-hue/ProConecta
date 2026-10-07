@@ -11,7 +11,10 @@
 
 // /api/whatsapp/webhook é chamado pelos servidores da Meta direto, sem Bearer token — a
 // verificação lá é o hub.verify_token da própria Meta (ver whatsapp.js), não o login do sistema.
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas'];
+// /api/outlook/callback é chamado pelo navegador vindo direto do redirect da Microsoft (fora do
+// fluxo normal de login do sistema) — não carrega o Bearer token da sessão, por isso tem que ser
+// público; quem autentica ali é o próprio "state" assinado (ver GET /api/outlook/callback).
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/outlook/callback'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],

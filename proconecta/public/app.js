@@ -456,7 +456,18 @@ function entrarNoApp() {
       if (ultima && buscarCaminho(navDoUsuario(), ultima, [])) paginaAoAbrir = ultima;
     } catch (e) {}
   }
+  // volta do redirect de autorização do Outlook (ver GET /api/outlook/callback em server.js) —
+  // a Microsoft manda o navegador de volta pra "/" com esse parâmetro na URL, não pra uma página
+  // específica do app (o app não tem roteamento por URL); detecta aqui e abre a tela certa.
+  const paramsUrl = new URLSearchParams(window.location.search);
+  const outlookResultado = paramsUrl.get('outlook');
+  if (outlookResultado && buscarCaminho(navDoUsuario(), 'agendamentos-outlook', [])) {
+    paginaAoAbrir = 'agendamentos-outlook';
+  }
   ir(paginaAoAbrir);
+  if (outlookResultado === 'conectado') mostrarToast('Conta do Outlook conectada.');
+  else if (outlookResultado === 'erro') mostrarToast('Não consegui conectar com o Outlook: ' + (paramsUrl.get('msg') || 'tente de novo.'));
+  if (outlookResultado) { try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {} }
 }
 
 function initials(nome) {
@@ -567,6 +578,11 @@ const NAV = {
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
+    // pedido do usuário: "como conectar minha agenda do outlook, quero criar um menu agendamentos,
+    // e puxar tudo que tem na agenda do outlook" — cada técnico conecta a própria conta Microsoft
+    // (recebe o convite de reunião no próprio e-mail corporativo e aceita no Outlook, igual sempre
+    // fez — ver print do usuário) e só LÊ os compromissos aqui dentro (ver renderAgendamentosOutlook).
+    { key: 'agendamentos-outlook', modulo: 'os_chamados', label: 'Agendamentos', page: 'agendamentos-outlook' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     // pedido do usuário: "crie no menu técnico um menu justificar despesa" — comprovante único por
     // lançamento (foto lida por IA ou manual), vai pra aprovação do financeiro. Rótulo "Despesas"
@@ -616,6 +632,9 @@ const NAV = {
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
     { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
+    // mesma conexão com o Outlook disponível pro técnico (ver NAV.suporte acima) — o administrador
+    // também tem e-mail corporativo próprio e pode querer ver a agenda dele aqui dentro.
+    { key: 'agendamentos-outlook', modulo: 'os_chamados', label: 'Agendamentos', page: 'agendamentos-outlook' },
     // Etapa 5 do briefing white label: o próprio administrador edita a marca da empresa (nome,
     // contato, cores, logo) e os valores padrão de bônus de viagem — sem precisar do Super Admin.
     { key: 'minha-empresa', modulo: 'nucleo', label: 'Minha Empresa', page: 'minha-empresa' },
@@ -731,6 +750,7 @@ const ICONE_MENU = {
   'solicitacoes-rh': '🙋',
   'atividades-dia': '🕒',
   'despesas-justificadas': '🧾',
+  'agendamentos-outlook': '📅',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -885,6 +905,7 @@ async function ir(pagina) {
     if (pagina === 'prestacao-contas-fila') return renderPrestacaoContasFila();
     if (pagina === 'despesas-justificadas') return renderDespesasJustificadas();
     if (pagina === 'despesas-justificadas-fila') return renderDespesasJustificadasFila();
+    if (pagina === 'agendamentos-outlook') return renderAgendamentosOutlook();
   } catch (e) {
     main.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
   }
@@ -1984,6 +2005,145 @@ async function reprovarDespesaJustificada(id) {
     await api(`/api/despesas-justificadas/${id}/reprovar`, { method: 'POST', body: { comentario: comentario.trim() } });
     mostrarToast('Despesa reprovada.');
     renderDespesasJustificadasFila();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+// ---------- Agendamentos — conexão com o Outlook (Microsoft Graph) ----------
+// pedido do usuário: "como conectar minha agenda do outlook, quero criar um menu agendamentos, e
+// puxar tudo que tem na agenda do outlook" — cada técnico/administrador conecta a própria conta
+// Microsoft (OAuth2, mesmo e-mail corporativo onde já recebe e aceita convite de reunião — ver
+// print do usuário) e essa tela só LISTA os compromissos lidos de lá (ver GET /api/outlook/eventos
+// em server.js); nunca cria, edita ou apaga nada no Outlook da pessoa.
+let _outlookFiltro = { inicio: '', fim: '' };
+
+function periodoPadraoOutlook() {
+  const hoje = new Date();
+  const fim = new Date(hoje); fim.setDate(fim.getDate() + 14);
+  const paraISO = (d) => d.toISOString().slice(0, 10);
+  return { inicio: paraISO(hoje), fim: paraISO(fim) };
+}
+
+async function renderAgendamentosOutlook() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Agendamentos</h1><p>Compromissos da sua conta do Outlook/Microsoft 365 — conecte sua conta pra ver aqui tudo que você aceitou por lá.</p></div>
+    <div id="outlook-area"><div class="empty">Carregando...</div></div>`;
+  await carregarStatusOutlook();
+}
+
+async function carregarStatusOutlook() {
+  const area = document.getElementById('outlook-area');
+  if (!area) return;
+  try {
+    const status = await api('/api/outlook/status');
+    if (!status.disponivel) {
+      area.innerHTML = `<div class="panel"><div class="empty">A conexão com o Outlook ainda não foi configurada neste sistema. Fale com o administrador da plataforma.</div></div>`;
+      return;
+    }
+    if (!status.conectado) {
+      area.innerHTML = `
+        <div class="panel" style="text-align:center;">
+          <p style="color:var(--ink-soft); margin-bottom:12px;">Conecte sua conta Microsoft (o mesmo e-mail onde você recebe e aceita os convites de reunião) pra ver seus compromissos aqui.</p>
+          <button class="btn btn-primary btn-sm" onclick="conectarOutlook()">Conectar com Outlook</button>
+        </div>`;
+      return;
+    }
+    if (!_outlookFiltro.inicio) _outlookFiltro = periodoPadraoOutlook();
+    area.innerHTML = `
+      <div class="panel">
+        <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <span>Conectado como ${esc(status.email || '')}</span>
+          <button class="btn-outline-sm" onclick="desconectarOutlook()">Desconectar</button>
+        </div>
+        <div class="filtros-row">
+          <div class="field"><label>Período — de</label><input type="date" id="outlook-filtro-inicio" value="${esc(_outlookFiltro.inicio)}"></div>
+          <div class="field"><label>Período — até</label><input type="date" id="outlook-filtro-fim" value="${esc(_outlookFiltro.fim)}"></div>
+          <button class="btn btn-primary btn-sm" onclick="filtrarAgendamentosOutlook()">Filtrar</button>
+        </div>
+        <div id="outlook-eventos"><div class="empty">Carregando compromissos...</div></div>
+      </div>`;
+    await carregarEventosOutlook();
+  } catch (e) {
+    area.innerHTML = `<div class="panel"><div class="empty">Erro: ${esc(e.message)}</div></div>`;
+  }
+}
+
+async function carregarEventosOutlook() {
+  const alvo = document.getElementById('outlook-eventos');
+  if (!alvo) return;
+  try {
+    const params = new URLSearchParams({ inicio: _outlookFiltro.inicio, fim: _outlookFiltro.fim });
+    const { eventos } = await api(`/api/outlook/eventos?${params.toString()}`);
+    renderListaEventosOutlook(eventos);
+  } catch (e) {
+    if (e.corpo && e.corpo.codigo === 'outlook_desconectado') { mostrarToast(e.message); return carregarStatusOutlook(); }
+    alvo.innerHTML = `<div class="empty">Erro ao buscar: ${esc(e.message)}</div>`;
+  }
+}
+
+function filtrarAgendamentosOutlook() {
+  _outlookFiltro = {
+    inicio: document.getElementById('outlook-filtro-inicio').value,
+    fim: document.getElementById('outlook-filtro-fim').value,
+  };
+  carregarEventosOutlook();
+}
+
+// agrupa por dia (um cabeçalho de data por grupo) — bem mais fácil de ler que uma lista corrida
+// quando o período cobre várias semanas.
+function renderListaEventosOutlook(eventos) {
+  const alvo = document.getElementById('outlook-eventos');
+  if (!eventos || !eventos.length) { alvo.innerHTML = '<div class="empty">Nenhum compromisso nesse período.</div>'; return; }
+  const grupos = new Map();
+  for (const ev of eventos) {
+    const diaChave = (ev.inicio || '').slice(0, 10);
+    if (!grupos.has(diaChave)) grupos.set(diaChave, []);
+    grupos.get(diaChave).push(ev);
+  }
+  alvo.innerHTML = [...grupos.entries()].map(([dia, itens]) => `
+    <div style="margin-top:14px;">
+      <div style="font-weight:700; color:var(--ink-soft); font-size:13px; margin-bottom:6px;">${dia ? fmtDataExtensoOutlook(dia) : '—'}</div>
+      ${itens.map((ev) => `
+        <div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--line);">
+          <div style="min-width:90px; color:var(--ink-soft); font-size:13px;">${ev.diaTodo ? 'Dia todo' : `${horaOutlook(ev.inicio)}–${horaOutlook(ev.fim)}`}</div>
+          <div style="flex:1;">
+            <div style="font-weight:600;">${esc(ev.assunto)}</div>
+            ${ev.local ? `<div style="color:var(--ink-soft); font-size:12.5px;">${esc(ev.local)}</div>` : ''}
+            ${ev.organizador ? `<div style="color:var(--ink-soft); font-size:12.5px;">Organizado por ${esc(ev.organizador)}</div>` : ''}
+          </div>
+          ${ev.link ? `<a class="btn-outline-sm" href="${esc(ev.link)}" target="_blank" rel="noopener">Abrir no Outlook</a>` : ''}
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+function horaOutlook(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+function fmtDataExtensoOutlook(diaISO) {
+  const [ano, mes, dia] = diaISO.split('-');
+  const d = new Date(Number(ano), Number(mes) - 1, Number(dia));
+  return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
+}
+
+async function conectarOutlook() {
+  try {
+    const { url } = await api('/api/outlook/conectar');
+    window.location.href = url;
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function desconectarOutlook() {
+  if (!(await mostrarConfirmacao('Desconectar sua conta do Outlook? Você pode conectar de novo quando quiser.'))) return;
+  try {
+    await api('/api/outlook/desconectar', { method: 'POST' });
+    mostrarToast('Conta desconectada.');
+    carregarStatusOutlook();
   } catch (e) {
     mostrarToast(e.message);
   }

@@ -795,6 +795,50 @@ WHATSAPP_VERIFY_TOKEN=uma_frase_secreta_qualquer_que_voce_inventa
 Sem essas três variáveis, o webhook do WhatsApp não faz nada — o chat dentro do app funciona
 normalmente do mesmo jeito.
 
+## Agendamentos — conexão com o Outlook (Microsoft Graph)
+
+Menu **Agendamentos** (acesso técnico e administrador): cada pessoa conecta a própria conta
+Microsoft (o mesmo e-mail corporativo onde já recebe e aceita convite de reunião) e o sistema
+**só lê** os compromissos de lá (`Calendars.Read`) — nunca cria, edita ou apaga nada no Outlook de
+ninguém (ver `outlook.js`).
+
+Isso exige um app registrado no **Azure AD / Microsoft Entra ID** — é de graça, mas só quem tem
+acesso ao portal da Microsoft 365 da empresa (ou uma conta Microsoft qualquer, pra uso pessoal)
+consegue fazer esse cadastro; o sistema não faz isso sozinho. Passo a passo:
+
+1. Acesse [portal.azure.com](https://portal.azure.com) → busque **"Registros de aplicativo"**
+   (App registrations) → **Novo registro**.
+2. Nome: `Nexor Connect` (ou o que preferir — é só um rótulo).
+3. Em **"Tipos de conta com suporte"**, escolha **"Contas em qualquer diretório organizacional e
+   contas Microsoft pessoais"** (multilocatário + contas pessoais) — assim cada técnico consegue
+   conectar com a própria conta, seja ela corporativa (Microsoft 365 de qualquer empresa) ou
+   pessoal (@outlook.com, @hotmail.com).
+4. Em **"URI de redirecionamento"**, escolha a plataforma **Web** e cole exatamente:
+   `https://SEU-DOMINIO-EM-PRODUCAO/api/outlook/callback` (troque pelo domínio real do seu
+   `APP_URL` — ex.: `https://proconecta.onrender.com/api/outlook/callback`).
+5. Clique em **Registrar**. Na tela que abrir, copie o **"ID do aplicativo (cliente)"** — é o
+   `MICROSOFT_CLIENT_ID`.
+6. No menu lateral, vá em **"Certificados e segredos"** → **Novo segredo do cliente** → dê
+   qualquer descrição, escolha uma validade → **Adicionar**. Copie o **VALOR** do segredo assim
+   que ele aparecer (não dá pra ver de novo depois) — é o `MICROSOFT_CLIENT_SECRET`.
+7. No menu lateral, vá em **"Permissões de API"** → **Adicionar uma permissão** → **Microsoft
+   Graph** → **Permissões delegadas** → busque e marque `Calendars.Read` → **Adicionar
+   permissões**. (`User.Read`, `openid`, `profile` e `offline_access` já vêm padrão/não precisam
+   de consentimento do administrador da organização — se o seu Microsoft 365 tiver bloqueado
+   consentimento de usuário, peça pro administrador de TI clicar em **"Conceder consentimento de
+   administrador"** nessa mesma tela.)
+
+Com os dois valores em mãos, defina as variáveis de ambiente (no Render: Environment → Add
+Environment Variable) e reinicie o serviço:
+
+```
+MICROSOFT_CLIENT_ID=o_client_id_copiado_no_passo_5
+MICROSOFT_CLIENT_SECRET=o_client_secret_copiado_no_passo_6
+```
+
+Sem essas duas variáveis, o menu Agendamentos mostra um aviso explicando que a conexão ainda não
+foi configurada — o resto do sistema continua funcionando normalmente.
+
 ## Referências do projeto
 
 A pasta `docs/` (na raiz do repositório) guarda o briefing original do
