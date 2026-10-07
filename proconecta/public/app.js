@@ -1593,6 +1593,10 @@ async function renderDespesasJustificadas() {
           <span class="plus">📷</span>Tirar foto do comprovante
           <input type="file" accept="image/*" capture="environment" style="display:none" onchange="processarFotoDespesa(event)">
         </label>
+        <label class="photo-add" style="display:inline-flex;">
+          <span class="plus">🖼️</span>Escolher da galeria
+          <input type="file" accept="image/*" style="display:none" onchange="processarFotoDespesa(event)">
+        </label>
         <button class="btn-outline-sm" onclick="abrirFormDespesaManual()">✍️ Preencher manualmente</button>
       </div>
       <div id="dj-status" style="margin-top:8px; color:var(--ink-soft); font-size:13px;"></div>
@@ -1656,7 +1660,7 @@ function renderListaDespesasJustificadas() {
         <p style="color:var(--ink-soft); font-size:13px;">${esc(periodoTexto)} — impresso em ${fmtData(new Date().toISOString())}</p>
       </div>
       <table>
-        <tr><th>Data</th><th>Estabelecimento</th><th>Descrição</th><th>Valor</th><th class="sem-impressao">Comprovante</th><th>Status</th></tr>
+        <tr><th>Data</th><th>Estabelecimento</th><th>Descrição</th><th>Valor</th><th class="sem-impressao">Comprovante</th><th>Status</th><th class="sem-impressao">Ações</th></tr>
         ${_despesasCache.map((d) => `
           <tr>
             <td data-label="Data">${fmtData(d.data)}</td>
@@ -1665,8 +1669,11 @@ function renderListaDespesasJustificadas() {
             <td data-label="Valor">${fmtMoeda(d.valor)}</td>
             <td data-label="Comprovante" class="sem-impressao">${d.foto ? `<button type="button" class="btn-outline-sm" onclick="abrirLightbox('${esc(d.foto)}')" title="Ver comprovante">🧾</button>` : '—'}</td>
             <td data-label="Status">${statusDespesaTag(d.status)}${d.status === 'reprovado' && d.comentario_financeiro ? `<div style="font-size:11.5px; color:var(--ink-soft); margin-top:3px;">${esc(d.comentario_financeiro)}</div>` : ''}</td>
+            <td data-label="Ações" class="sem-impressao">${d.status === 'pendente' ? `
+              <button type="button" class="btn-outline-sm" onclick="editarDespesaJustificada(${d.id})" title="Editar">✏️</button>
+              <button type="button" class="btn-outline-sm" onclick="excluirDespesaJustificada(${d.id})" title="Excluir">🗑️</button>` : '—'}</td>
           </tr>`).join('')}
-        <tr style="font-weight:700;"><td colspan="3" data-label="Total">Total</td><td data-label="Valor">${fmtMoeda(total)}</td><td class="sem-impressao"></td><td></td></tr>
+        <tr style="font-weight:700;"><td colspan="3" data-label="Total">Total</td><td data-label="Valor">${fmtMoeda(total)}</td><td class="sem-impressao"></td><td></td><td class="sem-impressao"></td></tr>
       </table>
     </div>`;
 }
@@ -1682,6 +1689,7 @@ async function processarFotoDespesa(event) {
   const [dataUrl] = await lerFotosComoDataUrl(arquivos);
   const status = document.getElementById('dj-status');
   if (status) status.textContent = 'Lendo o comprovante...';
+  window._despesaEditandoId = null;
   try {
     const { extraido } = await api('/api/despesas-justificadas/ler-recibo', { method: 'POST', body: { foto: dataUrl } });
     if (status) status.textContent = 'Comprovante lido — revise os dados antes de salvar.';
@@ -1694,7 +1702,32 @@ async function processarFotoDespesa(event) {
 
 function abrirFormDespesaManual() {
   document.getElementById('dj-status').textContent = '';
+  window._despesaEditandoId = null;
   abrirFormDespesa({ data: '', estabelecimento: '', valor: 0, descricao: '', foto: null, origem: 'manual' });
+}
+
+// pedido do usuário: "coloque opção de excluir e editar o documento" — reabre o mesmo formulário
+// já preenchido com os dados do lançamento; salvarDespesaJustificada detecta _despesaEditandoId e
+// manda PUT em vez de POST. Só lançamentos ainda pendentes aparecem com o botão de editar (ver
+// renderListaDespesasJustificadas e a trava correspondente em server.js).
+function editarDespesaJustificada(id) {
+  const item = _despesasCache.find((d) => d.id === id);
+  if (!item) return;
+  window._despesaEditandoId = id;
+  document.getElementById('dj-status').textContent = '';
+  abrirFormDespesa({ data: item.data, estabelecimento: item.estabelecimento, valor: item.valor, descricao: item.descricao, foto: item.foto, origem: item.origem });
+  document.getElementById('dj-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function excluirDespesaJustificada(id) {
+  if (!(await mostrarConfirmacao('Excluir esse lançamento de despesa?'))) return;
+  try {
+    await api(`/api/despesas-justificadas/${id}`, { method: 'DELETE' });
+    mostrarToast('Despesa excluída.');
+    await carregarDespesasJustificadas();
+  } catch (e) {
+    mostrarToast(e.message);
+  }
 }
 
 // pedido do usuário: "ter opção de anexar a foto do cupom fiscal, não ficar visível, coloque o
@@ -1733,7 +1766,7 @@ function abrirFormDespesa(draft) {
   const form = document.getElementById('dj-form');
   form.innerHTML = `
     <div class="panel" style="background:var(--blue-pale-2); margin-top:10px;">
-      <div class="panel-head"><span>${draft.origem === 'ocr' ? 'Confira os dados lidos do comprovante' : 'Nova despesa'}</span></div>
+      <div class="panel-head"><span>${window._despesaEditandoId ? 'Editar despesa' : draft.origem === 'ocr' ? 'Confira os dados lidos do comprovante' : 'Nova despesa'}</span></div>
       <div class="form-grid">
         <div><label>Data</label><input type="date" id="dj-data" value="${esc(draft.data || '')}"></div>
         <div><label>Estabelecimento</label><input id="dj-estabelecimento" value="${esc(draft.estabelecimento || '')}" placeholder="ex: Posto Ipiranga"></div>
@@ -1741,13 +1774,13 @@ function abrirFormDespesa(draft) {
         <div class="full"><label>Descrição</label><input id="dj-descricao" value="${esc(draft.descricao || '')}" placeholder="ex: Almoço durante atendimento"></div>
         <div class="full">
           <label>Comprovante</label><br>
-          <input type="file" id="dj-anexo-input" accept="image/*" capture="environment" style="display:none" onchange="anexarFotoComprovanteDespesa(event)">
+          <input type="file" id="dj-anexo-input" accept="image/*" style="display:none" onchange="anexarFotoComprovanteDespesa(event)">
           <div id="dj-comprovante-area">${trechoComprovanteDespesa(draft.foto)}</div>
         </div>
       </div>
       <div style="margin-top:14px; display:flex; gap:8px;">
         <button class="btn btn-primary btn-sm" onclick="salvarDespesaJustificada()">Salvar</button>
-        <button class="btn-outline-sm" onclick="document.getElementById('dj-form').innerHTML=''; document.getElementById('dj-status').textContent='';">Cancelar</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('dj-form').innerHTML=''; document.getElementById('dj-status').textContent=''; window._despesaEditandoId=null;">Cancelar</button>
       </div>
     </div>`;
 }
@@ -1760,15 +1793,20 @@ async function salvarDespesaJustificada() {
   if (!data) return mostrarToast('Informe a data da despesa.');
   if (!estabelecimento) return mostrarToast('Informe o estabelecimento.');
   if (!(valor > 0)) return mostrarToast('Informe um valor maior que zero.');
+  const editandoId = window._despesaEditandoId;
   try {
-    await api('/api/despesas-justificadas', {
-      method: 'POST',
-      body: { data, estabelecimento, valor, descricao, foto: (window._despesaDraft || {}).foto || null, origem: (window._despesaDraft || {}).origem || 'manual' },
-    });
-    mostrarToast('Despesa justificada enviada — aguardando aprovação do financeiro.');
+    const body = { data, estabelecimento, valor, descricao, foto: (window._despesaDraft || {}).foto || null, origem: (window._despesaDraft || {}).origem || 'manual' };
+    if (editandoId) {
+      await api(`/api/despesas-justificadas/${editandoId}`, { method: 'PUT', body });
+      mostrarToast('Despesa atualizada.');
+    } else {
+      await api('/api/despesas-justificadas', { method: 'POST', body });
+      mostrarToast('Despesa justificada enviada — aguardando aprovação do financeiro.');
+    }
     document.getElementById('dj-form').innerHTML = '';
     document.getElementById('dj-status').textContent = '';
     window._despesaDraft = null;
+    window._despesaEditandoId = null;
     await carregarDespesasJustificadas();
   } catch (e) {
     mostrarToast(e.message);

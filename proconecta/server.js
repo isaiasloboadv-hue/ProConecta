@@ -6307,6 +6307,46 @@ rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
   enviarJSON(res, 201, { despesa: item });
 });
 
+// PUT /api/despesas-justificadas/:id — edita um lançamento próprio (pedido do usuário: "coloque
+// opção de excluir e editar o documento"). Só o autor edita o próprio lançamento, e só enquanto
+// ainda estiver pendente — depois que o financeiro decide, o lançamento fica travado (mesmo
+// padrão de cancelarSolicitacaoRH).
+rota('PUT', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
+  if (!item || item.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Só é possível editar um lançamento ainda pendente.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const valor = Number(body.valor);
+  if (!(valor > 0)) return enviarJSON(res, 400, { erro: 'Informe um valor maior que zero.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data da despesa.' });
+  const estabelecimento = String(body.estabelecimento || '').trim();
+  if (!estabelecimento) return enviarJSON(res, 400, { erro: 'Informe o estabelecimento.' });
+  item.data = body.data;
+  item.estabelecimento = estabelecimento.slice(0, 200);
+  item.descricao = String(body.descricao || '').trim().slice(0, 300);
+  item.valor = valor;
+  item.foto = body.foto || null;
+  db.save(data);
+  enviarJSON(res, 200, { despesa: item });
+});
+
+// DELETE /api/despesas-justificadas/:id — exclui um lançamento próprio ainda pendente (mesmo
+// pedido do usuário acima).
+rota('DELETE', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
+  if (!item || item.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
+  if (item.status !== 'pendente') return enviarJSON(res, 400, { erro: 'Só é possível excluir um lançamento ainda pendente.' });
+  data.despesas_justificadas = data.despesas_justificadas.filter((d) => d.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // filtro de período por data da despesa (não por criado_em) — é a data que aparece no relatório/
 // impressão/PDF, então o filtro tem que bater com o que a pessoa vê na tela.
 function filtrarDespesasPorPeriodo(lista, query) {
