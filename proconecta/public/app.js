@@ -6637,18 +6637,64 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
 
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
+  // pedido do usuário: clonar o cabeçalho do modelo de referência — logo+nome da empresa à
+  // esquerda, título + "O.S. Nº" à direita na mesma faixa (em vez do título grande centralizado
+  // que o resto do app usa).
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
-    y += 20;
-    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
-    y += 15;
-    doc.setFontSize(13); doc.setFont(undefined, 'bold');
-    doc.text(cabecalhoAtual === 'termo' ? 'Termo de Manutenção Preventiva' : 'Relatório Técnico', pageW / 2, y, { align: 'center' });
-    y += 10;
-    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    const yTopo = y;
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, yTopo - 2, 16, 19); } catch (e) {} }
+    doc.setFont('times', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), margem + 22, yTopo + 11);
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.navy);
+    doc.text(cabecalhoAtual === 'termo' ? 'Termo de Manutenção Preventiva Laser' : 'Relatório Técnico', pageW - margem, yTopo + 9, { align: 'right' });
+    doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(`O.S. Nº ${r.os_uf} / ${r.os_numero} / ${r.os_ano}`), pageW - margem, yTopo + 23, { align: 'right' });
+    y = yTopo + 32;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1);
     doc.line(margem, y, pageW - margem, y);
-    y += 24;
+    y += 22;
+  }
+
+  // título de seção itálico à esquerda ("DADOS DO CLIENTE", "ITEM / VERIFICADO / OBSERVAÇÃO"),
+  // igual ao modelo de referência (em vez do título centralizado em caixa alta do resto do app).
+  function tituloSecao(t) {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(10.5); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), margem, y);
+    y += 16;
+  }
+
+  // caixa única com várias linhas de campos (1 ou 2 colunas por linha) — substitui o padrão do
+  // resto do app de uma caixa por campo; aqui é uma caixa só por seção, igual à referência.
+  function boxInfo(linhas) {
+    doc.setFontSize(8.5);
+    const preparado = linhas.map((linha) => linha.map((c) => {
+      const labelTxt = c.label + ': ';
+      doc.setFont('times', 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont('times', 'normal');
+      const larguraCol = linha.length === 2 ? largura / 2 - 18 : largura - 20;
+      const linhasTxt = doc.splitTextToSize(limparPdf(c.valor) || '—', larguraCol - wLabel);
+      return { labelTxt, wLabel, linhasTxt };
+    }));
+    const alturasLinha = preparado.map((linha) => Math.max(...linha.map((c) => c.linhasTxt.length)) * 11 + 6);
+    const altura = alturasLinha.reduce((a, b) => a + b, 0) + 8;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    let ty = y + 13;
+    preparado.forEach((linha, li) => {
+      let cx = margem + 10;
+      linha.forEach((c) => {
+        doc.setFont('times', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+        doc.text(c.labelTxt, cx, ty);
+        doc.setFont('times', 'normal');
+        doc.text(c.linhasTxt, cx + c.wLabel, ty);
+        cx += largura / linha.length;
+      });
+      ty += alturasLinha[li];
+    });
+    y += altura + 12;
   }
 
   function tituloCentro(t, sub, apertado) {
@@ -6698,50 +6744,49 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     y += alturaMax;
   }
 
-  // check-list em tabela (ITEM / VERIFICADO com 3 caixinhas Sim-Não-N.A / OBSERVAÇÃO) — é a
-  // diferença visual pedida em relação ao Preventiva original (que lista "01. Item — Sim" em
-  // texto corrido, sem tabela).
-  const wItemChk = largura * 0.37, wVerifChk = largura * 0.30, wObsChk = largura * 0.33;
+  // pedido do usuário: clonar a tabela do modelo de referência — cabeçalho de texto com linha
+  // fina embaixo (sem barra navy preenchida), caixinhas Sim/Não/N.A LADO A LADO numa linha só
+  // (não empilhadas) e sem numeração nos itens, com divisórias finas entre linhas em vez de
+  // célula com borda completa.
+  const wItemChk = largura * 0.33, wVerifChk = 150, wObsChk = largura - wItemChk - wVerifChk;
   function cabecalhoTabelaChecklist() {
-    if (y + 18 > pageH - margem) novaPagina();
-    doc.setFillColor(...PDF_COR.navy);
-    doc.rect(margem, y, largura, 16, 'F');
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-    doc.text('ITEM', margem + 6, y + 11);
-    doc.text('VERIFICADO', margem + wItemChk + 6, y + 11);
-    doc.text('OBSERVAÇÃO', margem + wItemChk + wVerifChk + 6, y + 11);
-    y += 16;
-  }
-  function caixinhaChecklist(x, yLinha, marcada, rotulo) {
+    if (y + 24 > pageH - margem) novaPagina();
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Item', margem, y);
+    doc.text('Verificado', margem + wItemChk, y);
+    doc.text('Observação', margem + wItemChk + wVerifChk, y);
+    y += 6;
     doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.6);
-    doc.rect(x, yLinha - 6.5, 6, 6, 'S');
-    if (marcada) doc.rect(x + 1, yLinha - 5.5, 4, 4, 'F');
-    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    doc.text(rotulo, x + 9, yLinha);
+    doc.line(margem, y, pageW - margem, y);
+    y += 14;
   }
-  function linhaChecklistTabela(c, numero) {
-    doc.setFontSize(8.2);
-    const linhasItem = doc.splitTextToSize(limparPdf(`${numero}. ${c.item}`), wItemChk - 10);
-    const linhasObs = doc.splitTextToSize(limparPdf(c.observacao || '—'), wObsChk - 10);
-    // a coluna VERIFICADO sempre desenha 3 caixinhas empilhadas (Sim/Não/N.A, ver
-    // caixinhaChecklist abaixo, até yTopo+39) — a linha precisa de altura mínima pra isso caber,
-    // mesmo quando o texto do item é curto (senão as caixinhas de baixo vazam pra próxima linha).
-    const alturaMinima = Math.max(linhasItem.length, linhasObs.length, 1) * 10.5 + 9;
-    const ALTURA_MIN_CHECKLIST = 50; // espaço pras 3 caixinhas empilhadas (Sim/Não/N.A), ver abaixo
-    const alturaLinha = Math.max(alturaMinima, ALTURA_MIN_CHECKLIST);
+  function caixinhaInline(x, yBase, marcada, rotulo) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.5);
+    doc.rect(x, yBase - 6, 6, 6, 'S');
+    if (marcada) doc.rect(x + 1, yBase - 5, 4, 4, 'F');
+    doc.setFont('times', 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.ink);
+    doc.text(rotulo, x + 8, yBase);
+  }
+  function linhaChecklistTabela(c) {
+    doc.setFont('times', 'italic'); doc.setFontSize(8.5);
+    const linhasItem = doc.splitTextToSize(limparPdf(c.item), wItemChk - 6);
+    doc.setFont('times', 'normal'); doc.setFontSize(8);
+    const linhasObs = doc.splitTextToSize(limparPdf(c.observacao || ''), wObsChk - 6);
+    const alturaLinha = Math.max(linhasItem.length, linhasObs.length, 1) * 11 + 9;
     if (y + alturaLinha > pageH - margem) { novaPagina(); cabecalhoTabelaChecklist(); }
-    const yTopo = y;
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.5);
-    doc.rect(margem, yTopo, wItemChk, alturaLinha, 'S');
-    doc.rect(margem + wItemChk, yTopo, wVerifChk, alturaLinha, 'S');
-    doc.rect(margem + wItemChk + wVerifChk, yTopo, wObsChk, alturaLinha, 'S');
-    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    doc.text(linhasItem, margem + 5, yTopo + 12);
-    doc.text(linhasObs, margem + wItemChk + wVerifChk + 5, yTopo + 12);
-    const xCaixas = margem + wItemChk + 5;
-    caixinhaChecklist(xCaixas, yTopo + 13, c.resposta === 'sim', 'Sim');
-    caixinhaChecklist(xCaixas, yTopo + 26, c.resposta === 'nao', 'Não');
-    caixinhaChecklist(xCaixas, yTopo + 39, c.resposta === 'na', 'N/A');
+    const yTexto = y + 8;
+    doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(linhasItem, margem, yTexto);
+    const xVerif = margem + wItemChk;
+    caixinhaInline(xVerif, yTexto, c.resposta === 'sim', 'Sim');
+    caixinhaInline(xVerif + 48, yTexto, c.resposta === 'nao', 'Não');
+    caixinhaInline(xVerif + 98, yTexto, c.resposta === 'na', 'N/A');
+    if (c.observacao) {
+      doc.setFont('times', 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.ink);
+      doc.text(linhasObs, margem + wItemChk + wVerifChk, yTexto);
+    }
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.4);
+    doc.line(margem, y + alturaLinha - 2, pageW - margem, y + alturaLinha - 2);
     y += alturaLinha;
   }
 
@@ -6753,41 +6798,57 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
-  doc.text('PREVENTIVA', pageW / 2, 438, { align: 'center' });
+  doc.text('PREVENTIVA LASER', pageW / 2, 438, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
   doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
-  // ===== conteúdo — Termo de Manutenção Preventiva =====
+  // ===== conteúdo — Termo de Manutenção Preventiva (layout clonado do modelo de referência) =====
   cabecalhoAtual = 'termo';
   doc.addPage(); y = margem; cabecalho();
 
-  // pedido do usuário: cabeçalho "Elaborado por / Revisão / Data", igual ao modelo de referência.
   const dataCriacao = r.criado_em ? new Date(r.criado_em) : new Date();
   const dataFormatada = `${String(dataCriacao.getDate()).padStart(2, '0')}/${String(dataCriacao.getMonth() + 1).padStart(2, '0')}/${dataCriacao.getFullYear()}`;
-  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.setFont('times', 'italic'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
   doc.text(limparPdf(`Elaborado por: ${r.tecnico_nome || r.autor_nome || ''} · Revisão: 1.0 · Data: ${dataFormatada}`), margem, y);
-  y += 18;
+  y += 20;
 
-  tituloCentro('Dados do cliente');
-  linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]);
-  linhaCampos([{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}`, frac: 1 }]);
-  linhaCampos([{ label: 'Setor', valor: r.setor_maquina, frac: 1 }]);
-  y += 10;
+  tituloSecao('Dados do cliente');
+  boxInfo([
+    [{ label: 'Empresa', valor: r.empresa }],
+    [{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}` }],
+    [{ label: 'Setor', valor: r.setor_maquina }],
+  ]);
 
-  tituloCentro('Dados do atendimento');
-  linhaCampos([{ label: 'Data inicial', valor: r.data_inicial, frac: 0.34 }, { label: 'Data final', valor: r.data_final, frac: 0.33 }, { label: 'O.S. Nº', valor: `${r.os_uf}/${r.os_numero}/${r.os_ano}`, frac: 0.33 }]);
-  linhaCampos([{ label: 'Modelo da máquina', valor: r.modelo_maquina, frac: 0.5 }, { label: 'Nº de série', valor: r.numero_serie, frac: 0.5 }]);
-  linhaCampos([{ label: 'Serviço', valor: r.servico_realizado, frac: 0.5 }, { label: 'Responsável', valor: r.tecnico_nome || r.autor_nome, frac: 0.5 }]);
-  y += 16;
+  boxInfo([
+    [{ label: 'Data inicial', valor: r.data_inicial }, { label: 'Data final', valor: r.data_final }],
+    [{ label: 'Modelo da máquina', valor: r.modelo_maquina }, { label: 'Nº série', valor: r.numero_serie }],
+    [{ label: 'Serviço', valor: r.servico_realizado }, { label: 'Responsável', valor: r.tecnico_nome || r.autor_nome }],
+  ]);
 
-  tituloCentro('Item / Verificado / Observação', null, true);
+  tituloSecao('Item / Verificado / Observação');
   cabecalhoTabelaChecklist();
-  (r.checklist || []).forEach((c, i) => linhaChecklistTabela(c, String(i + 1).padStart(2, '0')));
-  y += 12;
-  { if (y > pageH - margem - 30) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text('OBSERVAÇÕES', margem, y); y += 13; doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_checklist) || '—', largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 16; }
+  (r.checklist || []).forEach((c) => linhaChecklistTabela(c));
+  y += 8;
+  {
+    const valorObs = limparPdf(r.observacoes_checklist) || '—';
+    doc.setFont('times', 'bold'); doc.setFontSize(8.5);
+    const labelTxt = 'Observações: ';
+    const wLabel = doc.getTextWidth(labelTxt);
+    doc.setFont('times', 'normal');
+    const linhasObs = doc.splitTextToSize(valorObs, largura - 20 - wLabel);
+    const alturaObs = Math.max(24, linhasObs.length * 11 + 14);
+    if (y + alturaObs > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, largura, alturaObs, 'S');
+    doc.setFont('times', 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(labelTxt, margem + 10, y + 15);
+    doc.setFont('times', 'normal');
+    doc.text(linhasObs, margem + 10 + wLabel, y + 15);
+    y += alturaObs + 16;
+  }
 
   // ===== capa do Relatório Técnico (divisória entre os dois documentos) =====
   cabecalhoAtual = 'tecnico';
