@@ -9205,7 +9205,7 @@ function mostrarFormRelatorioPreventiva2(existente) {
         <button class="btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
         <button class="btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn-outline-sm" onclick="limparRascunhoPreventiva2(${d.id || 'null'})">Limpar rascunho</button>
-        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPreventiva2()">Concluir e enviar termo</button>
+        <button class="btn btn-primary btn-sm" id="rp2-btn-concluir" onclick="concluirRelatorioPreventiva2()">Concluir e enviar termo</button>
       </div>
     </div>`;
   renderChecklistPreventiva2();
@@ -9499,6 +9499,14 @@ async function concluirRelatorioPreventiva2() {
   if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
   d.emails_copia = emails;
 
+  // pedido do usuário: "Já tem um minuto que choveu em enviar msg mas não vai, parece que
+  // travou" — o envio real por e-mail depende de SMTP/Resend configurados no servidor, que hoje
+  // estão com falha de infraestrutura (fora do controle deste código). Enquanto isso, o botão
+  // some sem feedback nenhum, parecendo travado. Mostra "Enviando..." durante toda a operação.
+  const btn = document.getElementById('rp2-btn-concluir');
+  const textoOriginalBtn = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+
   try {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
@@ -9506,6 +9514,7 @@ async function concluirRelatorioPreventiva2() {
     limparRascunhoManual('preventiva2', d.id);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioPreventiva2(relatorio, logo);
+    const nomeArquivo = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
     // pedido do usuário: "no celular... aparece o relatório precisa ir pro e-mail ou WhatsApp.
     // E o relatório já tem que ser baixado direto" — window.open(url,'_blank') com uma blob: URL
     // é instável em navegador mobile (abre uma aba em branco, about:blank, em vez do PDF); um
@@ -9513,25 +9522,31 @@ async function concluirRelatorioPreventiva2() {
     // numa nova aba — funciona igual em desktop e mobile.
     const linkDownload = document.createElement('a');
     linkDownload.href = url;
-    linkDownload.download = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
+    linkDownload.download = nomeArquivo;
     document.body.appendChild(linkDownload);
     linkDownload.click();
     document.body.removeChild(linkDownload);
-    // pedido do usuário: "não tem como o PDF já ficar anexo ao e-mail tbm. Igual a função de
-    // encaminhar." — mailto: nunca consegue anexar um arquivo (limitação do próprio protocolo,
-    // não dá pra contornar no navegador), por isso o e-mail chegava sem o PDF. Troca pra mandar
-    // de verdade pelo backend, com o PDF em anexo — mesma rota /enviar-email que o botão
-    // "Encaminhar" da tela Relatório já usa (ver abrirEncaminharRelatorioManutencao), então quem
-    // recebe já chega com o anexo, sem precisar de nada manual.
+    // pedido do usuário: "Quero que abra o app do e-mail no celular. Ou WhatsApp pra
+    // encaminhar." — em vez de depender do envio por e-mail do servidor (hoje sem SMTP/Resend
+    // configurado de verdade), abre a bandeja de compartilhamento nativa do celular já com o PDF
+    // anexado, deixando o usuário escolher o app de e-mail, WhatsApp etc. — mesmo mecanismo do
+    // botão "Encaminhar por WhatsApp" da tela Relatório (ver encaminharRelatorioManutencaoWhatsapp).
     try {
-      const pdfBase64 = await gerarPdfBase64RelatorioManutencao(relatorio);
-      await api(`/api/relatorios-manutencao/${relatorio.id}/enviar-email`, { method: 'POST', body: { pdf_base64: pdfBase64, emails } });
-      mostrarToast(d.id ? 'Termo atualizado, PDF baixado neste dispositivo e enviado por e-mail com o anexo.' : 'Termo salvo, PDF baixado neste dispositivo e enviado por e-mail com o anexo.');
+      const blob = await (await fetch(url)).blob();
+      const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+        await navigator.share({ files: [arquivo], text: `Termo de manutenção preventiva de ${relatorio.empresa || relatorio.equipamento || 'atendimento'}.` });
+      }
+      mostrarToast(d.id ? 'Termo atualizado e PDF baixado neste dispositivo.' : 'Termo salvo e PDF baixado neste dispositivo.');
     } catch (e) {
-      alert('O termo foi salvo e o PDF baixado neste dispositivo, mas o envio por e-mail falhou: ' + e.message);
+      if (e.name !== 'AbortError') mostrarToast(d.id ? 'Termo atualizado e PDF baixado neste dispositivo.' : 'Termo salvo e PDF baixado neste dispositivo.');
     }
     renderRelatorioManutencao();
-  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+  } catch (e) {
+    alert('Erro ao salvar: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = textoOriginalBtn; }
+  }
 }
 
 // ---------- Relatório > Manual > Corretiva (Termo de Manutenção Corretiva) ----------
