@@ -6852,7 +6852,10 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   tituloSecao('Item / Verificado / Observação');
   cabecalhoTabelaChecklist();
   (r.checklist || []).forEach((c) => linhaChecklistTabela(c));
-  y += 8;
+  // pedido do usuário: "o campo observação começa na segunda página" — na referência, a caixa
+  // de Observações sempre começa numa página nova (depois do check-list), não emenda na mesma
+  // página mesmo quando sobra espaço. Força a quebra aqui pra clonar esse comportamento.
+  novaPagina();
   {
     const valorObs = limparPdf(r.observacoes_checklist) || '—';
     doc.setFont('times', 'bold'); doc.setFontSize(8.5);
@@ -6861,7 +6864,6 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     doc.setFont('times', 'normal');
     const linhasObs = doc.splitTextToSize(valorObs, largura - 20 - wLabel);
     const alturaObs = Math.max(24, linhasObs.length * 11 + 14);
-    if (y + alturaObs > pageH - margem) novaPagina();
     doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
     doc.rect(margem, y, largura, alturaObs, 'S');
     doc.setFont('times', 'bold'); doc.setTextColor(...PDF_COR.ink);
