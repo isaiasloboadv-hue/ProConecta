@@ -18,7 +18,7 @@ function t(chave, padrao) {
   return (USER && USER.terminologia && USER.terminologia[chave]) || padrao;
 }
 
-const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro' };
+const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro', comercial: 'Comercial' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
 // Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
 const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda' };
@@ -725,6 +725,21 @@ const NAV = {
   financeiro: [
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
     { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas — Aprovação', page: 'despesas-justificadas-fila' },
+  ],
+  // pedido do usuário: "criar um acesso comercial para ter acesso ao menu relatório e despesas e
+  // biblioteca" — time comercial/vendedor: cria o Relatório "Técnico (Briefing Pré-Visita)" antes
+  // da visita, lança as próprias despesas (igual suporte/administrador) e só CONSULTA a biblioteca
+  // (sem "Adicionar", que é técnico) — mesmo padrão de leitura que cliente/supervisor já usam.
+  comercial: [
+    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas', page: 'despesas-justificadas' },
+    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
+      { key: 'acessar', label: 'Acessar biblioteca', children: [
+        { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
+        { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
+      ]},
+      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
+    ]},
   ],
 };
 
@@ -16037,7 +16052,7 @@ function papeisCadastraveis(usuario) {
   if (USER.papel === 'administrador' && USER.departamento) return [USER.departamento, 'cliente'];
   // supervisor (só visualização) e financeiro (aprova prestação de contas) — Etapa 6 do briefing
   // white label — só o administrador geral cadastra, igual administrador.
-  return ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro'];
+  return ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro', 'comercial'];
 }
 function mostrarFormUsuario(usuario) {
   usuarioEmEdicaoId = usuario ? usuario.id : null;
@@ -16045,6 +16060,7 @@ function mostrarFormUsuario(usuario) {
   const opcoesPapel = {
     suporte: 'Suporte', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque',
     administrador: 'Administrador', cliente: 'Cliente', supervisor: 'Supervisor', financeiro: 'Financeiro',
+    comercial: 'Comercial',
   };
   const permitidos = papeisCadastraveis(usuario);
   const papelPadrao = usuario ? usuario.papel : permitidos[0];

@@ -3435,7 +3435,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   // por autor_id logo abaixo já garante que ele não vê relatório de outra pessoa. Com ?todas=1 o
   // administrador vê os relatórios de todo mundo (mesmo uso do ?todas=1 de /api/agenda), pra
   // telas como a linha do tempo da O.S. conseguirem mostrar o relatório de qualquer técnico.
-  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id);
@@ -3459,7 +3459,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
 // GET /api/relatorios-manutencao/:id — reabrir um relatório já criado (pra gerar o PDF de novo)
 rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
   // administrador (e supervisor, só leitura) vê/reabre o relatório de qualquer técnico (tela
   // "Relatório" com filtro por todo mundo); o técnico continua só vendo os que ele mesmo criou.
@@ -3473,7 +3473,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // não passa por aqui — é feito só no navegador (wa.me / Web Share), sem nada pra guardar no servidor.
 rota('POST', /^\/api\/relatorios-manutencao\/(\d+)\/enviar-email$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const body = await lerCorpo(req);
   if (!body.pdf_base64 || !Array.isArray(body.emails) || body.emails.length === 0) {
     return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
@@ -3593,7 +3593,7 @@ function sincronizarClienteDoRelatorio(data, empresaId, body) {
 // "ciclagem" (Ensaio de Ciclagem — ciclos de teste com amostras OK/com desvio).
 rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'preventiva2' ? 'preventiva2' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : body.tipo === 'entrega_teste' ? 'entrega_teste' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
@@ -3823,7 +3823,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
 // O tipo (completo/ficha/ciclagem) é fixo desde a criação — só os campos daquele tipo são atualizados.
 rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const data = db.load();
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
@@ -4054,7 +4054,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // o administrador também apaga o de qualquer técnico.
 rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
   const data = db.load();
   const relatorioExcluir = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || user.papel === 'administrador'));
   if (!relatorioExcluir) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
@@ -6319,7 +6319,7 @@ rota('POST', /^\/api\/prestacao-contas\/(\d+)\/reprovar$/, async (req, res, m) =
 // dados extraídos pra pré-preencher o formulário (não salva nada aqui, igual ler-etiqueta).
 rota('POST', /^\/api\/despesas-justificadas\/ler-recibo$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só quem justifica despesa (técnico ou administrador) usa a leitura automática.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só quem justifica despesa (técnico ou administrador) usa a leitura automática.' });
   if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'A leitura automática por IA não está configurada neste sistema.' });
   const body = await lerCorpo(req);
   if (!body.foto) return enviarJSON(res, 400, { erro: 'Envie uma foto do comprovante.' });
@@ -6335,7 +6335,7 @@ rota('POST', /^\/api\/despesas-justificadas\/ler-recibo$/, async (req, res) => {
 // tanto faz pro servidor — ele só recebe os campos finais já revisados pelo técnico).
 rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
   const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const valor = Number(body.valor);
   if (!(valor > 0)) return enviarJSON(res, 400, { erro: 'Informe um valor maior que zero.' });
@@ -6364,7 +6364,7 @@ rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
 // padrão de cancelarSolicitacaoRH).
 rota('PUT', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
   const data = db.load();
   const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
   if (!item || item.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
@@ -6389,7 +6389,7 @@ rota('PUT', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
 // pedido do usuário acima).
 rota('DELETE', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
   const data = db.load();
   const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
   if (!item || item.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
@@ -6414,7 +6414,7 @@ function filtrarDespesasPorPeriodo(lista, query) {
 // precisa enxergar o lançamento alheio, só o próprio, igual o técnico).
 rota('GET', /^\/api\/despesas-justificadas\/minhas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'despesas_justificadas', user.empresa_id);
