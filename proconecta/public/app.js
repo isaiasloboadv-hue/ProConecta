@@ -6642,9 +6642,18 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   // que o resto do app usa).
   function cabecalho() {
     const yTopo = y;
-    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, yTopo - 2, 16, 19); } catch (e) {} }
-    doc.setFont('times', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...PDF_COR.navy);
-    doc.text(empresaNome(), margem + 22, yTopo + 11);
+    // pedido do usuário: "o logo com o nome Promarking está diferente" — a referência usa o
+    // lockup grande (ícone + nome em 2 linhas, 1ª palavra em azul, resto em navy), igual à marca
+    // de verdade, não o ícone pequeno + nome numa linha só usado no resto do app.
+    if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', margem, yTopo - 6, 24, 28); } catch (e) {} }
+    const palavras = empresaNome().split(' ');
+    const primeira = palavras[0], resto = palavras.slice(1).join(' ');
+    doc.setFont(undefined, 'bold'); doc.setFontSize(12); doc.setTextColor(...PDF_COR.blue);
+    doc.text(primeira, margem + 30, yTopo + 2);
+    if (resto) {
+      doc.setTextColor(...PDF_COR.navy);
+      doc.text(resto, margem + 30, yTopo + 15);
+    }
     doc.setFont('times', 'bolditalic'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.navy);
     doc.text(cabecalhoAtual === 'termo' ? 'Termo de Manutenção Preventiva Laser' : 'Relatório Técnico', pageW - margem, yTopo + 9, { align: 'right' });
     doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
@@ -6760,22 +6769,31 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     doc.line(margem, y, pageW - margem, y);
     y += 14;
   }
+  // pedido do usuário: "o visto de ticado é um visto e não preenchido o quadrado" — desenha um
+  // "✓" (duas linhas) dentro da caixinha quando marcada, em vez de preencher o quadrado inteiro.
   function caixinhaInline(x, yBase, marcada, rotulo) {
     doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.5);
     doc.rect(x, yBase - 6, 6, 6, 'S');
-    if (marcada) doc.rect(x + 1, yBase - 5, 4, 4, 'F');
+    if (marcada) {
+      doc.setLineWidth(0.8);
+      doc.line(x + 1, yBase - 2.8, x + 2.4, yBase - 0.9);
+      doc.line(x + 2.4, yBase - 0.9, x + 5, yBase - 5.3);
+    }
     doc.setFont('times', 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.ink);
     doc.text(rotulo, x + 8, yBase);
   }
   function linhaChecklistTabela(c) {
-    doc.setFont('times', 'italic'); doc.setFontSize(8.5);
+    doc.setFont('times', 'italic'); doc.setFontSize(8);
     const linhasItem = doc.splitTextToSize(limparPdf(c.item), wItemChk - 6);
-    doc.setFont('times', 'normal'); doc.setFontSize(8);
+    doc.setFont('times', 'normal'); doc.setFontSize(7.5);
     const linhasObs = doc.splitTextToSize(limparPdf(c.observacao || ''), wObsChk - 6);
-    const alturaLinha = Math.max(linhasItem.length, linhasObs.length, 1) * 11 + 9;
+    // pedido do usuário: "os itens [do check-list] ficam na mesma página" — linhas bem mais
+    // compactas (mesmo padrão de uma linha só por item da referência) pra caber as ~28
+    // perguntas inteiras numa página só, em vez de vazar pra uma segunda.
+    const alturaLinha = Math.max(linhasItem.length, linhasObs.length, 1) * 9 + 6;
     if (y + alturaLinha > pageH - margem) { novaPagina(); cabecalhoTabelaChecklist(); }
-    const yTexto = y + 8;
-    doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    const yTexto = y + 7;
+    doc.setFont('times', 'italic'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.ink);
     doc.text(linhasItem, margem, yTexto);
     const xVerif = margem + wItemChk;
     caixinhaInline(xVerif, yTexto, c.resposta === 'sim', 'Sim');
