@@ -9506,7 +9506,17 @@ async function concluirRelatorioPreventiva2() {
     limparRascunhoManual('preventiva2', d.id);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioPreventiva2(relatorio, logo);
-    window.open(url, '_blank');
+    // pedido do usuário: "no celular... aparece o relatório precisa ir pro e-mail ou WhatsApp.
+    // E o relatório já tem que ser baixado direto" — window.open(url,'_blank') com uma blob: URL
+    // é instável em navegador mobile (abre uma aba em branco, about:blank, em vez do PDF); um
+    // <a download> força o download direto do arquivo, sem depender de abrir/renderizar o blob
+    // numa nova aba — funciona igual em desktop e mobile.
+    const linkDownload = document.createElement('a');
+    linkDownload.href = url;
+    linkDownload.download = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
+    document.body.appendChild(linkDownload);
+    linkDownload.click();
+    document.body.removeChild(linkDownload);
     // pedido do usuário: "no final onde preenche o e-mail a ser enviado o relatório... abre o
     // e-mail logado no dispositivo e preencher... mensagem automático preenchido" — mesmo
     // mailto: do Preventiva original, só o texto segue o formato do modelo de referência
