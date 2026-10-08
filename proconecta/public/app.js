@@ -9517,14 +9517,19 @@ async function concluirRelatorioPreventiva2() {
     document.body.appendChild(linkDownload);
     linkDownload.click();
     document.body.removeChild(linkDownload);
-    // pedido do usuário: "no final onde preenche o e-mail a ser enviado o relatório... abre o
-    // e-mail logado no dispositivo e preencher... mensagem automático preenchido" — mesmo
-    // mailto: do Preventiva original, só o texto segue o formato do modelo de referência
-    // (lista os dados do atendimento em vez de um parágrafo corrido).
-    const assunto = encodeURIComponent(`Termo de Manutenção Preventiva Laser - ${d.modelo_maquina} - ${d.empresa}`);
-    const corpo = encodeURIComponent(`Segue o Termo de Manutenção Preventiva Laser referente ao atendimento realizado.\n\nEmpresa: ${d.empresa}\nSetor: ${d.setor_maquina}\nModelo: ${d.modelo_maquina}\nNº de série: ${d.numero_serie}\nData: ${d.data_inicial} a ${d.data_final}\nTécnico: ${USER.nome}\n\nO PDF do termo assinado foi baixado neste dispositivo.\nPor favor, anexe o arquivo antes de enviar este e-mail.`);
-    window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
-    mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
+    // pedido do usuário: "não tem como o PDF já ficar anexo ao e-mail tbm. Igual a função de
+    // encaminhar." — mailto: nunca consegue anexar um arquivo (limitação do próprio protocolo,
+    // não dá pra contornar no navegador), por isso o e-mail chegava sem o PDF. Troca pra mandar
+    // de verdade pelo backend, com o PDF em anexo — mesma rota /enviar-email que o botão
+    // "Encaminhar" da tela Relatório já usa (ver abrirEncaminharRelatorioManutencao), então quem
+    // recebe já chega com o anexo, sem precisar de nada manual.
+    try {
+      const pdfBase64 = await gerarPdfBase64RelatorioManutencao(relatorio);
+      await api(`/api/relatorios-manutencao/${relatorio.id}/enviar-email`, { method: 'POST', body: { pdf_base64: pdfBase64, emails } });
+      mostrarToast(d.id ? 'Termo atualizado, PDF baixado neste dispositivo e enviado por e-mail com o anexo.' : 'Termo salvo, PDF baixado neste dispositivo e enviado por e-mail com o anexo.');
+    } catch (e) {
+      alert('O termo foi salvo e o PDF baixado neste dispositivo, mas o envio por e-mail falhou: ' + e.message);
+    }
     renderRelatorioManutencao();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
