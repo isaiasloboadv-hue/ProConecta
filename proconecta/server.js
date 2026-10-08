@@ -3595,7 +3595,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador criam este relatório.' });
   const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
-  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : body.tipo === 'entrega_teste' ? 'entrega_teste' : 'completo';
+  const tipo = body.tipo === 'ficha' ? 'ficha' : body.tipo === 'ciclagem' ? 'ciclagem' : body.tipo === 'preventiva' ? 'preventiva' : body.tipo === 'preventiva2' ? 'preventiva2' : body.tipo === 'corretiva' ? 'corretiva' : body.tipo === 'relatorio_tecnico' ? 'relatorio_tecnico' : body.tipo === 'aceite_entrega' ? 'aceite_entrega' : body.tipo === 'promotor' ? 'promotor' : body.tipo === 'devolutivo' ? 'devolutivo' : body.tipo === 'levantamento_tecnico' ? 'levantamento_tecnico' : body.tipo === 'entrega_teste' ? 'entrega_teste' : 'completo';
   const fotos = Array.isArray(body.fotos) ? body.fotos : [];
   const ciclos = sanitizarCiclos(body.ciclos);
   if (tipo === 'ficha') {
@@ -3612,6 +3612,12 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
   } else if (tipo === 'preventiva') {
     const erroPreventiva = validarRelatorioPreventiva(body);
     if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+  } else if (tipo === 'preventiva2') {
+    // pedido do usuário: "duplique o atual e renomeie como preventiva 2" — mesmo formato de dados
+    // do termo "preventiva" original (só o PDF/formulário têm um visual diferente), por isso
+    // reaproveita a mesma validação.
+    const erroPreventiva2 = validarRelatorioPreventiva(body);
+    if (erroPreventiva2) return enviarJSON(res, 400, { erro: erroPreventiva2 });
   } else if (tipo === 'corretiva') {
     const erroCorretiva = validarRelatorioCorretiva(body);
     if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
@@ -3668,6 +3674,25 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     fotos,
     criado_em: new Date().toISOString(),
     ...(tipo === 'preventiva' ? {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico_realizado: body.servico_realizado || '',
+      endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      setor_maquina: body.setor_maquina || '',
+      checklist: Array.isArray(body.checklist) ? body.checklist : [],
+      observacoes_checklist: body.observacoes_checklist || '',
+      servico_feito: body.servico_feito || '',
+      observacoes_servico: body.observacoes_servico || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_comentario: body.satisfacao_comentario || '',
+      satisfacao_autoriza: body.satisfacao_autoriza || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+    } : {}),
+    ...(tipo === 'preventiva2' ? {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
       data_inicial: body.data_inicial || '', data_final: body.data_final || '',
       modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
@@ -3832,6 +3857,29 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   } else if (item.tipo === 'preventiva') {
     const erroPreventiva = validarRelatorioPreventiva(body);
     if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+    Object.assign(item, {
+      os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
+      data_inicial: body.data_inicial || '', data_final: body.data_final || '',
+      modelo_maquina: body.modelo_maquina || '', numero_serie: body.numero_serie || '',
+      servico_realizado: body.servico_realizado || '',
+      empresa: body.empresa || '', endereco: body.endereco || '', numero: body.numero || '', bairro: body.bairro || '',
+      estado: body.estado || '', cidade: body.cidade || '', cep: body.cep || '',
+      setor_maquina: body.setor_maquina || '',
+      checklist: Array.isArray(body.checklist) ? body.checklist : [],
+      observacoes_checklist: body.observacoes_checklist || '',
+      servico_feito: body.servico_feito || '',
+      observacoes_servico: body.observacoes_servico || '',
+      satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
+      satisfacao_comentario: body.satisfacao_comentario || '',
+      satisfacao_autoriza: body.satisfacao_autoriza || '',
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
+      emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      fotos,
+    });
+  } else if (item.tipo === 'preventiva2') {
+    const erroPreventiva2 = validarRelatorioPreventiva(body);
+    if (erroPreventiva2) return enviarJSON(res, 400, { erro: erroPreventiva2 });
     Object.assign(item, {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
       data_inicial: body.data_inicial || '', data_final: body.data_final || '',

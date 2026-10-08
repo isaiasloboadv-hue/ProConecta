@@ -6618,6 +6618,309 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// Termo de Manutenção Preventiva — modelo alternativo ("Preventiva 2", ver formulário
+// mostrarFormRelatorioPreventiva2 acima). Pedido do usuário: "quero que o modelo de relatório de
+// Preventiva siga exatamente esse modelo [de referência externo] em todos os detalhes" — PDF
+// combinado num arquivo só: 1) Termo de Manutenção Preventiva com cabeçalho "Elaborado por/
+// Revisão/Data" e check-list em TABELA (coluna Verificado com 3 caixinhas Sim/Não/N.A, marcada a
+// que foi escolhida); 2) um "Relatório Técnico" completo logo em seguida, com capa própria.
+function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: nomeArquivoRelatorioManutencao(r) });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+  let cabecalhoAtual = 'termo';
+
+  function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+  function cabecalho() {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+    y += 20;
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+    y += 15;
+    doc.setFontSize(13); doc.setFont(undefined, 'bold');
+    doc.text(cabecalhoAtual === 'termo' ? 'Termo de Manutenção Preventiva' : 'Relatório Técnico', pageW / 2, y, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    doc.line(margem, y, pageW - margem, y);
+    y += 24;
+  }
+
+  function tituloCentro(t, sub, apertado) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+    if (sub) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
+      y += 4;
+    } else {
+      y += apertado ? 4 : 16;
+    }
+  }
+
+  function tituloEsquerda(t) {
+    if (y > pageH - margem - 60) novaPagina();
+    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(t, margem, y); y += 14;
+  }
+
+  function linhaCampos(campos) {
+    const larguras = campos.map((c) => largura * c.frac);
+    doc.setFontSize(8.5);
+    let alturaMax = 20;
+    const conteudos = campos.map((c, i) => {
+      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+      doc.setFont(undefined, 'bold');
+      const wLabel = doc.getTextWidth(labelTxt);
+      doc.setFont(undefined, 'normal');
+      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+      const altura = Math.max(20, linhas.length * 11 + 9);
+      if (altura > alturaMax) alturaMax = altura;
+      return { labelTxt, wLabel, linhas };
+    });
+    if (y + alturaMax > pageH - margem) novaPagina();
+    let cx = margem;
+    campos.forEach((c, i) => {
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+      doc.rect(cx, y, larguras[i], alturaMax, 'S');
+      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+      doc.setFont(undefined, 'normal');
+      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+      cx += larguras[i];
+    });
+    y += alturaMax;
+  }
+
+  // check-list em tabela (ITEM / VERIFICADO com 3 caixinhas Sim-Não-N.A / OBSERVAÇÃO) — é a
+  // diferença visual pedida em relação ao Preventiva original (que lista "01. Item — Sim" em
+  // texto corrido, sem tabela).
+  const wItemChk = largura * 0.37, wVerifChk = largura * 0.30, wObsChk = largura * 0.33;
+  function cabecalhoTabelaChecklist() {
+    if (y + 18 > pageH - margem) novaPagina();
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 16, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('ITEM', margem + 6, y + 11);
+    doc.text('VERIFICADO', margem + wItemChk + 6, y + 11);
+    doc.text('OBSERVAÇÃO', margem + wItemChk + wVerifChk + 6, y + 11);
+    y += 16;
+  }
+  function caixinhaChecklist(x, yLinha, marcada, rotulo) {
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.6);
+    doc.rect(x, yLinha - 6.5, 6, 6, 'S');
+    if (marcada) doc.rect(x + 1, yLinha - 5.5, 4, 4, 'F');
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(rotulo, x + 9, yLinha);
+  }
+  function linhaChecklistTabela(c, numero) {
+    doc.setFontSize(8.2);
+    const linhasItem = doc.splitTextToSize(limparPdf(`${numero}. ${c.item}`), wItemChk - 10);
+    const linhasObs = doc.splitTextToSize(limparPdf(c.observacao || '—'), wObsChk - 10);
+    // a coluna VERIFICADO sempre desenha 3 caixinhas empilhadas (Sim/Não/N.A, ver
+    // caixinhaChecklist abaixo, até yTopo+39) — a linha precisa de altura mínima pra isso caber,
+    // mesmo quando o texto do item é curto (senão as caixinhas de baixo vazam pra próxima linha).
+    const alturaMinima = Math.max(linhasItem.length, linhasObs.length, 1) * 10.5 + 9;
+    const ALTURA_MIN_CHECKLIST = 50; // espaço pras 3 caixinhas empilhadas (Sim/Não/N.A), ver abaixo
+    const alturaLinha = Math.max(alturaMinima, ALTURA_MIN_CHECKLIST);
+    if (y + alturaLinha > pageH - margem) { novaPagina(); cabecalhoTabelaChecklist(); }
+    const yTopo = y;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.5);
+    doc.rect(margem, yTopo, wItemChk, alturaLinha, 'S');
+    doc.rect(margem + wItemChk, yTopo, wVerifChk, alturaLinha, 'S');
+    doc.rect(margem + wItemChk + wVerifChk, yTopo, wObsChk, alturaLinha, 'S');
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(linhasItem, margem + 5, yTopo + 12);
+    doc.text(linhasObs, margem + wItemChk + wVerifChk + 5, yTopo + 12);
+    const xCaixas = margem + wItemChk + 5;
+    caixinhaChecklist(xCaixas, yTopo + 13, c.resposta === 'sim', 'Sim');
+    caixinhaChecklist(xCaixas, yTopo + 26, c.resposta === 'nao', 'Não');
+    caixinhaChecklist(xCaixas, yTopo + 39, c.resposta === 'na', 'N/A');
+    y += alturaLinha;
+  }
+
+  // ===== capa =====
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
+  doc.text('PREVENTIVA', pageW / 2, 438, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+  doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo — Termo de Manutenção Preventiva =====
+  cabecalhoAtual = 'termo';
+  doc.addPage(); y = margem; cabecalho();
+
+  // pedido do usuário: cabeçalho "Elaborado por / Revisão / Data", igual ao modelo de referência.
+  const dataCriacao = r.criado_em ? new Date(r.criado_em) : new Date();
+  const dataFormatada = `${String(dataCriacao.getDate()).padStart(2, '0')}/${String(dataCriacao.getMonth() + 1).padStart(2, '0')}/${dataCriacao.getFullYear()}`;
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(`Elaborado por: ${r.tecnico_nome || r.autor_nome || ''} · Revisão: 1.0 · Data: ${dataFormatada}`), margem, y);
+  y += 18;
+
+  tituloCentro('Dados do cliente');
+  linhaCampos([{ label: 'Empresa', valor: r.empresa, frac: 1 }]);
+  linhaCampos([{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}`, frac: 1 }]);
+  linhaCampos([{ label: 'Setor', valor: r.setor_maquina, frac: 1 }]);
+  y += 10;
+
+  tituloCentro('Dados do atendimento');
+  linhaCampos([{ label: 'Data inicial', valor: r.data_inicial, frac: 0.34 }, { label: 'Data final', valor: r.data_final, frac: 0.33 }, { label: 'O.S. Nº', valor: `${r.os_uf}/${r.os_numero}/${r.os_ano}`, frac: 0.33 }]);
+  linhaCampos([{ label: 'Modelo da máquina', valor: r.modelo_maquina, frac: 0.5 }, { label: 'Nº de série', valor: r.numero_serie, frac: 0.5 }]);
+  linhaCampos([{ label: 'Serviço', valor: r.servico_realizado, frac: 0.5 }, { label: 'Responsável', valor: r.tecnico_nome || r.autor_nome, frac: 0.5 }]);
+  y += 16;
+
+  tituloCentro('Item / Verificado / Observação', null, true);
+  cabecalhoTabelaChecklist();
+  (r.checklist || []).forEach((c, i) => linhaChecklistTabela(c, String(i + 1).padStart(2, '0')));
+  y += 12;
+  { if (y > pageH - margem - 30) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text('OBSERVAÇÕES', margem, y); y += 13; doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_checklist) || '—', largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 16; }
+
+  // ===== capa do Relatório Técnico (divisória entre os dois documentos) =====
+  cabecalhoAtual = 'tecnico';
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('RELATÓRIO TÉCNICO', pageW / 2, pageH / 2 - 10, { align: 'center' });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, pageH / 2 + 18, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== conteúdo — Relatório Técnico =====
+  doc.addPage(); y = margem; cabecalho();
+
+  tituloCentro('Serviços realizados', 'Manutenção realizada / resultados de amostra');
+  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.servico_feito) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+
+  tituloEsquerda('Peças fornecidas');
+  {
+    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.6 }, { t: 'Código PMK', frac: 0.28 }];
+    const larguras = cols.map((c) => largura * c.frac);
+    if (y + 20 > pageH - margem) novaPagina();
+    let cx = margem;
+    doc.setFillColor(...PDF_COR.navy);
+    doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
+    y += 18;
+    const pecas = r.pecas || [];
+    if (!pecas.length) {
+      if (y + 18 > pageH - margem) novaPagina();
+      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem + 6, y + 12);
+      y += 18;
+    } else {
+      pecas.forEach((p, i) => {
+        if (y + 18 > pageH - margem) novaPagina();
+        cx = margem;
+        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—'];
+        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
+        y += 18;
+      });
+    }
+    y += 16;
+  }
+
+  const temFotos = (r.fotos || []).some((bloco) => bloco && Array.isArray(bloco.fotos) && bloco.fotos.length);
+  if (temFotos) {
+    const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
+    if (y + 34 + hImgFoto > pageH - margem) novaPagina();
+  }
+  tituloCentro('Relatório fotográfico', null, true);
+  (r.fotos || []).forEach((bloco) => {
+    const fotosDoBloco = (bloco && bloco.fotos) || [];
+    if (y > pageH - margem - 20) novaPagina();
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(limparPdf(bloco && bloco.comentario) || '—', margem, y); y += 12;
+    if (fotosDoBloco.length) {
+      const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
+      for (let i = 0; i < fotosDoBloco.length; i += 2) {
+        if (y + hImg > pageH - margem) novaPagina();
+        [fotosDoBloco[i], fotosDoBloco[i + 1]].forEach((f, j) => {
+          if (!f) return;
+          const cx = margem + j * (wImg + gap);
+          try {
+            const m = /^data:image\/(\w+);/.exec(f);
+            const formato = m ? m[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG';
+            doc.setDrawColor(...PDF_COR.line);
+            doc.roundedRect(cx - 1, y - 1, wImg + 2, hImg + 2, 3, 3, 'S');
+            doc.addImage(f, formato, cx, y, wImg, hImg);
+          } catch (e) {}
+        });
+        y += hImg + gap;
+      }
+    } else {
+      doc.setFontSize(8.5); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma foto anexada.', margem, y); y += 14;
+    }
+    y += 6;
+  });
+
+  tituloCentro('Observações do serviço');
+  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_servico) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+
+  tituloCentro('Avaliação de desempenho');
+  linhaCampos([{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
+  if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário do cliente', valor: r.satisfacao_comentario, frac: 1 }]);
+  y += 18;
+
+  if (y > 560) novaPagina();
+  tituloCentro('Assinatura');
+  {
+    const wImg = 220, hImg = 90;
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`Ciente (Cliente/Empresa): ${r.assinatura_cliente_nome}`), margem, y);
+    doc.text(limparPdf(`Ciente (Técnico/${empresaNome()}): ${r.tecnico_nome || r.autor_nome}`), margem + largura / 2, y);
+    y += 18;
+    try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
+    try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
+    y += hImg + 16;
+  }
+  if ((r.emails_copia || []).length) {
+    if (y > pageH - margem - 16) novaPagina();
+    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(`Cópia enviada para: ${r.emails_copia[0]}`), margem, y);
+  }
+
+  // ===== página de contato =====
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.bege);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  doc.setFontSize(10); doc.setFont(undefined, 'bold');
+  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  doc.setFont(undefined, 'bold');
+  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+  empresaEmails().forEach((email, i) => {
+    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+  });
+
+  return doc.output('bloburl');
+}
+
 function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -6956,6 +7259,12 @@ function tiposRelatorioManual() {
   return [
     { tipo: 'completo', label: 'Completo', fn: 'mostrarFormRelatorioManutencao' },
     { tipo: 'preventiva', label: 'Preventiva', fn: 'mostrarFormRelatorioPreventiva' },
+    // pedido do usuário: "duplique o atual e renomeie como preventiva 2" — cópia paralela do
+    // Termo de Manutenção Preventiva, com o PDF seguindo um modelo de referência diferente
+    // (tabela de check-list Sim/Não/N.A. + Relatório Técnico combinado no mesmo arquivo) e a
+    // assinatura do técnico puxando o nome de quem está logado em vez de digitar de novo. O
+    // Preventiva original (acima) não foi tocado.
+    { tipo: 'preventiva2', label: 'Preventiva 2', fn: 'mostrarFormRelatorioPreventiva2' },
     { tipo: 'corretiva', label: 'Corretiva', fn: 'mostrarFormRelatorioCorretiva' },
     { tipo: 'relatorio_tecnico', label: 'Relatório Técnico', fn: 'mostrarFormRelatorioTecnico' },
     { tipo: 'aceite_entrega', label: 'Termo de Aceite', fn: 'mostrarFormRelatorioAceite' },
@@ -6990,13 +7299,14 @@ const TIPOS_RELATORIO_MANUT_LABEL = {
   completo: 'Completo', ficha: 'Ficha', ciclagem: 'Ciclagem', preventiva: 'Preventiva',
   corretiva: 'Corretiva', relatorio_tecnico: 'Relatório Técnico', aceite_entrega: 'Termo de Aceite',
   entrega_teste: 'Entrega para Teste', promotor: 'Técnico', devolutivo: 'Devolutivo',
-  levantamento_tecnico: 'Levantamento Técnico',
+  levantamento_tecnico: 'Levantamento Técnico', preventiva2: 'Preventiva 2',
 };
 
 function tagTipoRelatorioManut(r) {
   if (r.tipo === 'ficha') return tag('Ficha', 'blue');
   if (r.tipo === 'ciclagem') return tag('Ciclagem', 'purple');
   if (r.tipo === 'preventiva') return tag('Preventiva', 'amber');
+  if (r.tipo === 'preventiva2') return tag('Preventiva 2', 'amber');
   if (r.tipo === 'corretiva') return tag('Corretiva', 'orange');
   if (r.tipo === 'relatorio_tecnico') return tag('Relatório Técnico', 'purple');
   if (r.tipo === 'aceite_entrega') return tag('Termo de Aceite', 'blue');
@@ -7056,7 +7366,7 @@ function linhasRelatorioManut() {
         <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})">PDF</button>
         <button class="btn-outline-sm" onclick="abrirEncaminharRelatorioManutencao(${i})">Encaminhar</button>
         ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
-        ${r.tipo !== 'preventiva' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
+        ${r.tipo !== 'preventiva' && r.tipo !== 'preventiva2' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
         <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
         <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
       </td>
@@ -7178,7 +7488,7 @@ function descricaoRelatorioManutencao(r) {
   if (r.tipo === 'ciclagem') {
     return `${esc(r.equipamento)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
   }
-  if (r.tipo === 'preventiva' || r.tipo === 'corretiva' || r.tipo === 'aceite_entrega') {
+  if (r.tipo === 'preventiva' || r.tipo === 'preventiva2' || r.tipo === 'corretiva' || r.tipo === 'aceite_entrega') {
     return `${esc(r.modelo_maquina)} <span style="color:var(--ink-soft); font-size:12.5px;">(${esc(r.empresa)})</span>`;
   }
   if (r.tipo === 'entrega_teste') {
@@ -8082,6 +8392,7 @@ async function editarRelatorioManutencao(i) {
   if (r.tipo === 'ficha') mostrarFormFicha(r);
   else if (r.tipo === 'ciclagem') mostrarFormCiclagem(r);
   else if (r.tipo === 'preventiva') mostrarFormRelatorioPreventiva(r);
+  else if (r.tipo === 'preventiva2') mostrarFormRelatorioPreventiva2(r);
   else if (r.tipo === 'corretiva') mostrarFormRelatorioCorretiva(r);
   else if (r.tipo === 'relatorio_tecnico') mostrarFormRelatorioTecnico(r);
   else if (r.tipo === 'aceite_entrega') mostrarFormRelatorioAceite(r);
@@ -8558,6 +8869,492 @@ async function concluirRelatorioPreventiva() {
     window.open(url, '_blank');
     const assunto = encodeURIComponent(`Termo de Manutenção Preventiva — ${d.empresa}`);
     const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o Termo de Manutenção Preventiva (OS ${d.os_uf}/${d.os_numero}/${d.os_ano}) referente ao atendimento em ${d.empresa}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
+    window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
+    mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
+    renderRelatorioManutencao();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+// ---------- Relatório > Manual > Preventiva 2 (Termo de Manutenção Preventiva — modelo alternativo) ----------
+// pedido do usuário: "quero que o modelo de relatório de Preventiva siga exatamente esse modelo
+// [de referência, externo] em todos os detalhes... duplique o atual e renomeie como preventiva 2"
+// — cópia completa e independente do Termo de Manutenção Preventiva acima (mesmo esquema de
+// dados/validação no servidor), só o PDF e 2 detalhes do formulário mudam:
+// 1) o PDF segue o layout de referência (tabela de check-list Sim/Não/N.A., cabeçalho "Elaborado
+//    por/Revisão/Data", e um "Relatório Técnico" completo logo em seguida, no mesmo arquivo);
+// 2) a assinatura do técnico não pede o nome de novo — usa USER.nome automaticamente, igual ao
+//    campo "Responsável" lá em cima.
+// O Preventiva original (acima) continua exatamente como estava, sem nenhuma alteração.
+let relatorioPreventiva2Draft = null;
+function relatorioPreventiva2Padrao() {
+  return {
+    tipo: 'preventiva2',
+    os_uf: '', os_numero: '', os_ano: '',
+    data_inicial: '', data_final: '',
+    modelo_maquina: '', numero_serie: '',
+    servico_realizado: 'Preventiva',
+    empresa: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '',
+    setor_maquina: '',
+    checklist: [],
+    observacoes_checklist: '',
+    servico_feito: '',
+    pecas: [],
+    fotos: [],
+    observacoes_servico: '',
+    satisfacao_estrelas: 0,
+    satisfacao_comentario: '',
+    satisfacao_autoriza: '',
+    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
+    emails_copia: [''],
+  };
+}
+
+function mostrarFormRelatorioPreventiva2(existente) {
+  const rascunho = carregarRascunhoManual('preventiva2', existente && existente.id);
+  const recuperado = !!rascunho;
+  relatorioPreventiva2Draft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioPreventiva2Padrao());
+  const d = relatorioPreventiva2Draft;
+  const editando = !!d.id;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. (modelo alternativo — "Preventiva 2"). Campos com * são obrigatórios.</p></div>
+
+    <div class="panel">
+      <h2>Identificação</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Nº preenchido no ato do atendimento.</p>
+      <div class="form-grid">
+        <div><label>O.S. Nº — UF*</label><input id="rp2-os_uf" maxlength="2" placeholder="UF" value="${esc(d.os_uf)}" style="text-transform:uppercase;"></div>
+        <div><label>O.S. Nº — Número*</label><input id="rp2-os_numero" placeholder="000" value="${esc(d.os_numero)}"></div>
+        <div><label>O.S. Nº — Ano*</label><input id="rp2-os_ano" placeholder="0000" value="${esc(d.os_ano)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Dados do atendimento</h2>
+      <div class="form-grid">
+        <div><label>Data inicial*</label><input id="rp2-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
+        <div><label>Data final*</label><input id="rp2-data_final" type="date" value="${esc(d.data_final)}"></div>
+        <div>
+          <label>Modelo da máquina*</label>
+          <select id="rp2-modelo_maquina" onchange="selecionarModeloPreventiva2(this.value)">
+            <option value="" ${!d.modelo_maquina || !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'selected' : ''} disabled>Selecione...</option>
+            ${Object.keys(EQUIPAMENTOS_PREVENTIVA).map((nome) => `<option value="${esc(nome)}" ${d.modelo_maquina === nome ? 'selected' : ''}>${esc(nome)}</option>`).join('')}
+            <option value="Outro" ${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'selected' : ''}>Outro</option>
+          </select>
+        </div>
+        <div id="rp2-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
+          <label>Especifique o modelo*</label>
+          <input id="rp2-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}">
+        </div>
+        <div><label>Número de série*</label><input id="rp2-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
+        <div><label>Serviço realizado*</label><input id="rp2-servico_realizado" value="${esc(d.servico_realizado)}"></div>
+        <div><label>Responsável*</label><input value="${esc(USER.nome)}" disabled></div>
+        <div class="full"><label>Empresa (cliente)*</label><input id="rp2-empresa" value="${esc(d.empresa)}"></div>
+        <div class="full"><label>Endereço*</label><input id="rp2-endereco" value="${esc(d.endereco)}"></div>
+        <div><label>Número*</label><input id="rp2-numero" value="${esc(d.numero)}"></div>
+        <div><label>Bairro*</label><input id="rp2-bairro" value="${esc(d.bairro)}"></div>
+        <div><label>Estado*</label><input id="rp2-estado" maxlength="2" placeholder="UF" value="${esc(d.estado)}" style="text-transform:uppercase;"></div>
+        <div><label>Cidade*</label><input id="rp2-cidade" value="${esc(d.cidade)}"></div>
+        <div><label>CEP*</label><input id="rp2-cep" placeholder="00000-000" value="${esc(d.cep)}"></div>
+        <div class="full"><label>Setor onde a máquina está instalada*</label><input id="rp2-setor_maquina" value="${esc(d.setor_maquina)}"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Check-list de verificação*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Já vem com os itens mais comuns de equipamento a laser — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <div id="rp2-checklist"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistPreventiva2()">+ Adicionar item</button>
+      <label style="margin-top:10px;">Observações*</label>
+      <textarea id="rp2-observacoes_checklist" placeholder="Observações gerais sobre o check-list">${esc(d.observacoes_checklist)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Serviços realizados</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Manutenção realizada / resultados de amostra</p>
+      <label>O que foi feito na máquina*</label>
+      <textarea id="rp2-servico_feito" placeholder="Descreva a manutenção realizada e os resultados obtidos...">${esc(d.servico_feito)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Peças fornecidas</h2>
+      <div class="steps-list" id="rp2-pecas"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarPecaPreventiva2()">+ Adicionar peça</button>
+    </div>
+
+    <div class="panel">
+      <h2>Fotos</h2>
+      <p id="rp2-fotos-vazio" style="color:var(--ink-soft); font-size:13px; ${d.fotos.length ? 'display:none;' : ''}">Selecione o modelo da máquina acima pra liberar os grupos de fotos deste equipamento.</p>
+      <div id="rp2-fotos-wrap"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Observações do serviço*</h2>
+      <textarea id="rp2-observacoes_servico" placeholder="Observações adicionais do técnico...">${esc(d.observacoes_servico)}</textarea>
+    </div>
+
+    <div class="panel">
+      <h2>Pesquisa de satisfação</h2>
+      <label>Qual a sua avaliação sobre o atendimento preventivo realizado?*</label>
+      <div id="rp2-estrelas" style="margin-bottom:18px;"></div>
+      <label>Caso tenha algo para apontar dentro do processo de interação para este atendimento</label>
+      <input id="rp2-satisfacao_comentario" placeholder="Sua resposta" value="${esc(d.satisfacao_comentario)}">
+      <label style="margin-top:10px;">Podemos publicar o seu feedback nos canais de comunicação?*</label>
+      <div style="display:flex; gap:18px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rp2-autoriza" value="sim" style="width:auto;" ${d.satisfacao_autoriza === 'sim' ? 'checked' : ''}> Sim, autorizo o uso do meu feedback</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:600; text-transform:none;"><input type="radio" name="rp2-autoriza" value="nao" style="width:auto;" ${d.satisfacao_autoriza === 'nao' ? 'checked' : ''}> Não autorizo o uso do meu feedback</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Assinatura*</h2>
+      <div class="row2">
+        <div>
+          <label>Cliente</label>
+          <input id="rp2-assinatura-cliente-nome" placeholder="Nome do cliente" value="${esc(d.assinatura_cliente_nome || '')}" oninput="relatorioPreventiva2Draft.assinatura_cliente_nome=this.value;">
+          <canvas id="rp2-canvas-cliente" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+          <div id="rp2-assinatura-cliente-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-outline-sm" onclick="ampliarAssinaturaPreventiva2('cliente')">⤢ Ampliar para assinar</button>
+            <button class="btn-outline-sm" onclick="limparAssinaturaPreventiva2('cliente')">Limpar</button>
+          </div>
+        </div>
+        <div>
+          <label>Técnico</label>
+          <input value="${esc(USER.nome)}" disabled>
+          <canvas id="rp2-canvas-tecnico" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+          <div id="rp2-assinatura-tecnico-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-outline-sm" onclick="ampliarAssinaturaPreventiva2('tecnico')">⤢ Ampliar para assinar</button>
+            <button class="btn-outline-sm" onclick="limparAssinaturaPreventiva2('tecnico')">Limpar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Envio do termo*</h2>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">E-mails que devem receber uma cópia deste termo assim que ele for concluído.</p>
+      <div id="rp2-emails"></div>
+      <button class="btn btn-ghost btn-sm" onclick="adicionarEmailPreventiva2()">+ Adicionar e-mail</button>
+    </div>
+
+    <div class="panel">
+      ${blocoRascunhoManual('rp2-rascunho-status', rascunho && rascunho.em, recuperado)}
+      <p style="font-size:12.5px; color:var(--ink-soft);">Ao concluir, o PDF do termo é gerado automaticamente e o e-mail para os destinatários é aberto pronto para envio.</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
+        <button class="btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
+        <button class="btn-outline-sm" onclick="limparRascunhoPreventiva2(${d.id || 'null'})">Limpar rascunho</button>
+        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioPreventiva2()">Concluir e enviar termo</button>
+      </div>
+    </div>`;
+  renderChecklistPreventiva2();
+  renderPecasPreventiva2();
+  renderFotosPreventiva2();
+  renderEstrelasPreventiva2();
+  renderEmailsPreventiva2();
+  montarAssinaturaPreventiva2('cliente');
+  montarAssinaturaPreventiva2('tecnico');
+  window._draftSyncAtual = () => { lerCamposPreventiva2(); salvarRascunhoManual('preventiva2', relatorioPreventiva2Draft, d.id, 'rp2-rascunho-status'); };
+}
+
+async function limparRascunhoPreventiva2(id) {
+  if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
+  limparRascunhoManual('preventiva2', id);
+  if (id) { const { relatorio } = await api(`/api/relatorios-manutencao/${id}`); mostrarFormRelatorioPreventiva2(relatorio); }
+  else mostrarFormRelatorioManual('preventiva2');
+}
+
+function renderChecklistPreventiva2() {
+  document.getElementById('rp2-checklist').innerHTML = relatorioPreventiva2Draft.checklist.map((c, i) => `
+    <div class="step-item" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:6px; flex:1; min-width:160px;">
+          <span style="color:var(--navy); font-size:13.5px; font-weight:700;">${String(i + 1).padStart(2, '0')}</span>
+          <input placeholder="Nome do item" value="${esc(c.item)}" style="flex:1;" oninput="relatorioPreventiva2Draft.checklist[${i}].item=this.value;">
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          ${['sim', 'nao', 'na'].map((v) => `<button type="button" class="btn-outline-sm" style="${c.resposta === v ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="marcarChecklistPreventiva2(${i}, '${v}')">${v === 'sim' ? 'Sim' : v === 'nao' ? 'Não' : 'N/A'}</button>`).join('')}
+          <button class="step-rm" onclick="removerItemChecklistPreventiva2(${i})">×</button>
+        </div>
+      </div>
+      <input placeholder="Observação (opcional)" value="${esc(c.observacao)}" oninput="relatorioPreventiva2Draft.checklist[${i}].observacao=this.value;">
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhum item no check-list — adicione ao menos um.</p>';
+}
+function marcarChecklistPreventiva2(i, valor) {
+  relatorioPreventiva2Draft.checklist[i].resposta = valor;
+  renderChecklistPreventiva2();
+}
+function adicionarItemChecklistPreventiva2() {
+  relatorioPreventiva2Draft.checklist.push({ item: '', resposta: '', observacao: '' });
+  renderChecklistPreventiva2();
+}
+function removerItemChecklistPreventiva2(i) {
+  relatorioPreventiva2Draft.checklist.splice(i, 1);
+  renderChecklistPreventiva2();
+}
+
+function renderPecasPreventiva2() {
+  document.getElementById('rp2-pecas').innerHTML = relatorioPreventiva2Draft.pecas.map((p, i) => `
+    <div class="step-item">
+      <div class="step-main">
+        <div class="step-num">${i + 1}</div>
+        <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioPreventiva2Draft.pecas[${i}].descricao=this.value;">
+        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioPreventiva2Draft.pecas[${i}].codigo_pmk=this.value;">
+        <button class="step-rm" onclick="removerPecaPreventiva2(${i})">×</button>
+      </div>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
+}
+function adicionarPecaPreventiva2() { relatorioPreventiva2Draft.pecas.push({ descricao: '', codigo_pmk: '' }); renderPecasPreventiva2(); }
+function removerPecaPreventiva2(i) { relatorioPreventiva2Draft.pecas.splice(i, 1); renderPecasPreventiva2(); }
+
+async function selecionarModeloPreventiva2(nome) {
+  const d = relatorioPreventiva2Draft;
+  const jaTemDados = d.checklist.some((c) => c.item || c.resposta) || d.fotos.some((b) => b.fotos.length);
+  if (jaTemDados && !(await mostrarConfirmacao('Trocar o modelo da máquina vai substituir o check-list e as fotos atuais. Continuar?'))) {
+    document.getElementById('rp2-modelo_maquina').value = d.modelo_maquina || '';
+    return;
+  }
+  d.modelo_maquina = nome;
+  const outroWrap = document.getElementById('rp2-modelo_maquina-outro-wrap');
+  const preset = EQUIPAMENTOS_PREVENTIVA[nome];
+  if (preset) {
+    outroWrap.style.display = 'none';
+    d.checklist = preset.checklist.map((item) => ({ item, resposta: '', observacao: '' }));
+    d.fotos = preset.fotos.map((label) => ({ comentario: label, fotos: [] }));
+  } else {
+    outroWrap.style.display = 'block';
+    document.getElementById('rp2-modelo_maquina_outro').value = '';
+    d.checklist = [];
+    d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
+  }
+  renderChecklistPreventiva2();
+  renderFotosPreventiva2();
+}
+
+function renderFotosPreventiva2() {
+  const vazio = document.getElementById('rp2-fotos-vazio');
+  if (vazio) vazio.style.display = relatorioPreventiva2Draft.fotos.length ? 'none' : 'block';
+  document.getElementById('rp2-fotos-wrap').innerHTML = relatorioPreventiva2Draft.fotos.map((bloco, idx) => {
+    const obrigatorio = idx < relatorioPreventiva2Draft.fotos.length - 1;
+    return `
+    <div style="margin-bottom:18px;">
+      <label>${esc(bloco.comentario)}${obrigatorio ? '*' : ''}</label>
+      ${!obrigatorio ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Caso tenha mais algum registro importante</p>` : ''}
+      <div class="step-photos" id="rp2-fotos-${idx}"></div>
+      <label class="photo-add">
+        <span class="plus">+</span>Anexar fotos
+        <input type="file" accept="image/*" multiple style="display:none" onchange="adicionarFotosPreventiva2(${idx}, event)">
+      </label>
+    </div>`;
+  }).join('');
+  relatorioPreventiva2Draft.fotos.forEach((bloco, idx) => renderFotosGrupoPreventiva2(idx));
+}
+
+function renderFotosGrupoPreventiva2(idx) {
+  const el = document.getElementById('rp2-fotos-' + idx);
+  if (!el) return;
+  const bloco = relatorioPreventiva2Draft.fotos[idx];
+  el.innerHTML = bloco.fotos.map((f, j) => `
+    <div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="${esc(bloco.comentario)}">
+      <button class="photo-rm" onclick="removerFotoPreventiva2(${idx}, ${j})">×</button>
+    </div>`).join('') || '<p style="color:var(--ink-soft); font-size:12.5px;">Nenhuma foto anexada ainda.</p>';
+}
+function adicionarFotosPreventiva2(idx, event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    relatorioPreventiva2Draft.fotos[idx].fotos.push(...dataUrls);
+    renderFotosGrupoPreventiva2(idx);
+  });
+}
+function removerFotoPreventiva2(idx, j) { relatorioPreventiva2Draft.fotos[idx].fotos.splice(j, 1); renderFotosGrupoPreventiva2(idx); }
+
+function renderEstrelasPreventiva2() {
+  document.getElementById('rp2-estrelas').innerHTML = [1, 2, 3, 4, 5].map((n) => `
+    <button type="button" onclick="marcarEstrelaPreventiva2(${n})" style="background:none; border:none; cursor:pointer; font-size:28px; color:${n <= relatorioPreventiva2Draft.satisfacao_estrelas ? 'var(--blue)' : '#D8E2EF'};">★</button>
+  `).join('');
+}
+function marcarEstrelaPreventiva2(n) { relatorioPreventiva2Draft.satisfacao_estrelas = n; renderEstrelasPreventiva2(); }
+
+function renderEmailsPreventiva2() {
+  document.getElementById('rp2-emails').innerHTML = relatorioPreventiva2Draft.emails_copia.map((em, i) => `
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input placeholder="nome@empresa.com" value="${esc(em)}" oninput="relatorioPreventiva2Draft.emails_copia[${i}]=this.value;">
+      ${relatorioPreventiva2Draft.emails_copia.length > 1 ? `<button class="btn-outline-sm" onclick="removerEmailPreventiva2(${i})">×</button>` : ''}
+    </div>`).join('');
+}
+function adicionarEmailPreventiva2() { relatorioPreventiva2Draft.emails_copia.push(''); renderEmailsPreventiva2(); }
+function removerEmailPreventiva2(i) { relatorioPreventiva2Draft.emails_copia.splice(i, 1); renderEmailsPreventiva2(); }
+
+// ---------- assinatura (canvas) — mesmo mecanismo da Preventiva original, prefixo "rp2-" — do lado
+// do técnico o nome não é mais digitado (puxa USER.nome direto no momento de salvar, ver
+// concluirRelatorioPreventiva2) ----------
+const assinaturaEstadoPreventiva2 = {};
+function montarAssinaturaPreventiva2(chave) {
+  const canvas = document.getElementById('rp2-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  assinaturaEstadoPreventiva2[chave] = { desenhando: false, temTraco: false };
+  if (relatorioPreventiva2Draft['assinatura_' + chave + '_img']) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); assinaturaEstadoPreventiva2[chave].temTraco = true; atualizarStatusAssinaturaPreventiva2(chave); };
+    img.src = relatorioPreventiva2Draft['assinatura_' + chave + '_img'];
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); assinaturaEstadoPreventiva2[chave].desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!assinaturaEstadoPreventiva2[chave].desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); assinaturaEstadoPreventiva2[chave].temTraco = true; }
+  function parar() {
+    if (!assinaturaEstadoPreventiva2[chave].desenhando) return;
+    assinaturaEstadoPreventiva2[chave].desenhando = false;
+    if (assinaturaEstadoPreventiva2[chave].temTraco) {
+      relatorioPreventiva2Draft['assinatura_' + chave + '_img'] = canvas.toDataURL('image/png');
+      atualizarStatusAssinaturaPreventiva2(chave);
+      if (window._draftSyncAtual) window._draftSyncAtual();
+    }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinaturaPreventiva2(chave) {
+  const el = document.getElementById(`rp2-assinatura-${chave}-status`);
+  if (el) { el.textContent = assinaturaEstadoPreventiva2[chave].temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = assinaturaEstadoPreventiva2[chave].temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinaturaPreventiva2(chave) {
+  const canvas = document.getElementById('rp2-canvas-' + chave);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  assinaturaEstadoPreventiva2[chave].temTraco = false;
+  relatorioPreventiva2Draft['assinatura_' + chave + '_img'] = null;
+  atualizarStatusAssinaturaPreventiva2(chave);
+}
+function ampliarAssinaturaPreventiva2(chave) {
+  let modal = document.getElementById('modal-assinatura');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-assinatura';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Assinar</h3>
+      <p>Desenhe a assinatura com o dedo ou o mouse.</p>
+      <canvas id="modal-canvas" width="900" height="380" style="width:100%; height:260px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
+      <div class="modal-actions" style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="document.getElementById('modal-canvas').getContext('2d').clearRect(0,0,900,380)">Limpar</button>
+        <button class="btn btn-primary" onclick="confirmarAssinaturaModalPreventiva2('${chave}')">Usar esta assinatura</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-assinatura').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+  const canvas = document.getElementById('modal-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  let desenhando = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar); canvas.addEventListener('mousemove', mover); window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false }); canvas.addEventListener('touchmove', mover, { passive: false }); canvas.addEventListener('touchend', parar);
+}
+function confirmarAssinaturaModalPreventiva2(chave) {
+  const modalCanvas = document.getElementById('modal-canvas');
+  const destino = document.getElementById('rp2-canvas-' + chave);
+  const ctxDestino = destino.getContext('2d');
+  ctxDestino.clearRect(0, 0, destino.width, destino.height);
+  ctxDestino.drawImage(modalCanvas, 0, 0, destino.width, destino.height);
+  assinaturaEstadoPreventiva2[chave].temTraco = true;
+  relatorioPreventiva2Draft['assinatura_' + chave + '_img'] = destino.toDataURL('image/png');
+  atualizarStatusAssinaturaPreventiva2(chave);
+  document.getElementById('modal-assinatura').classList.remove('show');
+}
+
+// ---------- concluir: validar, salvar, gerar PDF, abrir e-mail pra envio ----------
+function lerCamposPreventiva2() {
+  const d = relatorioPreventiva2Draft;
+  d.os_uf = document.getElementById('rp2-os_uf').value;
+  d.os_numero = document.getElementById('rp2-os_numero').value;
+  d.os_ano = document.getElementById('rp2-os_ano').value;
+  d.data_inicial = document.getElementById('rp2-data_inicial').value;
+  d.data_final = document.getElementById('rp2-data_final').value;
+  const modeloSelecionado = document.getElementById('rp2-modelo_maquina').value;
+  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rp2-modelo_maquina_outro').value : modeloSelecionado;
+  d.numero_serie = document.getElementById('rp2-numero_serie').value;
+  d.servico_realizado = document.getElementById('rp2-servico_realizado').value;
+  d.empresa = document.getElementById('rp2-empresa').value;
+  d.endereco = document.getElementById('rp2-endereco').value;
+  d.numero = document.getElementById('rp2-numero').value;
+  d.bairro = document.getElementById('rp2-bairro').value;
+  d.estado = document.getElementById('rp2-estado').value;
+  d.cidade = document.getElementById('rp2-cidade').value;
+  d.cep = document.getElementById('rp2-cep').value;
+  d.setor_maquina = document.getElementById('rp2-setor_maquina').value;
+  d.observacoes_checklist = document.getElementById('rp2-observacoes_checklist').value;
+  d.servico_feito = document.getElementById('rp2-servico_feito').value;
+  d.observacoes_servico = document.getElementById('rp2-observacoes_servico').value;
+  d.satisfacao_comentario = document.getElementById('rp2-satisfacao_comentario').value;
+  const autoriza = document.querySelector('input[name="rp2-autoriza"]:checked');
+  d.satisfacao_autoriza = autoriza ? autoriza.value : '';
+  d.assinatura_cliente_nome = document.getElementById('rp2-assinatura-cliente-nome').value;
+  // pedido do usuário: "no campo assinatura no nome do técnico já puxa o que ele escreveu antes"
+  // — não existe mais input de nome do lado do técnico (ver form acima); o nome vem sempre de
+  // quem está logado, igual ao campo "Responsável".
+  d.assinatura_tecnico_nome = USER.nome;
+}
+
+async function concluirRelatorioPreventiva2() {
+  const d = relatorioPreventiva2Draft;
+  lerCamposPreventiva2();
+
+  const obrigatorios = ['os_uf', 'os_numero', 'os_ano', 'data_inicial', 'data_final', 'modelo_maquina', 'numero_serie',
+    'servico_realizado', 'empresa', 'endereco', 'numero', 'bairro', 'estado', 'cidade', 'cep', 'setor_maquina',
+    'observacoes_checklist', 'servico_feito', 'observacoes_servico'];
+  for (const campo of obrigatorios) {
+    if (!String(d[campo] || '').trim()) return alert('Preencha todos os campos obrigatórios de "Identificação" e "Dados do atendimento".');
+  }
+  if (!d.checklist.length) return alert('Adicione ao menos um item no check-list.');
+  if (d.checklist.some((c) => !String(c.item || '').trim())) return alert('Dê um nome a todos os itens do check-list, ou remova os que estiverem em branco.');
+  if (d.checklist.some((c) => !c.resposta)) return alert('Responda todos os itens do check-list (Sim/Não/N/A).');
+  if (!d.fotos.length) return alert('Selecione o modelo da máquina pra liberar os grupos de fotos.');
+  for (let idx = 0; idx < d.fotos.length - 1; idx++) {
+    if (!d.fotos[idx].fotos.length) return alert(`Anexe ao menos uma foto em "${d.fotos[idx].comentario}".`);
+  }
+  if (!d.satisfacao_estrelas) return alert('Selecione a avaliação por estrelas da pesquisa de satisfação.');
+  if (!d.satisfacao_autoriza) return alert('Responda se autoriza o uso do feedback.');
+  if (!d.assinatura_cliente_nome || !d.assinatura_cliente_img) return alert('Colete o nome e a assinatura do cliente.');
+  if (!d.assinatura_tecnico_img) return alert('Colete a assinatura do técnico.');
+  const emails = d.emails_copia.map((e) => e.trim()).filter(Boolean);
+  if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
+  d.emails_copia = emails;
+
+  try {
+    const { relatorio } = d.id
+      ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+    limparRascunhoManual('preventiva2', d.id);
+    const logo = await carregarLogoVariantes();
+    const url = gerarPdfRelatorioPreventiva2(relatorio, logo);
+    window.open(url, '_blank');
+    // pedido do usuário: "no final onde preenche o e-mail a ser enviado o relatório... abre o
+    // e-mail logado no dispositivo e preencher... mensagem automático preenchido" — mesmo
+    // mailto: do Preventiva original, só o texto segue o formato do modelo de referência
+    // (lista os dados do atendimento em vez de um parágrafo corrido).
+    const assunto = encodeURIComponent(`Termo de Manutenção Preventiva Laser - ${d.modelo_maquina} - ${d.empresa}`);
+    const corpo = encodeURIComponent(`Segue o Termo de Manutenção Preventiva Laser referente ao atendimento realizado.\n\nEmpresa: ${d.empresa}\nSetor: ${d.setor_maquina}\nModelo: ${d.modelo_maquina}\nNº de série: ${d.numero_serie}\nData: ${d.data_inicial} a ${d.data_final}\nTécnico: ${USER.nome}\n\nO PDF do termo assinado foi baixado neste dispositivo.\nPor favor, anexe o arquivo antes de enviar este e-mail.`);
     window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
     mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
     renderRelatorioManutencao();
@@ -11470,7 +12267,7 @@ async function relatorioManutCompleto(i) {
 // escolhe qual gerarPdfXXX chamar conforme o tipo do relatório — usado tanto pra abrir o PDF
 // numa aba nova quanto pra pegar o Blob dele na hora de encaminhar (e-mail/WhatsApp)
 function gerarPdfUrlRelatorioManutencao(r, logo) {
-  return r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'entrega_teste' ? gerarPdfRelatorioEntregaTeste(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
+  return r.tipo === 'ficha' ? gerarPdfFichaEquipamento(r, logo) : r.tipo === 'ciclagem' ? gerarPdfEnsaioCiclagem(r, logo) : r.tipo === 'preventiva' ? gerarPdfRelatorioPreventiva(r, logo) : r.tipo === 'preventiva2' ? gerarPdfRelatorioPreventiva2(r, logo) : r.tipo === 'corretiva' ? gerarPdfRelatorioCorretiva(r, logo) : r.tipo === 'relatorio_tecnico' ? gerarPdfRelatorioTecnico(r, logo) : r.tipo === 'aceite_entrega' ? gerarPdfRelatorioAceite(r, logo) : r.tipo === 'entrega_teste' ? gerarPdfRelatorioEntregaTeste(r, logo) : r.tipo === 'promotor' ? gerarPdfRelatorioPromotor(r, logo) : r.tipo === 'devolutivo' ? gerarPdfRelatorioDevolutivo(r, logo) : r.tipo === 'levantamento_tecnico' ? gerarPdfRelatorioLevantamentoTecnico(r, logo) : gerarPdfRelatorioManutencao(r, logo);
 }
 
 async function abrirPdfRelatorioManutencao(i) {
@@ -12586,6 +13383,11 @@ function nomeArquivoRelatorioManutencao(r) {
     const serie = limpar(r.numero_serie);
     const empresaPrev = limpar(r.empresa) || 'termo-preventiva';
     return serie ? `${empresaPrev} - ${serie}` : empresaPrev;
+  }
+  if (r.tipo === 'preventiva2') {
+    const serie = limpar(r.numero_serie);
+    const empresaPrev2 = limpar(r.empresa) || 'termo-preventiva';
+    return serie ? `${empresaPrev2} - ${serie}` : empresaPrev2;
   }
   if (r.tipo === 'corretiva') {
     const serie = limpar(r.numero_serie);
