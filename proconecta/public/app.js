@@ -7007,10 +7007,14 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   // do Termo), não 2 caixas separadas como a versão anterior (grade em colunas via linhaCampos).
   tituloSecao('Avaliação de desempenho');
   {
-    const linhasAval = [[{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5` }]];
-    if (r.satisfacao_comentario) linhasAval.push([{ label: 'Comentário do cliente', valor: r.satisfacao_comentario }]);
-    linhasAval.push([{ label: 'Autorização de uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim, autorizo o uso do meu feedback.' : 'Não, não autorizo o uso do meu feedback.' }]);
-    boxInfo(linhasAval);
+    // pedido do usuário: "na avaliação de desempenho tem comentário do cliente" — a caixa da
+    // referência sempre tem as 3 linhas fixas (comentário incluso, mesmo vazio o boxInfo mostra
+    // "—"), não é uma linha que só aparece quando preenchida.
+    boxInfo([
+      [{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5` }],
+      [{ label: 'Comentário do cliente', valor: r.satisfacao_comentario }],
+      [{ label: 'Autorização de uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim, autorizo o uso do meu feedback.' : 'Não, não autorizo o uso do meu feedback.' }],
+    ]);
   }
 
   if (y > 560) novaPagina();
