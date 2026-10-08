@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexor Connect — Briefing Pré-Visita</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* página pública avulsa: reusa style.css de verdade (mesma marca/cores/painéis do sistema),
+     só adapta o cabeçalho (sem hambúrguer/sino/usuário, já que não há sessão aqui). */
+  body { background: var(--blue-pale-2, #F5F7FA); padding-bottom: 110px; }
+  main { max-width: 760px; margin: 0 auto; padding: 26px 16px 0; }
+  .page-head .nota-publica { margin-top: 8px; font-size: 12.5px; color: var(--ink-soft); }
+  .form-grid .field { margin-bottom: 0; }
+  @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+  input.invalid, textarea.invalid { border-color: #c0392b; box-shadow: 0 0 0 3px rgba(192,57,43,.14); }
+  .action-bar {
+    position: sticky; bottom: 0; left: 0; right: 0;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, var(--blue-pale-2, #F5F7FA) 72%, transparent);
+    display: flex; justify-content: center;
+  }
+  .action-bar-inner { max-width: 760px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .action-bar .btn { width: 100%; max-width: 320px; justify-content: center; }
+  .status { margin: 0; font-size: 12.5px; color: var(--ink-soft); min-height: 15px; text-align: center; }
+  .status.err { color: #c0392b; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-mark chip"><img id="header-logo" src="/img/logo-pro-marking.png" alt="PRO Marking"></div>
+    <div class="wordmark inline"><span class="pro">Nexor</span><span class="conecta">Connect</span></div>
+    <span class="empresa-tag" id="empresa-tag">PRO Marking</span>
+  </div>
+</header>
+
+<main>
+  <div class="page-head">
+    <h1>Novo Briefing Pré-Visita — Técnico</h1>
+    <p>Preencher antes da visita. Dá ao Técnico contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p>
+    <p class="nota-publica">Versão pública e avulsa deste formulário — gera o PDF direto no seu aparelho, sem precisar entrar no sistema.</p>
+  </div>
+
+  <form id="form-briefing">
+    <div class="panel">
+      <h2>1. Identificação</h2>
+      <div class="form-grid">
+        <div class="field"><label>Cliente*</label><input id="pm-empresa" required></div>
+        <div class="field"><label>Data*</label><input id="pm-data_visita" type="date" required></div>
+        <div class="field"><label>Técnico*</label><input id="pm-promotor" required></div>
+        <div class="field"><label>Contato / Cargo</label><input id="pm-contato"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>2. Contexto da Oportunidade</h2>
+      <div class="field"><label>Por que estamos indo ao cliente?*</label>
+        <textarea id="pm-motivo_visita" placeholder="Ex.: demonstração de equipamento, gravação de peça..." required></textarea>
+      </div>
+      <div class="field"><label>Como o cliente faz esse processo hoje?*</label>
+        <textarea id="pm-processo_atual" required></textarea>
+      </div>
+      <div class="field"><label>O que o cliente informou que precisa resolver ou melhorar?*</label>
+        <textarea id="pm-necessidade_informada" required></textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>3. Demonstração</h2>
+      <div class="field"><label>O que vamos demonstrar?*</label>
+        <textarea id="pm-o_que_demonstrar" required></textarea>
+      </div>
+      <div class="field"><label>O que é mais importante mostrar nessa demonstração?*</label>
+        <textarea id="pm-ponto_importante_demo" required></textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>4. Pontos de Atenção</h2>
+      <div class="field"><label>Existe alguma dúvida, preocupação ou informação importante já mencionada pelo cliente?*</label>
+        <textarea id="pm-duvidas_preocupacoes" required></textarea>
+      </div>
+      <div class="field"><label>Existe concorrente? Se sim, qual?*</label>
+        <textarea id="pm-concorrente" required></textarea>
+      </div>
+      <div class="field"><label>O que você quer que o Técnico observe durante a visita?*</label>
+        <textarea id="pm-o_que_observar" required></textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>5. Resumo para o Técnico</h2>
+      <div class="field"><label>Objetivo da visita — em uma frase*</label>
+        <textarea id="pm-objetivo_visita" required></textarea>
+      </div>
+      <div class="field"><label>Ponto principal a observar*</label>
+        <textarea id="pm-ponto_principal_observar" required></textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Cabeçalho do PDF</h2>
+      <div class="field"><label>Sua empresa</label>
+        <input id="pm-empresa-prestador" value="PRO Marking">
+      </div>
+    </div>
+  </form>
+
+  <div class="action-bar">
+    <div class="action-bar-inner">
+      <button id="btn-gerar" class="btn btn-primary" type="button">Concluir e gerar PDF</button>
+      <p id="status-msg" class="status" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+(function () {
+  document.getElementById('form-briefing').addEventListener('submit', function (e) { e.preventDefault(); });
+
+  var inputEmpresaPrestador = document.getElementById('pm-empresa-prestador');
+  var empresaTag = document.getElementById('empresa-tag');
+  function syncEmpresaTag() { empresaTag.textContent = inputEmpresaPrestador.value.trim() || 'PRO Marking'; }
+  inputEmpresaPrestador.addEventListener('input', syncEmpresaTag);
+
+  // ---- mesma sanitização/formatação usada no sistema (limparPdf/fmtData em app.js) ----
+  function limparPdf(s) {
+    return String(s == null ? '' : s)
+      .replace(/[✅✓•]/g, '-')
+      .replace(/[^\x00-\xFF]/g, '')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+  }
+  function fmtData(iso) {
+    if (!iso) return '—';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) { var p = iso.split('-'); return p[2] + '/' + p[1]; }
+    return iso;
+  }
+  function val(id) { return document.getElementById(id).value; }
+
+  // ---- logo: mesma lógica de flatarLogoSobreCor em app.js (achatar o PNG com transparência
+  // sobre uma cor sólida, já que o PDF final não tem canal alpha) — com o logo real em /logo.png. ----
+  var COR = { navy: [11, 45, 79], blue: [25, 118, 210], ink: [23, 43, 58], inkSoft: [102, 120, 138], line: [217, 225, 232], white: [255, 255, 255] };
+
+  function flatarLogoSobreCor(img, rgb) {
+    var canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+    return canvas.toDataURL('image/png');
+  }
+
+  var logoVariantesPromise = new Promise(function (resolve) {
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function () {
+      try {
+        resolve({ header: flatarLogoSobreCor(img, COR.white), cover: flatarLogoSobreCor(img, COR.navy) });
+      } catch (e) { resolve(null); }
+    };
+    img.onerror = function () { resolve(null); };
+    img.src = '/img/logo-pro-marking.png';
+  });
+
+  // ---- validação (mesmos campos obrigatórios do formulário interno, exceto Contato/Cargo) ----
+  var OBRIGATORIOS = ['pm-empresa', 'pm-data_visita', 'pm-promotor', 'pm-motivo_visita', 'pm-processo_atual',
+    'pm-necessidade_informada', 'pm-o_que_demonstrar', 'pm-ponto_importante_demo', 'pm-duvidas_preocupacoes',
+    'pm-concorrente', 'pm-o_que_observar', 'pm-objetivo_visita', 'pm-ponto_principal_observar'];
+
+  function validar() {
+    var primeiroInvalido = null;
+    OBRIGATORIOS.forEach(function (id) {
+      var el = document.getElementById(id);
+      var vazio = !el.value.trim();
+      el.classList.toggle('invalid', vazio);
+      if (vazio && !primeiroInvalido) primeiroInvalido = el;
+    });
+    return primeiroInvalido;
+  }
+  OBRIGATORIOS.forEach(function (id) {
+    document.getElementById(id).addEventListener('input', function () { this.classList.remove('invalid'); });
+  });
+
+  // ---- PDF: mesma estrutura de gerarPdfRelatorioPromotor em app.js (capa navy + cabeçalho +
+  // seções numeradas com os mesmos títulos/rótulos) ----
+  function gerarPdf(logoVariantes) {
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    var empresaPrestador = val('pm-empresa-prestador').trim() || 'PRO Marking';
+    doc.setProperties({ title: limparPdf(val('pm-empresa')) || 'briefing-pre-visita' });
+    var pageW = doc.internal.pageSize.getWidth();
+    var pageH = doc.internal.pageSize.getHeight();
+    var margem = 40;
+    var largura = pageW - margem * 2;
+    var y = margem;
+
+    function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
+
+    function cabecalho() {
+      if (logoVariantes) { try { doc.addImage(logoVariantes.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+      y += 20;
+      doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor.apply(doc, COR.navy);
+      doc.text(limparPdf(empresaPrestador), pageW / 2, y, { align: 'center' });
+      y += 15;
+      doc.setFontSize(13); doc.setFont(undefined, 'bold');
+      doc.text('Briefing Pre-Visita - Tecnico', pageW / 2, y, { align: 'center' });
+      y += 10;
+      doc.setDrawColor.apply(doc, COR.blue); doc.setLineWidth(1.2);
+      doc.line(margem, y, pageW - margem, y);
+      y += 24;
+    }
+
+    function tituloCentro(t) {
+      if (y > pageH - margem - 60) novaPagina();
+      doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor.apply(doc, COR.blue);
+      doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 18;
+    }
+
+    function linhaCampos(campos) {
+      var larguras = campos.map(function (c) { return largura * c.frac; });
+      doc.setFontSize(8.5);
+      var alturaMax = 20;
+      var conteudos = campos.map(function (c, i) {
+        var labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
+        doc.setFont(undefined, 'bold');
+        var wLabel = doc.getTextWidth(labelTxt);
+        doc.setFont(undefined, 'normal');
+        var linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
+        var altura = Math.max(20, linhas.length * 11 + 9);
+        if (altura > alturaMax) alturaMax = altura;
+        return { labelTxt: labelTxt, wLabel: wLabel, linhas: linhas };
+      });
+      if (y + alturaMax > pageH - margem) novaPagina();
+      var cx = margem;
+      campos.forEach(function (c, i) {
+        doc.setDrawColor.apply(doc, COR.line); doc.setLineWidth(0.7);
+        doc.rect(cx, y, larguras[i], alturaMax, 'S');
+        doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor.apply(doc, COR.ink);
+        doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
+        doc.setFont(undefined, 'normal');
+        doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
+        cx += larguras[i];
+      });
+      y += alturaMax;
+    }
+
+    function paragrafo(label, texto) {
+      if (y > pageH - margem - 40) novaPagina();
+      doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor.apply(doc, COR.navy);
+      doc.text(label, margem, y); y += 12;
+      doc.setFont(undefined, 'normal'); doc.setTextColor.apply(doc, COR.ink);
+      var linhas = doc.splitTextToSize(limparPdf(texto) || '—', largura - 16);
+      var altura = Math.max(20, linhas.length * 12 + 10);
+      if (y + altura > pageH - margem) novaPagina();
+      doc.setDrawColor.apply(doc, COR.line); doc.setLineWidth(0.7);
+      doc.rect(margem, y, largura, altura, 'S');
+      doc.setTextColor.apply(doc, COR.ink);
+      doc.text(linhas, margem + 8, y + 13);
+      y += altura + 12;
+    }
+
+    // ===== capa =====
+    doc.setFillColor.apply(doc, COR.navy);
+    doc.rect(0, 0, pageW, pageH, 'F');
+    if (logoVariantes) { try { doc.addImage(logoVariantes.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+    doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor.apply(doc, COR.white);
+    doc.text(limparPdf(empresaPrestador), pageW / 2, 265, { align: 'center' });
+    doc.setFontSize(20); doc.setFont(undefined, 'bold');
+    doc.text('BRIEFING PRE-VISITA', pageW / 2, 410, { align: 'center' });
+    doc.setFontSize(13); doc.setFont(undefined, 'normal');
+    doc.text('VENDEDOR - TECNICO', pageW / 2, 434, { align: 'center' });
+    doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+    doc.text((limparPdf(val('pm-empresa')).toUpperCase()) || '—', pageW / 2, 460, { align: 'center' });
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+    doc.text('SIMPLES, ROBUSTO E ACESSIVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+    // ===== conteudo =====
+    doc.addPage(); y = margem; cabecalho();
+
+    tituloCentro('1. Identificacao');
+    linhaCampos([{ label: 'Cliente', valor: val('pm-empresa'), frac: 1 }]);
+    linhaCampos([{ label: 'Data', valor: fmtData(val('pm-data_visita')), frac: 0.5 }, { label: 'Tecnico', valor: val('pm-promotor'), frac: 0.5 }]);
+    linhaCampos([{ label: 'Contato / Cargo', valor: val('pm-contato'), frac: 1 }]);
+    y += 12;
+
+    tituloCentro('2. Contexto da Oportunidade');
+    paragrafo('Por que estamos indo ao cliente?', val('pm-motivo_visita'));
+    paragrafo('Como o cliente faz esse processo hoje?', val('pm-processo_atual'));
+    paragrafo('O que o cliente informou que precisa resolver ou melhorar?', val('pm-necessidade_informada'));
+
+    tituloCentro('3. Demonstracao');
+    paragrafo('O que vamos demonstrar?', val('pm-o_que_demonstrar'));
+    paragrafo('O que e mais importante mostrar nessa demonstracao?', val('pm-ponto_importante_demo'));
+
+    tituloCentro('4. Pontos de Atencao');
+    paragrafo('Duvidas, preocupacoes ou informacoes ja mencionadas pelo cliente', val('pm-duvidas_preocupacoes'));
+    paragrafo('Concorrente', val('pm-concorrente'));
+    paragrafo('O que o Tecnico deve observar durante a visita', val('pm-o_que_observar'));
+
+    tituloCentro('5. Resumo para o Tecnico');
+    paragrafo('Objetivo da visita - em uma frase', val('pm-objetivo_visita'));
+    paragrafo('Ponto principal a observar', val('pm-ponto_principal_observar'));
+
+    return doc;
+  }
+
+  async function handleGerar() {
+    var btn = document.getElementById('btn-gerar');
+    var status = document.getElementById('status-msg');
+    status.classList.remove('err');
+
+    var primeiroInvalido = validar();
+    if (primeiroInvalido) {
+      status.textContent = 'Preencha todos os campos obrigatorios (*).';
+      status.classList.add('err');
+      primeiroInvalido.focus();
+      primeiroInvalido.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Gerando...';
+    status.textContent = '';
+    try {
+      var logoVariantes = await logoVariantesPromise;
+      var doc = gerarPdf(logoVariantes);
+      var clienteNome = document.getElementById('pm-empresa').value.trim() || 'briefing-pre-visita';
+      var nomeArquivo = (clienteNome + '.pdf').replace(/[\\/:*?"<>|]/g, '-');
+      doc.save(nomeArquivo);
+      status.textContent = 'PDF baixado.';
+    } catch (e) {
+      status.textContent = 'Erro ao gerar o PDF: ' + (e && e.message ? e.message : e);
+      status.classList.add('err');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Concluir e gerar PDF';
+    }
+  }
+  document.getElementById('btn-gerar').addEventListener('click', handleGerar);
+})();
+</script>
+</body>
+</html>
