@@ -6642,17 +6642,28 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   // que o resto do app usa).
   // pedido do usuário: "na parte do relatório técnico ficou diferente, clonar, deixar idêntico"
   // — na referência, o Termo (1º documento) usa o cabeçalho novo (logo à esquerda, título +
-  // O.S. à direita), mas o Relatório Técnico (2º documento) usa o cabeçalho ANTIGO, centralizado
+  // O.S. à direita), mas o Relatório Técnico (2º documento) usa o layout ANTIGO, centralizado
   // (logo + nome da empresa centralizados, título centralizado embaixo, linha azul fina) — os 2
   // documentos dentro do mesmo PDF têm cabeçalhos diferentes de propósito, e isso é clonado aqui.
+  // pedido do usuário (2ª rodada): "ajustar os logos que ficam nas outras páginas" — em TODAS as
+  // páginas do Relatório Técnico (não só a 1ª) a referência usa o MESMO lockup grande em 2 linhas
+  // ("PRO" azul / "Marking" navy negrito) do Termo, só que centralizado em vez de à esquerda —
+  // não o nome da empresa numa linha só, como estava aqui antes.
   function cabecalho() {
     if (cabecalhoAtual === 'tecnico') {
-      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 10, y - 12, 20, 23); } catch (e) {} }
       y += 20;
-      doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-      doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
-      y += 15;
-      doc.setFontSize(13); doc.setFont(undefined, 'bold');
+      const palavras = empresaNome().split(' ');
+      const primeira = palavras[0], resto = palavras.slice(1).join(' ');
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COR.blue);
+      doc.text(primeira, pageW / 2, y, { align: 'center' });
+      y += 13;
+      if (resto) {
+        doc.setTextColor(...PDF_COR.navy);
+        doc.text(resto, pageW / 2, y, { align: 'center' });
+        y += 13;
+      }
+      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
       doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
       y += 10;
       doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
@@ -6991,10 +7002,16 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   tituloSecao('Observações do serviço');
   { if (y > pageH - margem - 40) novaPagina(); doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_servico) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
 
+  // pedido do usuário: "o campo observação e avaliação precisa ser exatamente iguais" — na
+  // referência é UMA caixa só com as 3 linhas empilhadas (reaproveita boxInfo, igual às caixas
+  // do Termo), não 2 caixas separadas como a versão anterior (grade em colunas via linhaCampos).
   tituloSecao('Avaliação de desempenho');
-  linhaCampos([{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
-  if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário do cliente', valor: r.satisfacao_comentario, frac: 1 }]);
-  y += 18;
+  {
+    const linhasAval = [[{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5` }]];
+    if (r.satisfacao_comentario) linhasAval.push([{ label: 'Comentário do cliente', valor: r.satisfacao_comentario }]);
+    linhasAval.push([{ label: 'Autorização de uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim, autorizo o uso do meu feedback.' : 'Não, não autorizo o uso do meu feedback.' }]);
+    boxInfo(linhasAval);
+  }
 
   if (y > 560) novaPagina();
   tituloSecao('Assinatura');
