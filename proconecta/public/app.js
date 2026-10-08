@@ -9531,11 +9531,27 @@ async function concluirRelatorioPreventiva2() {
     // configurado de verdade), abre a bandeja de compartilhamento nativa do celular já com o PDF
     // anexado, deixando o usuário escolher o app de e-mail, WhatsApp etc. — mesmo mecanismo do
     // botão "Encaminhar por WhatsApp" da tela Relatório (ver encaminharRelatorioManutencaoWhatsapp).
+    // pedido do usuário: "Só faltou aparecer as mensagem igual o exemplo em anexo" — o Android
+    // repassa os campos "title"/"text" do Web Share API como Assunto/Corpo pro app de e-mail
+    // escolhido (quando o app suporta), por isso title/text aqui seguem o mesmo texto que o
+    // Termo de Manutenção Preventiva (modelo original) já usa no e-mail. O campo "Para" não dá
+    // pra preencher por essa via — nenhum navegador expõe destinatário pro Web Share API, só
+    // pro mailto:, que por sua vez não consegue carregar anexo — por isso o e-mail do cliente
+    // também entra no corpo da mensagem, pra copiar/colar se o app não preencher sozinho.
+    const assunto = `Termo de Manutenção Preventiva Laser - ${relatorio.modelo_maquina || ''} - ${relatorio.empresa || ''}`.trim();
+    const corpo = `Segue o Termo de Manutenção Preventiva Laser referente ao atendimento realizado.\n\n` +
+      `Empresa: ${relatorio.empresa || '—'}\n` +
+      `Setor: ${relatorio.setor_maquina || '—'}\n` +
+      `Modelo: ${relatorio.modelo_maquina || '—'}\n` +
+      `Nº de série: ${relatorio.numero_serie || '—'}\n` +
+      `Data: ${relatorio.data_inicial || '—'} a ${relatorio.data_final || '—'}\n` +
+      `Técnico: ${relatorio.tecnico_nome || relatorio.autor_nome || '—'}\n\n` +
+      `Enviar para: ${emails.join(', ')}`;
     try {
       const blob = await (await fetch(url)).blob();
       const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
-        await navigator.share({ files: [arquivo], text: `Termo de manutenção preventiva de ${relatorio.empresa || relatorio.equipamento || 'atendimento'}.` });
+        await navigator.share({ files: [arquivo], title: assunto, text: corpo });
       }
       mostrarToast(d.id ? 'Termo atualizado e PDF baixado neste dispositivo.' : 'Termo salvo e PDF baixado neste dispositivo.');
     } catch (e) {
