@@ -1253,12 +1253,55 @@ rota('GET', /^\/api\/me$/, async (req, res) => {
   if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
   const data = db.load();
   const empresaDoUsuario = data.empresas.find((e) => e.id === user.empresa_id);
+  // o token (ver gerarToken no login) só carrega id/papel/nome/cliente_id/empresa_id — busca o
+  // registro completo pra devolver e-mail/cargo/setor/etc. também, igual ao login já devolve
+  // (sem isso, um F5 na página perdia esses campos até a próxima vez que o usuário logasse de
+  // novo). Pedido do usuário: "coloque opção de o próprio usuário alterar seu email e senha" —
+  // a tela de perfil precisa saber o e-mail atual mesmo depois de recarregar a página.
+  const registro = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
   enviarJSON(res, 200, { usuario: {
-    ...user,
+    ...(registro ? usuarioPublico(registro) : user),
     empresa: await empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
   } });
+});
+
+// PUT /api/me — o próprio usuário logado troca o e-mail e/ou a senha da própria conta (pedido do
+// usuário: "coloque opção de o próprio usuário alterar seu email e senha"). Pede a senha atual pra
+// confirmar antes de qualquer mudança — diferente do reset de senha que o super admin faz em PUT
+// /api/plataforma/administradores/:id (esse não pede senha atual porque é uma ação de suporte
+// feita por outra pessoa; aqui é a própria pessoa trocando os próprios dados de acesso).
+rota('PUT', /^\/api\/me$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const body = await lerCorpo(req);
+  const novoEmail = body.email !== undefined && body.email !== null ? String(body.email).trim() : null;
+  const novaSenha = body.senha_nova !== undefined && body.senha_nova !== null ? String(body.senha_nova) : null;
+  if (!novoEmail && !novaSenha) return enviarJSON(res, 400, { erro: 'Informe um novo e-mail ou uma nova senha.' });
+  if (!body.senha_atual) return enviarJSON(res, 400, { erro: 'Informe sua senha atual pra confirmar a alteração.' });
+
+  const data = db.load();
+  const registro = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
+  if (!registro) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  if (!conferirSenha(String(body.senha_atual), registro.salt, registro.hash)) {
+    return enviarJSON(res, 401, { erro: 'Senha atual incorreta.' });
+  }
+
+  if (novoEmail) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(novoEmail)) return enviarJSON(res, 400, { erro: 'E-mail inválido.' });
+    if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.id !== registro.id && u.email === novoEmail)) {
+      return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
+    }
+    registro.email = novoEmail;
+  }
+  if (novaSenha) {
+    if (novaSenha.length < 6) return enviarJSON(res, 400, { erro: 'A senha precisa ter pelo menos 6 caracteres.' });
+    const { salt, hash } = hashSenha(novaSenha);
+    registro.salt = salt; registro.hash = hash;
+  }
+  db.save(data);
+  enviarJSON(res, 200, { usuario: usuarioPublico(registro) });
 });
 
 // ---------- convite de primeiro acesso ----------

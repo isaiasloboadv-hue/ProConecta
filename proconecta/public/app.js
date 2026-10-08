@@ -481,7 +481,7 @@ function renderHeaderRight() {
     <button class="btn-presenca ${USER.online ? 'online' : 'offline'}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
       <span class="presenca-bolinha"></span><span class="presenca-label">${USER.online ? 'Online' : 'Offline'}</span>
     </button>` : ''}
-    <div class="user-chip">
+    <div class="user-chip" onclick="abrirMeuPerfil()" title="Meu perfil — alterar e-mail/senha" style="cursor:pointer;">
       <div class="user-avatar">${initials(USER.nome)}</div>
       <div class="user-meta">
         <span class="u-name">${esc(USER.nome)}</span>
@@ -501,6 +501,58 @@ function renderHeaderRight() {
     </div>
     <button class="btn-logout" onclick="sair()">Sair</button>
   `;
+}
+
+// pedido do usuário: "coloque opção de o próprio usuário alterar seu email e senha" — modal aberto
+// ao clicar no próprio chip de usuário no cabeçalho (até então só decorativo). Pede a senha atual
+// pra confirmar qualquer mudança (ver PUT /api/me no servidor), mesmo padrão de modal dinâmico
+// já usado em abrirEncaminharRelatorioManutencao (cria o container uma vez, reusa depois).
+function abrirMeuPerfil() {
+  let modal = document.getElementById('modal-meu-perfil');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-meu-perfil';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  const fechar = () => modal.classList.remove('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Meu perfil</h3>
+      <p>Altere seu e-mail e/ou sua senha de acesso. Informe a senha atual pra confirmar.</p>
+      <div class="field"><label>E-mail</label><input id="mp-email" value="${esc(USER.email || '')}"></div>
+      <div class="field"><label>Nova senha (deixe em branco pra não alterar)</label><input id="mp-senha-nova" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password"></div>
+      <div class="field"><label>Confirmar nova senha</label><input id="mp-senha-confirma" type="password" autocomplete="new-password"></div>
+      <div class="field"><label>Senha atual*</label><input id="mp-senha-atual" type="password" autocomplete="current-password"></div>
+      <button class="btn btn-primary" id="mp-btn-salvar" style="width:100%; justify-content:center; margin-top:6px;">Salvar alterações</button>
+      <button class="btn-outline-sm" id="mp-btn-cancelar" style="width:100%; justify-content:center; margin-top:10px;">Cancelar</button>
+    </div>`;
+  modal.querySelector('#mp-btn-cancelar').onclick = fechar;
+  modal.querySelector('#mp-btn-salvar').onclick = async () => {
+    const email = document.getElementById('mp-email').value.trim();
+    const senhaNova = document.getElementById('mp-senha-nova').value;
+    const senhaConfirma = document.getElementById('mp-senha-confirma').value;
+    const senhaAtual = document.getElementById('mp-senha-atual').value;
+    if (!email || !email.includes('@')) return alert('Informe um e-mail válido.');
+    if (senhaNova && senhaNova.length < 6) return alert('A nova senha precisa ter pelo menos 6 caracteres.');
+    if (senhaNova && senhaNova !== senhaConfirma) return alert('A confirmação não bate com a nova senha.');
+    if (!senhaAtual) return alert('Informe sua senha atual pra confirmar a alteração.');
+    const btn = modal.querySelector('#mp-btn-salvar');
+    btn.disabled = true; btn.textContent = 'Salvando...';
+    try {
+      const body = { email, senha_atual: senhaAtual };
+      if (senhaNova) body.senha_nova = senhaNova;
+      const { usuario } = await api('/api/me', { method: 'PUT', body });
+      USER.email = usuario.email;
+      fechar();
+      mostrarToast('Perfil atualizado.');
+    } catch (e) {
+      alert('Erro ao salvar: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Salvar alterações';
+    }
+  };
 }
 
 // liga/desliga a presença do técnico na fila de atendimento — só quem está online entra
