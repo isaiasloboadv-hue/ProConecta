@@ -103,12 +103,6 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h2>Cabeçalho do PDF</h2>
-      <div class="field"><label>Sua empresa</label>
-        <input id="pm-empresa-prestador" value="PRO Marking">
-      </div>
-    </div>
   </form>
 
   <div class="action-bar">
@@ -124,10 +118,10 @@
 (function () {
   document.getElementById('form-briefing').addEventListener('submit', function (e) { e.preventDefault(); });
 
-  var inputEmpresaPrestador = document.getElementById('pm-empresa-prestador');
-  var empresaTag = document.getElementById('empresa-tag');
-  function syncEmpresaTag() { empresaTag.textContent = inputEmpresaPrestador.value.trim() || 'PRO Marking'; }
-  inputEmpresaPrestador.addEventListener('input', syncEmpresaTag);
+  // link fixo da PRO Marking — pedido do usuário: "o link é da Nexor Connect [a plataforma], mas
+  // quando gerar o PDF, gerar só com dados da Promarking". O nome do prestador não é mais um campo
+  // editável: o PDF sempre sai com os dados da PRO Marking, não importa quem preencher o formulário.
+  var EMPRESA_PRESTADOR = 'PRO Marking';
 
   // ---- mesma sanitização/formatação usada no sistema (limparPdf/fmtData em app.js) ----
   function limparPdf(s) {
@@ -195,7 +189,7 @@
   function gerarPdf(logoVariantes) {
     var jsPDF = window.jspdf.jsPDF;
     var doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    var empresaPrestador = val('pm-empresa-prestador').trim() || 'PRO Marking';
+    var empresaPrestador = EMPRESA_PRESTADOR;
     doc.setProperties({ title: limparPdf(val('pm-empresa')) || 'briefing-pre-visita' });
     var pageW = doc.internal.pageSize.getWidth();
     var pageH = doc.internal.pageSize.getHeight();
