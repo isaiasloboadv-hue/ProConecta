@@ -6881,7 +6881,9 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   const dataCriacao = r.criado_em ? new Date(r.criado_em) : new Date();
   const dataFormatada = `${String(dataCriacao.getDate()).padStart(2, '0')}/${String(dataCriacao.getMonth() + 1).padStart(2, '0')}/${dataCriacao.getFullYear()}`;
   doc.setFont('times', 'italic'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(`Elaborado por: ${r.tecnico_nome || r.autor_nome || ''} · Revisão: 1.0 · Data: ${dataFormatada}`), margem, y);
+  // pedido do usuário: "o campo elaborado por coloca o nome Luis Henrique e deixe fixo" — não
+  // puxa mais do técnico logado, é sempre o mesmo nome em todo relatório Preventiva 2.
+  doc.text(limparPdf(`Elaborado por: Luis Henrique · Revisão: 1.0 · Data: ${dataFormatada}`), margem, y);
   y += 20;
 
   tituloSecao('Dados do cliente');
