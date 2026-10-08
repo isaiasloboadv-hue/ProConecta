@@ -780,19 +780,10 @@ const NAV = {
   ],
   // pedido do usuário: "criar um acesso comercial para ter acesso ao menu relatório e despesas e
   // biblioteca" — time comercial/vendedor: cria o Relatório "Técnico (Briefing Pré-Visita)" antes
-  // da visita, lança as próprias despesas (igual suporte/administrador) e só CONSULTA a biblioteca
-  // (sem "Adicionar", que é técnico) — mesmo padrão de leitura que cliente/supervisor já usam.
+  // da visita. Despesas e Biblioteca foram removidos depois, a pedido do usuário ("remova
+  // despesas e biblioteca do acesso comercial") — fica só o Relatório.
   comercial: [
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
-    { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas', page: 'despesas-justificadas' },
-    // pedido do usuário: "remova ranking técnico do menu biblioteca do acesso comercial" — só
-    // Acessar biblioteca (consulta), sem Ranking de técnicos nem Adicionar.
-    { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
-      { key: 'acessar', label: 'Acessar biblioteca', children: [
-        { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
-        { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
-      ]},
-    ]},
   ],
 };
 

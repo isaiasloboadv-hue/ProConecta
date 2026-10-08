@@ -6376,7 +6376,7 @@ rota('POST', /^\/api\/prestacao-contas\/(\d+)\/reprovar$/, async (req, res, m) =
 // dados extraídos pra pré-preencher o formulário (não salva nada aqui, igual ler-etiqueta).
 rota('POST', /^\/api\/despesas-justificadas\/ler-recibo$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só quem justifica despesa (técnico ou administrador) usa a leitura automática.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só quem justifica despesa (técnico ou administrador) usa a leitura automática.' });
   if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'A leitura automática por IA não está configurada neste sistema.' });
   const body = await lerCorpo(req);
   if (!body.foto) return enviarJSON(res, 400, { erro: 'Envie uma foto do comprovante.' });
@@ -6392,7 +6392,7 @@ rota('POST', /^\/api\/despesas-justificadas\/ler-recibo$/, async (req, res) => {
 // tanto faz pro servidor — ele só recebe os campos finais já revisados pelo técnico).
 rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
   const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   const valor = Number(body.valor);
   if (!(valor > 0)) return enviarJSON(res, 400, { erro: 'Informe um valor maior que zero.' });
@@ -6421,7 +6421,7 @@ rota('POST', /^\/api\/despesas-justificadas$/, async (req, res) => {
 // padrão de cancelarSolicitacaoRH).
 rota('PUT', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
   const data = db.load();
   const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
   if (!item || item.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
@@ -6446,7 +6446,7 @@ rota('PUT', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
 // pedido do usuário acima).
 rota('DELETE', /^\/api\/despesas-justificadas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador justificam despesa.' });
   const data = db.load();
   const item = tenant.buscar(data, 'despesas_justificadas', Number(m[1]), user.empresa_id);
   if (!item || item.tecnico_id !== user.id) return enviarJSON(res, 404, { erro: 'Despesa não encontrada.' });
@@ -6471,7 +6471,7 @@ function filtrarDespesasPorPeriodo(lista, query) {
 // precisa enxergar o lançamento alheio, só o próprio, igual o técnico).
 rota('GET', /^\/api\/despesas-justificadas\/minhas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  if (!exigirPapel(user, ['suporte', 'administrador', 'financeiro', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'despesas_justificadas', user.empresa_id);
