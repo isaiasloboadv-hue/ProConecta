@@ -785,12 +785,13 @@ const NAV = {
   comercial: [
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
     { key: 'despesas-justificadas', modulo: 'os_chamados', label: 'Despesas', page: 'despesas-justificadas' },
+    // pedido do usuário: "remova ranking técnico do menu biblioteca do acesso comercial" — só
+    // Acessar biblioteca (consulta), sem Ranking de técnicos nem Adicionar.
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
         { key: 'acessar-defeitos', label: 'Defeitos/Falhas', page: 'biblioteca-defeitos' },
         { key: 'acessar-procedimentos', label: 'Manual de Procedimentos', page: 'biblioteca-procedimentos' },
       ]},
-      { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
   ],
 };
@@ -7614,12 +7615,25 @@ function limparFiltrosRelatorioManut() {
   desenharRelatorioManutencao();
 }
 
+// pedido do usuário: "os relatórios são compartilhados entre o comercial... coloque um filtro
+// meus relatórios e todos" — ao contrário do administrador/supervisor (que já veem tudo direto,
+// sem escolher), o comercial tem um alternador de verdade: começa em "Meus relatórios" (mesmo
+// padrão de privacidade do técnico) e troca pra "Todos" quando quer ver o que os colegas
+// comerciais lançaram (ver filtro por papel comercial em GET /relatorios-manutencao/meus).
+let relatorioManutModoTodos = false;
+function alternarFiltroRelatorioManutTodos(valor) {
+  relatorioManutModoTodos = valor;
+  renderRelatorioManutencao();
+}
+
 async function renderRelatorioManutencao() {
   // administrador vê o relatório de todo mundo (qualquer tipo), com filtro de busca; o técnico
   // continua vendo só os que ele mesmo criou, sem os filtros (não faz sentido filtrar por
   // técnico/empresa numa lista que já é só dele).
   const vePodeTodos = USER.papel === 'administrador' || USER.papel === 'supervisor';
-  const { relatorios } = await api('/api/relatorios-manutencao/meus' + (vePodeTodos ? '?todas=1' : ''));
+  const podeAlternarTodos = USER.papel === 'comercial';
+  const mostrarTodos = vePodeTodos || (podeAlternarTodos && relatorioManutModoTodos);
+  const { relatorios } = await api('/api/relatorios-manutencao/meus' + (mostrarTodos ? '?todas=1' : ''));
   window._relatoriosManutCache = relatorios;
   window._relatoriosManutFiltro = { tipo: '', tecnico: '', empresa: '', os: '', periodo: '', busca: '' };
   desenharRelatorioManutencao();
@@ -7633,6 +7647,7 @@ function desenharRelatorioManutencao() {
   const pendentes = rascunhosNovosPendentes();
   const main = document.getElementById('main');
   const podeFiltrar = USER.papel === 'administrador' || USER.papel === 'supervisor';
+  const podeAlternarTodos = USER.papel === 'comercial';
 
   const tiposPresentes = [...new Set(relatorios.map((r) => r.tipo))].sort((a, b) => (TIPOS_RELATORIO_MANUT_LABEL[a] || a).localeCompare(TIPOS_RELATORIO_MANUT_LABEL[b] || b));
   const tecnicosPresentes = [...new Set(relatorios.map((r) => r.autor_nome).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -7641,8 +7656,14 @@ function desenharRelatorioManutencao() {
 
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <div><h1>Relatório</h1><p>${podeFiltrar ? 'Relatórios de todos os técnicos, de qualquer tipo. Use os filtros abaixo pra encontrar um específico.' : 'A maioria é avulsa (sem vínculo com O.S.); o Técnico (Briefing) e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.'}</p></div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <div><h1>Relatório</h1><p>${podeFiltrar ? 'Relatórios de todos os técnicos, de qualquer tipo. Use os filtros abaixo pra encontrar um específico.' : podeAlternarTodos ? 'Relatórios do time comercial (Briefing Pré-Visita). Alterne entre os seus e os de todo o time.' : 'A maioria é avulsa (sem vínculo com O.S.); o Técnico (Briefing) e o Devolutivo podem ficar vinculados a uma O.S. de Demonstração Técnica.'}</p></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        ${podeAlternarTodos ? `
+          <div style="display:flex; gap:6px;">
+            <button class="${relatorioManutModoTodos ? 'btn-outline-sm' : 'btn btn-primary btn-sm'}" onclick="alternarFiltroRelatorioManutTodos(false)">Meus relatórios</button>
+            <button class="${relatorioManutModoTodos ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" onclick="alternarFiltroRelatorioManutTodos(true)">Todos</button>
+          </div>
+        ` : ''}
         <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">Manual</button>
         ${USER.papel === 'suporte' ? `
           <button class="btn-outline-sm" onclick="ir('relatorio-automatico')">Automático</button>

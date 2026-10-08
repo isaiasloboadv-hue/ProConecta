@@ -3482,7 +3482,15 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id);
-  if (!(['administrador', 'supervisor'].includes(user.papel) && query.todas === '1')) {
+  // pedido do usuário: "os relatórios são compartilhados entre o comercial... coloque um filtro
+  // meus relatórios e todos" — "Todos" pro comercial mostra só os relatórios de QUEM TAMBÉM É
+  // comercial (o time de vendas compartilha entre si), não o relatório técnico de manutenção de
+  // suporte/administrador — diferente do ?todas=1 do administrador/supervisor, que já era (e
+  // continua sendo) a empresa inteira.
+  if (user.papel === 'comercial' && query.todas === '1') {
+    const idsComercial = new Set(tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'comercial').map((u) => u.id));
+    lista = lista.filter((r) => idsComercial.has(r.autor_id));
+  } else if (!(['administrador', 'supervisor'].includes(user.papel) && query.todas === '1')) {
     lista = lista.filter((r) => r.autor_id === user.id);
   }
   const agendaDaEmpresa = tenant.listar(data, 'agenda', user.empresa_id);
@@ -3506,7 +3514,13 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   // administrador (e supervisor, só leitura) vê/reabre o relatório de qualquer técnico (tela
   // "Relatório" com filtro por todo mundo); o técnico continua só vendo os que ele mesmo criou.
-  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (r.autor_id === user.id || ['administrador', 'supervisor'].includes(user.papel)));
+  // comercial também reabre o relatório de outro comercial (ver filtro "Todos" em GET /meus
+  // acima) — precisa pra gerar o PDF/Encaminhar de um relatório que não é o dele.
+  const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (
+    r.autor_id === user.id
+    || ['administrador', 'supervisor'].includes(user.papel)
+    || (user.papel === 'comercial' && (data.usuarios.find((u) => u.id === r.autor_id) || {}).papel === 'comercial')
+  ));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
