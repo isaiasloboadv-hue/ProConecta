@@ -6649,20 +6649,29 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   // páginas do Relatório Técnico (não só a 1ª) a referência usa o MESMO lockup grande em 2 linhas
   // ("PRO" azul / "Marking" navy negrito) do Termo, só que centralizado em vez de à esquerda —
   // não o nome da empresa numa linha só, como estava aqui antes.
+  // pedido do usuário (3ª rodada): "o logo P fica do lado do nome Pro Marking e o Marking fica
+  // embaixo do Pro" — o ícone precisa ficar ao LADO do texto (como no Termo), não EM CIMA dele
+  // (como numa versão anterior desta correção); aqui só centraliza o bloco inteiro (ícone + 2
+  // linhas de texto) em vez de prendê-lo na margem esquerda.
   function cabecalho() {
     if (cabecalhoAtual === 'tecnico') {
-      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 10, y - 12, 20, 23); } catch (e) {} }
-      y += 20;
       const palavras = empresaNome().split(' ');
       const primeira = palavras[0], resto = palavras.slice(1).join(' ');
+      const iconW = 20, iconH = 23, gap = 8;
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11);
+      const wTexto = Math.max(doc.getTextWidth(primeira), resto ? doc.getTextWidth(resto) : 0);
+      const totalW = iconW + gap + wTexto;
+      const xIcon = pageW / 2 - totalW / 2;
+      const xTexto = xIcon + iconW + gap;
+      const yTopo = y;
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', xIcon, yTopo - 4, iconW, iconH); } catch (e) {} }
       doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COR.blue);
-      doc.text(primeira, pageW / 2, y, { align: 'center' });
-      y += 13;
+      doc.text(primeira, xTexto, yTopo + 6);
       if (resto) {
         doc.setTextColor(...PDF_COR.navy);
-        doc.text(resto, pageW / 2, y, { align: 'center' });
-        y += 13;
+        doc.text(resto, xTexto, yTopo + 19);
       }
+      y = yTopo + 36;
       doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
       doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
       y += 10;
@@ -7018,16 +7027,27 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   }
 
   if (y > 560) novaPagina();
+  // pedido do usuário: "o valor assinatura cliente está errado, fica embaixo da assinatura não
+  // em cima" — na referência vem: imagem da assinatura, depois uma linha fina, "Ciente (...)"
+  // em itálico centralizado embaixo da linha, e o nome por último — não o rótulo+nome ACIMA da
+  // imagem como estava.
   tituloSecao('Assinatura');
   {
     const wImg = 220, hImg = 90;
-    doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-    doc.text(limparPdf(`Ciente (Cliente/Empresa): ${r.assinatura_cliente_nome}`), margem, y);
-    doc.text(limparPdf(`Ciente (Técnico/${empresaNome()}): ${r.tecnico_nome || r.autor_nome}`), margem + largura / 2, y);
-    y += 18;
+    if (y + hImg + 50 > pageH - margem) novaPagina();
     try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
     try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
-    y += hImg + 16;
+    const yLinha = y + hImg + 10;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+    doc.line(margem, yLinha, margem + wImg, yLinha);
+    doc.line(margem + largura / 2, yLinha, margem + largura / 2 + wImg, yLinha);
+    doc.setFont('times', 'italic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Ciente (Cliente/Empresa)', margem + wImg / 2, yLinha + 14, { align: 'center' });
+    doc.text(limparPdf(`Ciente (Técnico/${empresaNome()})`), margem + largura / 2 + wImg / 2, yLinha + 14, { align: 'center' });
+    doc.setFont('times', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(r.assinatura_cliente_nome) || '—', margem + wImg / 2, yLinha + 27, { align: 'center' });
+    doc.text(limparPdf(r.tecnico_nome || r.autor_nome) || '—', margem + largura / 2 + wImg / 2, yLinha + 27, { align: 'center' });
+    y = yLinha + 40;
   }
   if ((r.emails_copia || []).length) {
     if (y > pageH - margem - 16) novaPagina();
