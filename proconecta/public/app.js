@@ -6645,7 +6645,10 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     // pedido do usuário: "o logo com o nome Promarking está diferente" — a referência usa o
     // lockup grande (ícone + nome em 2 linhas, 1ª palavra em azul, resto em navy), igual à marca
     // de verdade, não o ícone pequeno + nome numa linha só usado no resto do app.
-    if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', margem, yTopo - 6, 24, 28); } catch (e) {} }
+    // IMPORTANTE: usa a variante "header" (achatada sobre fundo BRANCO), não "cover" (achatada
+    // sobre navy, pensada pra capa escura) — "cover" numa página branca mostra um quadrado
+    // escuro atrás do ícone, porque o PNG final não tem canal alpha (ver flatarLogoSobreCor).
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, yTopo - 6, 24, 28); } catch (e) {} }
     const palavras = empresaNome().split(' ');
     const primeira = palavras[0], resto = palavras.slice(1).join(' ');
     doc.setFont(undefined, 'bold'); doc.setFontSize(12); doc.setTextColor(...PDF_COR.blue);
