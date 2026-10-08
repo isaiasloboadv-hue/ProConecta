@@ -6640,7 +6640,26 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   // pedido do usuário: clonar o cabeçalho do modelo de referência — logo+nome da empresa à
   // esquerda, título + "O.S. Nº" à direita na mesma faixa (em vez do título grande centralizado
   // que o resto do app usa).
+  // pedido do usuário: "na parte do relatório técnico ficou diferente, clonar, deixar idêntico"
+  // — na referência, o Termo (1º documento) usa o cabeçalho novo (logo à esquerda, título +
+  // O.S. à direita), mas o Relatório Técnico (2º documento) usa o cabeçalho ANTIGO, centralizado
+  // (logo + nome da empresa centralizados, título centralizado embaixo, linha azul fina) — os 2
+  // documentos dentro do mesmo PDF têm cabeçalhos diferentes de propósito, e isso é clonado aqui.
   function cabecalho() {
+    if (cabecalhoAtual === 'tecnico') {
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+      y += 20;
+      doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+      doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+      y += 15;
+      doc.setFontSize(13); doc.setFont(undefined, 'bold');
+      doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
+      y += 10;
+      doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+      doc.line(margem, y, pageW - margem, y);
+      y += 24;
+      return;
+    }
     const yTopo = y;
     // pedido do usuário: "o logo com o nome Promarking está diferente" — a referência usa o
     // lockup grande (ícone + nome em 2 linhas, 1ª palavra em azul, resto em navy), igual à marca
@@ -6658,7 +6677,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
       doc.text(resto, margem + 30, yTopo + 15);
     }
     doc.setFont('times', 'bolditalic'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.navy);
-    doc.text(cabecalhoAtual === 'termo' ? 'Termo de Manutenção Preventiva Laser' : 'Relatório Técnico', pageW - margem, yTopo + 9, { align: 'right' });
+    doc.text('Termo de Manutenção Preventiva Laser', pageW - margem, yTopo + 9, { align: 'right' });
     doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text(limparPdf(`O.S. Nº ${r.os_uf} / ${r.os_numero} / ${r.os_ano}`), pageW - margem, yTopo + 23, { align: 'right' });
     y = yTopo + 32;
@@ -6667,13 +6686,22 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     y += 22;
   }
 
-  // título de seção itálico à esquerda ("DADOS DO CLIENTE", "ITEM / VERIFICADO / OBSERVAÇÃO"),
-  // igual ao modelo de referência (em vez do título centralizado em caixa alta do resto do app).
-  function tituloSecao(t) {
+  // título de seção itálico à esquerda ("DADOS DO CLIENTE", "ITEM / VERIFICADO / OBSERVAÇÃO",
+  // "SERVIÇOS REALIZADOS" etc.), igual ao modelo de referência (em vez do título centralizado em
+  // caixa alta do resto do app) — usado nos 2 documentos. `sub` opcional reproduz a legenda
+  // pequena em itálico cinza abaixo do título (ex.: "Manutenção realizada / resultados de amostra").
+  function tituloSecao(t, sub) {
     if (y > pageH - margem - 40) novaPagina();
     doc.setFont('times', 'bolditalic'); doc.setFontSize(10.5); doc.setTextColor(...PDF_COR.blue);
     doc.text(t.toUpperCase(), margem, y);
-    y += 16;
+    y += 14;
+    if (sub) {
+      doc.setFont('times', 'italic'); doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub.toUpperCase(), margem, y);
+      y += 14;
+    } else {
+      y += 2;
+    }
   }
 
   // caixa única com várias linhas de campos (1 ou 2 colunas por linha) — substitui o padrão do
@@ -6887,39 +6915,42 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   // ===== conteúdo — Relatório Técnico =====
   doc.addPage(); y = margem; cabecalho();
 
-  tituloCentro('Serviços realizados', 'Manutenção realizada / resultados de amostra');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.servico_feito) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+  tituloSecao('Serviços realizados', 'Manutenção realizada / resultados de amostra');
+  { if (y > pageH - margem - 40) novaPagina(); doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.servico_feito) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
 
-  tituloEsquerda('Peças fornecidas');
+  tituloSecao('Peças fornecidas');
   {
-    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.6 }, { t: 'Código PMK', frac: 0.28 }];
+    // pedido do usuário: cabeçalho de texto fino (sem barra navy) e coluna "Qtd." extra, igual
+    // à tabela do check-list do Termo — mesmo padrão visual nas 2 tabelas do documento.
+    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.48 }, { t: 'Código PMK', frac: 0.27 }, { t: 'Qtd.', frac: 0.15 }];
     const larguras = cols.map((c) => largura * c.frac);
-    if (y + 20 > pageH - margem) novaPagina();
+    if (y + 24 > pageH - margem) novaPagina();
     let cx = margem;
-    doc.setFillColor(...PDF_COR.navy);
-    doc.rect(margem, y, largura, 18, 'F');
-    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
-    y += 18;
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    cols.forEach((c, i) => { doc.text(c.t, cx, y); cx += larguras[i]; });
+    y += 6;
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.6);
+    doc.line(margem, y, pageW - margem, y);
+    y += 14;
     const pecas = r.pecas || [];
     if (!pecas.length) {
-      if (y + 18 > pageH - margem) novaPagina();
-      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
-      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text('Nenhuma peça informada', margem + 6, y + 12);
-      y += 18;
+      if (y + 16 > pageH - margem) novaPagina();
+      doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem, y);
+      y += 16;
     } else {
       pecas.forEach((p, i) => {
-        if (y + 18 > pageH - margem) novaPagina();
+        if (y + 16 > pageH - margem) { novaPagina(); }
         cx = margem;
-        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
-        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-        const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—'];
-        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
-        y += 18;
+        doc.setFont('times', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+        const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—', limparPdf(p.quantidade) || '—'];
+        valores.forEach((v, j) => { doc.text(v, cx, y); cx += larguras[j]; });
+        doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.4);
+        doc.line(margem, y + 4, pageW - margem, y + 4);
+        y += 16;
       });
     }
-    y += 16;
+    y += 14;
   }
 
   const temFotos = (r.fotos || []).some((bloco) => bloco && Array.isArray(bloco.fotos) && bloco.fotos.length);
@@ -6927,11 +6958,11 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
     if (y + 34 + hImgFoto > pageH - margem) novaPagina();
   }
-  tituloCentro('Relatório fotográfico', null, true);
+  tituloSecao('Relatório fotográfico');
   (r.fotos || []).forEach((bloco) => {
     const fotosDoBloco = (bloco && bloco.fotos) || [];
     if (y > pageH - margem - 20) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.setFont('times', 'italic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.navy);
     doc.text(limparPdf(bloco && bloco.comentario) || '—', margem, y); y += 12;
     if (fotosDoBloco.length) {
       const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
@@ -6951,25 +6982,25 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
         y += hImg + gap;
       }
     } else {
-      doc.setFontSize(8.5); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text('Nenhuma foto anexada.', margem, y); y += 14;
     }
     y += 6;
   });
 
-  tituloCentro('Observações do serviço');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_servico) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+  tituloSecao('Observações do serviço');
+  { if (y > pageH - margem - 40) novaPagina(); doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_servico) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
 
-  tituloCentro('Avaliação de desempenho');
+  tituloSecao('Avaliação de desempenho');
   linhaCampos([{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
   if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário do cliente', valor: r.satisfacao_comentario, frac: 1 }]);
   y += 18;
 
   if (y > 560) novaPagina();
-  tituloCentro('Assinatura');
+  tituloSecao('Assinatura');
   {
     const wImg = 220, hImg = 90;
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(`Ciente (Cliente/Empresa): ${r.assinatura_cliente_nome}`), margem, y);
     doc.text(limparPdf(`Ciente (Técnico/${empresaNome()}): ${r.tecnico_nome || r.autor_nome}`), margem + largura / 2, y);
     y += 18;
@@ -6979,7 +7010,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   }
   if ((r.emails_copia || []).length) {
     if (y > pageH - margem - 16) novaPagina();
-    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.setFont('times', 'italic'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text(limparPdf(`Cópia enviada para: ${r.emails_copia[0]}`), margem, y);
   }
 
