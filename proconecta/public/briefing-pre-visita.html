@@ -33,7 +33,7 @@
 
 <header>
   <div class="brand">
-    <div class="brand-mark chip"><img id="header-logo" src="/img/logo-pro-marking.png" alt="PRO Marking"></div>
+    <div class="brand-mark chip"><img id="header-logo" class="brand-mark-img" src="/img/logo-pro-marking.png" alt="PRO Marking" style="height:28px;width:auto;display:block;"></div>
     <div class="wordmark inline"><span class="pro">Nexor</span><span class="conecta">Connect</span></div>
     <span class="empresa-tag" id="empresa-tag">PRO Marking</span>
   </div>
@@ -41,8 +41,8 @@
 
 <main>
   <div class="page-head">
-    <h1>Novo Briefing Pré-Visita — Técnico</h1>
-    <p>Preencher antes da visita. Dá ao Técnico contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p>
+    <h1>Novo Briefing Pré-Visita — Promotor</h1>
+    <p>Preencher antes da visita. Dá ao Promotor contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p>
     <p class="nota-publica">Versão pública e avulsa deste formulário — gera o PDF direto no seu aparelho, sem precisar entrar no sistema.</p>
   </div>
 
@@ -52,7 +52,7 @@
       <div class="form-grid">
         <div class="field"><label>Cliente*</label><input id="pm-empresa" required></div>
         <div class="field"><label>Data*</label><input id="pm-data_visita" type="date" required></div>
-        <div class="field"><label>Técnico*</label><input id="pm-promotor" required></div>
+        <div class="field"><label>Promotor*</label><input id="pm-promotor" required></div>
         <div class="field"><label>Contato / Cargo</label><input id="pm-contato"></div>
       </div>
     </div>
@@ -88,13 +88,13 @@
       <div class="field"><label>Existe concorrente? Se sim, qual?*</label>
         <textarea id="pm-concorrente" required></textarea>
       </div>
-      <div class="field"><label>O que você quer que o Técnico observe durante a visita?*</label>
+      <div class="field"><label>O que você quer que o Promotor observe durante a visita?*</label>
         <textarea id="pm-o_que_observar" required></textarea>
       </div>
     </div>
 
     <div class="panel">
-      <h2>5. Resumo para o Técnico</h2>
+      <h2>5. Resumo para o Promotor</h2>
       <div class="field"><label>Objetivo da visita — em uma frase*</label>
         <textarea id="pm-objetivo_visita" required></textarea>
       </div>
@@ -145,7 +145,7 @@
   function val(id) { return document.getElementById(id).value; }
 
   // ---- logo: mesma lógica de flatarLogoSobreCor em app.js (achatar o PNG com transparência
-  // sobre uma cor sólida, já que o PDF final não tem canal alpha) — com o logo real em /logo.png. ----
+  // sobre uma cor sólida, já que o PDF final não tem canal alpha) — com o logo real da PRO Marking. ----
   var COR = { navy: [11, 45, 79], blue: [25, 118, 210], ink: [23, 43, 58], inkSoft: [102, 120, 138], line: [217, 225, 232], white: [255, 255, 255] };
 
   function flatarLogoSobreCor(img, rgb) {
@@ -212,7 +212,7 @@
       doc.text(limparPdf(empresaPrestador), pageW / 2, y, { align: 'center' });
       y += 15;
       doc.setFontSize(13); doc.setFont(undefined, 'bold');
-      doc.text('Briefing Pre-Visita - Tecnico', pageW / 2, y, { align: 'center' });
+      doc.text('Briefing Pre-Visita - Promotor', pageW / 2, y, { align: 'center' });
       y += 10;
       doc.setDrawColor.apply(doc, COR.blue); doc.setLineWidth(1.2);
       doc.line(margem, y, pageW - margem, y);
@@ -277,7 +277,7 @@
     doc.setFontSize(20); doc.setFont(undefined, 'bold');
     doc.text('BRIEFING PRE-VISITA', pageW / 2, 410, { align: 'center' });
     doc.setFontSize(13); doc.setFont(undefined, 'normal');
-    doc.text('VENDEDOR - TECNICO', pageW / 2, 434, { align: 'center' });
+    doc.text('VENDEDOR - PROMOTOR', pageW / 2, 434, { align: 'center' });
     doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
     doc.text((limparPdf(val('pm-empresa')).toUpperCase()) || '—', pageW / 2, 460, { align: 'center' });
     doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
@@ -288,7 +288,7 @@
 
     tituloCentro('1. Identificacao');
     linhaCampos([{ label: 'Cliente', valor: val('pm-empresa'), frac: 1 }]);
-    linhaCampos([{ label: 'Data', valor: fmtData(val('pm-data_visita')), frac: 0.5 }, { label: 'Tecnico', valor: val('pm-promotor'), frac: 0.5 }]);
+    linhaCampos([{ label: 'Data', valor: fmtData(val('pm-data_visita')), frac: 0.5 }, { label: 'Promotor', valor: val('pm-promotor'), frac: 0.5 }]);
     linhaCampos([{ label: 'Contato / Cargo', valor: val('pm-contato'), frac: 1 }]);
     y += 12;
 
@@ -304,9 +304,9 @@
     tituloCentro('4. Pontos de Atencao');
     paragrafo('Duvidas, preocupacoes ou informacoes ja mencionadas pelo cliente', val('pm-duvidas_preocupacoes'));
     paragrafo('Concorrente', val('pm-concorrente'));
-    paragrafo('O que o Tecnico deve observar durante a visita', val('pm-o_que_observar'));
+    paragrafo('O que o Promotor deve observar durante a visita', val('pm-o_que_observar'));
 
-    tituloCentro('5. Resumo para o Tecnico');
+    tituloCentro('5. Resumo para o Promotor');
     paragrafo('Objetivo da visita - em uma frase', val('pm-objetivo_visita'));
     paragrafo('Ponto principal a observar', val('pm-ponto_principal_observar'));
 
