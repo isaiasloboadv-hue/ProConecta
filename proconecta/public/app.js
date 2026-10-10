@@ -173,13 +173,15 @@ async function carregarEmpresa() {
   try { window._empresa = (await api('/api/empresa')).empresa; } catch (e) {}
   aplicarMarcaNaTela();
 }
-// troca toda <img class="brand-mark-img"> da tela (tela de login, cabeçalho) pela logo própria da
-// empresa (window._empresa.logo_url), se ela tiver uma — senão mantém a logo padrão do sistema
-// (/logo.png, já no HTML). Também invalida o cache da logo usada nos PDFs (ver
-// carregarLogoDataUri), pra um PDF gerado depois de trocar a logo já saír com a nova.
+// pedido do usuário: "o logo P é da Promarking precisa ser o logo N. Nos relatórios não mexer
+// em nada continuar como está logo da Promarking" — login e cabeçalho (a cara da própria Nexor
+// Connect, a plataforma) sempre usam a logo padrão do sistema (/logo.png, já fixa no HTML),
+// independente da logo própria que a empresa configurou em Minha Empresa. Essa logo própria
+// (window._empresa.logo_url) continua valendo só pros PDFs/relatórios (ver carregarLogoDataUri/
+// carregarLogoVariantes), que é o que esse campo deve controlar. Ainda assim invalida o cache
+// da logo usada nos PDFs sempre que a marca muda, pra um PDF gerado depois de trocar a logo em
+// Minha Empresa já sair com a nova.
 function aplicarMarcaNaTela() {
-  const url = window._empresa && window._empresa.logo_url;
-  document.querySelectorAll('.brand-mark-img').forEach((img) => { img.src = url || '/logo.png'; });
   _logoDataUriPromise = null;
   _logoVariantesPromise = null;
 }
