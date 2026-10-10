@@ -7655,7 +7655,7 @@ function desenharRelatorioManutencao() {
             <button class="${relatorioManutModoTodos ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" onclick="alternarFiltroRelatorioManutTodos(true)">Todos</button>
           </div>
         ` : ''}
-        <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">Manual</button>
+        <button class="btn btn-primary btn-sm" onclick="mostrarFormRelatorioManual()">${USER.papel === 'comercial' ? '+ Relatório' : 'Manual'}</button>
         ${USER.papel === 'suporte' ? `
           <button class="btn-outline-sm" onclick="ir('relatorio-automatico')">Automático</button>
           <button class="btn-outline-sm" onclick="ir('relatorio-ciclagem')">Ensaio de Ciclagem</button>

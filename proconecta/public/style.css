@@ -47,7 +47,7 @@ header{
   position:sticky;top:0;z-index:50;
   box-shadow:0 2px 14px rgba(7,26,51,0.25);
 }
-.brand{display:flex;align-items:center;gap:12px;}
+.brand{display:flex;align-items:center;gap:10px;}
 .brand-mark{flex-shrink:0;display:flex;}
 .brand-mark.chip{background:#fff;border-radius:11px;padding:5px;box-shadow:0 2px 8px rgba(0,0,0,.18);}
 .wordmark{font-family:'Montserrat',sans-serif;font-weight:800;line-height:1;text-transform:uppercase;}
@@ -57,6 +57,17 @@ header{
 .wordmark.inline{display:flex;align-items:baseline;gap:6px;}
 .wordmark.inline .pro{color:var(--blue-bright);font-size:17px;letter-spacing:.8px;}
 .wordmark.inline .conecta{color:#fff;font-size:17px;letter-spacing:.8px;}
+/* pedido do usuário: "diminua o logo para que fique o logo N o nome Nexor e Conect um em
+   cima do outro igual a teus de login" — no cabeçalho do sistema (fundo navy), o ícone fica
+   EM CIMA e o wordmark empilhado embaixo (mesmo formato vertical do login), só que numa
+   escala bem menor pra caber na faixa de 68px do cabeçalho sem cortar o resto (tarja da
+   empresa, ícones à direita); a cor do "Connect" vira branca aqui (no login é navy, porque
+   lá o fundo é branco). */
+.brand-lockup{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.brand-lockup .brand-mark.chip{padding:3px;}
+.brand-lockup .wordmark.stacked{gap:0;align-items:center;}
+.brand-lockup .wordmark.stacked .pro,.brand-lockup .wordmark.stacked .conecta{font-size:8px;letter-spacing:.2px;line-height:1.05;}
+.brand-lockup .wordmark.stacked .conecta{color:#fff;}
 .empresa-tag{margin-left:4px;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
 .empresa-tag:empty{display:none;}
 
@@ -531,8 +542,12 @@ tr:last-child td{border-bottom:none;}
   .filtros-row{flex-direction:column;align-items:stretch;}
 }
 @media(max-width:520px){
-  .brand .wordmark.inline{display:none;}
-  .empresa-tag{display:none;}
+  /* pedido do usuário: "se possível diminuir o tamanho para que fique alinhado" — o logo em
+     cima do wordmark empilhado já é bem compacto (ver .brand-lockup acima), então aqui só
+     aperta mais um pouco a tarja da empresa, que é o elemento que ainda pode estourar a
+     largura em telas bem estreitas. */
+  .brand{gap:8px;}
+  .empresa-tag{font-size:10px;padding:3px 8px;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 }
 
 /* ---------- atendimento por chat (IA -> fila -> técnico) ---------- */
