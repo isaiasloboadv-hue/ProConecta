@@ -186,21 +186,6 @@ function aplicarMarcaNaTela() {
   _logoVariantesPromise = null;
 }
 function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
-// pedido do usuário: "o que precisa ser configurado são os textos fixos. Ex nome simples e
-// robusto" — o slogan da capa dos relatórios ("SIMPLES, ROBUSTO E ACESSÍVEL") era um texto
-// fixo no código, igual pra qualquer empresa; agora vem de empresa.slogan (editável em Minha
-// Empresa), com esse texto como valor padrão (preserva o que já existe pra quem não mudar).
-function empresaSlogan() { return (window._empresa && window._empresa.slogan) || 'SIMPLES, ROBUSTO E ACESSÍVEL'; }
-// pedido do usuário: "No relatório fala relatório laser. Mas se outra empresa não trabalhar com
-// laser?" — o título do Termo de Manutenção Preventiva (tipo 'preventiva2') tinha "Laser" fixo
-// no código. Agora vem de empresa.qualificador_preventiva, vazio por padrão (título genérico,
-// sem palavra nenhuma depois de "Preventiva") pra qualquer empresa nova.
-function empresaQualificadorPreventiva() { return (window._empresa && window._empresa.qualificador_preventiva) || ''; }
-// "Checklist precisa ser adaptado a equipamentos que outras empresas passam a utilizar" — ponto
-// de partida do check-list quando o técnico escolhe um modelo de equipamento "Outro" (fora da
-// lista EQUIPAMENTOS_PREVENTIVA, que é toda específica da PRO Marking) — [] por padrão (mesmo
-// comportamento de hoje: começa em branco) até a empresa configurar o seu em Minha Empresa.
-function empresaChecklistPadrao() { return (window._empresa && Array.isArray(window._empresa.checklist_padrao)) ? window._empresa.checklist_padrao : []; }
 function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
 function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || '12 99718-7506'; }
 function empresaTelefone() { return (window._empresa && window._empresa.telefone) || '12 3902-3453'; }
@@ -1387,23 +1372,16 @@ async function salvarTerminologiaPlataforma(empresaId) {
 }
 
 // ---------- Minha Empresa (Etapa 5 do briefing white label) ----------
-// pedido do usuário: "no menu minha empresa quero que seja o menu de coração do logo e layout
-// dos relatórios" — a tela virou "Configuração do Relatório". IMPORTANTE (depois de duas
-// correções do usuário): o que é editável aqui são só os TEXTOS FIXOS que aparecem em TODO
-// relatório, de qualquer empresa — logo, nome, site, WhatsApp, telefone, e-mails de contato
-// (usados na página de contato) e o slogan da capa ("SIMPLES, ROBUSTO E ACESSÍVEL"). O
-// CONTEÚDO do relatório em si (defeito, serviço realizado, checklist etc.) NÃO é editável aqui
-// — "é o que já é preenchido na hora de fazer o relatório, não faz sentido" configurar isso
-// (quem preenche é o técnico/vendedor, na hora, pra cada atendimento real). O layout/estrutura
-// também é padrão, igual pra todo mundo. Os campos de cor foram removidos porque não tinham
-// efeito nenhum (não eram usados em lugar nenhum do sistema).
+// o próprio administrador edita a marca da empresa (nome, contato, cores, logo) e os valores
+// padrão de bônus de viagem — sem precisar do Super Admin. Usa USER.empresa (já carregado no
+// login/GET /api/me) pra preencher o formulário, sem precisar de outra chamada à API.
 async function renderMinhaEmpresa() {
   const e = USER.empresa || {};
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Minha Empresa</h1><p>Configuração do relatório: logo, contato e textos fixos que aparecem em todo relatório/PDF gerado pelo sistema. O conteúdo de cada relatório (preenchido na hora do atendimento) e o layout em si são padrão — só esses dados mudam.</p></div>
+    <div class="page-head"><h1>Minha Empresa</h1><p>Dados de marca e configurações usados nos relatórios, PDFs e e-mails enviados pelo sistema.</p></div>
     <div class="panel">
-      <div class="panel-head">Logo e dados do relatório</div>
+      <div class="panel-head">Marca</div>
       <div class="form-grid">
         <div style="grid-column:1/-1;">
           <label>Logo</label>
@@ -1417,39 +1395,13 @@ async function renderMinhaEmpresa() {
             </div>
           </div>
         </div>
-        <div><label>Nome da empresa*</label><input id="me-nome" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.nome || '')}"></div>
-        <div><label>Slogan da capa</label><input id="me-slogan" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.slogan || 'SIMPLES, ROBUSTO E ACESSÍVEL')}"></div>
-        <div><label>Site</label><input id="me-site" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
-        <div><label>WhatsApp</label><input id="me-whatsapp" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.whatsapp || '')}"></div>
-        <div><label>Telefone</label><input id="me-telefone" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.telefone || '')}"></div>
-        <div style="grid-column:1/-1;"><label>E-mails de contato (página final do relatório)</label><textarea id="me-emails" rows="2" onblur="atualizarPreviaRelatorioMinhaEmpresa()" placeholder="um por linha, ex: suporte@empresa.com.br">${esc((e.emails || []).join('\n'))}</textarea></div>
+        <div><label>Nome da empresa*</label><input id="me-nome" value="${esc(e.nome || '')}"></div>
+        <div><label>Site</label><input id="me-site" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
+        <div><label>WhatsApp</label><input id="me-whatsapp" value="${esc(e.whatsapp || '')}"></div>
+        <div><label>Telefone</label><input id="me-telefone" value="${esc(e.telefone || '')}"></div>
+        <div><label>Cor primária</label><input type="color" id="me-corprim" value="${esc(e.cor_primaria || '#0B2D4F')}"></div>
+        <div><label>Cor secundária</label><input type="color" id="me-corsec" value="${esc(e.cor_secundaria || '#0E7C86')}"></div>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
-    </div>
-    <div class="panel">
-      <div class="panel-head">Termo de Manutenção Preventiva</div>
-      <p>Pedido do usuário: "Checklist precisa ser adaptado a equipamentos que outras empresas passam a utilizar" — isso aqui só vale pro equipamento "Outro" no formulário de Preventiva (os modelos específicos da PRO Marking — Smartbox, KT, MP5 etc. — continuam com o check-list próprio deles).</p>
-      <div class="form-grid">
-        <div><label>Qualificador do equipamento (aparece no título, ex: "Laser")</label><input id="me-qualificador-preventiva" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.qualificador_preventiva || '')}" placeholder="deixe em branco pra um título genérico"></div>
-        <div style="grid-column:1/-1;"><label>Check-list padrão pro equipamento "Outro" (um item por linha)</label><textarea id="me-checklist-padrao" rows="4" onblur="atualizarPreviaRelatorioMinhaEmpresa()" placeholder="ex: Limpeza geral&#10;Teste de funcionamento&#10;Verificação elétrica">${esc((e.checklist_padrao || []).join('\n'))}</textarea></div>
-      </div>
-      <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
-    </div>
-    <div class="panel">
-      <div class="panel-head">Prévia do relatório</div>
-      <p>Escolha um tipo pra ver exatamente como o PDF sai, com a logo e os dados de cima (mesmo antes de salvar).</p>
-      <div class="field" style="max-width:320px;">
-        <label>Tipo de relatório</label>
-        <select id="me-previa-tipo" onchange="atualizarPreviaRelatorioMinhaEmpresa()">
-          ${TIPOS_RELATORIO_PREVIA.map((t) => `<option value="${t}">${esc(TIPOS_RELATORIO_MANUT_LABEL[t] || t)}</option>`).join('')}
-        </select>
-      </div>
-      <div id="me-previa-wrap" style="margin-top:12px; display:flex; align-items:center; gap:10px;">
-        <button class="btn btn-primary btn-sm" id="me-previa-btn" onclick="abrirPreviaRelatorioMinhaEmpresa()" disabled>Gerando prévia...</button>
-        <span id="me-previa-status" style="font-size:12px; color:var(--gray-500,#888);"></span>
-      </div>
-    </div>
-    <div class="panel">
       <h2>Valores padrão de bônus de viagem</h2>
       <div class="form-grid">
         <div><label>Valor por diária (R$)</label><input type="number" min="0" step="0.01" id="me-valor-bonus" value="${esc(e.valor_bonus_viagem ?? 200)}"></div>
@@ -1457,67 +1409,6 @@ async function renderMinhaEmpresa() {
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
     </div>`;
-  atualizarPreviaRelatorioMinhaEmpresa();
-}
-
-// gera a prévia com os dados AINDA NÃO salvos (os campos digitados no formulário acima, mesmo
-// antes de clicar em "Salvar") — troca window._empresa só durante a geração síncrona do PDF
-// (os helpers empresaNome()/empresaSite()/etc. leem dali) e devolve pro valor original logo em
-// seguida, pra não vazar dado de prévia pro resto do app. Pedido do usuário ("não abre"): um
-// <iframe src="blob:...">  não mostra o PDF embutido na maioria dos navegadores de celular (e
-// no WebView do PWA instalado) — só aparece aquele cartão genérico de "abrir arquivo", sem
-// prévia nenhuma. Em vez disso, guarda a URL gerada e abre numa aba nova ao clicar no botão,
-// igual todo outro PDF do sistema já faz (abrirPdfRelatorioManutencao etc.) — esse caminho é o
-// que já funciona de verdade em qualquer navegador/celular.
-window._previaRelatorioUrl = null;
-async function atualizarPreviaRelatorioMinhaEmpresa() {
-  const tipoEl = document.getElementById('me-previa-tipo');
-  const btn = document.getElementById('me-previa-btn');
-  const status = document.getElementById('me-previa-status');
-  if (!tipoEl || !btn) return;
-  const amostra = RELATORIO_AMOSTRA[tipoEl.value];
-  if (!amostra) return;
-  btn.disabled = true;
-  btn.textContent = 'Gerando prévia...';
-  if (status) status.textContent = '';
-  const logoUrl = window._minhaEmpresaLogoNova !== undefined
-    ? (window._minhaEmpresaLogoNova || '/logo.png')
-    : ((window._empresa && window._empresa.logo_url) || '/logo.png');
-  const emailsEl = document.getElementById('me-emails');
-  const emails = emailsEl ? emailsEl.value.split('\n').map((v) => v.trim()).filter(Boolean) : undefined;
-  const checklistEl = document.getElementById('me-checklist-padrao');
-  const checklistPadrao = checklistEl ? checklistEl.value.split('\n').map((v) => v.trim()).filter(Boolean) : undefined;
-  const qualificadorEl = document.getElementById('me-qualificador-preventiva');
-  const empresaOriginal = window._empresa;
-  window._empresa = {
-    ...(empresaOriginal || {}),
-    nome: document.getElementById('me-nome').value.trim() || empresaNome(),
-    slogan: document.getElementById('me-slogan').value.trim(),
-    site: document.getElementById('me-site').value.trim(),
-    whatsapp: document.getElementById('me-whatsapp').value.trim(),
-    telefone: document.getElementById('me-telefone').value.trim(),
-    ...(emails !== undefined ? { emails } : {}),
-    ...(qualificadorEl !== null ? { qualificador_preventiva: qualificadorEl.value.trim() } : {}),
-    ...(checklistPadrao !== undefined ? { checklist_padrao: checklistPadrao } : {}),
-    logo_url: logoUrl,
-  };
-  try {
-    const logo = await calcularLogoVariantesPara(logoUrl);
-    window._previaRelatorioUrl = gerarPdfUrlRelatorioManutencao(amostra, logo);
-    btn.textContent = 'Abrir prévia em PDF';
-    btn.disabled = false;
-  } catch (e) {
-    window._previaRelatorioUrl = null;
-    btn.textContent = 'Abrir prévia em PDF';
-    btn.disabled = false;
-    if (status) status.textContent = 'Não deu pra gerar a prévia: ' + e.message;
-  } finally {
-    window._empresa = empresaOriginal;
-  }
-}
-function abrirPreviaRelatorioMinhaEmpresa() {
-  if (!window._previaRelatorioUrl) return;
-  window.open(window._previaRelatorioUrl, '_blank');
 }
 
 // guarda a logo nova (já comprimida) separada do resto do formulário — só vai no corpo do PUT se
@@ -1529,10 +1420,9 @@ function trocarLogoMinhaEmpresa(event) {
   if (!arquivo) return;
   const leitor = new FileReader();
   leitor.onload = () => {
-    comprimirLogoDataUrl(leitor.result).then((dataUrl) => {
+    comprimirImagemDataUrl(leitor.result).then((dataUrl) => {
       window._minhaEmpresaLogoNova = dataUrl;
       document.getElementById('me-logo-preview').innerHTML = `<img src="${dataUrl}" style="width:100%; height:100%; object-fit:contain;">`;
-      atualizarPreviaRelatorioMinhaEmpresa();
     });
   };
   leitor.readAsDataURL(arquivo);
@@ -1540,7 +1430,6 @@ function trocarLogoMinhaEmpresa(event) {
 function removerLogoMinhaEmpresa() {
   window._minhaEmpresaLogoNova = null; // null explícito = remover (diferente de undefined = não mudar)
   document.getElementById('me-logo-preview').innerHTML = `<span style="font-size:11px; color:var(--gray-500,#888); text-align:center;">sem logo própria</span>`;
-  atualizarPreviaRelatorioMinhaEmpresa();
 }
 
 async function salvarMinhaEmpresa() {
@@ -1548,13 +1437,11 @@ async function salvarMinhaEmpresa() {
   if (!nome) return mostrarToast('Informe o nome da empresa.');
   const body = {
     nome,
-    slogan: document.getElementById('me-slogan').value.trim(),
     site: document.getElementById('me-site').value.trim(),
     whatsapp: document.getElementById('me-whatsapp').value.trim(),
     telefone: document.getElementById('me-telefone').value.trim(),
-    emails: document.getElementById('me-emails').value.split('\n').map((v) => v.trim()).filter(Boolean),
-    qualificador_preventiva: document.getElementById('me-qualificador-preventiva').value.trim(),
-    checklist_padrao: document.getElementById('me-checklist-padrao').value.split('\n').map((v) => v.trim()).filter(Boolean),
+    cor_primaria: document.getElementById('me-corprim').value,
+    cor_secundaria: document.getElementById('me-corsec').value,
     valor_bonus_viagem: Number(document.getElementById('me-valor-bonus').value),
     limite_viagens_bonus_mes: Number(document.getElementById('me-limite-bonus').value),
   };
@@ -4574,33 +4461,6 @@ function comprimirImagemDataUrl(dataUrl) {
     img.src = dataUrl;
   });
 }
-// pedido do usuário: "o fundo não é compatível" na logo própria de Minha Empresa — a causa era
-// comprimirImagemDataUrl (acima) recomprimir TUDO como JPEG, que não tem canal alpha; uma logo
-// em PNG com fundo transparente saía com um retângulo preto sólido no lugar da transparência, e
-// o jsPDF (ver flatarLogoSobreCor) conta justamente com essa transparência pra "pintar" a logo
-// certa em cada fundo do relatório (branco no cabeçalho, navy na capa, bege na página de
-// contato). Logo usa PNG (preserva alpha) em vez de JPEG; só redimensiona se for maior que o
-// necessário, sem recomprimir com perda.
-function comprimirLogoDataUrl(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const MAX = 600;
-      let { width, height } = img;
-      if (width > MAX || height > MAX) {
-        const escala = MAX / Math.max(width, height);
-        width = Math.round(width * escala);
-        height = Math.round(height * escala);
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-      try { resolve(canvas.toDataURL('image/png')); } catch (e) { resolve(dataUrl); }
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
-}
 function lerFotosComoDataUrl(arquivos) {
   return Promise.all(Array.from(arquivos).map((arquivo) => new Promise((resolve) => {
     const leitor = new FileReader();
@@ -4771,7 +4631,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(item.cliente_nome).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -5021,7 +4881,7 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(a.numero_os) || '—'}`, pageW / 2, 466, { align: 'center' });
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -6380,30 +6240,6 @@ function carregarLogoVariantes() {
   return _logoVariantesPromise;
 }
 
-// mesma lógica de carregarLogoVariantes, só que recebe a URL/data URI direto em vez de ler
-// window._empresa.logo_url, e não mexe no cache global (_logoVariantesPromise acima) — usado
-// pela prévia de "Minha Empresa" (ver atualizarPreviaRelatorioMinhaEmpresa), que precisa gerar
-// o PDF com uma logo ainda não salva (upload novo ou remoção, antes de clicar em "Salvar") sem
-// invalidar/sujar o cache usado pelo resto do app pra gerar PDF de verdade.
-async function calcularLogoVariantesPara(url) {
-  let base = url;
-  if (!url.startsWith('data:')) {
-    base = await fetch(url).then((resp) => resp.blob()).then((blob) => new Promise((resolve, reject) => {
-      const leitor = new FileReader();
-      leitor.onload = () => resolve(leitor.result);
-      leitor.onerror = reject;
-      leitor.readAsDataURL(blob);
-    })).catch(() => null);
-  }
-  if (!base) return null;
-  const [header, cover, contato] = await Promise.all([
-    flatarLogoSobreCor(base, PDF_COR.white),
-    flatarLogoSobreCor(base, PDF_COR.navy),
-    flatarLogoSobreCor(base, PDF_COR.bege),
-  ]);
-  return { header, cover, contato };
-}
-
 async function abrirPdfBiblioteca(tipo, i) {
   const r = tipo === 'procedimento' ? (window._procedimentosCache || [])[i] : (window._defeitosCache || [])[i];
   if (!r) return;
@@ -6705,7 +6541,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -6922,7 +6758,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
       doc.text(resto, margem + 30, yTopo + 15);
     }
     doc.setFont('times', 'bolditalic'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.navy);
-    doc.text(`Termo de Manutenção Preventiva${empresaQualificadorPreventiva() ? ' ' + empresaQualificadorPreventiva() : ''}`, pageW - margem, yTopo + 9, { align: 'right' });
+    doc.text('Termo de Manutenção Preventiva Laser', pageW - margem, yTopo + 9, { align: 'right' });
     doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text(limparPdf(`O.S. Nº ${r.os_uf} / ${r.os_numero} / ${r.os_ano}`), pageW - margem, yTopo + 23, { align: 'right' });
     y = yTopo + 32;
@@ -7092,12 +6928,12 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
-  doc.text(`PREVENTIVA${empresaQualificadorPreventiva() ? ' ' + empresaQualificadorPreventiva().toUpperCase() : ''}`, pageW / 2, 438, { align: 'center' });
+  doc.text('PREVENTIVA LASER', pageW / 2, 438, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo — Termo de Manutenção Preventiva (layout clonado do modelo de referência) =====
   cabecalhoAtual = 'termo';
@@ -7157,7 +6993,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.text('RELATÓRIO TÉCNICO', pageW / 2, pageH / 2 - 10, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, pageH / 2 + 18, { align: 'center' });
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo — Relatório Técnico =====
   doc.addPage(); y = margem; cabecalho();
@@ -7390,7 +7226,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -8890,7 +8726,7 @@ function mostrarFormRelatorioPreventiva(existente) {
 
     <div class="panel">
       <h2>Check-list de verificação*</h2>
-      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pro modelo escolhido, já vem com um ponto de partida de itens comuns (ou os itens padrão configurados em Minha Empresa, se o modelo for "Outro") — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Já vem com os itens mais comuns de equipamento a laser — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
       <div id="rp-checklist"></div>
       <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistPreventiva()">+ Adicionar item</button>
       <label style="margin-top:10px;">Observações*</label>
@@ -9053,7 +8889,7 @@ async function selecionarModeloPreventiva(nome) {
   } else {
     outroWrap.style.display = 'block';
     document.getElementById('rp-modelo_maquina_outro').value = '';
-    d.checklist = empresaChecklistPadrao().map((item) => ({ item, resposta: '', observacao: '' }));
+    d.checklist = [];
     d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
   }
   renderChecklistPreventiva();
@@ -9366,7 +9202,7 @@ function mostrarFormRelatorioPreventiva2(existente) {
 
     <div class="panel">
       <h2>Check-list de verificação*</h2>
-      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pro modelo escolhido, já vem com um ponto de partida de itens comuns (ou os itens padrão configurados em Minha Empresa, se o modelo for "Outro") — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Já vem com os itens mais comuns de equipamento a laser — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
       <div id="rp2-checklist"></div>
       <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistPreventiva2()">+ Adicionar item</button>
       <label style="margin-top:10px;">Observações*</label>
@@ -9530,7 +9366,7 @@ async function selecionarModeloPreventiva2(nome) {
   } else {
     outroWrap.style.display = 'block';
     document.getElementById('rp2-modelo_maquina_outro').value = '';
-    d.checklist = empresaChecklistPadrao().map((item) => ({ item, resposta: '', observacao: '' }));
+    d.checklist = [];
     d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
   }
   renderChecklistPreventiva2();
@@ -9783,9 +9619,8 @@ async function concluirRelatorioPreventiva2() {
     // pra preencher por essa via — nenhum navegador expõe destinatário pro Web Share API, só
     // pro mailto:, que por sua vez não consegue carregar anexo — por isso o e-mail do cliente
     // também entra no corpo da mensagem, pra copiar/colar se o app não preencher sozinho.
-    const tituloTermo = `Termo de Manutenção Preventiva${empresaQualificadorPreventiva() ? ' ' + empresaQualificadorPreventiva() : ''}`;
-    const assunto = `${tituloTermo} - ${relatorio.modelo_maquina || ''} - ${relatorio.empresa || ''}`.trim();
-    const corpo = `Segue o ${tituloTermo} referente ao atendimento realizado.\n\n` +
+    const assunto = `Termo de Manutenção Preventiva Laser - ${relatorio.modelo_maquina || ''} - ${relatorio.empresa || ''}`.trim();
+    const corpo = `Segue o Termo de Manutenção Preventiva Laser referente ao atendimento realizado.\n\n` +
       `Empresa: ${relatorio.empresa || '—'}\n` +
       `Setor: ${relatorio.setor_maquina || '—'}\n` +
       `Modelo: ${relatorio.modelo_maquina || '—'}\n` +
@@ -10579,7 +10414,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -11241,7 +11076,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -11715,7 +11550,7 @@ function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 434, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12008,7 +11843,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12325,7 +12160,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12662,7 +12497,7 @@ function gerarPdfRelatorioLevantamentoTecnico(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12713,215 +12548,6 @@ async function relatorioManutCompleto(i) {
   window._relatoriosManutCache[i] = relatorio;
   return relatorio;
 }
-
-// pedido do usuário: ver a "prévia do relatório" em Minha Empresa, "exatamente como o
-// relatório é em PDF" — cada tipo de relatório tem um formulário/esquema de dados bem
-// diferente dos outros (ver os 12 gerarPdfXXX abaixo), então pra prévia funcionar sem precisar
-// de um relatório de verdade já lançado, cada tipo tem aqui um registro de EXEMPLO (dados
-// fictícios, mas realistas) com exatamente os campos que o respectivo gerador lê — dados do
-// cliente/empresa/logo continuam vindo de window._empresa (ver atualizarPreviaRelatorioMinhaEmpresa),
-// só o "miolo" do relatório (o que seria preenchido pelo técnico/vendedor numa visita de
-// verdade) é que é fixo, igual pra qualquer empresa — é o "relatório padrão" que o usuário
-// pediu pra não poder editar aqui.
-const TIPOS_RELATORIO_PREVIA = [
-  'completo', 'corretiva', 'preventiva', 'preventiva2', 'relatorio_tecnico', 'aceite_entrega',
-  'entrega_teste', 'ficha', 'ciclagem', 'promotor', 'devolutivo', 'levantamento_tecnico',
-];
-const RELATORIO_AMOSTRA = {
-  completo: {
-    tipo: 'completo',
-    empresa: 'Indústria Metalúrgica Alvorada S.A.', contato: 'Roberto Lima Souza', telefone: '(11) 98877-4521',
-    tipo_servico: 'corretiva', tipo_servico_outros: '',
-    marca: 'Pro Marking', equipamento: 'MP5-80P', numero_serie: 'SN-204599',
-    condicao: 'usado', garantia: 'nao', data_fabricacao: '05/2022',
-    acessorios: 'Fonte de alimentação, cabo USB, manual do usuário.',
-    defeito_informado: 'Equipamento apresentou ruído incomum durante a operação.',
-    tecnico_nome: 'Carlos Eduardo Ferreira', tecnico_email: 'carlos.ferreira@nexorconnect.com.br',
-    data_entrada: '14/03/2026', data_conclusao: '15/03/2026',
-    laudo_tecnico: 'Constatado desalinhamento do espelho de marcação, provavelmente causado por vibração excessiva na linha de produção.',
-    servico_realizado: 'Realinhamento do espelho, limpeza da lente de marcação e teste funcional com 20 peças de amostra, todas aprovadas.',
-    pecas: [{ descricao: 'Lente de sacrifício', codigo_pmk: 'PMK-5120', quantidade: '2' }],
-    fotos: [],
-  },
-  ficha: {
-    tipo: 'ficha',
-    campos: [
-      { campo: 'Modelo', valor: 'MP5-80P' },
-      { campo: 'Nº de Série', valor: 'SN-204599' },
-      { campo: 'Tensão de alimentação', valor: '220V / 60Hz' },
-      { campo: 'Ano de fabricação', valor: '2022' },
-    ],
-    condicao: 'usado', tecnico_nome: 'Carlos Eduardo Ferreira', fotos: [],
-  },
-  ciclagem: {
-    tipo: 'ciclagem',
-    empresa: 'Metalúrgica Santa Rita Ltda.', equipamento: 'MP5-80P', data_conclusao: '18/02/2026',
-    mtbf_encontrado: '1.850 ciclos', resultado_ensaio: 'aprovado',
-    ciclos: [
-      { tipo_amostra: 'Peça metálica 50x50mm', quantidade: '500', hora_inicial: '08:00', hora_final: '10:30', qtd_ok: 495, qtd_desvio: 5, descricao_desvio: 'Marcação com baixo contraste em 5 amostras.' },
-      { tipo_amostra: 'Peça metálica 50x50mm', quantidade: '500', hora_inicial: '10:45', hora_final: '13:10', qtd_ok: 500, qtd_desvio: 0, descricao_desvio: '' },
-    ],
-    conclusao_ensaio: 'Equipamento aprovado no ensaio de ciclagem, com índice de desvio dentro do aceitável.',
-    tecnico_nome: 'Carlos Eduardo Ferreira', tecnico_cargo: 'Técnico de Campo', tecnico_setor: 'Assistência Técnica',
-  },
-  preventiva: {
-    tipo: 'preventiva',
-    os_uf: 'SP', os_numero: '0482', os_ano: '2026',
-    data_inicial: '2026-03-10', data_final: '2026-03-10',
-    modelo_maquina: 'Smartbox', numero_serie: 'SN-118820',
-    servico_realizado: 'Manutenção preventiva semestral', tecnico_nome: 'Carlos Eduardo Ferreira',
-    empresa: 'Cliente Exemplo Ltda.', endereco: 'Rua das Indústrias', numero: '450', bairro: 'Distrito Industrial',
-    estado: 'SP', cidade: 'São José dos Campos', cep: '12220-000', setor_maquina: 'Linha de produção 2',
-    checklist: [
-      { item: 'Fonte', resposta: 'sim', observacao: '' },
-      { item: 'CLP', resposta: 'sim', observacao: '' },
-      { item: 'Filtro de linha', resposta: 'nao', observacao: 'Filtro substituído por apresentar desgaste.' },
-      { item: 'Calibração', resposta: 'sim', observacao: '' },
-      { item: 'Sistema de segurança', resposta: 'sim', observacao: '' },
-    ],
-    observacoes_checklist: 'Equipamento em boas condições gerais, apenas o filtro de linha precisou de substituição.',
-    servico_feito: 'Realizada limpeza geral do equipamento, substituição do filtro de linha, calibração do sistema de marcação e verificação dos sistemas de segurança.',
-    observacoes_servico: 'Recomenda-se a próxima manutenção preventiva em 6 meses.',
-    pecas: [{ descricao: 'Filtro de linha', codigo_pmk: 'PMK-3321', quantidade: '1' }],
-    fotos: [{ comentario: 'Equipamento antes do início do serviço.', fotos: [] }, { comentario: 'Fotos adicionais', fotos: [] }],
-    satisfacao_estrelas: 5, satisfacao_comentario: 'Atendimento rápido e técnico muito atencioso.', satisfacao_autoriza: 'sim',
-    assinatura_cliente_nome: 'Mariana Alves Costa', assinatura_cliente_img: null,
-    assinatura_tecnico_nome: 'Carlos Eduardo Ferreira', assinatura_tecnico_img: null,
-    emails_copia: ['mariana.costa@clienteexemplo.com.br'],
-  },
-  preventiva2: {
-    tipo: 'preventiva2',
-    os_uf: 'SP', os_numero: '0497', os_ano: '2026',
-    data_inicial: '2026-03-20', data_final: '2026-03-20',
-    modelo_maquina: 'OEM', numero_serie: 'SN-552310',
-    servico_realizado: 'Manutenção preventiva semestral', tecnico_nome: 'Carlos Eduardo Ferreira',
-    empresa: 'Autopeças Guarulhos Ltda.', endereco: 'Avenida Monteiro Lobato', numero: '2200', bairro: 'Jardim Cumbica',
-    estado: 'SP', cidade: 'Guarulhos', cep: '07180-000', setor_maquina: 'Linha de gravação de chassi',
-    checklist: [
-      { item: 'Fonte', resposta: 'sim', observacao: '' },
-      { item: 'Ressonador', resposta: 'sim', observacao: '' },
-      { item: 'Filtro cooler', resposta: 'nao', observacao: 'Filtro cooler trocado por desgaste excessivo.' },
-      { item: 'Calibração', resposta: 'sim', observacao: '' },
-    ],
-    observacoes_checklist: 'Nenhuma pendência crítica identificada além do filtro substituído.',
-    servico_feito: 'Limpeza geral do equipamento, substituição do filtro cooler, calibração da projeção e teste de marcação.',
-    observacoes_servico: 'Equipamento liberado para operação normal.',
-    pecas: [{ descricao: 'Filtro cooler', codigo_pmk: 'PMK-4410', quantidade: '1' }],
-    fotos: [{ comentario: 'Equipamento antes da manutenção.', fotos: [] }],
-    satisfacao_estrelas: 4, satisfacao_comentario: 'Bom atendimento, dentro do prazo combinado.', satisfacao_autoriza: 'sim',
-    assinatura_cliente_nome: 'João Paulo Martins', assinatura_cliente_img: null,
-    assinatura_tecnico_nome: 'Carlos Eduardo Ferreira', assinatura_tecnico_img: null,
-    emails_copia: ['joao.martins@autopecasguarulhos.com.br'],
-  },
-  corretiva: {
-    tipo: 'corretiva',
-    os_uf: 'SP', os_numero: '0491', os_ano: '2026',
-    data_inicial: '2026-03-15', data_final: '2026-03-15',
-    modelo_maquina: 'MP5-80P', numero_serie: 'SN-204599',
-    servico_realizado: 'Manutenção corretiva', tecnico_nome: 'Carlos Eduardo Ferreira',
-    empresa: 'Indústria Metalúrgica Alvorada S.A.', endereco: 'Avenida dos Metalúrgicos', numero: '980', bairro: 'Vila Industrial',
-    estado: 'SP', cidade: 'Jundiaí', cep: '13208-000', setor_maquina: 'Linha de marcação a laser',
-    defeito_informado: 'Equipamento apresentou ruído incomum durante a operação e parou de marcar as peças corretamente.',
-    acoes_executadas: 'Identificado desalinhamento do espelho de marcação. Realizado realinhamento, limpeza da lente e teste de marcação em 20 peças.',
-    observacoes: 'Equipamento voltou a operar normalmente após o ajuste. Recomendada limpeza periódica da lente.',
-    pecas: [{ descricao: 'Lente de sacrifício', codigo_pmk: 'PMK-5120', quantidade: '2' }],
-    fotos: [{ comentario: 'Espelho de marcação antes do ajuste.', fotos: [] }],
-    satisfacao_estrelas: 4, satisfacao_comentario: 'Problema resolvido, só achei que poderia ter sido mais rápido.', satisfacao_autoriza: 'nao',
-    assinatura_cliente_nome: 'Roberto Lima Souza', assinatura_cliente_img: null,
-    assinatura_tecnico_nome: 'Carlos Eduardo Ferreira', assinatura_tecnico_img: null,
-    emails_copia: ['roberto.souza@alvoradametalurgica.com.br'],
-  },
-  relatorio_tecnico: {
-    tipo: 'relatorio_tecnico',
-    empresa: 'Indústria Metalúrgica Alvorada S.A.', contato: 'Roberto Lima Souza', telefone: '(11) 98877-4521',
-    tipo_servico: ['corretiva', 'analise'], tipo_servico_outros: '',
-    marca: 'Pro Marking', equipamento: 'MP5-80P', numero_serie: 'SN-204599',
-    garantia: 'nao', garantia_obs: '', data_fabricacao: '05/2022',
-    acessorios: 'Fonte de alimentação, cabo USB, manual do usuário.',
-    defeito_informado: 'Equipamento apresentou ruído incomum durante a operação.',
-    tecnico_nome: 'Carlos Eduardo Ferreira', tecnico_email: 'carlos.ferreira@nexorconnect.com.br',
-    data_entrada: '2026-03-14T08:30:00', data_conclusao: '2026-03-15T17:00:00',
-    laudo_tecnico: 'Constatado desalinhamento do espelho de marcação, provavelmente causado por vibração excessiva na linha de produção.',
-    servico_realizado: 'Realinhamento do espelho, limpeza da lente de marcação e teste funcional com 20 peças de amostra, todas aprovadas.',
-    pecas: [{ descricao: 'Lente de sacrifício', codigo_pmk: 'PMK-5120', quantidade: '2' }],
-    observacoes: 'Equipamento devolvido em pleno funcionamento.', fotos: [],
-  },
-  aceite_entrega: {
-    tipo: 'aceite_entrega',
-    os_uf: 'SP', os_numero: '0512', os_ano: '2026',
-    data_inicial: '2026-04-02', data_final: '2026-04-02',
-    modelo_maquina: 'Smartbox', numero_serie: 'SN-331180',
-    servico: 'Instalação e entrega técnica do equipamento', tecnico_nome: 'Carlos Eduardo Ferreira',
-    empresa: 'Confecções Boa Vista Ltda.', setor: 'Expedição',
-    endereco: 'Rua dos Tecidos', numero: '120', bairro: 'Centro', estado: 'SC', cidade: 'Blumenau', cep: '89010-000',
-    contato: 'Fernanda Rocha',
-    checklist: [
-      { item: 'Instalação mecânica', resposta: 'sim', observacao: '' },
-      { item: 'Instalação elétrica', resposta: 'sim', observacao: '' },
-      { item: 'Treinamento operacional', resposta: 'sim', observacao: '' },
-      { item: 'Entrega de documentação', resposta: 'sim', observacao: '' },
-    ],
-    observacoes: 'Equipamento entregue e instalado conforme especificação, cliente treinado na operação básica.',
-    aceite: 'aceito', satisfacao_estrelas: 5, satisfacao_duvidas: 'sim', satisfacao_apto: 'sim',
-    assinatura_cliente_nome: 'Fernanda Rocha', assinatura_cliente_img: null,
-    assinatura_tecnico_nome: 'Carlos Eduardo Ferreira', assinatura_tecnico_img: null,
-    emails_copia: ['fernanda.rocha@boavistaconfeccoes.com.br'],
-  },
-  entrega_teste: {
-    tipo: 'entrega_teste',
-    empresa: 'Gráfica Rápida Express Ltda.', contato: 'Paulo Henrique Souza', email: 'paulo.souza@graficarapida.com.br',
-    equipamento: 'FlyMarker Pro', numero_serie: 'SN-776230',
-    data_entrega: '2026-05-05', data_prevista_devolucao: '2026-05-12', tecnico_nome: 'Carlos Eduardo Ferreira',
-    observacoes: 'Equipamento entregue com case de transporte e cabo de alimentação sobressalente.',
-    assinatura_cliente_nome: 'Paulo Henrique Souza', assinatura_cliente_img: null,
-  },
-  promotor: {
-    tipo: 'promotor',
-    empresa: 'Confecções Boa Vista Ltda.', contato: 'Fernanda Rocha — Gerente de Produção',
-    data_visita: '2026-01-20', promotor: 'Carlos Eduardo Ferreira',
-    motivo_visita: 'Demonstração de equipamento de marcação a laser para substituir o processo manual de etiquetagem.',
-    processo_atual: 'O cliente faz a identificação das peças manualmente, com etiquetas adesivas impressas em outra gráfica.',
-    necessidade_informada: 'Reduzir o tempo de identificação das peças e eliminar o custo recorrente com etiquetas adesivas.',
-    o_que_demonstrar: 'Marcação direta na peça com o equipamento Smartbox, incluindo configuração de texto variável e código de barras.',
-    ponto_importante_demo: 'Mostrar a velocidade de marcação e a legibilidade do código em diferentes materiais usados pelo cliente.',
-    duvidas_preocupacoes: 'Cliente mencionou preocupação com o tempo de parada da linha durante a instalação.',
-    concorrente: 'Está avaliando também uma proposta da concorrente Laser Print Brasil.',
-    o_que_observar: 'Observar se o espaço físico disponível é compatível com o equipamento e se há tomada dedicada próxima à linha.',
-    objetivo_visita: 'Fechar a demonstração com uma proposta comercial formal em até 7 dias.',
-    ponto_principal_observar: 'Viabilidade de instalação sem impacto relevante na produção.',
-  },
-  devolutivo: {
-    tipo: 'devolutivo',
-    empresa: 'Confecções Boa Vista Ltda.', contato: 'Fernanda Rocha',
-    data_visita: '2026-01-20', promotor: 'Carlos Eduardo Ferreira',
-    equipamento_demonstrado: 'Smartbox', resultado_demonstracao: 'aprovado_parcial',
-    feedback_cliente: 'Cliente gostou da velocidade de marcação, mas pediu um orçamento também para automatizar a alimentação das peças na linha.',
-    pontos_positivos: 'Qualidade e legibilidade da marcação, facilidade de configuração do texto variável.',
-    pontos_ajuste: 'Cliente achou o painel de controle um pouco complexo para os operadores atuais.',
-    identificou_oportunidade_adicional: true, tipo_oportunidade: ['automacao'], tipo_oportunidade_outro: '',
-    descricao_oportunidade: 'Cliente quer automatizar a alimentação das peças na esteira antes da estação de marcação, hoje feita manualmente.',
-    valor_agregado: 'Permite ofertar um sistema de automação completo integrado ao equipamento de marcação, aumentando o ticket da venda.',
-    proximos_passos: 'Agendar visita de engenharia (Levantamento Técnico) para dimensionar a automação.',
-    observacoes_finais: 'Cliente tem urgência por conta de um novo contrato de fornecimento que entra em vigor em 2 meses.',
-  },
-  levantamento_tecnico: {
-    tipo: 'levantamento_tecnico',
-    empresa: 'Confecções Boa Vista Ltda.', contato: 'Fernanda Rocha',
-    data_levantamento: '2026-02-03', responsavel_tecnico: 'Carlos Eduardo Ferreira',
-    tempo_ciclo_atual: '18 segundos por peça (alimentação manual)', volume_producao: '1.200 peças/turno',
-    material_peca: 'Peças metálicas estampadas, dimensões médias de 80x50mm',
-    tolerancias_qualidade: 'Marcação deve manter contraste mínimo de 80% e não pode comprometer o revestimento da peça.',
-    automacao_existente: 'Não há automação instalada; alimentação e posicionamento das peças são feitos manualmente por um operador.',
-    integracao_necessaria: 'A automação precisa se integrar à esteira já existente, sem alterar o layout da linha.',
-    espaco_disponivel: '2,5m x 1,8m ao lado da esteira atual', alimentacao_eletrica: '380V trifásico, 15kW disponíveis no painel próximo',
-    requisitos_seguranca: 'Necessário gradil de proteção e cortina de luz na área de movimentação do braço robótico.',
-    escopo_proposto: 'Implantação de um sistema de alimentação automatizado com esteira vibratória e braço robótico para posicionar as peças na estação de marcação.',
-    prazo_decisao: '30 dias', responsavel_decisao: 'Fernanda Rocha — Gerente de Produção',
-    orcamento_sinalizado: 'Entre R$ 80.000 e R$ 120.000', viabilidade_tecnica: 'viavel_com_ressalvas',
-    observacoes_tecnicas: 'Viável, mas é necessário validar a tensão de alimentação disponível no painel antes de orçar o braço robótico.',
-    proximos_passos: 'Elaborar proposta técnica detalhada e agendar validação elétrica com a equipe de manutenção do cliente.',
-  },
-};
 
 // escolhe qual gerarPdfXXX chamar conforme o tipo do relatório — usado tanto pra abrir o PDF
 // numa aba nova quanto pra pegar o Blob dele na hora de encaminhar (e-mail/WhatsApp)
@@ -13349,7 +12975,7 @@ function wCapa(r, logoDataUri, titulo, subtitulo) {
     new docx.Paragraph({
       alignment: docx.AlignmentType.CENTER,
       spacing: { after: DESLOC_BASE },
-      children: [new docx.TextRun({ text: empresaSlogan(), bold: true, color: '96AAC8', size: 18 })],
+      children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
     }),
   ];
 
@@ -13593,7 +13219,7 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(r.condicao === 'novo' ? 'EQUIPAMENTO NOVO' : r.condicao === 'usado' ? 'EQUIPAMENTO USADO' : '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -13812,7 +13438,7 @@ function gerarPdfEnsaioCiclagem(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -14164,7 +13790,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
