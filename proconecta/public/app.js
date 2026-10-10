@@ -1418,8 +1418,9 @@ async function renderMinhaEmpresa() {
           ${TIPOS_RELATORIO_PREVIA.map((t) => `<option value="${t}">${esc(TIPOS_RELATORIO_MANUT_LABEL[t] || t)}</option>`).join('')}
         </select>
       </div>
-      <div id="me-previa-wrap" style="margin-top:12px;">
-        <iframe id="me-previa-frame" style="width:100%; height:70vh; min-height:480px; border:1px solid var(--line,#e5e5e5); border-radius:8px; background:#f5f5f5;"></iframe>
+      <div id="me-previa-wrap" style="margin-top:12px; display:flex; align-items:center; gap:10px;">
+        <button class="btn btn-primary btn-sm" id="me-previa-btn" onclick="abrirPreviaRelatorioMinhaEmpresa()" disabled>Gerando prévia...</button>
+        <span id="me-previa-status" style="font-size:12px; color:var(--gray-500,#888);"></span>
       </div>
     </div>
     <div class="panel">
@@ -1436,13 +1437,23 @@ async function renderMinhaEmpresa() {
 // gera a prévia com os dados AINDA NÃO salvos (os campos digitados no formulário acima, mesmo
 // antes de clicar em "Salvar") — troca window._empresa só durante a geração síncrona do PDF
 // (os helpers empresaNome()/empresaSite()/etc. leem dali) e devolve pro valor original logo em
-// seguida, pra não vazar dado de prévia pro resto do app.
+// seguida, pra não vazar dado de prévia pro resto do app. Pedido do usuário ("não abre"): um
+// <iframe src="blob:...">  não mostra o PDF embutido na maioria dos navegadores de celular (e
+// no WebView do PWA instalado) — só aparece aquele cartão genérico de "abrir arquivo", sem
+// prévia nenhuma. Em vez disso, guarda a URL gerada e abre numa aba nova ao clicar no botão,
+// igual todo outro PDF do sistema já faz (abrirPdfRelatorioManutencao etc.) — esse caminho é o
+// que já funciona de verdade em qualquer navegador/celular.
+window._previaRelatorioUrl = null;
 async function atualizarPreviaRelatorioMinhaEmpresa() {
-  const frame = document.getElementById('me-previa-frame');
   const tipoEl = document.getElementById('me-previa-tipo');
-  if (!frame || !tipoEl) return;
+  const btn = document.getElementById('me-previa-btn');
+  const status = document.getElementById('me-previa-status');
+  if (!tipoEl || !btn) return;
   const amostra = RELATORIO_AMOSTRA[tipoEl.value];
   if (!amostra) return;
+  btn.disabled = true;
+  btn.textContent = 'Gerando prévia...';
+  if (status) status.textContent = '';
   const logoUrl = window._minhaEmpresaLogoNova !== undefined
     ? (window._minhaEmpresaLogoNova || '/logo.png')
     : ((window._empresa && window._empresa.logo_url) || '/logo.png');
@@ -1457,12 +1468,21 @@ async function atualizarPreviaRelatorioMinhaEmpresa() {
   };
   try {
     const logo = await calcularLogoVariantesPara(logoUrl);
-    frame.src = gerarPdfUrlRelatorioManutencao(amostra, logo);
+    window._previaRelatorioUrl = gerarPdfUrlRelatorioManutencao(amostra, logo);
+    btn.textContent = 'Abrir prévia em PDF';
+    btn.disabled = false;
   } catch (e) {
-    mostrarToast('Não deu pra gerar a prévia: ' + e.message);
+    window._previaRelatorioUrl = null;
+    btn.textContent = 'Abrir prévia em PDF';
+    btn.disabled = false;
+    if (status) status.textContent = 'Não deu pra gerar a prévia: ' + e.message;
   } finally {
     window._empresa = empresaOriginal;
   }
+}
+function abrirPreviaRelatorioMinhaEmpresa() {
+  if (!window._previaRelatorioUrl) return;
+  window.open(window._previaRelatorioUrl, '_blank');
 }
 
 // guarda a logo nova (já comprimida) separada do resto do formulário — só vai no corpo do PUT se
