@@ -143,6 +143,18 @@ function sincronizarEmpresaPadrao(data) {
   // textos fixos. Ex nome simples e robusto" (ver empresaSlogan() em app.js). null = usa o
   // texto padrão do sistema ("SIMPLES, ROBUSTO E ACESSÍVEL").
   if (empresa.slogan === undefined) empresa.slogan = null;
+  // pedido do usuário: "No relatório fala relatório laser. Mas se outra empresa não trabalhar
+  // com laser? Checklist precisa ser adaptado a equipamentos que outras empresas passam a
+  // utilizar" — o Termo de Manutenção Preventiva (tipo 'preventiva2') e o check-list padrão de
+  // equipamento "Outro" (ver EQUIPAMENTOS_PREVENTIVA/selecionarModeloPreventiva em app.js) eram
+  // fixos no código pra equipamento a laser da PRO Marking. qualificador_preventiva é a palavra
+  // que aparece depois de "Preventiva" no título (ex: "Laser") — null/vazio = título genérico,
+  // sem palavra nenhuma. checklist_padrao é o ponto de partida do check-list quando o técnico
+  // escolhe um modelo de equipamento fora da lista da PRO Marking (ou de qualquer empresa nova,
+  // já que a lista inteira é específica da PRO Marking) — [] = começa em branco, igual já era.
+  if (empresa.qualificador_preventiva === undefined) empresa.qualificador_preventiva = null;
+  if (empresa.id === 1 && !empresa.qualificador_preventiva) empresa.qualificador_preventiva = 'Laser';
+  if (!Array.isArray(empresa.checklist_padrao)) empresa.checklist_padrao = [];
   // valores padrão que antes eram constante fixa no código (Etapa 5/passo 4) — toda empresa já
   // nasce com o mesmo valor de hoje, só editável a partir de agora pelo administrador/Super Admin.
   if (empresa.valor_bonus_viagem === undefined) empresa.valor_bonus_viagem = 200;

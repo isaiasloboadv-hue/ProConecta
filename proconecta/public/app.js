@@ -191,6 +191,16 @@ function empresaNome() { return (window._empresa && window._empresa.nome) || 'PR
 // fixo no código, igual pra qualquer empresa; agora vem de empresa.slogan (editável em Minha
 // Empresa), com esse texto como valor padrão (preserva o que já existe pra quem não mudar).
 function empresaSlogan() { return (window._empresa && window._empresa.slogan) || 'SIMPLES, ROBUSTO E ACESSÍVEL'; }
+// pedido do usuário: "No relatório fala relatório laser. Mas se outra empresa não trabalhar com
+// laser?" — o título do Termo de Manutenção Preventiva (tipo 'preventiva2') tinha "Laser" fixo
+// no código. Agora vem de empresa.qualificador_preventiva, vazio por padrão (título genérico,
+// sem palavra nenhuma depois de "Preventiva") pra qualquer empresa nova.
+function empresaQualificadorPreventiva() { return (window._empresa && window._empresa.qualificador_preventiva) || ''; }
+// "Checklist precisa ser adaptado a equipamentos que outras empresas passam a utilizar" — ponto
+// de partida do check-list quando o técnico escolhe um modelo de equipamento "Outro" (fora da
+// lista EQUIPAMENTOS_PREVENTIVA, que é toda específica da PRO Marking) — [] por padrão (mesmo
+// comportamento de hoje: começa em branco) até a empresa configurar o seu em Minha Empresa.
+function empresaChecklistPadrao() { return (window._empresa && Array.isArray(window._empresa.checklist_padrao)) ? window._empresa.checklist_padrao : []; }
 function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
 function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || '12 99718-7506'; }
 function empresaTelefone() { return (window._empresa && window._empresa.telefone) || '12 3902-3453'; }
@@ -1417,6 +1427,15 @@ async function renderMinhaEmpresa() {
       <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
     </div>
     <div class="panel">
+      <div class="panel-head">Termo de Manutenção Preventiva</div>
+      <p>Pedido do usuário: "Checklist precisa ser adaptado a equipamentos que outras empresas passam a utilizar" — isso aqui só vale pro equipamento "Outro" no formulário de Preventiva (os modelos específicos da PRO Marking — Smartbox, KT, MP5 etc. — continuam com o check-list próprio deles).</p>
+      <div class="form-grid">
+        <div><label>Qualificador do equipamento (aparece no título, ex: "Laser")</label><input id="me-qualificador-preventiva" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.qualificador_preventiva || '')}" placeholder="deixe em branco pra um título genérico"></div>
+        <div style="grid-column:1/-1;"><label>Check-list padrão pro equipamento "Outro" (um item por linha)</label><textarea id="me-checklist-padrao" rows="4" onblur="atualizarPreviaRelatorioMinhaEmpresa()" placeholder="ex: Limpeza geral&#10;Teste de funcionamento&#10;Verificação elétrica">${esc((e.checklist_padrao || []).join('\n'))}</textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
+    </div>
+    <div class="panel">
       <div class="panel-head">Prévia do relatório</div>
       <p>Escolha um tipo pra ver exatamente como o PDF sai, com a logo e os dados de cima (mesmo antes de salvar).</p>
       <div class="field" style="max-width:320px;">
@@ -1466,6 +1485,9 @@ async function atualizarPreviaRelatorioMinhaEmpresa() {
     : ((window._empresa && window._empresa.logo_url) || '/logo.png');
   const emailsEl = document.getElementById('me-emails');
   const emails = emailsEl ? emailsEl.value.split('\n').map((v) => v.trim()).filter(Boolean) : undefined;
+  const checklistEl = document.getElementById('me-checklist-padrao');
+  const checklistPadrao = checklistEl ? checklistEl.value.split('\n').map((v) => v.trim()).filter(Boolean) : undefined;
+  const qualificadorEl = document.getElementById('me-qualificador-preventiva');
   const empresaOriginal = window._empresa;
   window._empresa = {
     ...(empresaOriginal || {}),
@@ -1475,6 +1497,8 @@ async function atualizarPreviaRelatorioMinhaEmpresa() {
     whatsapp: document.getElementById('me-whatsapp').value.trim(),
     telefone: document.getElementById('me-telefone').value.trim(),
     ...(emails !== undefined ? { emails } : {}),
+    ...(qualificadorEl !== null ? { qualificador_preventiva: qualificadorEl.value.trim() } : {}),
+    ...(checklistPadrao !== undefined ? { checklist_padrao: checklistPadrao } : {}),
     logo_url: logoUrl,
   };
   try {
@@ -1529,6 +1553,8 @@ async function salvarMinhaEmpresa() {
     whatsapp: document.getElementById('me-whatsapp').value.trim(),
     telefone: document.getElementById('me-telefone').value.trim(),
     emails: document.getElementById('me-emails').value.split('\n').map((v) => v.trim()).filter(Boolean),
+    qualificador_preventiva: document.getElementById('me-qualificador-preventiva').value.trim(),
+    checklist_padrao: document.getElementById('me-checklist-padrao').value.split('\n').map((v) => v.trim()).filter(Boolean),
     valor_bonus_viagem: Number(document.getElementById('me-valor-bonus').value),
     limite_viagens_bonus_mes: Number(document.getElementById('me-limite-bonus').value),
   };
@@ -6896,7 +6922,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
       doc.text(resto, margem + 30, yTopo + 15);
     }
     doc.setFont('times', 'bolditalic'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.navy);
-    doc.text('Termo de Manutenção Preventiva Laser', pageW - margem, yTopo + 9, { align: 'right' });
+    doc.text(`Termo de Manutenção Preventiva${empresaQualificadorPreventiva() ? ' ' + empresaQualificadorPreventiva() : ''}`, pageW - margem, yTopo + 9, { align: 'right' });
     doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text(limparPdf(`O.S. Nº ${r.os_uf} / ${r.os_numero} / ${r.os_ano}`), pageW - margem, yTopo + 23, { align: 'right' });
     y = yTopo + 32;
@@ -7066,7 +7092,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
   doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
-  doc.text('PREVENTIVA LASER', pageW / 2, 438, { align: 'center' });
+  doc.text(`PREVENTIVA${empresaQualificadorPreventiva() ? ' ' + empresaQualificadorPreventiva().toUpperCase() : ''}`, pageW / 2, 438, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
@@ -8864,7 +8890,7 @@ function mostrarFormRelatorioPreventiva(existente) {
 
     <div class="panel">
       <h2>Check-list de verificação*</h2>
-      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Já vem com os itens mais comuns de equipamento a laser — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pro modelo escolhido, já vem com um ponto de partida de itens comuns (ou os itens padrão configurados em Minha Empresa, se o modelo for "Outro") — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
       <div id="rp-checklist"></div>
       <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistPreventiva()">+ Adicionar item</button>
       <label style="margin-top:10px;">Observações*</label>
@@ -9027,7 +9053,7 @@ async function selecionarModeloPreventiva(nome) {
   } else {
     outroWrap.style.display = 'block';
     document.getElementById('rp-modelo_maquina_outro').value = '';
-    d.checklist = [];
+    d.checklist = empresaChecklistPadrao().map((item) => ({ item, resposta: '', observacao: '' }));
     d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
   }
   renderChecklistPreventiva();
@@ -9340,7 +9366,7 @@ function mostrarFormRelatorioPreventiva2(existente) {
 
     <div class="panel">
       <h2>Check-list de verificação*</h2>
-      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Já vem com os itens mais comuns de equipamento a laser — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-10px;">Pro modelo escolhido, já vem com um ponto de partida de itens comuns (ou os itens padrão configurados em Minha Empresa, se o modelo for "Outro") — apague, renomeie ou adicione itens pra deixar de acordo com o equipamento atendido. Marque Sim, Não ou N/A para cada item. Use a observação para detalhar qualquer irregularidade.</p>
       <div id="rp2-checklist"></div>
       <button class="btn btn-ghost btn-sm" onclick="adicionarItemChecklistPreventiva2()">+ Adicionar item</button>
       <label style="margin-top:10px;">Observações*</label>
@@ -9504,7 +9530,7 @@ async function selecionarModeloPreventiva2(nome) {
   } else {
     outroWrap.style.display = 'block';
     document.getElementById('rp2-modelo_maquina_outro').value = '';
-    d.checklist = [];
+    d.checklist = empresaChecklistPadrao().map((item) => ({ item, resposta: '', observacao: '' }));
     d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
   }
   renderChecklistPreventiva2();
@@ -9757,8 +9783,9 @@ async function concluirRelatorioPreventiva2() {
     // pra preencher por essa via — nenhum navegador expõe destinatário pro Web Share API, só
     // pro mailto:, que por sua vez não consegue carregar anexo — por isso o e-mail do cliente
     // também entra no corpo da mensagem, pra copiar/colar se o app não preencher sozinho.
-    const assunto = `Termo de Manutenção Preventiva Laser - ${relatorio.modelo_maquina || ''} - ${relatorio.empresa || ''}`.trim();
-    const corpo = `Segue o Termo de Manutenção Preventiva Laser referente ao atendimento realizado.\n\n` +
+    const tituloTermo = `Termo de Manutenção Preventiva${empresaQualificadorPreventiva() ? ' ' + empresaQualificadorPreventiva() : ''}`;
+    const assunto = `${tituloTermo} - ${relatorio.modelo_maquina || ''} - ${relatorio.empresa || ''}`.trim();
+    const corpo = `Segue o ${tituloTermo} referente ao atendimento realizado.\n\n` +
       `Empresa: ${relatorio.empresa || '—'}\n` +
       `Setor: ${relatorio.setor_maquina || '—'}\n` +
       `Modelo: ${relatorio.modelo_maquina || '—'}\n` +

@@ -1011,9 +1011,9 @@ function usuarioPublico(u) {
 // de qual empresa é a sessão atual (super_admin não tem empresa, vem null).
 async function empresaResumo(empresa) {
   if (!empresa) return null;
-  const { id, nome, slogan, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes } = empresa;
+  const { id, nome, slogan, qualificador_preventiva, checklist_padrao, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes } = empresa;
   return {
-    id, nome, slogan, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio,
+    id, nome, slogan, qualificador_preventiva, checklist_padrao, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio,
     logo_url: await hidratarFotosProfundo(logo_url),
     valor_bonus_viagem: valorBonusViagem(empresa), limite_viagens_bonus_mes: limiteViagensBonusMes(empresa),
   };
@@ -1229,6 +1229,12 @@ rota('PUT', /^\/api\/empresa$/, async (req, res) => {
     // slogan da capa dos relatórios — pedido do usuário: "o que precisa ser configurado são os
     // textos fixos. Ex nome simples e robusto" (ver empresaSlogan() em app.js).
     slogan: body.slogan !== undefined ? String(body.slogan).trim() || null : empresa.slogan,
+    // qualificador do título do Termo de Manutenção Preventiva (ex: "Laser") e check-list
+    // padrão pro equipamento "Outro" — pedido do usuário: "checklist precisa ser adaptado a
+    // equipamentos que outras empresas passam a utilizar" (ver empresaQualificadorPreventiva()/
+    // empresaChecklistPadrao() em app.js).
+    qualificador_preventiva: body.qualificador_preventiva !== undefined ? String(body.qualificador_preventiva).trim() || null : empresa.qualificador_preventiva,
+    checklist_padrao: Array.isArray(body.checklist_padrao) ? body.checklist_padrao : empresa.checklist_padrao,
     site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
     emails: Array.isArray(body.emails) ? body.emails : [],
     cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,
