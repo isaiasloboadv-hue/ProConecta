@@ -1411,13 +1411,14 @@ async function renderMinhaEmpresa() {
     </div>
     <div class="panel">
       <div class="panel-head">Prévia do relatório</div>
-      <p>Escolha um tipo pra ver exatamente como o PDF sai, com a logo e os dados de cima (mesmo antes de salvar).</p>
+      <p>Escolha um tipo pra ver exatamente como o PDF sai. Edite os campos abaixo pra ver o relatório com o seu próprio texto em vez do exemplo.</p>
       <div class="field" style="max-width:320px;">
         <label>Tipo de relatório</label>
-        <select id="me-previa-tipo" onchange="atualizarPreviaRelatorioMinhaEmpresa()">
+        <select id="me-previa-tipo" onchange="trocarTipoPreviaRelatorio()">
           ${TIPOS_RELATORIO_PREVIA.map((t) => `<option value="${t}">${esc(TIPOS_RELATORIO_MANUT_LABEL[t] || t)}</option>`).join('')}
         </select>
       </div>
+      <div id="me-previa-campos" class="form-grid" style="margin-top:14px;"></div>
       <div id="me-previa-wrap" style="margin-top:12px; display:flex; align-items:center; gap:10px;">
         <button class="btn btn-primary btn-sm" id="me-previa-btn" onclick="abrirPreviaRelatorioMinhaEmpresa()" disabled>Gerando prévia...</button>
         <span id="me-previa-status" style="font-size:12px; color:var(--gray-500,#888);"></span>
@@ -1431,6 +1432,67 @@ async function renderMinhaEmpresa() {
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
     </div>`;
+  renderCamposPreviaRelatorio();
+  atualizarPreviaRelatorioMinhaEmpresa();
+}
+
+// pedido do usuário: "No relatório na verdade" (em resposta a "é algo fixo tipo a capa ou é o
+// conteúdo do relatório em si?") — não é só logo/nome/contato: o texto do CONTEÚDO do relatório
+// (defeito, serviço realizado, laudo técnico, observações etc.) também precisa dar pra editar
+// na prévia, pra testar como fica com o texto de verdade em vez do exemplo. Guarda as edições
+// por tipo, só nesta sessão do navegador (não é um "relatório de verdade" salvo em lugar nenhum
+// — é só o texto usado pra gerar a prévia). Campos estruturais (checklist, peças, fotos,
+// assinaturas, listas de opção) continuam fixos: são tabelas/opções, não "texto escrito", e
+// editar isso exigiria uma tela própria por tipo — fora do que foi pedido aqui.
+window._relatorioAmostraEditada = {};
+const CAMPOS_PREVIA_NAO_EDITAVEIS = new Set([
+  'tipo', 'checklist', 'pecas', 'fotos', 'ciclos', 'campos', 'tipo_oportunidade',
+  'emails_copia', 'assinatura_cliente_img', 'assinatura_tecnico_img',
+]);
+function valorAtualPreviaRelatorio(tipo) {
+  return { ...(RELATORIO_AMOSTRA[tipo] || {}), ...(window._relatorioAmostraEditada[tipo] || {}) };
+}
+function humanizarCampoRelatorio(chave) {
+  const txt = chave.replace(/_/g, ' ');
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+function renderCamposPreviaRelatorio() {
+  const wrap = document.getElementById('me-previa-campos');
+  const tipoEl = document.getElementById('me-previa-tipo');
+  if (!wrap || !tipoEl) return;
+  const dados = valorAtualPreviaRelatorio(tipoEl.value);
+  const original = RELATORIO_AMOSTRA[tipoEl.value] || {};
+  wrap.innerHTML = Object.entries(dados)
+    .filter(([campo, valor]) => !CAMPOS_PREVIA_NAO_EDITAVEIS.has(campo) && !Array.isArray(valor) && (valor === null || typeof valor !== 'object'))
+    .map(([campo, valor]) => {
+      const label = humanizarCampoRelatorio(campo);
+      if (typeof valor === 'boolean') {
+        return `<div><label>${esc(label)}</label><select onchange="editarCampoPreviaRelatorio('${campo}', this.value === 'sim')">
+          <option value="sim" ${valor ? 'selected' : ''}>Sim</option>
+          <option value="nao" ${!valor ? 'selected' : ''}>Não</option>
+        </select></div>`;
+      }
+      const texto = valor === null || valor === undefined ? '' : String(valor);
+      // decide textarea/input pelo tamanho do texto ORIGINAL do exemplo (não do que o
+      // administrador já editou) — senão o campo "encolhe" de textarea pra input de uma hora
+      // pra outra só porque a edição ficou mais curta que o texto de exemplo.
+      const textoOriginal = original[campo] === null || original[campo] === undefined ? '' : String(original[campo]);
+      if (textoOriginal.length > 45) {
+        return `<div style="grid-column:1/-1;"><label>${esc(label)}</label><textarea rows="2" onblur="editarCampoPreviaRelatorio('${campo}', this.value)">${esc(texto)}</textarea></div>`;
+      }
+      return `<div><label>${esc(label)}</label><input value="${esc(texto)}" onblur="editarCampoPreviaRelatorio('${campo}', this.value)"></div>`;
+    }).join('');
+}
+function editarCampoPreviaRelatorio(campo, valor) {
+  const tipoEl = document.getElementById('me-previa-tipo');
+  if (!tipoEl) return;
+  const tipo = tipoEl.value;
+  if (!window._relatorioAmostraEditada[tipo]) window._relatorioAmostraEditada[tipo] = {};
+  window._relatorioAmostraEditada[tipo][campo] = valor;
+  atualizarPreviaRelatorioMinhaEmpresa();
+}
+function trocarTipoPreviaRelatorio() {
+  renderCamposPreviaRelatorio();
   atualizarPreviaRelatorioMinhaEmpresa();
 }
 
@@ -1449,8 +1511,8 @@ async function atualizarPreviaRelatorioMinhaEmpresa() {
   const btn = document.getElementById('me-previa-btn');
   const status = document.getElementById('me-previa-status');
   if (!tipoEl || !btn) return;
-  const amostra = RELATORIO_AMOSTRA[tipoEl.value];
-  if (!amostra) return;
+  const amostra = valorAtualPreviaRelatorio(tipoEl.value);
+  if (!amostra || !Object.keys(amostra).length) return;
   btn.disabled = true;
   btn.textContent = 'Gerando prévia...';
   if (status) status.textContent = '';
