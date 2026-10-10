@@ -1011,9 +1011,9 @@ function usuarioPublico(u) {
 // de qual empresa é a sessão atual (super_admin não tem empresa, vem null).
 async function empresaResumo(empresa) {
   if (!empresa) return null;
-  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes } = empresa;
+  const { id, nome, slogan, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes } = empresa;
   return {
-    id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio,
+    id, nome, slogan, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio,
     logo_url: await hidratarFotosProfundo(logo_url),
     valor_bonus_viagem: valorBonusViagem(empresa), limite_viagens_bonus_mes: limiteViagensBonusMes(empresa),
   };
@@ -1226,6 +1226,9 @@ rota('PUT', /^\/api\/empresa$/, async (req, res) => {
   if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
   Object.assign(empresa, {
     nome: String(body.nome).trim(),
+    // slogan da capa dos relatórios — pedido do usuário: "o que precisa ser configurado são os
+    // textos fixos. Ex nome simples e robusto" (ver empresaSlogan() em app.js).
+    slogan: body.slogan !== undefined ? String(body.slogan).trim() || null : empresa.slogan,
     site: body.site || '', whatsapp: body.whatsapp || '', telefone: body.telefone || '',
     emails: Array.isArray(body.emails) ? body.emails : [],
     cor_primaria: body.cor_primaria || empresa.cor_primaria, cor_secundaria: body.cor_secundaria || empresa.cor_secundaria,

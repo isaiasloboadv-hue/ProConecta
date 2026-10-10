@@ -139,6 +139,10 @@ function sincronizarEmpresaPadrao(data) {
   // da plataforma por engano. Só preenche se ainda estiver vazio — nunca sobrescreve um upload que
   // o admin já tenha feito em "Minha Empresa" — roda em todo boot, idempotente.
   if (empresa.id === 1 && !empresa.logo_url) empresa.logo_url = '/img/logo-pro-marking.png';
+  // slogan da capa dos relatórios — pedido do usuário: "o que precisa ser configurado são os
+  // textos fixos. Ex nome simples e robusto" (ver empresaSlogan() em app.js). null = usa o
+  // texto padrão do sistema ("SIMPLES, ROBUSTO E ACESSÍVEL").
+  if (empresa.slogan === undefined) empresa.slogan = null;
   // valores padrão que antes eram constante fixa no código (Etapa 5/passo 4) — toda empresa já
   // nasce com o mesmo valor de hoje, só editável a partir de agora pelo administrador/Super Admin.
   if (empresa.valor_bonus_viagem === undefined) empresa.valor_bonus_viagem = 200;

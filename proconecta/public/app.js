@@ -186,6 +186,11 @@ function aplicarMarcaNaTela() {
   _logoVariantesPromise = null;
 }
 function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
+// pedido do usuário: "o que precisa ser configurado são os textos fixos. Ex nome simples e
+// robusto" — o slogan da capa dos relatórios ("SIMPLES, ROBUSTO E ACESSÍVEL") era um texto
+// fixo no código, igual pra qualquer empresa; agora vem de empresa.slogan (editável em Minha
+// Empresa), com esse texto como valor padrão (preserva o que já existe pra quem não mudar).
+function empresaSlogan() { return (window._empresa && window._empresa.slogan) || 'SIMPLES, ROBUSTO E ACESSÍVEL'; }
 function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
 function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || '12 99718-7506'; }
 function empresaTelefone() { return (window._empresa && window._empresa.telefone) || '12 3902-3453'; }
@@ -1373,20 +1378,20 @@ async function salvarTerminologiaPlataforma(empresaId) {
 
 // ---------- Minha Empresa (Etapa 5 do briefing white label) ----------
 // pedido do usuário: "no menu minha empresa quero que seja o menu de coração do logo e layout
-// dos relatórios [...] tem um visual de um relatório como exemplo e o administrador consegue
-// editar os campos [...] o que está escrito [vira] um relatório padrão pra todas as empresas,
-// mas cada uma possa editar o que está escrito pra cada uma" — a tela virou "Configuração do
-// Relatório": o administrador edita só os dados PRÓPRIOS da empresa que entram nos relatórios
-// (logo, nome, site, WhatsApp, telefone — o layout/estrutura do relatório em si é padrão, igual
-// pra todo mundo, não é editável aqui) e escolhe um tipo de relatório numa lista suspensa pra
-// ver a prévia exatamente como o PDF de verdade sai, com esses dados aplicados. Os campos de
-// cor foram removidos daqui porque não tinham efeito nenhum (não eram usados em lugar nenhum do
-// sistema — só guardados sem uso).
+// dos relatórios" — a tela virou "Configuração do Relatório". IMPORTANTE (depois de duas
+// correções do usuário): o que é editável aqui são só os TEXTOS FIXOS que aparecem em TODO
+// relatório, de qualquer empresa — logo, nome, site, WhatsApp, telefone, e-mails de contato
+// (usados na página de contato) e o slogan da capa ("SIMPLES, ROBUSTO E ACESSÍVEL"). O
+// CONTEÚDO do relatório em si (defeito, serviço realizado, checklist etc.) NÃO é editável aqui
+// — "é o que já é preenchido na hora de fazer o relatório, não faz sentido" configurar isso
+// (quem preenche é o técnico/vendedor, na hora, pra cada atendimento real). O layout/estrutura
+// também é padrão, igual pra todo mundo. Os campos de cor foram removidos porque não tinham
+// efeito nenhum (não eram usados em lugar nenhum do sistema).
 async function renderMinhaEmpresa() {
   const e = USER.empresa || {};
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Minha Empresa</h1><p>Configuração do relatório: logo e dados de contato que aparecem nos relatórios/PDFs gerados pelo sistema. O layout em si é padrão pra todas as empresas — só esses dados mudam.</p></div>
+    <div class="page-head"><h1>Minha Empresa</h1><p>Configuração do relatório: logo, contato e textos fixos que aparecem em todo relatório/PDF gerado pelo sistema. O conteúdo de cada relatório (preenchido na hora do atendimento) e o layout em si são padrão — só esses dados mudam.</p></div>
     <div class="panel">
       <div class="panel-head">Logo e dados do relatório</div>
       <div class="form-grid">
@@ -1403,22 +1408,23 @@ async function renderMinhaEmpresa() {
           </div>
         </div>
         <div><label>Nome da empresa*</label><input id="me-nome" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.nome || '')}"></div>
+        <div><label>Slogan da capa</label><input id="me-slogan" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.slogan || 'SIMPLES, ROBUSTO E ACESSÍVEL')}"></div>
         <div><label>Site</label><input id="me-site" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.site || '')}" placeholder="empresa.com.br"></div>
         <div><label>WhatsApp</label><input id="me-whatsapp" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.whatsapp || '')}"></div>
         <div><label>Telefone</label><input id="me-telefone" onblur="atualizarPreviaRelatorioMinhaEmpresa()" value="${esc(e.telefone || '')}"></div>
+        <div style="grid-column:1/-1;"><label>E-mails de contato (página final do relatório)</label><textarea id="me-emails" rows="2" onblur="atualizarPreviaRelatorioMinhaEmpresa()" placeholder="um por linha, ex: suporte@empresa.com.br">${esc((e.emails || []).join('\n'))}</textarea></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
     </div>
     <div class="panel">
       <div class="panel-head">Prévia do relatório</div>
-      <p>Escolha um tipo pra ver exatamente como o PDF sai. Edite os campos abaixo pra ver o relatório com o seu próprio texto em vez do exemplo.</p>
+      <p>Escolha um tipo pra ver exatamente como o PDF sai, com a logo e os dados de cima (mesmo antes de salvar).</p>
       <div class="field" style="max-width:320px;">
         <label>Tipo de relatório</label>
-        <select id="me-previa-tipo" onchange="trocarTipoPreviaRelatorio()">
+        <select id="me-previa-tipo" onchange="atualizarPreviaRelatorioMinhaEmpresa()">
           ${TIPOS_RELATORIO_PREVIA.map((t) => `<option value="${t}">${esc(TIPOS_RELATORIO_MANUT_LABEL[t] || t)}</option>`).join('')}
         </select>
       </div>
-      <div id="me-previa-campos" class="form-grid" style="margin-top:14px;"></div>
       <div id="me-previa-wrap" style="margin-top:12px; display:flex; align-items:center; gap:10px;">
         <button class="btn btn-primary btn-sm" id="me-previa-btn" onclick="abrirPreviaRelatorioMinhaEmpresa()" disabled>Gerando prévia...</button>
         <span id="me-previa-status" style="font-size:12px; color:var(--gray-500,#888);"></span>
@@ -1432,67 +1438,6 @@ async function renderMinhaEmpresa() {
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
     </div>`;
-  renderCamposPreviaRelatorio();
-  atualizarPreviaRelatorioMinhaEmpresa();
-}
-
-// pedido do usuário: "No relatório na verdade" (em resposta a "é algo fixo tipo a capa ou é o
-// conteúdo do relatório em si?") — não é só logo/nome/contato: o texto do CONTEÚDO do relatório
-// (defeito, serviço realizado, laudo técnico, observações etc.) também precisa dar pra editar
-// na prévia, pra testar como fica com o texto de verdade em vez do exemplo. Guarda as edições
-// por tipo, só nesta sessão do navegador (não é um "relatório de verdade" salvo em lugar nenhum
-// — é só o texto usado pra gerar a prévia). Campos estruturais (checklist, peças, fotos,
-// assinaturas, listas de opção) continuam fixos: são tabelas/opções, não "texto escrito", e
-// editar isso exigiria uma tela própria por tipo — fora do que foi pedido aqui.
-window._relatorioAmostraEditada = {};
-const CAMPOS_PREVIA_NAO_EDITAVEIS = new Set([
-  'tipo', 'checklist', 'pecas', 'fotos', 'ciclos', 'campos', 'tipo_oportunidade',
-  'emails_copia', 'assinatura_cliente_img', 'assinatura_tecnico_img',
-]);
-function valorAtualPreviaRelatorio(tipo) {
-  return { ...(RELATORIO_AMOSTRA[tipo] || {}), ...(window._relatorioAmostraEditada[tipo] || {}) };
-}
-function humanizarCampoRelatorio(chave) {
-  const txt = chave.replace(/_/g, ' ');
-  return txt.charAt(0).toUpperCase() + txt.slice(1);
-}
-function renderCamposPreviaRelatorio() {
-  const wrap = document.getElementById('me-previa-campos');
-  const tipoEl = document.getElementById('me-previa-tipo');
-  if (!wrap || !tipoEl) return;
-  const dados = valorAtualPreviaRelatorio(tipoEl.value);
-  const original = RELATORIO_AMOSTRA[tipoEl.value] || {};
-  wrap.innerHTML = Object.entries(dados)
-    .filter(([campo, valor]) => !CAMPOS_PREVIA_NAO_EDITAVEIS.has(campo) && !Array.isArray(valor) && (valor === null || typeof valor !== 'object'))
-    .map(([campo, valor]) => {
-      const label = humanizarCampoRelatorio(campo);
-      if (typeof valor === 'boolean') {
-        return `<div><label>${esc(label)}</label><select onchange="editarCampoPreviaRelatorio('${campo}', this.value === 'sim')">
-          <option value="sim" ${valor ? 'selected' : ''}>Sim</option>
-          <option value="nao" ${!valor ? 'selected' : ''}>Não</option>
-        </select></div>`;
-      }
-      const texto = valor === null || valor === undefined ? '' : String(valor);
-      // decide textarea/input pelo tamanho do texto ORIGINAL do exemplo (não do que o
-      // administrador já editou) — senão o campo "encolhe" de textarea pra input de uma hora
-      // pra outra só porque a edição ficou mais curta que o texto de exemplo.
-      const textoOriginal = original[campo] === null || original[campo] === undefined ? '' : String(original[campo]);
-      if (textoOriginal.length > 45) {
-        return `<div style="grid-column:1/-1;"><label>${esc(label)}</label><textarea rows="2" onblur="editarCampoPreviaRelatorio('${campo}', this.value)">${esc(texto)}</textarea></div>`;
-      }
-      return `<div><label>${esc(label)}</label><input value="${esc(texto)}" onblur="editarCampoPreviaRelatorio('${campo}', this.value)"></div>`;
-    }).join('');
-}
-function editarCampoPreviaRelatorio(campo, valor) {
-  const tipoEl = document.getElementById('me-previa-tipo');
-  if (!tipoEl) return;
-  const tipo = tipoEl.value;
-  if (!window._relatorioAmostraEditada[tipo]) window._relatorioAmostraEditada[tipo] = {};
-  window._relatorioAmostraEditada[tipo][campo] = valor;
-  atualizarPreviaRelatorioMinhaEmpresa();
-}
-function trocarTipoPreviaRelatorio() {
-  renderCamposPreviaRelatorio();
   atualizarPreviaRelatorioMinhaEmpresa();
 }
 
@@ -1511,21 +1456,25 @@ async function atualizarPreviaRelatorioMinhaEmpresa() {
   const btn = document.getElementById('me-previa-btn');
   const status = document.getElementById('me-previa-status');
   if (!tipoEl || !btn) return;
-  const amostra = valorAtualPreviaRelatorio(tipoEl.value);
-  if (!amostra || !Object.keys(amostra).length) return;
+  const amostra = RELATORIO_AMOSTRA[tipoEl.value];
+  if (!amostra) return;
   btn.disabled = true;
   btn.textContent = 'Gerando prévia...';
   if (status) status.textContent = '';
   const logoUrl = window._minhaEmpresaLogoNova !== undefined
     ? (window._minhaEmpresaLogoNova || '/logo.png')
     : ((window._empresa && window._empresa.logo_url) || '/logo.png');
+  const emailsEl = document.getElementById('me-emails');
+  const emails = emailsEl ? emailsEl.value.split('\n').map((v) => v.trim()).filter(Boolean) : undefined;
   const empresaOriginal = window._empresa;
   window._empresa = {
     ...(empresaOriginal || {}),
     nome: document.getElementById('me-nome').value.trim() || empresaNome(),
+    slogan: document.getElementById('me-slogan').value.trim(),
     site: document.getElementById('me-site').value.trim(),
     whatsapp: document.getElementById('me-whatsapp').value.trim(),
     telefone: document.getElementById('me-telefone').value.trim(),
+    ...(emails !== undefined ? { emails } : {}),
     logo_url: logoUrl,
   };
   try {
@@ -1575,9 +1524,11 @@ async function salvarMinhaEmpresa() {
   if (!nome) return mostrarToast('Informe o nome da empresa.');
   const body = {
     nome,
+    slogan: document.getElementById('me-slogan').value.trim(),
     site: document.getElementById('me-site').value.trim(),
     whatsapp: document.getElementById('me-whatsapp').value.trim(),
     telefone: document.getElementById('me-telefone').value.trim(),
+    emails: document.getElementById('me-emails').value.split('\n').map((v) => v.trim()).filter(Boolean),
     valor_bonus_viagem: Number(document.getElementById('me-valor-bonus').value),
     limite_viagens_bonus_mes: Number(document.getElementById('me-limite-bonus').value),
   };
@@ -4794,7 +4745,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(item.cliente_nome).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -5044,7 +4995,7 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(a.numero_os) || '—'}`, pageW / 2, 466, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -6728,7 +6679,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -7120,7 +7071,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo — Termo de Manutenção Preventiva (layout clonado do modelo de referência) =====
   cabecalhoAtual = 'termo';
@@ -7180,7 +7131,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.text('RELATÓRIO TÉCNICO', pageW / 2, pageH / 2 - 10, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, pageH / 2 + 18, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo — Relatório Técnico =====
   doc.addPage(); y = margem; cabecalho();
@@ -7413,7 +7364,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -10601,7 +10552,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -11263,7 +11214,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -11737,7 +11688,7 @@ function gerarPdfRelatorioEntregaTeste(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 434, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12030,7 +11981,7 @@ function gerarPdfRelatorioPromotor(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12347,7 +12298,7 @@ function gerarPdfRelatorioDevolutivo(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -12684,7 +12635,7 @@ function gerarPdfRelatorioLevantamentoTecnico(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 460, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -13371,7 +13322,7 @@ function wCapa(r, logoDataUri, titulo, subtitulo) {
     new docx.Paragraph({
       alignment: docx.AlignmentType.CENTER,
       spacing: { after: DESLOC_BASE },
-      children: [new docx.TextRun({ text: 'SIMPLES, ROBUSTO E ACESSÍVEL', bold: true, color: '96AAC8', size: 18 })],
+      children: [new docx.TextRun({ text: empresaSlogan(), bold: true, color: '96AAC8', size: 18 })],
     }),
   ];
 
@@ -13615,7 +13566,7 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(r.condicao === 'novo' ? 'EQUIPAMENTO NOVO' : r.condicao === 'usado' ? 'EQUIPAMENTO USADO' : '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -13834,7 +13785,7 @@ function gerarPdfEnsaioCiclagem(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
@@ -14186,7 +14137,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
   doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  doc.text(empresaSlogan(), pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
   doc.addPage(); y = margem; cabecalho();
