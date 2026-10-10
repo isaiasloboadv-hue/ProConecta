@@ -1027,6 +1027,17 @@ async function empresaResumo(empresa) {
 function valorBonusViagem(empresa) { return (empresa && empresa.valor_bonus_viagem) ?? VALOR_BONUS_VIAGEM; }
 function limiteViagensBonusMes(empresa) { return (empresa && empresa.limite_viagens_bonus_mes) ?? LIMITE_VIAGENS_BONUS_MES; }
 
+// Perfil/Segmento (Etapa 8): tipos_os_ativos/tipos_relatorio_ativos vazios ou ausentes = "todos" —
+// nunca ler o campo bruto direto, sempre por aqui, pra garantir que nenhuma empresa (nova ou já
+// migrada) perca opção que já tinha por um registro incompleto.
+function tiposOsAtivos(empresa) {
+  return (empresa && Array.isArray(empresa.tipos_os_ativos) && empresa.tipos_os_ativos.length) ? empresa.tipos_os_ativos : db.TIPOS_OS_DISPONIVEIS;
+}
+function tiposRelatorioAtivos(empresa) {
+  return (empresa && Array.isArray(empresa.tipos_relatorio_ativos) && empresa.tipos_relatorio_ativos.length) ? empresa.tipos_relatorio_ativos : db.TIPOS_RELATORIO_DISPONIVEIS;
+}
+function escalaAtiva(empresa) { return !empresa || empresa.escala_ativa !== false; }
+
 // extrai o 1º rótulo do host (ex.: "promarking" de "promarking.proconecta.app:3000") pra servir de
 // candidato a subdomínio. Exige pelo menos 3 partes (sub.domínio.tld) — domínio "nu", localhost e IP
 // nunca contam, pra nunca confundir a instalação raiz com um subdomínio de empresa.
@@ -1199,6 +1210,9 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
     empresa: await empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
+    tipos_os_ativos: tiposOsAtivos(empresaDoUsuario),
+    tipos_relatorio_ativos: tiposRelatorioAtivos(empresaDoUsuario),
+    escala_ativa: escalaAtiva(empresaDoUsuario),
   } });
 });
 
@@ -1264,6 +1278,9 @@ rota('GET', /^\/api\/me$/, async (req, res) => {
     empresa: await empresaResumo(empresaDoUsuario),
     modulos_ativos: (empresaDoUsuario && empresaDoUsuario.modulos_ativos) || [],
     terminologia: (empresaDoUsuario && empresaDoUsuario.terminologia) || {},
+    tipos_os_ativos: tiposOsAtivos(empresaDoUsuario),
+    tipos_relatorio_ativos: tiposRelatorioAtivos(empresaDoUsuario),
+    escala_ativa: escalaAtiva(empresaDoUsuario),
   } });
 });
 
@@ -6773,6 +6790,14 @@ rota('GET', /^\/api\/plataforma\/versoes$/, async (req, res) => {
   enviarJSON(res, 200, { versoes: data.versoes });
 });
 
+// GET /api/plataforma/perfis — catálogo de perfil/segmento (Etapa 8), usado no cadastro de
+// empresa nova (atalho de preenchimento) e na tela de edição do Super Admin.
+rota('GET', /^\/api\/plataforma\/perfis$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  enviarJSON(res, 200, { perfis: db.PERFIS_DISPONIVEIS, tipos_os: db.TIPOS_OS_DISPONIVEIS, tipos_relatorio: db.TIPOS_RELATORIO_DISPONIVEIS });
+});
+
 // GET /api/plataforma/empresas — todas as empresas cadastradas na plataforma, cada uma já com a
 // lista de administradores (pra o painel saber se a empresa ainda não tem ninguém pra logar).
 rota('GET', /^\/api\/plataforma\/empresas$/, async (req, res) => {
@@ -6805,6 +6830,13 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
   if (subdominio && data.empresas.some((e) => e.subdominio === subdominio)) {
     return enviarJSON(res, 400, { erro: 'Esse subdomínio já está em uso por outra empresa.' });
   }
+  // Perfil/Segmento (Etapa 8): atalho de preenchimento — perfil ausente/não reconhecido = nenhum
+  // atalho aplicado (empresa nasce sem restrição nenhuma, igual ao comportamento de antes dessa
+  // etapa). Segmento ausente/não pertencente ao perfil escolhido cai em "generico".
+  const perfilEscolhido = db.CHAVES_PERFIS.includes(body.perfil) ? body.perfil : null;
+  const perfilCatalogo = perfilEscolhido ? db.PERFIS_DISPONIVEIS.find((p) => p.chave === perfilEscolhido) : null;
+  const segmentoEscolhido = perfilCatalogo && perfilCatalogo.segmentos.some((s) => s.chave === body.segmento) ? body.segmento : (perfilCatalogo ? 'generico' : null);
+  const preset = db.presetPerfilSegmento(perfilEscolhido, segmentoEscolhido);
   const empresa = {
     id: nextId(data, 'empresas'),
     nome: String(body.nome).trim(),
@@ -6814,7 +6846,12 @@ rota('POST', /^\/api\/plataforma\/empresas$/, async (req, res) => {
     cor_primaria: body.cor_primaria || '#0B2D4F', cor_secundaria: body.cor_secundaria || '#0891B2',
     versao_id: versao ? versao.id : null,
     modulos_ativos: versao ? [...versao.modulos] : [],
-    terminologia: {},
+    terminologia: preset.terminologia,
+    perfil: perfilEscolhido,
+    segmento: segmentoEscolhido,
+    tipos_os_ativos: preset.tipos_os_ativos,
+    tipos_relatorio_ativos: preset.tipos_relatorio_ativos,
+    escala_ativa: preset.escala_ativa,
     // cotas de plano (Etapa 6/passo 3): a empresa nova herda o limite padrão da versão
     // escolhida (null = sem limite), editável depois por empresa pela rota de PUT abaixo.
     limite_tecnicos: versao && versao.limite_tecnicos != null ? versao.limite_tecnicos : null,
@@ -6882,6 +6919,16 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
   }
   if (body.plano_dia_vencimento !== undefined) {
     empresa.plano_dia_vencimento = body.plano_dia_vencimento === null || body.plano_dia_vencimento === '' ? null : Number(body.plano_dia_vencimento);
+  }
+  // Perfil/Segmento (Etapa 8) — metadado simples, editável igual nome/site: nunca reaplica o
+  // preset aqui (evitaria sobrescrever terminologia/tipos que o Super Admin já customizou depois
+  // do cadastro). Quem quiser reaplicar um preset faz isso manualmente pelas rotas de tipos/módulos.
+  if (body.perfil !== undefined) {
+    empresa.perfil = db.CHAVES_PERFIS.includes(body.perfil) ? body.perfil : null;
+  }
+  if (body.segmento !== undefined) {
+    const perfilAtual = db.PERFIS_DISPONIVEIS.find((p) => p.chave === empresa.perfil);
+    empresa.segmento = perfilAtual && perfilAtual.segmentos.some((s) => s.chave === body.segmento) ? body.segmento : null;
   }
   db.save(data);
   enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
@@ -7019,6 +7066,40 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/modulos$/, async (req, res, m)
   const empresa = data.empresas.find((e) => e.id === Number(m[1]));
   if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
   empresa.modulos_ativos = [...new Set(body.modulos)];
+  db.save(data);
+  enviarJSON(res, 200, { empresa });
+});
+
+// PUT /api/plataforma/empresas/:id/tipos-os — Etapa 8: quais tipos de O.S. aparecem no formulário
+// de "Nova Ordem de Serviço" dessa empresa (body.tipos vazio = "todos", mesmo efeito de null).
+rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/tipos-os$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!Array.isArray(body.tipos)) return enviarJSON(res, 400, { erro: 'Informe a lista de tipos de O.S.' });
+  const invalido = body.tipos.find((tipo) => !db.TIPOS_OS_DISPONIVEIS.includes(tipo));
+  if (invalido) return enviarJSON(res, 400, { erro: `Tipo de O.S. desconhecido: ${invalido}` });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === Number(m[1]));
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  empresa.tipos_os_ativos = [...new Set(body.tipos)];
+  db.save(data);
+  enviarJSON(res, 200, { empresa });
+});
+
+// PUT /api/plataforma/empresas/:id/tipos-relatorio — Etapa 8: quais tipos de relatório aparecem
+// na criação manual de relatório dessa empresa (body.tipos vazio = "todos", mesmo efeito de null).
+rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/tipos-relatorio$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  if (!Array.isArray(body.tipos)) return enviarJSON(res, 400, { erro: 'Informe a lista de tipos de relatório.' });
+  const invalido = body.tipos.find((tipo) => !db.TIPOS_RELATORIO_DISPONIVEIS.includes(tipo));
+  if (invalido) return enviarJSON(res, 400, { erro: `Tipo de relatório desconhecido: ${invalido}` });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === Number(m[1]));
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  empresa.tipos_relatorio_ativos = [...new Set(body.tipos)];
   db.save(data);
   enviarJSON(res, 200, { empresa });
 });

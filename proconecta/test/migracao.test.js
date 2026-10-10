@@ -81,6 +81,29 @@ test('migrar backfilla empresa_id em coleções que ficaram de fora do multiempr
   assert.equal(data.mensagens_internas[0].empresa_id, 1);
 });
 
+test('migrar dá à empresa 1 perfil/segmento/tipos ativos "sem restrição nenhuma" (Etapa 8)', () => {
+  const data = db.migrar(dadosAntigos());
+  const empresa = data.empresas.find((e) => e.id === 1);
+  assert.equal(empresa.perfil, null);
+  assert.equal(empresa.segmento, null);
+  assert.equal(empresa.tipos_os_ativos, null);
+  assert.equal(empresa.tipos_relatorio_ativos, null);
+  assert.equal(empresa.escala_ativa, true);
+});
+
+test('migrar não sobrescreve perfil/segmento/tipos ativos já customizados', () => {
+  const data = dadosAntigos();
+  data.empresas[0].perfil = 'autonomo';
+  data.empresas[0].segmento = 'montagem_painel_eletrico';
+  data.empresas[0].tipos_os_ativos = ['corretiva'];
+  data.empresas[0].escala_ativa = false;
+  const depois = db.migrar(data);
+  assert.equal(depois.empresas[0].perfil, 'autonomo');
+  assert.equal(depois.empresas[0].segmento, 'montagem_painel_eletrico');
+  assert.deepEqual(depois.empresas[0].tipos_os_ativos, ['corretiva']);
+  assert.equal(depois.empresas[0].escala_ativa, false);
+});
+
 test('depois de migrar, os módulos da empresa 1 ficam ativos de acordo com moduloAtivo', () => {
   const data = db.migrar(dadosAntigos());
   assert.equal(db.moduloAtivo(data, 1, 'os_chamados'), true);

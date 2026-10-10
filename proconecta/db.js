@@ -44,6 +44,78 @@ const MODULOS_DISPONIVEIS = [
 ];
 const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
 
+// Perfil/Segmento (Etapa 8): escolhido uma vez no cadastro da empresa, só serve de atalho pra
+// pré-preencher terminologia/tipos ativos — nunca trava nada, tudo editável depois pelo Super
+// Admin. "Genérico" sempre disponível em qualquer perfil, pra quando nada específico encaixa.
+const PERFIS_DISPONIVEIS = [
+  {
+    chave: 'prestadora_manutencao',
+    nome: 'Prestadora de manutenção',
+    segmentos: [
+      { chave: 'refrigeracao_climatizacao', nome: 'Refrigeração/Climatização' },
+      { chave: 'elevadores', nome: 'Elevadores' },
+      { chave: 'geradores_nobreak', nome: 'Geradores/No-break' },
+      { chave: 'automacao_cftv_seguranca', nome: 'Automação/CFTV/Segurança' },
+      { chave: 'hidraulica_bombas', nome: 'Hidráulica/Bombas' },
+      { chave: 'marcacao_gravacao', nome: 'Marcação/Gravação' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  {
+    chave: 'industria_equipe_propria',
+    nome: 'Indústria com equipe técnica própria',
+    segmentos: [
+      { chave: 'eletrica_industrial', nome: 'Elétrica industrial' },
+      { chave: 'mecanica_industrial', nome: 'Mecânica industrial' },
+      { chave: 'refrigeracao_climatizacao', nome: 'Refrigeração/Climatização' },
+      { chave: 'hidraulica', nome: 'Hidráulica' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  {
+    chave: 'autonomo',
+    nome: 'Autônomo / prestador de serviço avulso',
+    segmentos: [
+      { chave: 'montagem_painel_eletrico', nome: 'Montagem de painel elétrico' },
+      { chave: 'instalacao_eletrica', nome: 'Instalação elétrica' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+];
+const CHAVES_PERFIS = PERFIS_DISPONIVEIS.map((p) => p.chave);
+
+// listas completas de hoje (ver app.js: select "na-tipo" e tiposRelatorioManual()) — usadas como
+// catálogo de validação e como "sem restrição" quando a empresa não tem preset/edição própria.
+const TIPOS_OS_DISPONIVEIS = ['corretiva', 'preventiva', 'treinamento_online', 'treinamento_presencial', 'demonstracao_tecnica'];
+const TIPOS_RELATORIO_DISPONIVEIS = ['completo', 'preventiva', 'preventiva2', 'corretiva', 'relatorio_tecnico', 'aceite_entrega', 'entrega_teste', 'promotor', 'devolutivo', 'levantamento_tecnico'];
+
+// presets por "perfil:segmento" — só os que já têm conteúdo real aqui; qualquer combinação não
+// listada (inclusive todo "Genérico") cai no preset "sem restrição" em presetPerfilSegmento, que
+// reproduz exatamente o comportamento de hoje (nenhum tipo/terminologia reduzido por omissão).
+const PRESETS_PERFIL_SEGMENTO = {
+  'autonomo:montagem_painel_eletrico': {
+    terminologia: { equipamento: 'Painel' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'corretiva', 'relatorio_tecnico'],
+    escala_ativa: false,
+  },
+  'autonomo:instalacao_eletrica': {
+    terminologia: {},
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+    escala_ativa: false,
+  },
+};
+function presetPerfilSegmento(perfil, segmento) {
+  const preset = PRESETS_PERFIL_SEGMENTO[`${perfil}:${segmento}`];
+  return {
+    terminologia: (preset && preset.terminologia) || {},
+    tipos_os_ativos: (preset && preset.tipos_os_ativos) || null,
+    tipos_relatorio_ativos: (preset && preset.tipos_relatorio_ativos) || null,
+    escala_ativa: preset && preset.escala_ativa !== undefined ? preset.escala_ativa : true,
+  };
+}
+
 // módulos padrão da versão "Manutenção" — o pacote que toda empresa migrada do sistema antigo
 // (só a PRO Marking, por enquanto) já usa hoje.
 const MODULOS_VERSAO_MANUTENCAO = ['os_chamados', 'smp_preventivas', 'biblioteca'];
@@ -156,6 +228,14 @@ function sincronizarEmpresaPadrao(data) {
   // plano e cobrança (Etapa 7/passo 2) — só exibição, sem integração de pagamento nesta etapa.
   if (empresa.plano_valor_mensal === undefined) empresa.plano_valor_mensal = null;
   if (empresa.plano_dia_vencimento === undefined) empresa.plano_dia_vencimento = null;
+  // Perfil/Segmento (Etapa 8): null = sem perfil escolhido (comportamento de hoje, preservado pra
+  // quem já existia); tipos_os/relatorio_ativos null = "todos" (ver tiposOsAtivos/tiposRelatorioAtivos
+  // em server.js, nunca lê o campo bruto direto); escala_ativa true = Escala de Folga visível, igual hoje.
+  if (empresa.perfil === undefined) empresa.perfil = null;
+  if (empresa.segmento === undefined) empresa.segmento = null;
+  if (!Array.isArray(empresa.tipos_os_ativos)) empresa.tipos_os_ativos = null;
+  if (!Array.isArray(empresa.tipos_relatorio_ativos)) empresa.tipos_relatorio_ativos = null;
+  if (empresa.escala_ativa === undefined) empresa.escala_ativa = true;
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;
@@ -1059,5 +1139,6 @@ module.exports = {
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,
+  PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento,
   obterPool, COLECOES_EM_TABELA,
 };

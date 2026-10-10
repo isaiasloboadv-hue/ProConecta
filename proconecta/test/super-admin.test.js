@@ -307,3 +307,114 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     fs.rmSync(dbTemp, { force: true });
   }
 });
+
+// Etapa 8: cadastro de empresa com perfil/segmento aplica o preset (terminologia/tipos ativos),
+// fica editável depois sem reaplicar o preset, e a PRO Marking (empresa 1, nunca passa por esse
+// fluxo) continua sem nenhuma restrição.
+test('perfil/segmento: aplica preset na criação, não reaplica na edição, PRO Marking intacta', async () => {
+  const dbTemp = path.join(os.tmpdir(), `proconecta-teste-perfil-${Date.now()}.json`);
+  fs.writeFileSync(dbTemp, JSON.stringify(dadosComSuperAdmin()));
+  const porta = 39000 + Math.floor(Math.random() * 5000);
+
+  const servidor = spawn(process.execPath, ['server.js'], {
+    cwd: path.join(__dirname, '..'),
+    env: { ...process.env, DB_PATH_ARQUIVO: dbTemp, PORT: String(porta), ADMIN_EMAIL: '', ADMIN_SENHA: '', SUPERADMIN_EMAIL: '', SUPERADMIN_SENHA: '' },
+    stdio: 'ignore',
+  });
+
+  try {
+    await aguardarServidorSubir(porta);
+    const base = `http://localhost:${porta}`;
+
+    const loginSuper = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'super@teste-super.com', senha: 'super1234' }),
+    });
+    const { token: tokenSuper } = await loginSuper.json();
+    const authSuper = { Authorization: `Bearer ${tokenSuper}` };
+
+    // catálogo de perfis acessível pelo super admin
+    const perfisResp = await (await fetch(`${base}/api/plataforma/perfis`, { headers: authSuper })).json();
+    assert.ok(perfisResp.perfis.some((p) => p.chave === 'autonomo'));
+    assert.ok(perfisResp.tipos_os.includes('corretiva'));
+
+    // cria empresa com perfil/segmento que já tem preset de verdade (autonomo:montagem_painel_eletrico)
+    const criarResp = await fetch(`${base}/api/plataforma/empresas`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Painéis Elétricos Teste', perfil: 'autonomo', segmento: 'montagem_painel_eletrico' }),
+    });
+    assert.equal(criarResp.status, 201);
+    const { empresa: nova } = await criarResp.json();
+    assert.equal(nova.perfil, 'autonomo');
+    assert.equal(nova.segmento, 'montagem_painel_eletrico');
+    assert.equal(nova.terminologia.equipamento, 'Painel');
+    assert.deepEqual(nova.tipos_os_ativos.sort(), ['corretiva', 'preventiva'].sort());
+    assert.equal(nova.escala_ativa, false);
+
+    // usuário dessa empresa já recebe os tipos ativos/escala_ativa no login
+    const criarAdminResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/administrador`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Admin Painéis', email: 'admin@paineis-teste.com', senha: 'paineis1234' }),
+    });
+    assert.equal(criarAdminResp.status, 201);
+    const loginNovo = await (await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@paineis-teste.com', senha: 'paineis1234' }),
+    })).json();
+    assert.deepEqual(loginNovo.usuario.tipos_os_ativos.sort(), ['corretiva', 'preventiva'].sort());
+    assert.equal(loginNovo.usuario.escala_ativa, false);
+
+    // segmento que não pertence ao perfil escolhido cai em "generico" (sem restrição)
+    const criarGenericoResp = await fetch(`${base}/api/plataforma/empresas`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Empresa Segmento Inválido', perfil: 'autonomo', segmento: 'nao-existe' }),
+    });
+    const { empresa: generica } = await criarGenericoResp.json();
+    assert.equal(generica.segmento, 'generico');
+    assert.equal(generica.tipos_os_ativos, null);
+
+    // editar perfil/segmento depois NÃO reaplica o preset — tipos_os_ativos continua como estava
+    const editarPerfilResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Painéis Elétricos Teste', perfil: 'autonomo', segmento: 'instalacao_eletrica' }),
+    });
+    const { empresa: editada } = await editarPerfilResp.json();
+    assert.equal(editada.segmento, 'instalacao_eletrica');
+    assert.deepEqual(editada.tipos_os_ativos.sort(), ['corretiva', 'preventiva'].sort()); // continua o preset antigo, não o de instalacao_eletrica
+
+    // edita manualmente a lista de tipos de O.S./relatório ativos (checklist do painel)
+    const tiposOsResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/tipos-os`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipos: ['corretiva'] }),
+    });
+    assert.equal(tiposOsResp.status, 200);
+    const { empresa: comTiposOs } = await tiposOsResp.json();
+    assert.deepEqual(comTiposOs.tipos_os_ativos, ['corretiva']);
+
+    const tipoOsInvalido = await fetch(`${base}/api/plataforma/empresas/${nova.id}/tipos-os`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipos: ['nao_existe'] }),
+    });
+    assert.equal(tipoOsInvalido.status, 400);
+
+    const tiposRelatorioResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/tipos-relatorio`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipos: ['completo', 'corretiva'] }),
+    });
+    assert.equal(tiposRelatorioResp.status, 200);
+    const { empresa: comTiposRelatorio } = await tiposRelatorioResp.json();
+    assert.deepEqual(comTiposRelatorio.tipos_relatorio_ativos.sort(), ['completo', 'corretiva'].sort());
+
+    // PRO Marking (empresa 1) nunca passou por esse fluxo — continua sem restrição nenhuma
+    const loginAdminOriginal = await (await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@teste-super.com', senha: 'senha1234' }),
+    })).json();
+    assert.equal(loginAdminOriginal.usuario.tipos_os_ativos.length, 5);
+    assert.equal(loginAdminOriginal.usuario.tipos_relatorio_ativos.length, 10);
+    assert.equal(loginAdminOriginal.usuario.escala_ativa, true);
+  } finally {
+    servidor.kill();
+    fs.rmSync(dbTemp, { force: true });
+  }
+});

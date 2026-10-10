@@ -27,6 +27,20 @@ const TIPO_OS_LABEL = {
   treinamento_presencial: 'Treinamento presencial', demonstracao_tecnica: 'Demonstração Técnica',
   atendimento: 'Atendimento',
 };
+// os 5 tipos selecionáveis em "Nova Ordem de Serviço" (ver mostrarFormNovaAtividade, select
+// "na-tipo") — "atendimento" fica fora, é derivado/de sistema, nunca escolhido na criação. Mesma
+// lista de db.TIPOS_OS_DISPONIVEIS (Etapa 8) — usada aqui só pra montar o checklist de "Tipos de
+// O.S. ativos" no painel da plataforma.
+const TIPOS_OS_SELECIONAVEIS = ['corretiva', 'preventiva', 'treinamento_online', 'treinamento_presencial', 'demonstracao_tecnica'];
+// Perfil/Segmento (Etapa 8): filtra o select "na-tipo" pelos tipos ativos da empresa logada
+// (USER.tipos_os_ativos, vazio/ausente = mostra todos — nunca restringe mais do que o padrão de
+// hoje por omissão). tipoJaUsado garante que editar uma O.S. antiga de um tipo desativado depois
+// não perde a opção selecionada atual.
+function tiposOsAtivosParaEmpresa(tipoJaUsado) {
+  const ativos = Array.isArray(USER.tipos_os_ativos) && USER.tipos_os_ativos.length ? USER.tipos_os_ativos : TIPOS_OS_SELECIONAVEIS;
+  const lista = TIPOS_OS_SELECIONAVEIS.filter((t) => ativos.includes(t));
+  return (tipoJaUsado && !lista.includes(tipoJaUsado)) ? [tipoJaUsado, ...lista] : lista;
+}
 // versão curta pro topo do card de O.S. — cabe ao lado da tag do técnico sem quebrar linha
 const TIPO_OS_LABEL_CURTO = {
   corretiva: 'Corretiva', preventiva: 'Preventiva', treinamento_online: 'Trein. online',
@@ -979,6 +993,7 @@ async function ir(pagina) {
 
 let _plataformaModulosCache = [];
 let _plataformaVersoesCache = [];
+let _plataformaPerfisCache = [];
 let _plataformaEmpresasCache = [];
 
 // painel reorganizado como dashboard de widgets (mesmo padrão de renderEquipe/renderCadastros):
@@ -1021,8 +1036,9 @@ async function renderPlataformaNovaEmpresa() {
     </div>
     <div class="empty">Carregando...</div>`;
 
-  const { versoes } = await api('/api/plataforma/versoes');
+  const [{ versoes }, { perfis }] = await Promise.all([api('/api/plataforma/versoes'), api('/api/plataforma/perfis')]);
   _plataformaVersoesCache = versoes;
+  _plataformaPerfisCache = perfis;
 
   main.innerHTML = `
     <div class="page-head"><h1>Nova empresa</h1><p>Cadastre uma empresa cliente e, se quiser, já crie o primeiro administrador dela.</p>
@@ -1036,7 +1052,13 @@ async function renderPlataformaNovaEmpresa() {
           <option value="">Nenhuma (sem módulo nenhum ativo)</option>
           ${versoes.map((v) => `<option value="${v.id}">${esc(v.nome)} (${v.modulos.map(esc).join(', ')})</option>`).join('')}
         </select></div>
+        <div><label>Perfil</label><select id="pe-perfil" onchange="atualizarSegmentoNovaEmpresa()">
+          <option value="">Nenhum (sem atalho de configuração)</option>
+          ${perfis.map((p) => `<option value="${esc(p.chave)}">${esc(p.nome)}</option>`).join('')}
+        </select></div>
+        <div><label>Segmento</label><select id="pe-segmento"><option value="">—</option></select></div>
       </div>
+      <p style="margin-top:-8px; color:var(--gray-500, #666);">Perfil/Segmento só pré-preenchem terminologia e quais tipos de O.S./relatório aparecem pra essa empresa — tudo editável depois, a qualquer momento, na tela da empresa.</p>
       <h2>Primeiro administrador (opcional agora, dá pra criar depois)</h2>
       <p style="margin-top:-8px; color:var(--gray-500, #666);">Sem um administrador, ninguém consegue logar nessa empresa.</p>
       <div class="form-grid">
@@ -1056,11 +1078,12 @@ async function renderPlataformaCadastros() {
     </div>
     <div class="ficha-grid" id="plataforma-cadastros-grid"><div class="empty">Carregando...</div></div>`;
 
-  const [{ empresas }, { modulos }] = await Promise.all([
-    api('/api/plataforma/empresas'), api('/api/plataforma/modulos'),
+  const [{ empresas }, { modulos }, { perfis }] = await Promise.all([
+    api('/api/plataforma/empresas'), api('/api/plataforma/modulos'), api('/api/plataforma/perfis'),
   ]);
   _plataformaEmpresasCache = empresas;
   _plataformaModulosCache = modulos;
+  _plataformaPerfisCache = perfis;
 
   const grid = document.getElementById('plataforma-cadastros-grid');
   if (!grid) return;
@@ -1146,6 +1169,16 @@ function conteudoEmpresaPlataforma(e) {
         <div><label>Cota do plano — limite de equipamentos</label><input type="number" min="0" step="1" id="pe-dados-limiteequip-${e.id}" value="${e.limite_equipamentos != null ? esc(e.limite_equipamentos) : ''}" placeholder="sem limite"></div>
       </div>
       <button class="btn btn-outline-sm" onclick="salvarDadosEmpresaPlataforma(${e.id})">Salvar dados</button>
+      <h2>Perfil e Segmento</h2>
+      <p style="margin-top:-8px; color:var(--gray-500, #666);">Só metadado — editar aqui não reaplica os valores sugeridos de terminologia/tipos ativos, que continuam do jeito que estão.</p>
+      <div class="form-grid">
+        <div><label>Perfil</label><select id="pe-perfil-${e.id}" onchange="atualizarSegmentoPlataforma(${e.id})">
+          <option value="">Nenhum</option>
+          ${_plataformaPerfisCache.map((p) => `<option value="${esc(p.chave)}" ${p.chave === e.perfil ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}
+        </select></div>
+        <div><label>Segmento</label><select id="pe-segmento-${e.id}">${e.perfil ? opcoesSegmentoPlataforma(e.perfil, e.segmento) : '<option value="">—</option>'}</select></div>
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarPerfilEmpresaPlataforma(${e.id})">Salvar perfil/segmento</button>
       <h2>Administradores</h2>
       ${(e.administradores || []).length ? e.administradores.map((a) => `
         <div class="form-grid" style="align-items:end;">
@@ -1176,6 +1209,26 @@ function conteudoEmpresaPlataforma(e) {
           </label>`).join('')}
       </div>
       <button class="btn btn-outline-sm" onclick="salvarModulosPlataforma(${e.id})">Salvar módulos</button>
+      <h2>Tipos de O.S. ativos</h2>
+      <p style="margin-top:-8px; color:var(--gray-500, #666);">Quais tipos aparecem no formulário de Nova Ordem de Serviço dessa empresa. Nenhum marcado = mostra todos.</p>
+      <div class="form-grid" id="pe-tipos-os-${e.id}">
+        ${TIPOS_OS_SELECIONAVEIS.map((t) => `
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+            <input type="checkbox" data-chave="${esc(t)}" ${(e.tipos_os_ativos || []).includes(t) ? 'checked' : ''}>
+            ${esc(TIPO_OS_LABEL[t] || t)}
+          </label>`).join('')}
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarTiposOsPlataforma(${e.id})">Salvar tipos de O.S.</button>
+      <h2>Tipos de relatório ativos</h2>
+      <p style="margin-top:-8px; color:var(--gray-500, #666);">Quais tipos aparecem na criação manual de relatório dessa empresa. Nenhum marcado = mostra todos.</p>
+      <div class="form-grid" id="pe-tipos-relatorio-${e.id}">
+        ${tiposRelatorioManual().map((t) => `
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+            <input type="checkbox" data-chave="${esc(t.tipo)}" ${(e.tipos_relatorio_ativos || []).includes(t.tipo) ? 'checked' : ''}>
+            ${esc(t.label)}
+          </label>`).join('')}
+      </div>
+      <button class="btn btn-outline-sm" onclick="salvarTiposRelatorioPlataforma(${e.id})">Salvar tipos de relatório</button>
       <h2>Terminologia</h2>
       <div class="form-grid">
         <div><label>Termo pra "Equipamento"</label><input id="pe-term-equipamento-${e.id}" value="${esc((e.terminologia || {}).equipamento || '')}" placeholder="Equipamento"></div>
@@ -1184,16 +1237,31 @@ function conteudoEmpresaPlataforma(e) {
     </div>`;
 }
 
+// cascata Perfil → Segmento: popula o segundo <select> com os segmentos do perfil escolhido,
+// "Genérico" sempre por último. Reaproveitada tanto na Nova Empresa quanto na edição (abaixo).
+function opcoesSegmentoPlataforma(perfilChave, segmentoAtual) {
+  const perfil = _plataformaPerfisCache.find((p) => p.chave === perfilChave);
+  if (!perfil) return '<option value="">—</option>';
+  const segmentos = [...perfil.segmentos].sort((a, b) => (a.chave === 'generico' ? 1 : b.chave === 'generico' ? -1 : 0));
+  return segmentos.map((s) => `<option value="${esc(s.chave)}" ${s.chave === segmentoAtual ? 'selected' : ''}>${esc(s.nome)}</option>`).join('');
+}
+function atualizarSegmentoNovaEmpresa() {
+  const perfilChave = document.getElementById('pe-perfil').value;
+  document.getElementById('pe-segmento').innerHTML = perfilChave ? opcoesSegmentoPlataforma(perfilChave, null) : '<option value="">—</option>';
+}
+
 async function criarEmpresaPlataforma() {
   const nome = document.getElementById('pe-nome').value.trim();
   if (!nome) return mostrarToast('Informe o nome da empresa.');
   const subdominio = document.getElementById('pe-subdominio').value.trim();
   const versaoId = document.getElementById('pe-versao').value;
+  const perfil = document.getElementById('pe-perfil').value;
+  const segmento = document.getElementById('pe-segmento').value;
   const adminNome = document.getElementById('pe-admin-nome').value.trim();
   const adminEmail = document.getElementById('pe-admin-email').value.trim();
   const adminSenha = document.getElementById('pe-admin-senha').value;
   try {
-    const { empresa } = await api('/api/plataforma/empresas', { method: 'POST', body: { nome, subdominio, versao_id: versaoId || null } });
+    const { empresa } = await api('/api/plataforma/empresas', { method: 'POST', body: { nome, subdominio, versao_id: versaoId || null, perfil: perfil || null, segmento: segmento || null } });
     if (adminNome || adminEmail || adminSenha) {
       await api(`/api/plataforma/empresas/${empresa.id}/administrador`, { method: 'POST', body: { nome: adminNome, email: adminEmail, senha: adminSenha } });
       mostrarToast('Empresa e administrador cadastrados.');
@@ -1345,6 +1413,48 @@ async function excluirAdministradorPlataforma(adminId) {
     await api(`/api/plataforma/administradores/${adminId}`, { method: 'DELETE' });
     mostrarToast('Administrador excluído.');
     if (empresaId) recarregarEmpresaPlataforma(empresaId); else ir('plataforma-cadastros');
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+function atualizarSegmentoPlataforma(empresaId) {
+  const perfilChave = document.getElementById(`pe-perfil-${empresaId}`).value;
+  document.getElementById(`pe-segmento-${empresaId}`).innerHTML = perfilChave ? opcoesSegmentoPlataforma(perfilChave, null) : '<option value="">—</option>';
+}
+
+async function salvarPerfilEmpresaPlataforma(empresaId) {
+  const perfil = document.getElementById(`pe-perfil-${empresaId}`).value;
+  const segmento = document.getElementById(`pe-segmento-${empresaId}`).value;
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}`, {
+      method: 'PUT',
+      body: { nome: _plataformaEmpresasCache.find((e) => e.id === empresaId).nome, perfil: perfil || null, segmento: segmento || null },
+    });
+    mostrarToast('Perfil/segmento atualizado.');
+    recarregarEmpresaPlataforma(empresaId);
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarTiposOsPlataforma(empresaId) {
+  const checks = document.querySelectorAll(`#pe-tipos-os-${empresaId} input[type="checkbox"]`);
+  const tipos = [...checks].filter((c) => c.checked).map((c) => c.dataset.chave);
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}/tipos-os`, { method: 'PUT', body: { tipos } });
+    mostrarToast('Tipos de O.S. atualizados.');
+  } catch (e) {
+    mostrarToast(e.message);
+  }
+}
+
+async function salvarTiposRelatorioPlataforma(empresaId) {
+  const checks = document.querySelectorAll(`#pe-tipos-relatorio-${empresaId} input[type="checkbox"]`);
+  const tipos = [...checks].filter((c) => c.checked).map((c) => c.dataset.chave);
+  try {
+    await api(`/api/plataforma/empresas/${empresaId}/tipos-relatorio`, { method: 'PUT', body: { tipos } });
+    mostrarToast('Tipos de relatório atualizados.');
   } catch (e) {
     mostrarToast(e.message);
   }
@@ -2663,7 +2773,9 @@ function desenharGradeCalendario() {
       // específica) — folga coletiva (ex.: DSR de fim de semana pra equipe inteira) não gera tag
       // nenhuma, porque já é sabido que ninguém trabalha nesses dias; listar todo mundo pelo nome
       // ali seria só poluição visual. Corta em 3 tags visíveis + "+N" pra não estourar a célula.
-      const indisponiveis = (escalasPorDia[iso] || []).filter((e) => e.usuario_id !== null);
+      // Perfil/Segmento (Etapa 8): empresa autônoma (sem colega pra coordenar) não mostra tag de
+      // indisponibilidade — mesma flag que esconde o card Escala de Folga em Equipe.
+      const indisponiveis = USER.escala_ativa === false ? [] : (escalasPorDia[iso] || []).filter((e) => e.usuario_id !== null);
       const tagsVisiveis = indisponiveis.slice(0, 3);
       const tagsExtra = indisponiveis.length - tagsVisiveis.length;
 
@@ -2858,11 +2970,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <div class="form-grid">
         <div><label>Nº da O.S.</label><input id="na-numero-os" value="${esc(agendaItem ? numeroOS(agendaItem) : sugestaoNumero.numero)}"></div>
         <div><label>Tipo</label><select id="na-tipo" onchange="atualizarTipoNovaAtividade()">
-          <option value="corretiva" ${agendaItem && agendaItem.tipo === 'corretiva' ? 'selected' : ''}>Corretiva</option>
-          <option value="preventiva" ${agendaItem && agendaItem.tipo === 'preventiva' ? 'selected' : ''}>Preventiva</option>
-          <option value="treinamento_online" ${agendaItem && agendaItem.tipo === 'treinamento_online' ? 'selected' : ''}>Treinamento online</option>
-          <option value="treinamento_presencial" ${agendaItem && agendaItem.tipo === 'treinamento_presencial' ? 'selected' : ''}>Treinamento presencial</option>
-          <option value="demonstracao_tecnica" ${agendaItem && agendaItem.tipo === 'demonstracao_tecnica' ? 'selected' : ''}>Demonstração Técnica</option>
+          ${tiposOsAtivosParaEmpresa(agendaItem && agendaItem.tipo).map((tipo) => `<option value="${tipo}" ${agendaItem && agendaItem.tipo === tipo ? 'selected' : ''}>${esc(TIPO_OS_LABEL[tipo] || tipo)}</option>`).join('')}
         </select></div>
       </div>
 
@@ -7495,9 +7603,16 @@ function tiposRelatorioManual() {
 }
 
 function mostrarFormRelatorioManual(tipo) {
-  const tipos = tiposRelatorioManual();
-  const def = tipos.find((t) => t.tipo === tipo) || tipos[0];
+  const todos = tiposRelatorioManual();
+  // Perfil/Segmento (Etapa 8): filtra o seletor pelos tipos de relatório ativos da empresa
+  // logada (USER.tipos_relatorio_ativos, vazio/ausente = mostra todos). Um tipo pedido direto
+  // (link/rascunho antigo) sempre renderiza certo e aparece na lista, mesmo fora da restrição —
+  // nunca perde o que já estava em uso.
+  const restricao = Array.isArray(USER.tipos_relatorio_ativos) && USER.tipos_relatorio_ativos.length ? USER.tipos_relatorio_ativos : null;
+  const permitidos = restricao ? todos.filter((t) => restricao.includes(t.tipo)) : todos;
+  const def = todos.find((t) => t.tipo === tipo) || permitidos[0] || todos[0];
   window[def.fn]();
+  const tipos = (restricao && !permitidos.some((t) => t.tipo === def.tipo)) ? [def, ...permitidos] : permitidos;
   const seletorHtml = `
     <div class="panel">
       <label>Tipo de formulário</label>
@@ -14125,7 +14240,8 @@ function desenharGradeCalendarioTecnico() {
       // aparece aqui de novo (já tem o ícone acima), e folga coletiva não vira tag nenhuma (já é
       // sabido que ninguém trabalha nesse dia, listar todo mundo pelo nome seria poluição visual;
       // mesma regra usada na Agenda geral do administrador). Corta em 2 tags + "+N".
-      const escalasDoDia = escalasPorDia[iso] || [];
+      // Perfil/Segmento (Etapa 8): empresa autônoma não tem colega pra mostrar aqui.
+      const escalasDoDia = USER.escala_ativa === false ? [] : (escalasPorDia[iso] || []);
       const tagsColegas = escalasDoDia.filter((e) => e.usuario_id !== null && e.usuario_id !== USER.id);
       const tagsVisiveis = tagsColegas.slice(0, 2);
       const tagsExtra = tagsColegas.length - tagsVisiveis.length;
@@ -17597,6 +17713,7 @@ async function renderEquipe() {
       <div class="stat-valor">${solicitacoesResp.solicitacoes.length}</div>
       <div class="stat-label">pendente(s)</div>
     </div>
+    ${USER.escala_ativa === false ? '' : `
     <div class="equipe-card" onclick="ir('escala-folga')">
       <div class="equipe-card-icone" style="background:var(--purple-bg);">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="1"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg>
@@ -17604,7 +17721,7 @@ async function renderEquipe() {
       <div class="equipe-card-titulo">Escala de Folga</div>
       <div class="stat-valor">${foraHoje}</div>
       <div class="stat-label">de folga hoje</div>
-    </div>
+    </div>`}
     <div class="equipe-card" onclick="ir('tecnicos-acompanhamento')">
       <div class="equipe-card-icone" style="background:var(--green-bg);">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-1 .1-1.3.5l-.6.7c-.4.5-.3 1.2.2 1.5l5.7 3.6-2 3.3H3.5c-.4 0-.8.2-1 .5L2 17.3c-.2.4-.1.8.2 1l2.1 1.4 1.4 2.1c.2.3.6.4 1 .2l.7-.5c.3-.2.5-.6.5-1v-3.4l3.3-2 3.6 5.7c.3.5 1 .6 1.5.2l.7-.6c.4-.3.6-.8.5-1.3Z"/></svg>
