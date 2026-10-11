@@ -199,14 +199,20 @@ function aplicarMarcaNaTela() {
   _logoDataUriPromise = null;
   _logoVariantesPromise = null;
 }
+// pedido do usuário: "na última página aparece o contato da Promarking isso não deve acontecer"
+// — os contatos reais da PRO Marking só podem aparecer pra ela mesma (empresa id 1). Pra
+// qualquer outra empresa que ainda não preencheu site/whatsapp/telefone/e-mails em Minha
+// Empresa, o certo é mostrar vazio/nada, nunca o contato de outra empresa. Sem empresa nenhuma
+// carregada (window._empresa null — preview sem login, ambiente de teste), trata como padrão
+// (mesmo comportamento de sempre) só pra esses casos sem contexto real nenhum.
+function ehEmpresaPromarking() { return !window._empresa || window._empresa.id === 1; }
 function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
-function empresaSite() { return (window._empresa && window._empresa.site) || 'promarking.com.br'; }
-function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || '12 99718-7506'; }
-function empresaTelefone() { return (window._empresa && window._empresa.telefone) || '12 3902-3453'; }
+function empresaSite() { return (window._empresa && window._empresa.site) || (ehEmpresaPromarking() ? 'promarking.com.br' : ''); }
+function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || (ehEmpresaPromarking() ? '12 99718-7506' : ''); }
+function empresaTelefone() { return (window._empresa && window._empresa.telefone) || (ehEmpresaPromarking() ? '12 3902-3453' : ''); }
 function empresaEmails() {
-  return (window._empresa && Array.isArray(window._empresa.emails) && window._empresa.emails.length)
-    ? window._empresa.emails
-    : ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'];
+  if (window._empresa && Array.isArray(window._empresa.emails) && window._empresa.emails.length) return window._empresa.emails;
+  return ehEmpresaPromarking() ? ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'] : [];
 }
 
 // o service worker não enxerga o localStorage da página (mundos separados) — pra conseguir
@@ -4894,20 +4900,36 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -5020,20 +5042,36 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -6575,15 +6613,32 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
 
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
+  // pedido do usuário: "o nome Nexor Connect precisa está menor... mas o nome da empresa
+  // cliente precisa está em destaque" — só pra quem não é a PRO Marking (pedido do usuário:
+  // "na empresa Promarking não deve ser alterado nada" — cabeçalho dela continua como sempre).
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
-    y += 20;
-    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
-    y += 15;
-    doc.setFontSize(13); doc.setFont(undefined, 'bold');
-    doc.text('Termo de Manutenção Preventiva', pageW / 2, y, { align: 'center' });
-    y += 10;
+    if (ehEmpresaPromarking()) {
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
+      y += 20;
+      doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+      doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+      y += 15;
+      doc.setFontSize(13); doc.setFont(undefined, 'bold');
+      doc.text('Termo de Manutenção Preventiva', pageW / 2, y, { align: 'center' });
+      y += 10;
+    } else {
+      // inverte o peso visual de antes (logo+título maiores que o nome da empresa): logo
+      // menor, nome da empresa maior e em primeiro, título do documento vira subtítulo
+      // discreto embaixo dele.
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 7, y - 9, 14, 16); } catch (e) {} }
+      y += 16;
+      doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+      doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
+      y += 13;
+      doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Termo de Manutenção Preventiva', pageW / 2, y, { align: 'center' });
+      y += 11;
+    }
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
     doc.line(margem, y, pageW - margem, y);
     y += 24;
@@ -6639,16 +6694,39 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   // ===== capa =====
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
-  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
-  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-  doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
-  doc.text('PREVENTIVA', pageW / 2, 438, { align: 'center' });
-  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
-  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
-  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
+  if (ehEmpresaPromarking()) {
+    // pedido do usuário: "na empresa Promarking não deve ser alterado nada" — capa dela
+    // continua exatamente como sempre foi, sem o selo/redução de logo abaixo.
+    if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+    doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+    doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
+    doc.text('PREVENTIVA', pageW / 2, 438, { align: 'center' });
+    doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+    doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+    doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
+  } else {
+    // pedido do usuário: "o logo da Nexor Connect precisa está em menos destaque tipo uma
+    // marca d'água... deixando em evidência a empresa contratante" — logo bem menor + legenda
+    // discreta de atribuição da plataforma, e o nome da empresa muito mais em evidência: fonte
+    // maior, com um traço embaixo pra ancorar como o elemento principal da capa.
+    if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 24, 110, 48, 56); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(120, 140, 170);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, 182, { align: 'center' });
+    doc.setFontSize(32); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text(empresaNome(), pageW / 2, 250, { align: 'center' });
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.5);
+    doc.line(pageW / 2 - 50, 264, pageW / 2 + 50, 264);
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 370, { align: 'center' });
+    doc.text('PREVENTIVA', pageW / 2, 392, { align: 'center' });
+    doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+    doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 420, { align: 'center' });
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
+    doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 441, { align: 'center' });
+  }
   doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== conteúdo =====
@@ -6769,20 +6847,36 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -7230,20 +7324,36 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -7445,20 +7555,36 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -10684,20 +10810,36 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -11223,7 +11365,15 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   {
     if (y > pageH - margem - 60) novaPagina();
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const texto = `A máquina está coberta por uma garantia de 1 ano a partir da data de entrega. Esta garantia cobre defeitos de fabricação e mão de obra. WhatsApp: ${empresaWhatsapp()} — Telefone: ${empresaTelefone()} — E-mail: ${empresaEmails().slice(0, 2).join(' / ')}. Estamos confiantes de que o equipamento${r.modelo_maquina ? ` modelo ${r.modelo_maquina}` : ''} atenderá às suas expectativas e necessidades de produção.`;
+    // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+    // acontecer" — monta só os contatos que a empresa realmente tem, sem deixar "WhatsApp:  —
+    // Telefone:  — E-mail: ." pendurado quando algum estiver vazio.
+    const contatos = [
+      empresaWhatsapp() && `WhatsApp: ${empresaWhatsapp()}`,
+      empresaTelefone() && `Telefone: ${empresaTelefone()}`,
+      empresaEmails().length && `E-mail: ${empresaEmails().slice(0, 2).join(' / ')}`,
+    ].filter(Boolean).join(' — ');
+    const texto = `A máquina está coberta por uma garantia de 1 ano a partir da data de entrega. Esta garantia cobre defeitos de fabricação e mão de obra.${contatos ? ` ${contatos}.` : ''} Estamos confiantes de que o equipamento${r.modelo_maquina ? ` modelo ${r.modelo_maquina}` : ''} atenderá às suas expectativas e necessidades de produção.`;
     const linhas = doc.splitTextToSize(limparPdf(texto), largura - 16);
     const altura = Math.max(24, linhas.length * 12 + 12);
     doc.setDrawColor(...PDF_COR.line); doc.setFillColor(...PDF_COR.bege);
@@ -11273,20 +11423,36 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -13126,17 +13292,19 @@ function wPaginaContato(logoDataUri) {
     spacing: { after: 180 },
     children: [new docx.TextRun({ text: 'Entre em contato conosco através:', bold: true, color: WORD_COR.ink, size: 20 })],
   }));
-  conteudo.push(new docx.Paragraph({
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — mesmo tratamento do contato em PDF: nunca mostra linha vazia.
+  if (empresaWhatsapp()) conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 60 },
     children: [new docx.TextRun({ text: `WhatsApp: ${empresaWhatsapp()}`, color: WORD_COR.ink, size: 18 })],
   }));
-  conteudo.push(new docx.Paragraph({
+  if (empresaTelefone()) conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 220 },
     children: [new docx.TextRun({ text: `Telefone: ${empresaTelefone()}`, color: WORD_COR.ink, size: 18 })],
   }));
-  conteudo.push(new docx.Paragraph({
+  if (empresaEmails().length) conteudo.push(new docx.Paragraph({
     alignment: docx.AlignmentType.CENTER,
     spacing: { after: 100 },
     children: [new docx.TextRun({ text: 'E-mail:', bold: true, color: WORD_COR.ink, size: 18 })],
@@ -13372,20 +13540,36 @@ function gerarPdfFichaEquipamento(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -13611,20 +13795,36 @@ function gerarPdfEnsaioCiclagem(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
@@ -14081,20 +14281,36 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.bege);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
+  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
+  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
+  if (ehEmpresaPromarking()) {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
+    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  } else {
+    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
+    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
+  }
   doc.setFontSize(10); doc.setFont(undefined, 'bold');
   doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
   doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  doc.setFont(undefined, 'bold');
-  doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-  empresaEmails().forEach((email, i) => {
-    doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-  });
+  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
+  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
+  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
+  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
+  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
+  if (empresaEmails().length) {
+    doc.setFont(undefined, 'bold');
+    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
+    empresaEmails().forEach((email, i) => {
+      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
+    });
+  }
 
   return doc.output('bloburl');
 }
