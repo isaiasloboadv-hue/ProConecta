@@ -355,4 +355,66 @@ async function processarTurno(data, chamado) {
   return textoFinal;
 }
 
-module.exports = { ativa, processarTurno, buscarBiblioteca, lerEtiqueta, lerRecibo, calcularSla, PERGUNTAS_SLA };
+// ---------- Assistente IA no preenchimento de relatório ----------
+// pedido do usuário: "o técnico pode apertar o botão assistente IA... descreve toda a atividade e
+// a IA faz edições e correções usando termos altamente técnicos... abre um chat com a IA, igual
+// nas IAs convencionais... ao apresentar o texto relatório a IA pergunta se deseja seguir com a
+// sugestão. O técnico dando ok a IA já preenche os campos do relatório." Sem persistência no
+// servidor — cada chamada recebe o histórico inteiro da conversa (o front guarda, igual
+// processarTurno recebe de chamado.mensagens) e devolve a resposta da vez. A IA só chama a
+// ferramenta de preenchimento depois que o técnico confirmar explicitamente a sugestão que ela
+// apresentou no texto — nunca preenche sem essa confirmação.
+function montarFerramentaPreencherRelatorio(campos) {
+  return {
+    name: 'preencher_campos_relatorio',
+    description: 'Preenche os campos do relatório com o texto técnico final — só depois que o técnico confirmar explicitamente, na conversa, que quer seguir com a versão apresentada.',
+    input_schema: {
+      type: 'object',
+      properties: Object.fromEntries(campos.map((c) => [c.chave, { type: 'string', description: c.rotulo }])),
+    },
+  };
+}
+
+function montarSystemPromptAssistenteRelatorio(tipo, campos) {
+  const listaCampos = campos.map((c) => `- ${c.chave}: ${c.rotulo}`).join('\n');
+  return `Você ajuda um técnico de campo a escrever a parte técnica de um relatório de manutenção (tipo: ${tipo}), a partir da descrição informal que ele fizer da atividade que realizou.
+
+Converse em português, de forma direta e natural, como um chat comum. Quando o técnico descrever o que fez, reescreva o conteúdo em linguagem técnica precisa de manutenção industrial (nomenclatura correta de peças, defeitos, ações e medições) e distribua entre estes campos do relatório:
+${listaCampos}
+
+Depois de organizar, APRESENTE o texto de cada campo preenchido na sua própria mensagem de chat (nunca use a ferramenta nesse momento) e pergunte se o técnico quer seguir com essa sugestão ou corrigir/completar algo.
+
+Só chame a ferramenta preencher_campos_relatorio depois que o técnico confirmar explicitamente (ex.: "sim", "pode", "tá bom", "confirma", "segue assim") que quer seguir com a última versão que você apresentou. Se ele pedir ajuste ou der mais detalhes, incorpore, apresente a versão corrigida de novo na sua mensagem e pergunte de novo — nunca chame a ferramenta sem essa confirmação explícita da versão específica que está valendo.
+
+Se faltar informação importante pra preencher um campo, pergunte ao técnico antes de propor o relatório. Nunca invente um detalhe técnico que ele não tenha mencionado.`;
+}
+
+async function assistenteRelatorio({ tipo, mensagens, campos }) {
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1500,
+      system: montarSystemPromptAssistenteRelatorio(tipo, campos),
+      tools: [montarFerramentaPreencherRelatorio(campos)],
+      messages: mensagens.map((m) => ({ role: m.role, content: m.texto })),
+    }),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.text().catch(() => '');
+    throw new Error(`Erro na API da Anthropic: ${resp.status} ${corpo}`);
+  }
+  const dados = await resp.json();
+  const texto = (dados.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+  const blocoFerramenta = (dados.content || []).find((b) => b.type === 'tool_use' && b.name === 'preencher_campos_relatorio');
+  const preenchimento = blocoFerramenta ? blocoFerramenta.input : null;
+  if (!texto && !preenchimento) throw new Error('A IA não respondeu nada — tente de novo.');
+  return { texto: texto || 'Preenchi o relatório com a sugestão combinada.', preenchimento };
+}
+
+module.exports = { ativa, processarTurno, buscarBiblioteca, lerEtiqueta, lerRecibo, calcularSla, PERGUNTAS_SLA, assistenteRelatorio };

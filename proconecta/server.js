@@ -3701,6 +3701,33 @@ rota('POST', /^\/api\/relatorios-manutencao\/ler-etiqueta$/, async (req, res) =>
   }
 });
 
+// POST /api/ia/assistente-relatorio — chat com a IA pra ajudar a escrever a parte técnica de um
+// relatório (pedido do usuário: descreve a atividade, a IA organiza em termos técnicos nos campos
+// certos, pergunta se confirma, e só preenche depois do "ok" do técnico — ver ia.assistenteRelatorio).
+// Sem persistência no servidor: o histórico da conversa vive só no front (descartável, ao
+// contrário do chat de atendimento, que fica salvo em chamado.mensagens).
+rota('POST', /^\/api\/ia\/assistente-relatorio$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só quem cria relatório usa o assistente de IA.' });
+  if (!ia.ativa()) return enviarJSON(res, 400, { erro: 'O assistente de IA não está configurado neste sistema.' });
+  const body = await lerCorpo(req);
+  const tipo = String(body.tipo || '').trim();
+  const campos = (Array.isArray(body.campos) ? body.campos : [])
+    .filter((c) => c && String(c.chave || '').trim() && String(c.rotulo || '').trim())
+    .map((c) => ({ chave: String(c.chave).trim(), rotulo: String(c.rotulo).trim() }));
+  const mensagens = (Array.isArray(body.mensagens) ? body.mensagens : [])
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && String(m.texto || '').trim())
+    .map((m) => ({ role: m.role, texto: String(m.texto).trim() }));
+  if (!tipo || !campos.length) return enviarJSON(res, 400, { erro: 'Tipo de relatório e campos são obrigatórios.' });
+  if (!mensagens.length) return enviarJSON(res, 400, { erro: 'Descreva o que você fez pra a IA ajudar.' });
+  try {
+    const { texto, preenchimento } = await ia.assistenteRelatorio({ tipo, mensagens, campos });
+    enviarJSON(res, 200, { texto, preenchimento });
+  } catch (e) {
+    enviarJSON(res, 502, { erro: e.message });
+  }
+});
+
 // normaliza a lista de campos de uma "ficha de equipamento" (o que a IA leu da etiqueta, com
 // possíveis ajustes do técnico) — tira linhas totalmente vazias, garante string em tudo.
 function sanitizarCamposFicha(lista) {

@@ -8723,7 +8723,10 @@ function mostrarFormRelatorioManutencao(existente) {
   const editando = !!d.id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar relatório' : 'Novo relatório'} — Manutenção interna</h1><p>Preencha os dados abaixo. Ao gerar, o PDF fica disponível e o relatório é salvo no seu histórico. Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar relatório' : 'Novo relatório'} — Manutenção interna</h1><p>Preencha os dados abaixo. Ao gerar, o PDF fica disponível e o relatório é salvo no seu histórico. Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('completo')}
+    </div>
 
     <div class="panel">
       <h2>Dados do cliente</h2>
@@ -9099,7 +9102,10 @@ async function mostrarFormRelatorioPreventiva(existente) {
   const editando = !!d.id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('preventiva')}
+    </div>
 
     <div class="panel">
       <h2>Identificação</h2>
@@ -9585,7 +9591,10 @@ async function mostrarFormRelatorioPreventiva2(existente) {
   const editando = !!d.id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. (modelo alternativo — "Preventiva 2"). Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Preventiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. (modelo alternativo — "Preventiva 2"). Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('preventiva2')}
+    </div>
 
     <div class="panel">
       <h2>Identificação</h2>
@@ -10120,7 +10129,10 @@ async function mostrarFormRelatorioCorretiva(existente) {
   const editando = !!d.id;
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Corretiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Termo de Manutenção Corretiva</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('corretiva')}
+    </div>
 
     <div class="panel">
       <h2>Identificação</h2>
@@ -10553,7 +10565,10 @@ async function mostrarFormRelatorioTecnico(existente) {
   const tiposServico = [['amostra', 'Amostra'], ['analise', 'Análise'], ['preventiva', 'Preventiva'], ['corretiva', 'Corretiva'], ['outros', 'Outros']];
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Relatório Técnico</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Relatório Técnico</h1><p>Relatório de manutenção interna, avulso — sem vínculo com nenhuma O.S. Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('relatorio_tecnico')}
+    </div>
 
     <div class="panel">
       <h2>Dados do cliente</h2>
@@ -12140,7 +12155,10 @@ async function mostrarFormRelatorioPromotor(existente) {
   const osList = await osDemonstracaoTecnica();
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Briefing Pré-Visita — Técnico</h1><p>Preencher antes da visita. Dá ao Técnico contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Briefing Pré-Visita — Técnico</h1><p>Preencher antes da visita. Dá ao Técnico contexto suficiente para uma boa demonstração. Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('promotor')}
+    </div>
 
     <div class="panel">
       <h2>1. Identificação</h2>
@@ -12431,7 +12449,10 @@ async function mostrarFormRelatorioDevolutivo(existente) {
   const osList = await osDemonstracaoTecnica();
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Relatório Devolutivo</h1><p>Preencher depois da visita — o que foi demonstrado e se o cliente revelou uma necessidade a mais (ex.: automação, retrofit), pra devolver pro líder de vendas. Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Relatório Devolutivo</h1><p>Preencher depois da visita — o que foi demonstrado e se o cliente revelou uma necessidade a mais (ex.: automação, retrofit), pra devolver pro líder de vendas. Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('devolutivo')}
+    </div>
 
     <div class="panel">
       <h2>Identificação</h2>
@@ -12775,7 +12796,10 @@ async function mostrarFormRelatorioLevantamentoTecnico(existente) {
   const [devolutivos, osList] = await Promise.all([devolutivosComOportunidade(), osDemonstracaoTecnica()]);
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>${editando ? 'Editar' : 'Novo'} Levantamento Técnico</h1><p>Preencher numa visita de engenharia, quando o Devolutivo já sinalizou uma oportunidade adicional (automação, retrofit...). Campos com * são obrigatórios.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${editando ? 'Editar' : 'Novo'} Levantamento Técnico</h1><p>Preencher numa visita de engenharia, quando o Devolutivo já sinalizou uma oportunidade adicional (automação, retrofit...). Campos com * são obrigatórios.</p></div>
+      ${botaoAssistenteIA('levantamento_tecnico')}
+    </div>
 
     <div class="panel">
       <h2>Identificação</h2>
@@ -18449,6 +18473,178 @@ function mostrarPrompt(mensagem) {
       fechar(texto || null);
     };
   });
+}
+
+// ---------- Assistente IA no preenchimento de relatório ----------
+// pedido do usuário: "o técnico pode apertar o botão assistente IA... descreve toda a atividade e
+// a IA faz edições e correções usando termos altamente técnicos... abre um chat com a IA, igual
+// nas IAs convencionais... ao apresentar o texto relatório a IA pergunta se deseja seguir com a
+// sugestão. O técnico dando ok a IA já preenche os campos do relatório." Cada tipo de relatório
+// manual com campos narrativos (os tipos de checklist/leitura de etiqueta — ficha, ciclagem,
+// aceite de entrega, entrega para teste — não têm um campo de "descreva o que você fez" e por
+// isso não entraram aqui) tem sua própria lista de campos preenchíveis; o chat é genérico, só o
+// catálogo muda por tipo.
+const LER_CAMPOS_POR_TIPO_IA = {
+  completo: 'lerCamposRelatorioManut',
+  preventiva: 'lerCamposPreventiva',
+  preventiva2: 'lerCamposPreventiva2',
+  corretiva: 'lerCamposCorretiva',
+  relatorio_tecnico: 'lerCamposTecnico',
+  promotor: 'lerCamposPromotor',
+  devolutivo: 'lerCamposDevolutivo',
+  levantamento_tecnico: 'lerCamposLevantamento',
+};
+
+const CAMPOS_IA_POR_TIPO = {
+  completo: [
+    { chave: 'defeito_informado', rotulo: 'Defeito informado', idCampo: 'rm-defeito_informado' },
+    { chave: 'laudo_tecnico', rotulo: 'Laudo técnico (diagnóstico)', idCampo: 'rm-laudo_tecnico' },
+    { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rm-servico_realizado' },
+  ],
+  preventiva: [
+    { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rp-servico_realizado' },
+    { chave: 'observacoes_checklist', rotulo: 'Observações do checklist', idCampo: 'rp-observacoes_checklist' },
+  ],
+  preventiva2: [
+    { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rp2-servico_realizado' },
+    { chave: 'observacoes_checklist', rotulo: 'Observações do checklist', idCampo: 'rp2-observacoes_checklist' },
+  ],
+  corretiva: [
+    { chave: 'defeito_informado', rotulo: 'Defeito informado', idCampo: 'rcm-defeito_informado' },
+    { chave: 'acoes_executadas', rotulo: 'Ações executadas', idCampo: 'rcm-acoes_executadas' },
+    { chave: 'observacoes', rotulo: 'Observações', idCampo: 'rcm-observacoes' },
+  ],
+  relatorio_tecnico: [
+    { chave: 'defeito_informado', rotulo: 'Defeito informado', idCampo: 'rt-defeito_informado' },
+    { chave: 'laudo_tecnico', rotulo: 'Laudo técnico', idCampo: 'rt-laudo_tecnico' },
+    { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rt-servico_realizado' },
+    { chave: 'observacoes', rotulo: 'Observações', idCampo: 'rt-observacoes' },
+  ],
+  promotor: [
+    { chave: 'motivo_visita', rotulo: 'Por que estamos indo ao cliente', idCampo: 'pm-motivo_visita' },
+    { chave: 'processo_atual', rotulo: 'Como o cliente faz esse processo hoje', idCampo: 'pm-processo_atual' },
+    { chave: 'necessidade_informada', rotulo: 'O que o cliente precisa resolver ou melhorar', idCampo: 'pm-necessidade_informada' },
+    { chave: 'o_que_demonstrar', rotulo: 'O que vamos demonstrar', idCampo: 'pm-o_que_demonstrar' },
+    { chave: 'ponto_importante_demo', rotulo: 'Ponto mais importante da demonstração', idCampo: 'pm-ponto_importante_demo' },
+    { chave: 'duvidas_preocupacoes', rotulo: 'Dúvidas/preocupações já mencionadas pelo cliente', idCampo: 'pm-duvidas_preocupacoes' },
+    { chave: 'concorrente', rotulo: 'Concorrente envolvido', idCampo: 'pm-concorrente' },
+    { chave: 'o_que_observar', rotulo: 'O que o técnico deve observar na visita', idCampo: 'pm-o_que_observar' },
+    { chave: 'objetivo_visita', rotulo: 'Objetivo da visita em uma frase', idCampo: 'pm-objetivo_visita' },
+    { chave: 'ponto_principal_observar', rotulo: 'Ponto principal a observar', idCampo: 'pm-ponto_principal_observar' },
+  ],
+  devolutivo: [
+    { chave: 'feedback_cliente', rotulo: 'Feedback do cliente', idCampo: 'dv-feedback_cliente' },
+    { chave: 'pontos_positivos', rotulo: 'Pontos positivos', idCampo: 'dv-pontos_positivos' },
+    { chave: 'pontos_ajuste', rotulo: 'Pontos de ajuste', idCampo: 'dv-pontos_ajuste' },
+    { chave: 'descricao_oportunidade', rotulo: 'Descrição da oportunidade adicional identificada', idCampo: 'dv-descricao_oportunidade' },
+    { chave: 'proximos_passos', rotulo: 'Próximos passos', idCampo: 'dv-proximos_passos' },
+    { chave: 'observacoes_finais', rotulo: 'Observações finais', idCampo: 'dv-observacoes_finais' },
+  ],
+  levantamento_tecnico: [
+    { chave: 'tolerancias_qualidade', rotulo: 'Tolerâncias e requisitos de qualidade', idCampo: 'lt-tolerancias_qualidade' },
+    { chave: 'automacao_existente', rotulo: 'Automação já existente', idCampo: 'lt-automacao_existente' },
+    { chave: 'integracao_necessaria', rotulo: 'Integração necessária com a linha do cliente', idCampo: 'lt-integracao_necessaria' },
+    { chave: 'requisitos_seguranca', rotulo: 'Requisitos de segurança / normas aplicáveis', idCampo: 'lt-requisitos_seguranca' },
+    { chave: 'escopo_proposto', rotulo: 'Escopo técnico proposto', idCampo: 'lt-escopo_proposto' },
+    { chave: 'observacoes_tecnicas', rotulo: 'Observações técnicas', idCampo: 'lt-observacoes_tecnicas' },
+    { chave: 'proximos_passos', rotulo: 'Próximos passos', idCampo: 'lt-proximos_passos' },
+  ],
+};
+
+function botaoAssistenteIA(tipo) {
+  return `<button class="btn-outline-sm" onclick="abrirAssistenteIA('${tipo}')">🤖 Assistente IA</button>`;
+}
+
+let _iaRelatorioEstado = null;
+
+function abrirAssistenteIA(tipo) {
+  const campos = CAMPOS_IA_POR_TIPO[tipo];
+  if (!campos) return;
+  _iaRelatorioEstado = { tipo, mensagens: [], campos };
+  let modal = document.getElementById('modal-ia-assistente');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-ia-assistente';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:600px;">
+      <h3>🤖 Assistente IA</h3>
+      <p>Descreva com suas palavras o que você fez. A IA organiza em termos técnicos, mostra a sugestão e, quando você confirmar, preenche os campos do relatório.</p>
+      <div class="chat-panel" style="padding:0;">
+        <div class="chat-mensagens" id="ia-relatorio-mensagens"></div>
+        <div class="chat-compositor">
+          <textarea id="ia-relatorio-texto" placeholder="Descreva o que você fez..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemAssistenteIA();}"></textarea>
+          <button class="btn btn-primary btn-sm" id="ia-relatorio-enviar" onclick="enviarMensagemAssistenteIA()">Enviar</button>
+        </div>
+      </div>
+      <button class="btn-ghost btn-sm" style="margin-top:10px;" onclick="document.getElementById('modal-ia-assistente').classList.remove('show')">Fechar</button>
+    </div>`;
+  renderMensagensAssistenteIA();
+  document.getElementById('ia-relatorio-texto').focus();
+}
+
+function renderMensagensAssistenteIA() {
+  const container = document.getElementById('ia-relatorio-mensagens');
+  if (!container) return;
+  const mensagens = _iaRelatorioEstado.mensagens;
+  container.innerHTML = mensagens.length
+    ? mensagens.map((m) => `
+      <div class="chat-msg ${m.role === 'user' ? 'chat-msg-proprio' : 'chat-msg-outro chat-msg-ia'}">
+        <div class="chat-msg-rotulo">${m.role === 'user' ? 'Você' : 'Assistente IA'}</div>
+        <div class="chat-msg-texto">${esc(m.texto)}</div>
+      </div>`).join('')
+    : `<div class="chat-sistema">Descreva o que você fez, com suas palavras.</div>`;
+  container.scrollTop = container.scrollHeight;
+}
+
+async function enviarMensagemAssistenteIA() {
+  const campo = document.getElementById('ia-relatorio-texto');
+  const texto = campo.value.trim();
+  if (!texto) return;
+  const estado = _iaRelatorioEstado;
+  estado.mensagens.push({ role: 'user', texto });
+  campo.value = '';
+  renderMensagensAssistenteIA();
+  const botaoEnviar = document.getElementById('ia-relatorio-enviar');
+  botaoEnviar.disabled = true;
+  try {
+    const { texto: resposta, preenchimento } = await api('/api/ia/assistente-relatorio', {
+      method: 'POST',
+      body: {
+        tipo: estado.tipo,
+        mensagens: estado.mensagens,
+        campos: estado.campos.map((c) => ({ chave: c.chave, rotulo: c.rotulo })),
+      },
+    });
+    estado.mensagens.push({ role: 'assistant', texto: resposta });
+    renderMensagensAssistenteIA();
+    if (preenchimento && Object.keys(preenchimento).length) {
+      aplicarPreenchimentoIA(estado.tipo, estado.campos, preenchimento);
+      mostrarToast('Relatório preenchido pela IA.');
+      document.getElementById('modal-ia-assistente').classList.remove('show');
+    }
+  } catch (e) {
+    estado.mensagens.push({ role: 'assistant', texto: 'Não consegui responder agora (' + e.message + '). Tente de novo.' });
+    renderMensagensAssistenteIA();
+  } finally {
+    botaoEnviar.disabled = false;
+    const campoTexto = document.getElementById('ia-relatorio-texto');
+    if (campoTexto) campoTexto.focus();
+  }
+}
+
+function aplicarPreenchimentoIA(tipo, campos, preenchimento) {
+  for (const c of campos) {
+    const valor = preenchimento[c.chave];
+    if (valor === undefined || valor === null) continue;
+    const el = document.getElementById(c.idCampo);
+    if (el) el.value = valor;
+  }
+  const nomeFuncaoLer = LER_CAMPOS_POR_TIPO_IA[tipo];
+  if (nomeFuncaoLer && typeof window[nomeFuncaoLer] === 'function') window[nomeFuncaoLer]();
 }
 
 // ---------- Técnicos: acompanhamento de viagens/bônus + solicitações de RH ----------

@@ -26,6 +26,7 @@ const PREFIXO_MODULO = [
   ['/api/solicitacoes-rh', 'os_chamados'],
   ['/api/equipamentos', 'os_chamados'],
   ['/api/relatorios-manutencao', 'os_chamados'],
+  ['/api/ia', 'os_chamados'],
   ['/api/fmea', 'os_chamados'],
   ['/api/kpis', 'os_chamados'],
   ['/api/tecnicos', 'os_chamados'],
