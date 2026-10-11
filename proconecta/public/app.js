@@ -18580,6 +18580,7 @@ function abrirAssistenteIA(tipo) {
           <button class="btn btn-primary btn-sm" id="ia-relatorio-enviar" onclick="enviarMensagemAssistenteIA()">Enviar</button>
         </div>
       </div>
+      <button class="btn btn-success btn-sm" id="ia-relatorio-aceitar" style="margin-top:10px; width:100%;" disabled onclick="aceitarRelatorioIA()">✅ Aceitar e preencher relatório</button>
       <button class="btn-ghost btn-sm" style="margin-top:10px;" onclick="document.getElementById('modal-ia-assistente').classList.remove('show')">Fechar</button>
     </div>`;
   renderMensagensAssistenteIA();
@@ -18598,6 +18599,8 @@ function renderMensagensAssistenteIA() {
       </div>`).join('')
     : `<div class="chat-sistema">Descreva o que você fez, com suas palavras.</div>`;
   container.scrollTop = container.scrollHeight;
+  const botaoAceitar = document.getElementById('ia-relatorio-aceitar');
+  if (botaoAceitar) botaoAceitar.disabled = !mensagens.some((m) => m.role === 'assistant');
 }
 
 async function enviarMensagemAssistenteIA() {
@@ -18631,6 +18634,47 @@ async function enviarMensagemAssistenteIA() {
     renderMensagensAssistenteIA();
   } finally {
     botaoEnviar.disabled = false;
+    const campoTexto = document.getElementById('ia-relatorio-texto');
+    if (campoTexto) campoTexto.focus();
+  }
+}
+
+// botão "Aceitar e preencher relatório": pedido do usuário — ele aceitou o texto que a IA
+// apresentou no chat, mas nada preencheu os campos, porque o preenchimento dependia da IA
+// interpretar sozinha uma confirmação em texto livre. Esse botão não depende disso: manda uma
+// confirmação explícita e marca confirmar:true, que força o servidor a chamar a ferramenta de
+// preenchimento agora, com a última versão já apresentada na conversa.
+async function aceitarRelatorioIA() {
+  const estado = _iaRelatorioEstado;
+  if (!estado || !estado.mensagens.some((m) => m.role === 'assistant')) return;
+  estado.mensagens.push({ role: 'user', texto: 'Pode seguir com essa versão, preenche o relatório.' });
+  renderMensagensAssistenteIA();
+  const botaoAceitar = document.getElementById('ia-relatorio-aceitar');
+  const botaoEnviar = document.getElementById('ia-relatorio-enviar');
+  if (botaoAceitar) botaoAceitar.disabled = true;
+  if (botaoEnviar) botaoEnviar.disabled = true;
+  try {
+    const { texto: resposta, preenchimento } = await api('/api/ia/assistente-relatorio', {
+      method: 'POST',
+      body: {
+        tipo: estado.tipo,
+        mensagens: estado.mensagens,
+        campos: estado.campos.map((c) => ({ chave: c.chave, rotulo: c.rotulo })),
+        confirmar: true,
+      },
+    });
+    estado.mensagens.push({ role: 'assistant', texto: resposta });
+    renderMensagensAssistenteIA();
+    if (preenchimento && Object.keys(preenchimento).length) {
+      aplicarPreenchimentoIA(estado.tipo, estado.campos, preenchimento);
+      mostrarToast('Relatório preenchido pela IA.');
+      document.getElementById('modal-ia-assistente').classList.remove('show');
+    }
+  } catch (e) {
+    estado.mensagens.push({ role: 'assistant', texto: 'Não consegui preencher agora (' + e.message + '). Tente de novo.' });
+    renderMensagensAssistenteIA();
+  } finally {
+    if (botaoEnviar) botaoEnviar.disabled = false;
     const campoTexto = document.getElementById('ia-relatorio-texto');
     if (campoTexto) campoTexto.focus();
   }

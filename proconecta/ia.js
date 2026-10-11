@@ -389,7 +389,18 @@ Só chame a ferramenta preencher_campos_relatorio depois que o técnico confirma
 NUNCA faça perguntas de esclarecimento antes de apresentar o relatório — o técnico não quer ser interrogado, quer ver o relatório pronto. Mesmo que a descrição seja curta ou informal, use seu conhecimento técnico de manutenção industrial pra desenvolver cada campo de forma completa e forte na própria primeira resposta: explique o porquê técnico de cada verificação/ação (ex.: por que limpeza de lente, reaperto de parafusos e contatos elétricos importam pra manter a performance e evitar falhas), usando nomenclatura e justificativas técnicas plausíveis do tipo de equipamento, mesmo preenchendo lacunas que o técnico não detalhou. Só não invente número/medição/data específica que ele não tenha informado — nesse caso descreva em termos qualitativos (ex.: "aumento expressivo da potência de saída") em vez de inventar um valor exato. Depois de apresentar essa primeira versão já completa, pergunte se o técnico quer seguir com ela ou ajustar algo — a pergunta é sempre sobre a sugestão já pronta, nunca um pedido de mais dados antes de montá-la.`;
 }
 
-async function assistenteRelatorio({ tipo, mensagens, campos }) {
+async function assistenteRelatorio({ tipo, mensagens, campos, confirmar }) {
+  const corpo = {
+    model: ANTHROPIC_MODEL,
+    max_tokens: 1500,
+    system: montarSystemPromptAssistenteRelatorio(tipo, campos),
+    tools: [montarFerramentaPreencherRelatorio(campos)],
+    messages: mensagens.map((m) => ({ role: m.role, content: m.texto })),
+  };
+  // botão "Aceitar e preencher relatório" do front: não depende da IA interpretar a confirmação
+  // em texto livre — força a chamada da ferramenta agora, com a última versão já apresentada no
+  // histórico da conversa.
+  if (confirmar) corpo.tool_choice = { type: 'tool', name: 'preencher_campos_relatorio' };
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -397,13 +408,7 @@ async function assistenteRelatorio({ tipo, mensagens, campos }) {
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 1500,
-      system: montarSystemPromptAssistenteRelatorio(tipo, campos),
-      tools: [montarFerramentaPreencherRelatorio(campos)],
-      messages: mensagens.map((m) => ({ role: m.role, content: m.texto })),
-    }),
+    body: JSON.stringify(corpo),
   });
   if (!resp.ok) {
     const corpo = await resp.text().catch(() => '');

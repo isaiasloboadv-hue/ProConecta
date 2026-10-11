@@ -74,6 +74,34 @@ test('assistenteRelatorio: envia o histórico de mensagens e a ferramenta certa 
   assert.match(corpo.system, /promotor/);
 });
 
+test('assistenteRelatorio: sem confirmar, não força tool_choice (IA decide sozinha)', async () => {
+  mockarFetch({ content: [{ type: 'text', text: 'ok' }] });
+  await ia.assistenteRelatorio({
+    tipo: 'corretiva',
+    mensagens: [{ role: 'user', texto: 'descrição qualquer' }],
+    campos: CAMPOS,
+  });
+  assert.equal(mockarFetch.ultimaChamada.opts.tool_choice, undefined);
+});
+
+test('assistenteRelatorio: com confirmar:true, força a chamada da ferramenta (botão "Aceitar e preencher")', async () => {
+  mockarFetch({
+    content: [{ type: 'tool_use', id: 'x1', name: 'preencher_campos_relatorio', input: { defeito_informado: 'x', acoes_executadas: 'y' } }],
+  });
+  const { preenchimento } = await ia.assistenteRelatorio({
+    tipo: 'corretiva',
+    mensagens: [
+      { role: 'user', texto: 'descrição qualquer' },
+      { role: 'assistant', texto: 'Sugestão: ... Quer seguir com ela?' },
+      { role: 'user', texto: 'Pode seguir com essa versão, preenche o relatório.' },
+    ],
+    campos: CAMPOS,
+    confirmar: true,
+  });
+  assert.deepEqual(mockarFetch.ultimaChamada.opts.tool_choice, { type: 'tool', name: 'preencher_campos_relatorio' });
+  assert.deepEqual(preenchimento, { defeito_informado: 'x', acoes_executadas: 'y' });
+});
+
 test('assistenteRelatorio: erro da API da Anthropic propaga como exceção', async () => {
   global.fetch = async () => ({ ok: false, status: 503, text: async () => 'fora do ar' });
   await assert.rejects(

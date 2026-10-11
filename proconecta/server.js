@@ -3718,10 +3718,11 @@ rota('POST', /^\/api\/ia\/assistente-relatorio$/, async (req, res) => {
   const mensagens = (Array.isArray(body.mensagens) ? body.mensagens : [])
     .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && String(m.texto || '').trim())
     .map((m) => ({ role: m.role, texto: String(m.texto).trim() }));
+  const confirmar = body.confirmar === true;
   if (!tipo || !campos.length) return enviarJSON(res, 400, { erro: 'Tipo de relatório e campos são obrigatórios.' });
   if (!mensagens.length) return enviarJSON(res, 400, { erro: 'Descreva o que você fez pra a IA ajudar.' });
   try {
-    const { texto, preenchimento } = await ia.assistenteRelatorio({ tipo, mensagens, campos });
+    const { texto, preenchimento } = await ia.assistenteRelatorio({ tipo, mensagens, campos, confirmar });
     enviarJSON(res, 200, { texto, preenchimento });
   } catch (e) {
     enviarJSON(res, 502, { erro: e.message });
