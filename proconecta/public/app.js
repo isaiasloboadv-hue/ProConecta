@@ -15185,13 +15185,46 @@ async function renderClientes() {
           <td data-label="E-mail">${esc(c.email || '—')}</td>
           <td data-label="Cidade/UF">${c.cidade ? esc(c.cidade) + '/' + esc(c.estado || '') : '—'}</td>
           <td class="td-acoes">
+            <button class="btn-ghost btn-sm" onclick="verHistoricoCliente(${c.id})">Histórico</button>
             ${USER.papel === 'administrador' ? `
               <button class="btn-outline-sm" onclick="editarCliente(${c.id})">Editar</button>
               <button class="btn-outline-sm" onclick="excluirCliente(${c.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
             ` : ''}
           </td>
         </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum cliente cadastrado ainda.</td></tr>`}
-    </table></div>`;
+    </table></div>
+    <div id="historico-cliente"></div>`;
+}
+
+// Histórico Unificado por Cliente (CRM nativo, passo 4) — agrega agenda/relatórios/chamados/
+// equipamentos/oportunidades/propostas desse cliente numa timeline só, numa seção dentro da
+// própria tela de Clientes (mesmo padrão de verHistorico() dos Equipamentos: botão por linha,
+// painel inline abaixo da tabela, sem navegar pra outra tela).
+function iconeHistoricoCliente(tipo) {
+  return { agenda: '📅', relatorio: '📝', chamado: '💬', equipamento: '⚙️', oportunidade: '🎯', proposta: '🧾' }[tipo] || '•';
+}
+
+async function verHistoricoCliente(id) {
+  const cliente = (window._clientesCache || []).find((c) => c.id === id);
+  const { agenda, relatorios, chamados, equipamentos, oportunidades, propostas } = await api(`/api/clientes/${id}/historico`);
+  const itens = [
+    ...agenda.map((a) => ({ tipo: 'agenda', data: a.data_hora_inicio, titulo: `O.S. ${a.numero_os || ''} — ${a.tipo}` })),
+    ...relatorios.map((r) => ({ tipo: 'relatorio', data: r.criado_em || r.data_visita || '', titulo: `Relatório (${r.tipo})` })),
+    ...chamados.map((c) => ({ tipo: 'chamado', data: c.criado_em || '', titulo: `Atendimento — ${c.status}` })),
+    ...equipamentos.map((e) => ({ tipo: 'equipamento', data: e.data_fabricacao || '', titulo: `Equipamento: ${e.tipo || e.modelo || '—'}` })),
+    ...oportunidades.map((o) => ({ tipo: 'oportunidade', data: o.criado_em || '', titulo: `Oportunidade: ${o.titulo} (${ESTAGIO_OPORTUNIDADE_LABEL[o.estagio] || o.estagio})` })),
+    ...propostas.map((p) => ({ tipo: 'proposta', data: p.criado_em || '', titulo: `Proposta — ${STATUS_PROPOSTA_LABEL[p.status] || p.status} — ${fmtMoeda(p.valor_total)}` })),
+  ].sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+  document.getElementById('historico-cliente').innerHTML = `
+    <div class="panel"><div class="panel-head">Histórico — ${cliente ? esc(cliente.nome_empresa) : ''}</div>
+      ${itens.length ? itens.map((i) => `
+        <div style="display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+          <div>${iconeHistoricoCliente(i.tipo)}</div>
+          <div style="flex:1;">${esc(i.titulo)}</div>
+          <div style="color:var(--ink-soft); font-size:12px;">${i.data ? esc(String(i.data).slice(0, 10)) : '—'}</div>
+        </div>`).join('') : `<p class="empty">Nenhum histórico ainda pra este cliente.</p>`}
+    </div>`;
+  document.getElementById('historico-cliente').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 let clienteEmEdicaoId = null;

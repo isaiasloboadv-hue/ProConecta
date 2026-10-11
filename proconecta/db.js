@@ -444,6 +444,11 @@ function migrar(data) {
   // propostas/orçamentos (CRM nativo, passo 3).
   if (!data.propostas) data.propostas = [];
   if (!data._seq.propostas) data._seq.propostas = 1;
+  // criado_em entrou depois em oportunidades/propostas, pro Histórico Unificado (passo 4) poder
+  // ordenar por data — quem já existia sem o campo ganha a data da migração (não tem como saber a
+  // data real de criação retroativamente).
+  for (const o of data.oportunidades) { if (!o.criado_em) o.criado_em = new Date().toISOString(); }
+  for (const p of data.propostas) { if (!p.criado_em) p.criado_em = new Date().toISOString(); }
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];

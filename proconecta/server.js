@@ -3935,6 +3935,7 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       observacoes: '',
       origem: 'devolutivo',
       devolutivo_id: item.id,
+      criado_em: new Date().toISOString(),
     });
   }
   db.save(data);
@@ -4258,6 +4259,34 @@ rota('DELETE', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { ok: true });
 });
 
+// GET /api/clientes/:id/historico — Histórico Unificado (CRM nativo, passo 4): agrega tudo que já
+// existe espalhado (agenda, relatórios, chamados, equipamentos, oportunidades, propostas) numa
+// timeline só, na própria tela de Clientes. relatorios_manutencao não tem cliente_id nenhum — só
+// o texto livre `empresa` — então o match é por agenda_id quando existe, senão por nome igual
+// sincronizarClienteDoRelatorio já faz; não dá pra fingir que é um JOIN limpo por FK.
+rota('GET', /^\/api\/clientes\/(\d+)\/historico$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'producao', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção veem o histórico do cliente.' });
+  const data = db.load();
+  const clienteId = Number(m[1]);
+  const cliente = tenant.buscar(data, 'clientes', clienteId, user.empresa_id);
+  if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
+  const nomeCliente = String(cliente.nome_empresa || '').trim().toLowerCase();
+
+  const agenda = tenant.listar(data, 'agenda', user.empresa_id).filter((a) => a.cliente_id === clienteId);
+  const agendaIds = new Set(agenda.map((a) => a.id));
+  const relatorios = tenant.listar(data, 'relatorios_manutencao', user.empresa_id).filter((r) => (
+    r.agenda_id ? agendaIds.has(r.agenda_id) : String(r.empresa || '').trim().toLowerCase() === nomeCliente
+  ));
+  const chamados = tenant.listar(data, 'chamados', user.empresa_id).filter((c) => c.cliente_id === clienteId);
+  const equipamentos = tenant.listar(data, 'equipamentos', user.empresa_id).filter((e) => e.cliente_id === clienteId);
+  const oportunidades = tenant.listar(data, 'oportunidades', user.empresa_id).filter((o) => o.cliente_id === clienteId);
+  const oportunidadeIds = new Set(oportunidades.map((o) => o.id));
+  const propostas = tenant.listar(data, 'propostas', user.empresa_id).filter((p) => oportunidadeIds.has(p.oportunidade_id));
+
+  enviarJSON(res, 200, { agenda, relatorios, chamados, equipamentos, oportunidades, propostas });
+});
+
 const ESTAGIOS_LEAD_VALIDOS = ['novo', 'contatado', 'desqualificado'];
 
 // GET /api/leads — menu Comercial: prospects que ainda não são clientes oficiais
@@ -4371,6 +4400,7 @@ rota('POST', /^\/api\/oportunidades$/, async (req, res) => {
     observacoes: body.observacoes || '',
     origem: 'manual',
     devolutivo_id: null,
+    criado_em: new Date().toISOString(),
   });
   db.save(data);
   enviarJSON(res, 201, { oportunidade: item });
@@ -4447,6 +4477,7 @@ rota('POST', /^\/api\/propostas$/, async (req, res) => {
     valor_total: valorTotalProposta(itens),
     validade: body.validade || '',
     status: 'rascunho',
+    criado_em: new Date().toISOString(),
   });
   db.save(data);
   enviarJSON(res, 201, { proposta: item });
