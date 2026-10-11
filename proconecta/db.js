@@ -234,7 +234,10 @@ function seed() {
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
-    versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
+    // preco_mensal (SaaS, passo 3): só exibição por enquanto — sem gateway de pagamento nenhum
+    // integrado ainda (ver PUT /api/empresa/plano em server.js), igual plano_valor_mensal da
+    // empresa já era antes disso.
+    versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
     _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
@@ -466,8 +469,10 @@ function migrar(data) {
   if (!data._seq.fmea_efeitos) data._seq.fmea_efeitos = 1;
   // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
-  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];
+  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }];
   if (!data._seq.versoes) data._seq.versoes = 2;
+  // preco_mensal (SaaS, passo 3) — não existia antes; só exibição, sem gateway de pagamento.
+  for (const v of data.versoes) { if (v.preco_mensal === undefined) v.preco_mensal = null; }
   // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
   // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
   if (!data._seq.empresas) data._seq.empresas = 2;

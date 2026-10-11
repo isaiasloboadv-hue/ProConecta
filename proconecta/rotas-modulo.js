@@ -36,6 +36,11 @@ const PREFIXO_MODULO = [
   ['/api/leads', 'comercial'],
   ['/api/oportunidades', 'comercial'],
   ['/api/propostas', 'comercial'],
+  // 'nucleo' (não núcleo implícito por omissão) de propósito: evita que esse prefixo um dia seja
+  // confundido com /api/empresa (público) por alguém editando essa lista às pressas — "Meu plano"
+  // tem que passar pela checagem central de módulo/suspensa/trial (ver comentário em
+  // PUT /api/meu-plano, server.js).
+  ['/api/meu-plano', 'nucleo'],
   ['/api/agendamento', 'agendamento'],
   ['/api/financeiro', 'financeiro'],
   ['/api/prestacao-contas', 'prestacao_contas'],

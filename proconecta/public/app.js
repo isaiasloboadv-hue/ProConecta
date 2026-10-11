@@ -1626,7 +1626,42 @@ async function renderMinhaEmpresa() {
         <div><label>Limite de diárias/mês antes de exigir justificativa</label><input type="number" min="0" step="1" id="me-limite-bonus" value="${esc(e.limite_viagens_bonus_mes ?? 7)}"></div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="salvarMinhaEmpresa()">Salvar</button>
+    </div>
+    <div id="meu-plano"></div>`;
+  carregarMeuPlano();
+}
+
+// "Meu plano" (SaaS, passo 3) — a própria empresa troca de versão/plano sem precisar do Super
+// Admin, aplicando módulos/cotas na hora. Sem gateway de pagamento nenhum envolvido ainda
+// ("terreno pronto" — ver PUT /api/meu-plano em server.js); preço é só exibição por enquanto.
+async function carregarMeuPlano() {
+  const { versoes, versao_id_atual } = await api('/api/meu-plano/versoes');
+  document.getElementById('meu-plano').innerHTML = `
+    <div class="panel">
+      <div class="panel-head">Meu plano</div>
+      ${versoes.map((v) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--line);">
+          <div>
+            <strong>${esc(v.nome)}</strong>
+            <div style="color:var(--ink-soft); font-size:13px;">${v.preco_mensal != null ? fmtMoeda(v.preco_mensal) + '/mês' : 'Preço a combinar'}</div>
+          </div>
+          ${v.id === versao_id_atual
+            ? `<span class="tag tag-green">Plano atual</span>`
+            : `<button class="btn-outline-sm" onclick="trocarMeuPlano(${v.id})">Trocar pra este plano</button>`}
+        </div>`).join('')}
     </div>`;
+}
+
+async function trocarMeuPlano(versaoId) {
+  if (!(await mostrarConfirmacao('Trocar de plano agora? Os módulos e cotas da sua empresa serão atualizados na hora, de acordo com o novo plano.'))) return;
+  try {
+    const { empresa } = await api('/api/meu-plano', { method: 'PUT', body: { versao_id: versaoId } });
+    USER.empresa = { ...USER.empresa, ...empresa };
+    USER.modulos_ativos = empresa.modulos_ativos;
+    mostrarToast('Plano atualizado.');
+    montarSidebar();
+    carregarMeuPlano();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // guarda a logo nova (já comprimida) separada do resto do formulário — só vai no corpo do PUT se

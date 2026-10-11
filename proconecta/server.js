@@ -1318,6 +1318,43 @@ rota('PUT', /^\/api\/empresa$/, async (req, res) => {
   enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
 });
 
+// GET /api/meu-plano/versoes — SaaS, passo 3: catálogo de versões com preço, pra tela "Meu plano"
+// dentro de "Minha Empresa". Diferente de GET /api/plataforma/versoes (exclusivo do Super Admin) —
+// esta é a própria empresa vendo o que tem disponível pra trocar, sem acesso de plataforma.
+// Namespace separado de /api/empresa de propósito: esse prefixo é público (ver PREFIXOS_PUBLICOS
+// em rotas-modulo.js, usado por GET /api/empresa pra dados de marca antes do login) — se essas
+// rotas nascessem sob /api/empresa, herdariam "publico" por prefixo e escapariam da checagem
+// central de empresa suspensa/trial expirado (ver dispatcher, mais abaixo), o que anularia o
+// próprio passo 2 bem na rota que troca de plano.
+rota('GET', /^\/api\/meu-plano\/versoes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador vê o plano da própria empresa.' });
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === user.empresa_id);
+  enviarJSON(res, 200, { versoes: data.versoes, versao_id_atual: empresa ? empresa.versao_id : null });
+});
+
+// PUT /api/meu-plano { versao_id } — SaaS, passo 3: a própria empresa troca de plano, aplicando
+// módulos/cotas da versão escolhida na hora. Diferente de PUT /api/plataforma/empresas/:id
+// (exclusivo do Super Admin, edita qualquer empresa) — aqui só a própria, e sem gateway de
+// pagamento nenhum envolvido (terreno pronto, cobrar de verdade é uma etapa futura separada).
+rota('PUT', /^\/api\/meu-plano$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador troca o plano da própria empresa.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const empresa = data.empresas.find((e) => e.id === user.empresa_id);
+  if (!empresa) return enviarJSON(res, 404, { erro: 'Empresa não encontrada.' });
+  const versao = data.versoes.find((v) => v.id === Number(body.versao_id));
+  if (!versao) return enviarJSON(res, 400, { erro: 'Versão não encontrada.' });
+  empresa.versao_id = versao.id;
+  empresa.modulos_ativos = [...versao.modulos];
+  empresa.limite_tecnicos = versao.limite_tecnicos != null ? versao.limite_tecnicos : null;
+  empresa.limite_equipamentos = versao.limite_equipamentos != null ? versao.limite_equipamentos : null;
+  db.save(data);
+  enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
+});
+
 // GET /api/me
 rota('GET', /^\/api\/me$/, async (req, res) => {
   const user = usuarioAutenticado(req);
