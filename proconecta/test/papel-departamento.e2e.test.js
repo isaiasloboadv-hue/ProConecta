@@ -27,7 +27,10 @@ function dados() {
       // empresa grande: já tem "equipe_avancado" (já dividida em departamentos)
       { id: 2, nome: 'Empresa Grande', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#000', cor_secundaria: '#000', versao_id: 1, modulos_ativos: ['os_chamados', 'comercial', 'relatorios', 'equipe_avancado'], terminologia: {} },
     ],
-    versoes: [{ id: 1, nome: 'Básico', modulos: ['comercial', 'relatorios'] }],
+    // nome neutro de propósito (não "Básico"/"Autônomo"/etc) — evita colidir com os nomes que a
+    // migração automática de planos padrão usa (ver db.js), já que este teste não guarda as
+    // flags dessa migração e deixa ela rodar normalmente.
+    versoes: [{ id: 1, nome: 'Plano Teste', modulos: ['comercial', 'relatorios'] }],
   };
 }
 

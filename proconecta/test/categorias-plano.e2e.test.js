@@ -31,6 +31,7 @@ function dados() {
     // flags evitam que a auto-criação mexa na contagem/ids que este teste assume.
     _migracaoPlanosPadraoV1: true,
     _migracaoPlanosPadraoV2: true,
+    _migracaoPlanosPadraoV3: true,
     _migracaoSplitOsChamadosV1: true,
   };
 }

@@ -565,6 +565,35 @@ function migrar(data) {
     recalcularModulosVersoes(data);
     data._migracaoPlanosPadraoV2 = true;
   }
+  // pedido do usuário: "não é plano autônomo é plano básico. Intermediário. Profissional e
+  // completo" — renomeia os 3 planos da V2 pros 4 nomes corretos, dividindo o antigo "Completo"
+  // (que acumulava equipe/escala JUNTO com financeiro/prestação de contas/agendamento) em dois
+  // estágios: "Profissional" (ordem 3, só acrescenta equipe/escala — "quando a equipe aumenta")
+  // e um "Completo" novo (ordem 4, acrescenta o resto — financeiro, prestação de contas,
+  // agendamento, assistente IA), fechando com o catálogo inteiro liberado nele. Acha os planos
+  // pelos nomes que a V2 já deixou (funciona tanto numa migração nova quanto numa já rodada em
+  // produção antes deste pedido); se o Super Admin já tiver apagado/renomeado algum, só pula.
+  if (!data._migracaoPlanosPadraoV3) {
+    const autonomo = data.versoes.find((v) => v.nome === 'Autônomo');
+    if (autonomo) autonomo.nome = 'Básico';
+    const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
+    if (manutencao) manutencao.nome = 'Intermediário';
+    const completoAntigo = data.versoes.find((v) => v.nome === 'Completo');
+    if (completoAntigo) {
+      completoAntigo.nome = 'Profissional';
+      const proprios = Array.isArray(completoAntigo.modulos_proprios) ? completoAntigo.modulos_proprios : [];
+      const restante = proprios.filter((m) => m !== 'equipe_avancado');
+      completoAntigo.modulos_proprios = proprios.filter((m) => m === 'equipe_avancado');
+      const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
+      data.versoes.push({
+        id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 1,
+        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento'],
+        modulos: [], preco_mensal: null,
+      });
+    }
+    recalcularModulosVersoes(data);
+    data._migracaoPlanosPadraoV3 = true;
+  }
   // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
   // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
   if (!data._seq.empresas) data._seq.empresas = 2;
@@ -930,6 +959,7 @@ function carregarDoArquivo() {
   const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
   const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
   const tinhaFlagPlanosPadraoV2 = !!bruto._migracaoPlanosPadraoV2;
+  const tinhaFlagPlanosPadraoV3 = !!bruto._migracaoPlanosPadraoV3;
   const tinhaFlagSplitOsChamados = !!bruto._migracaoSplitOsChamadosV1;
   const data = migrar(bruto);
   const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
@@ -938,6 +968,7 @@ function carregarDoArquivo() {
     || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)
     || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)
     || (!tinhaFlagPlanosPadraoV2 && data._migracaoPlanosPadraoV2)
+    || (!tinhaFlagPlanosPadraoV3 && data._migracaoPlanosPadraoV3)
     || (!tinhaFlagSplitOsChamados && data._migracaoSplitOsChamadosV1)
   ) salvarNoArquivo(data);
   return data;
@@ -1044,6 +1075,7 @@ async function inicializarPostgres() {
     const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
     const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
     const tinhaFlagPlanosPadraoV2 = !!bruto._migracaoPlanosPadraoV2;
+    const tinhaFlagPlanosPadraoV3 = !!bruto._migracaoPlanosPadraoV3;
     const tinhaFlagSplitOsChamados = !!bruto._migracaoSplitOsChamadosV1;
     const data = migrar(bruto);
     const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
@@ -1052,6 +1084,7 @@ async function inicializarPostgres() {
       || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)
       || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)
       || (!tinhaFlagPlanosPadraoV2 && data._migracaoPlanosPadraoV2)
+      || (!tinhaFlagPlanosPadraoV3 && data._migracaoPlanosPadraoV3)
       || (!tinhaFlagSplitOsChamados && data._migracaoSplitOsChamadosV1)
     ) {
       await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);

@@ -35,6 +35,7 @@ function dadosComVersoes() {
     // fixture, já que "Completo" coincide de nome com o plano que o Super Admin cria de verdade.
     _migracaoPlanosPadraoV1: true,
     _migracaoPlanosPadraoV2: true,
+    _migracaoPlanosPadraoV3: true,
     _migracaoSplitOsChamadosV1: true,
   };
 }
