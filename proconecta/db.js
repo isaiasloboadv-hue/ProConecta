@@ -503,6 +503,22 @@ function migrar(data) {
     if (!Array.isArray(v.modulos_proprios)) { v.modulos_proprios = Array.isArray(v.modulos) ? [...v.modulos] : []; precisaRecalcularVersoes = true; }
   });
   if (precisaRecalcularVersoes) recalcularModulosVersoes(data);
+  // pedido do usuário: "crie automático planos com as suas funções inclusas... crie o nome dos
+  // planos também" — até aqui só existia a versão "Manutenção" (os 3 módulos que o sistema sempre
+  // ofereceu), sem nenhum plano de nível maior. Cria duas categorias a mais, UMA VEZ só (flag
+  // abaixo), acima dela na cascata: "Profissional" (ordem 2) acrescenta o lado comercial/agenda,
+  // "Completo" (ordem 3) acrescenta financeiro e o Assistente IA — fechando com os 8 módulos do
+  // catálogo inteiro liberados. Continua tudo editável depois (nome, ordem, módulos, preço) na
+  // tela Planos do Super Admin; a flag só evita recriar se o Super Admin apagar ou renomear.
+  if (!data._migracaoPlanosPadraoV1) {
+    const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
+    data.versoes.push(
+      { id: nextId(data, 'versoes'), nome: 'Profissional', ordem: maiorOrdemAtual + 1, modulos_proprios: ['comercial', 'prestacao_contas', 'agendamento'], modulos: [], preco_mensal: null },
+      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia'], modulos: [], preco_mensal: null },
+    );
+    recalcularModulosVersoes(data);
+    data._migracaoPlanosPadraoV1 = true;
+  }
   // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
   // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
   if (!data._seq.empresas) data._seq.empresas = 2;
@@ -850,9 +866,10 @@ function carregarDoArquivo() {
   // senão a próxima leitura parte do arquivo original de novo e desfaz uma escolha real feita
   // depois (ver _migracaoContratoNaoInformadoV1 em migrar()).
   const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
+  const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
   const data = migrar(bruto);
   const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-  if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)) salvarNoArquivo(data);
+  if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1) || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)) salvarNoArquivo(data);
   return data;
 }
 
@@ -949,9 +966,16 @@ async function inicializarPostgres() {
     await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
     cache = data;
   } else {
-    const data = migrar(r.rows[0].data);
+    const bruto = r.rows[0].data;
+    // modo Postgres cacheia em memória depois desse boot (variável `cache` abaixo), então uma
+    // migração que só roda UMA VEZ (flag) só fica de pé se for persistida já aqui — senão o
+    // próximo restart do processo lê o registro antigo de novo do Postgres e repete a migração
+    // (no caso dos planos automáticos abaixo, duplicando os planos a cada reinício).
+    const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
+    const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
+    const data = migrar(bruto);
     const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-    if (criouAlguem) {
+    if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1) || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)) {
       await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);
     }
     cache = data;

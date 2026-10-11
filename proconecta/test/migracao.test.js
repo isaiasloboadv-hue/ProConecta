@@ -112,3 +112,41 @@ test('depois de migrar, os módulos da empresa 1 ficam ativos de acordo com modu
   assert.equal(db.moduloAtivo(data, 1, 'comercial'), false);
   assert.equal(db.moduloAtivo(data, 1, 'financeiro'), false);
 });
+
+// pedido do usuário: "crie automático planos com as suas funções inclusas... crie o nome dos
+// planos também" — além da versão Manutenção (ordem 1, já testada acima), a migração cria duas
+// categorias a mais (uma vez só), em cascata: "Profissional" e "Completo", até liberar o catálogo
+// inteiro na de maior ordem.
+test('migrar cria automaticamente os planos Profissional e Completo, em cascata acima da Manutenção', () => {
+  const data = db.migrar(dadosAntigos());
+  const nomes = data.versoes.map((v) => v.nome).sort();
+  assert.deepEqual(nomes, ['Completo', 'Manutenção', 'Profissional'].sort());
+
+  const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
+  const profissional = data.versoes.find((v) => v.nome === 'Profissional');
+  const completo = data.versoes.find((v) => v.nome === 'Completo');
+
+  assert.ok(profissional.ordem > manutencao.ordem);
+  assert.ok(completo.ordem > profissional.ordem);
+
+  // cascata: Profissional acumula tudo da Manutenção + o que ele mesmo acrescenta
+  for (const chave of manutencao.modulos) assert.ok(profissional.modulos.includes(chave));
+  // Completo libera o catálogo inteiro — "até o plano em que todas as funções é liberada"
+  assert.deepEqual([...completo.modulos].sort(), [...db.CHAVES_MODULOS].sort());
+});
+
+test('migrar dos planos automáticos é idempotente: rodar de novo não duplica nem recria o que foi apagado', () => {
+  const uma = db.migrar(dadosAntigos());
+  assert.equal(uma.versoes.length, 3);
+  const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
+  assert.equal(duas.versoes.length, 3);
+  assert.deepEqual(duas.versoes, uma.versoes);
+
+  // Super Admin apaga o "Profissional" — rodar a migração de novo não deve recriá-lo (a flag
+  // impede, senão apagar um plano automático seria impossível de verdade)
+  const semProfissional = JSON.parse(JSON.stringify(uma));
+  semProfissional.versoes = semProfissional.versoes.filter((v) => v.nome !== 'Profissional');
+  const depoisDeApagar = db.migrar(semProfissional);
+  assert.equal(depoisDeApagar.versoes.find((v) => v.nome === 'Profissional'), undefined);
+  assert.equal(depoisDeApagar.versoes.length, 2);
+});
