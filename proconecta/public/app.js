@@ -15919,12 +15919,16 @@ function tabelaOrcamentos(propostas, { comOportunidade } = {}) {
     </table></div>`;
 }
 
+// pedido do usuário: "está tudo desalinhado" — era flex sem quebra (4 campos numa linha só),
+// então em tela estreita Qtd./Valor unit. saíam cortados pra fora da tela. .proposta-item-row
+// segue o mesmo padrão responsivo do .form-grid (ver style.css): empilha a Descrição sozinha em
+// cima no mobile, Qtd./Valor unit. dividem a linha seguinte.
 function renderItensPropostaDraft() {
   document.getElementById('proposta-itens').innerHTML = propostaItensDraft.map((item, i) => `
-    <div style="display:flex; gap:8px; margin-bottom:6px; align-items:flex-end;">
-      <div style="flex:2;"><label>Descrição</label><input value="${esc(item.descricao)}" oninput="propostaItensDraft[${i}].descricao=this.value"></div>
-      <div style="flex:1;"><label>Qtd.</label><input type="number" min="0" step="1" value="${item.quantidade}" oninput="propostaItensDraft[${i}].quantidade=this.value"></div>
-      <div style="flex:1;"><label>Valor unit.</label><input type="number" min="0" step="0.01" value="${item.valor_unitario}" oninput="propostaItensDraft[${i}].valor_unitario=this.value"></div>
+    <div class="proposta-item-row">
+      <div class="proposta-item-desc"><label>Descrição</label><input value="${esc(item.descricao)}" oninput="propostaItensDraft[${i}].descricao=this.value"></div>
+      <div><label>Qtd.</label><input type="number" min="0" step="1" value="${item.quantidade}" oninput="propostaItensDraft[${i}].quantidade=this.value"></div>
+      <div><label>Valor unit.</label><input type="number" min="0" step="0.01" value="${item.valor_unitario}" oninput="propostaItensDraft[${i}].valor_unitario=this.value"></div>
       <button class="btn-outline-sm" onclick="propostaItensDraft.splice(${i},1); renderItensPropostaDraft();">Remover</button>
     </div>`).join('');
 }
