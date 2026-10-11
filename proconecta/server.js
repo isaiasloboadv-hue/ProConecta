@@ -1204,6 +1204,9 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   if (empresaDoUsuario && empresaDoUsuario.status === 'suspensa') {
     return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.', codigo: 'empresa_suspensa' });
   }
+  if (empresaDoUsuario && verificarExpiracaoTeste(empresaDoUsuario, data)) {
+    return enviarJSON(res, 403, { erro: 'Seu período de teste acabou — fale com o suporte pra continuar.', codigo: 'teste_expirado' });
+  }
   const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: {
     ...usuarioPublico(u),
@@ -7292,7 +7295,24 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)$/, async (req, res, m) => {
 // marcar como "teste"). "suspensa" bloqueia login novo e qualquer rota pra quem já estava logado
 // (ver checagem central no dispatcher, mais abaixo) — a empresa 1 (instalação atual, em uso de
 // verdade) nunca pode ser suspensa por aqui, mesma trava do DELETE.
-const STATUS_EMPRESA_VALIDOS = ['teste', 'ativa', 'suspensa'];
+// "teste_expirado" (SaaS, passo 2) é diferente de "suspensa": nasce automático (ver
+// verificarExpiracaoTeste), nunca de uma ação manual do Super Admin — mas ele pode reverter pra
+// "ativa" pela mesma rota, igual já faz com "suspensa".
+const STATUS_EMPRESA_VALIDOS = ['teste', 'ativa', 'suspensa', 'teste_expirado'];
+
+// SaaS, passo 2: validade do trial. Dias configuráveis por variável de ambiente (padrão 14) — só
+// empresa com status 'teste' é afetada; 'ativa'/'suspensa'/'teste_expirado' nunca passam por aqui
+// de novo. Transforma o status na primeira requisição (login ou qualquer rota autenticada) que
+// detectar que passou do prazo, e salva na hora — não é um job agendado, é checado sob demanda.
+const DIAS_TRIAL = Number(process.env.DIAS_TRIAL) || 14;
+function verificarExpiracaoTeste(empresa, data) {
+  if (!empresa || empresa.status !== 'teste' || !empresa.criado_em) return false;
+  const diasDesdeCriacao = (Date.now() - new Date(empresa.criado_em).getTime()) / (24 * 60 * 60 * 1000);
+  if (diasDesdeCriacao <= DIAS_TRIAL) return false;
+  empresa.status = 'teste_expirado';
+  db.save(data);
+  return true;
+}
 rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/status$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
@@ -7524,6 +7544,9 @@ const server = http.createServer(async (req, res) => {
           const empresaDoUsuario = dadosAtuais.empresas.find((e) => e.id === user.empresa_id);
           if (empresaDoUsuario && empresaDoUsuario.status === 'suspensa') {
             return enviarJSON(res, 403, { erro: 'Esta empresa está suspensa. Fale com o suporte.', codigo: 'empresa_suspensa' });
+          }
+          if (empresaDoUsuario && verificarExpiracaoTeste(empresaDoUsuario, dadosAtuais)) {
+            return enviarJSON(res, 403, { erro: 'Seu período de teste acabou — fale com o suporte pra continuar.', codigo: 'teste_expirado' });
           }
         }
         if (rotaEncontrada.modulo !== 'nucleo' && !db.moduloAtivo(dadosAtuais, user.empresa_id, rotaEncontrada.modulo)) {

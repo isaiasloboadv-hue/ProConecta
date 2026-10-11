@@ -156,7 +156,9 @@ async function api(path, opts = {}) {
       // empresa suspensa (Etapa 7/passo 1): acontece em qualquer chamada, inclusive as silenciosas
       // em segundo plano (sino, chat), que nunca mostram erro pro usuário — por isso o logout e o
       // aviso saem daqui, central, em vez de depender do catch de cada tela.
-      if (data.codigo === 'empresa_suspensa' && TOKEN) {
+      // trial expirado (SaaS, passo 2) — mesmo tratamento central da empresa suspensa: pega
+      // inclusive quem já estava logado quando o prazo venceu, mesmo numa chamada silenciosa.
+      if ((data.codigo === 'empresa_suspensa' || data.codigo === 'teste_expirado') && TOKEN) {
         sair();
         const erroEl = document.getElementById('login-erro');
         if (erroEl) { erroEl.textContent = erro.message; erroEl.classList.remove('hidden'); }
@@ -1202,7 +1204,7 @@ async function renderPlataformaCadastros() {
       </div>
       <div class="ficha-card-nome">${esc(e.nome)}${e.id === 1 ? ' 🏠' : ''}</div>
       <div class="ficha-card-info">${(e.administradores || []).length} administrador(es)</div>
-      <span class="tag ${e.status === 'suspensa' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}" style="margin-top:6px;">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span>
+      <span class="tag ${e.status === 'suspensa' || e.status === 'teste_expirado' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}" style="margin-top:6px;">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa', teste_expirado: 'teste expirado' }[e.status] || 'ativa'}</span>
     </div>`).join('');
 }
 
@@ -1231,7 +1233,7 @@ function conteudoEmpresaPlataforma(e) {
   return `
     <div class="panel">
       <div class="panel-head" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-        <span>${e.id === 1 ? '<span class="tag">instalação atual</span> ' : ''}<span class="tag ${e.status === 'suspensa' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa' }[e.status] || 'ativa'}</span></span>
+        <span>${e.id === 1 ? '<span class="tag">instalação atual</span> ' : ''}<span class="tag ${e.status === 'suspensa' || e.status === 'teste_expirado' ? 'tag-red' : e.status === 'teste' ? 'tag-amber' : 'tag-green'}">${{ teste: 'teste', ativa: 'ativa', suspensa: 'suspensa', teste_expirado: 'teste expirado' }[e.status] || 'ativa'}</span></span>
         ${e.id !== 1 ? `<button class="btn-outline-sm" style="color:var(--red,#c00); border-color:var(--red,#c00);" onclick="excluirEmpresaPlataforma(${e.id})">Excluir empresa</button>` : ''}
       </div>
       <h2 style="margin-top:0;">Status e cobrança</h2>
@@ -1243,6 +1245,7 @@ function conteudoEmpresaPlataforma(e) {
             <option value="teste" ${e.status === 'teste' ? 'selected' : ''}>Teste</option>
             <option value="ativa" ${(!e.status || e.status === 'ativa') ? 'selected' : ''}>Ativa</option>
             <option value="suspensa" ${e.status === 'suspensa' ? 'selected' : ''}>Suspensa</option>
+            <option value="teste_expirado" ${e.status === 'teste_expirado' ? 'selected' : ''}>Teste expirado</option>
           </select>
         </div>
         <div><label>Plano — valor mensal (R$)</label><input type="number" min="0" step="0.01" id="pe-plano-valor-${e.id}" value="${e.plano_valor_mensal != null ? esc(e.plano_valor_mensal) : ''}" placeholder="não definido"></div>
