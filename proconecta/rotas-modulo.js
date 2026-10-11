@@ -32,6 +32,7 @@ const PREFIXO_MODULO = [
   ['/api/registros', 'biblioteca'],
   ['/api/leads', 'comercial'],
   ['/api/oportunidades', 'comercial'],
+  ['/api/propostas', 'comercial'],
   ['/api/agendamento', 'agendamento'],
   ['/api/financeiro', 'financeiro'],
   ['/api/prestacao-contas', 'prestacao_contas'],

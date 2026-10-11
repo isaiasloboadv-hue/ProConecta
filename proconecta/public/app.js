@@ -15392,12 +15392,13 @@ async function renderOportunidades() {
       ${o.cliente_id ? `<div>${esc(nomeCliente(o.cliente_id) || '—')}</div>` : ''}
       ${o.valor_estimado ? `<div style="color:var(--ink-soft); font-size:13px;">${esc(o.valor_estimado)}</div>` : ''}
       ${o.origem === 'devolutivo' ? `<span class="tag tag-blue">Do devolutivo</span>` : ''}
-      ${!terminal ? `
-        <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+      <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+        <button class="btn-outline-sm" onclick="renderPropostasOportunidade(${o.id})">Propostas</button>
+        ${!terminal ? `
           ${proximoEstagio ? `<button class="btn-outline-sm" onclick="moverEstagioOportunidade(${o.id}, '${proximoEstagio}')">Mover para ${ESTAGIO_OPORTUNIDADE_LABEL[proximoEstagio]} →</button>` : ''}
           <button class="btn-outline-sm" onclick="moverEstagioOportunidade(${o.id}, 'perdido')" style="color:var(--red); border-color:var(--red);">Perdido</button>
-        </div>
-      ` : ''}
+        ` : ''}
+      </div>
     </div>`;
   };
   main.innerHTML = `
@@ -15455,6 +15456,141 @@ async function moverEstagioOportunidade(id, estagio) {
     await api(`/api/oportunidades/${id}`, { method: 'PUT', body: { estagio } });
     renderOportunidades();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- COMERCIAL: PROPOSTAS/ORÇAMENTOS (CRM nativo, passo 3) ----------
+// aberta a partir da tela da Oportunidade — itens de linha de verdade (quantidade x valor
+// unitário), diferente do valor_estimado em texto livre da própria Oportunidade.
+const STATUS_PROPOSTA_LABEL = { rascunho: 'Rascunho', enviada: 'Enviada', aceita: 'Aceita', recusada: 'Recusada' };
+let propostaItensDraft = [];
+
+async function renderPropostasOportunidade(oportunidadeId) {
+  const oportunidade = (window._oportunidadesCache || []).find((o) => o.id === oportunidadeId);
+  const { propostas } = await api(`/api/propostas?oportunidade_id=${oportunidadeId}`);
+  window._propostasCache = propostas;
+  window._propostaOportunidadeAtual = oportunidadeId;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <button class="btn-outline-sm" onclick="renderOportunidades()" style="margin-bottom:10px;">‹ Funil de Oportunidades</button>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Propostas</h1><p>${oportunidade ? esc(oportunidade.titulo) : ''} — ${propostas.length} proposta(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormProposta(${oportunidadeId})">+ Nova proposta</button>
+    </div>
+    <div id="form-proposta"></div>
+    <div class="panel"><table>
+      <tr><th>Status</th><th>Itens</th><th>Total</th><th>Validade</th><th></th></tr>
+      ${propostas.length ? propostas.map((p) => `
+        <tr>
+          <td data-label="Status"><span class="tag ${p.status === 'aceita' ? 'tag-green' : p.status === 'recusada' ? 'tag-red' : p.status === 'enviada' ? 'tag-blue' : 'tag-gray'}">${STATUS_PROPOSTA_LABEL[p.status]}</span></td>
+          <td data-label="Itens">${p.itens.length} item(ns)</td>
+          <td data-label="Total">${fmtMoeda(p.valor_total)}</td>
+          <td data-label="Validade">${p.validade ? esc(p.validade) : '—'}</td>
+          <td class="td-acoes">
+            <button class="btn-outline-sm" onclick="abrirPdfProposta(${p.id})">PDF</button>
+            ${p.status === 'rascunho' ? `<button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'enviada')">Marcar enviada</button>` : ''}
+            ${p.status === 'enviada' ? `<button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'aceita')">Aceita</button><button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'recusada')">Recusada</button>` : ''}
+          </td>
+        </tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhuma proposta ainda.</td></tr>`}
+    </table></div>`;
+}
+
+function renderItensPropostaDraft() {
+  document.getElementById('proposta-itens').innerHTML = propostaItensDraft.map((item, i) => `
+    <div style="display:flex; gap:8px; margin-bottom:6px; align-items:flex-end;">
+      <div style="flex:2;"><label>Descrição</label><input value="${esc(item.descricao)}" oninput="propostaItensDraft[${i}].descricao=this.value"></div>
+      <div style="flex:1;"><label>Qtd.</label><input type="number" min="0" step="1" value="${item.quantidade}" oninput="propostaItensDraft[${i}].quantidade=this.value"></div>
+      <div style="flex:1;"><label>Valor unit.</label><input type="number" min="0" step="0.01" value="${item.valor_unitario}" oninput="propostaItensDraft[${i}].valor_unitario=this.value"></div>
+      <button class="btn-outline-sm" onclick="propostaItensDraft.splice(${i},1); renderItensPropostaDraft();">Remover</button>
+    </div>`).join('');
+}
+
+function mostrarFormProposta(oportunidadeId) {
+  propostaItensDraft = [{ descricao: '', quantidade: 1, valor_unitario: 0 }];
+  document.getElementById('form-proposta').innerHTML = `
+    <div class="panel"><div class="panel-head">Nova proposta</div>
+      <div id="proposta-itens"></div>
+      <button class="btn-outline-sm" onclick="propostaItensDraft.push({descricao:'',quantidade:1,valor_unitario:0}); renderItensPropostaDraft();" style="margin-bottom:12px;">+ Adicionar item</button>
+      <div class="form-grid">
+        <div><label>Validade</label><input type="date" id="np-validade"></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarProposta(${oportunidadeId})">Salvar proposta</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-proposta').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+  renderItensPropostaDraft();
+}
+
+async function salvarProposta(oportunidadeId) {
+  const itens = propostaItensDraft.map((i) => ({ descricao: i.descricao, quantidade: Number(i.quantidade), valor_unitario: Number(i.valor_unitario) }));
+  try {
+    await api('/api/propostas', { method: 'POST', body: { oportunidade_id: oportunidadeId, itens, validade: document.getElementById('np-validade').value } });
+    mostrarToast('Proposta cadastrada.');
+    renderPropostasOportunidade(oportunidadeId);
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function mudarStatusProposta(id, status) {
+  try {
+    await api(`/api/propostas/${id}`, { method: 'PUT', body: { status } });
+    renderPropostasOportunidade(window._propostaOportunidadeAtual);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+function gerarPdfProposta(p, oportunidade, logoDataUri) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Proposta ${p.id}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, y - 10, 24, 28); } catch (e) {} }
+  doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(empresaNome(), margem + (logoDataUri ? 32 : 0), y + 8);
+  y += 30;
+  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
+
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text('Proposta Comercial', margem, y); y += 20;
+  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(oportunidade ? oportunidade.titulo : ''), margem, y); y += 24;
+
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 20, 'F');
+  doc.text('DESCRIÇÃO', margem + 8, y + 14);
+  doc.text('QTD', margem + largura * 0.6, y + 14);
+  doc.text('VALOR UNIT.', margem + largura * 0.72, y + 14);
+  doc.text('SUBTOTAL', margem + largura * 0.87, y + 14);
+  y += 20;
+  doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+  p.itens.forEach((item) => {
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.rect(margem, y, largura, 18, 'S');
+    doc.text(limparPdf(item.descricao), margem + 8, y + 13);
+    doc.text(String(item.quantidade), margem + largura * 0.6, y + 13);
+    doc.text(fmtMoeda(item.valor_unitario), margem + largura * 0.72, y + 13);
+    doc.text(fmtMoeda(item.quantidade * item.valor_unitario), margem + largura * 0.87, y + 13);
+    y += 18;
+  });
+  y += 16;
+  doc.setFont(undefined, 'bold'); doc.setFontSize(12);
+  doc.text(`Total: ${fmtMoeda(p.valor_total)}`, pageW - margem, y, { align: 'right' });
+  y += 20;
+  doc.setFontSize(9); doc.setFont(undefined, 'normal');
+  doc.text(`Validade: ${p.validade || '—'}`, margem, y);
+  return doc.output('bloburl');
+}
+
+async function abrirPdfProposta(id) {
+  const p = (window._propostasCache || []).find((x) => x.id === id);
+  if (!p) return;
+  const oportunidade = (window._oportunidadesCache || []).find((o) => o.id === p.oportunidade_id);
+  try {
+    const logo = await carregarLogoVariantes();
+    const url = gerarPdfProposta(p, oportunidade, logo);
+    window.open(url, '_blank');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
 // ---------- EQUIPAMENTOS ----------

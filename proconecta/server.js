@@ -4399,6 +4399,82 @@ rota('PUT', /^\/api\/oportunidades\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { oportunidade: item });
 });
 
+const STATUS_PROPOSTA_VALIDOS = ['rascunho', 'enviada', 'aceita', 'recusada'];
+
+function sanitizarItensProposta(itens) {
+  if (!Array.isArray(itens)) return null;
+  const limpos = [];
+  for (const i of itens) {
+    const descricao = String((i && i.descricao) || '').trim();
+    const quantidade = Number(i && i.quantidade);
+    const valorUnitario = Number(i && i.valor_unitario);
+    if (!descricao || !Number.isFinite(quantidade) || quantidade <= 0 || !Number.isFinite(valorUnitario) || valorUnitario < 0) return null;
+    limpos.push({ descricao, quantidade, valor_unitario: valorUnitario });
+  }
+  return limpos.length ? limpos : null;
+}
+
+function valorTotalProposta(itens) {
+  return itens.reduce((soma, i) => soma + i.quantidade * i.valor_unitario, 0);
+}
+
+// GET /api/propostas?oportunidade_id= — propostas de uma oportunidade (tela abre a partir dela)
+rota('GET', /^\/api\/propostas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial veem propostas.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'propostas', user.empresa_id);
+  if (query.oportunidade_id) lista = lista.filter((p) => p.oportunidade_id === Number(query.oportunidade_id));
+  enviarJSON(res, 200, { propostas: lista });
+});
+
+// POST /api/propostas — aberta a partir da tela da Oportunidade
+rota('POST', /^\/api\/propostas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial cadastram propostas.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const oportunidadeId = Number(body.oportunidade_id);
+  if (!oportunidadeId || !tenant.buscar(data, 'oportunidades', oportunidadeId, user.empresa_id)) {
+    return enviarJSON(res, 400, { erro: 'Oportunidade não encontrada.' });
+  }
+  const itens = sanitizarItensProposta(body.itens);
+  if (!itens) return enviarJSON(res, 400, { erro: 'Adicione ao menos um item com descrição, quantidade e valor unitário válidos.' });
+  const item = tenant.criar(data, 'propostas', user.empresa_id, {
+    oportunidade_id: oportunidadeId,
+    itens,
+    valor_total: valorTotalProposta(itens),
+    validade: body.validade || '',
+    status: 'rascunho',
+  });
+  db.save(data);
+  enviarJSON(res, 201, { proposta: item });
+});
+
+// PUT /api/propostas/:id — edita itens/validade ou muda status (Enviar/Aceitar/Recusar)
+rota('PUT', /^\/api\/propostas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial editam propostas.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const item = tenant.buscar(data, 'propostas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Proposta não encontrada.' });
+  if (body.itens !== undefined) {
+    const itens = sanitizarItensProposta(body.itens);
+    if (!itens) return enviarJSON(res, 400, { erro: 'Adicione ao menos um item com descrição, quantidade e valor unitário válidos.' });
+    item.itens = itens;
+    item.valor_total = valorTotalProposta(itens);
+  }
+  if (body.validade !== undefined) item.validade = body.validade || '';
+  if (body.status !== undefined) {
+    if (!STATUS_PROPOSTA_VALIDOS.includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
+    item.status = body.status;
+  }
+  db.save(data);
+  enviarJSON(res, 200, { proposta: item });
+});
+
 // GET /api/equipamentos
 rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);
