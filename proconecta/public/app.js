@@ -6629,15 +6629,16 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
     } else {
       // inverte o peso visual de antes (logo+título maiores que o nome da empresa): logo
       // menor, nome da empresa maior e em primeiro, título do documento vira subtítulo
-      // discreto embaixo dele.
-      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 7, y - 9, 14, 16); } catch (e) {} }
-      y += 16;
+      // discreto embaixo dele. Pedido do usuário: "aqui ficou muito colado" — mais espaço
+      // entre logo/nome/título, que antes quase se tocavam.
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 7, y - 4, 14, 16); } catch (e) {} }
+      y += 24;
       doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
       doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
-      y += 13;
+      y += 18;
       doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text('Termo de Manutenção Preventiva', pageW / 2, y, { align: 'center' });
-      y += 11;
+      y += 16;
     }
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
     doc.line(margem, y, pageW - margem, y);
