@@ -10869,7 +10869,11 @@ function relatorioAceitePadrao() {
     modelo_maquina: '', numero_serie: '',
     servico: '',
     empresa: '', setor: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '', contato: '',
-    checklist: CHECKLIST_CORRETIVA.map((item) => ({ item, resposta: '', observacao: '' })),
+    // pedido do usuário: "No aceite de entrega aparece coisas da Promarking" — CHECKLIST_CORRETIVA
+    // é a lista de instalação de equipamento a laser, específica da PRO Marking; outra empresa
+    // começa com o check-list em branco (igual já acontece com o modelo "Outro" na Preventiva) e
+    // adiciona os itens dela pelo botão "+ Adicionar item".
+    checklist: ehEmpresaPromarking() ? CHECKLIST_CORRETIVA.map((item) => ({ item, resposta: '', observacao: '' })) : [],
     observacoes: '',
     aceite: '',
     satisfacao_estrelas: 0, satisfacao_duvidas: '', satisfacao_apto: '',
@@ -10913,6 +10917,7 @@ function mostrarFormRelatorioAceite(existente) {
       <div class="form-grid">
         <div><label>Data inicial*</label><input id="rae-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
         <div><label>Data final*</label><input id="rae-data_final" type="date" value="${esc(d.data_final)}"></div>
+        ${ehEmpresaPromarking() ? `
         <div>
           <label>Modelo da máquina*</label>
           <select id="rae-modelo_maquina" onchange="selecionarModeloAceite(this.value)">
@@ -10924,7 +10929,11 @@ function mostrarFormRelatorioAceite(existente) {
         <div id="rae-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
           <label>Especifique o modelo*</label>
           <input id="rae-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}" oninput="atualizarSobreEquipamentoAceite();">
-        </div>
+        </div>` : `
+        <div class="full">
+          <label>Modelo da máquina*</label>
+          <input id="rae-modelo_maquina" value="${esc(d.modelo_maquina)}" oninput="atualizarSobreEquipamentoAceite();">
+        </div>`}
         <div><label>Nº de série*</label><input id="rae-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Serviço*</label><input id="rae-servico" value="${esc(d.servico)}"></div>
         <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
@@ -11033,7 +11042,8 @@ function selecionarModeloAceite(nome) {
 }
 function atualizarSobreEquipamentoAceite() {
   const selecionado = document.getElementById('rae-modelo_maquina').value;
-  const modelo = selecionado === 'Outro' ? document.getElementById('rae-modelo_maquina_outro').value : selecionado;
+  const elOutro = document.getElementById('rae-modelo_maquina_outro');
+  const modelo = (selecionado === 'Outro' && elOutro) ? elOutro.value : selecionado;
   document.getElementById('rae-sobre-equipamento').innerHTML = textoSobreEquipamentoAceite(modelo);
 }
 function atualizarRegiaoAceite() {
@@ -11193,7 +11203,8 @@ function lerCamposAceite() {
   d.data_inicial = document.getElementById('rae-data_inicial').value;
   d.data_final = document.getElementById('rae-data_final').value;
   const modeloSelecionado = document.getElementById('rae-modelo_maquina').value;
-  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rae-modelo_maquina_outro').value : modeloSelecionado;
+  const elModeloOutro = document.getElementById('rae-modelo_maquina_outro');
+  d.modelo_maquina = (modeloSelecionado === 'Outro' && elModeloOutro) ? elModeloOutro.value : modeloSelecionado;
   d.numero_serie = document.getElementById('rae-numero_serie').value;
   d.servico = document.getElementById('rae-servico').value;
   d.empresa = document.getElementById('rae-empresa').value;
