@@ -18501,13 +18501,18 @@ const CAMPOS_IA_POR_TIPO = {
     { chave: 'laudo_tecnico', rotulo: 'Laudo técnico (diagnóstico)', idCampo: 'rm-laudo_tecnico' },
     { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rm-servico_realizado' },
   ],
+  // "servico_realizado" (rp-/rp2-servico_realizado) é um campo curto de uma linha, diferente de
+  // "servico_feito" (textarea "O que foi feito na máquina") — a IA tem que preencher o textarea,
+  // não o campo curto, senão o relatório fica com a parte técnica em branco.
   preventiva: [
-    { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rp-servico_realizado' },
+    { chave: 'servico_feito', rotulo: 'O que foi feito na máquina', idCampo: 'rp-servico_feito' },
     { chave: 'observacoes_checklist', rotulo: 'Observações do checklist', idCampo: 'rp-observacoes_checklist' },
+    { chave: 'observacoes_servico', rotulo: 'Observações do serviço', idCampo: 'rp-observacoes_servico' },
   ],
   preventiva2: [
-    { chave: 'servico_realizado', rotulo: 'Serviço realizado', idCampo: 'rp2-servico_realizado' },
+    { chave: 'servico_feito', rotulo: 'O que foi feito na máquina', idCampo: 'rp2-servico_feito' },
     { chave: 'observacoes_checklist', rotulo: 'Observações do checklist', idCampo: 'rp2-observacoes_checklist' },
+    { chave: 'observacoes_servico', rotulo: 'Observações do serviço', idCampo: 'rp2-observacoes_servico' },
   ],
   corretiva: [
     { chave: 'defeito_informado', rotulo: 'Defeito informado', idCampo: 'rcm-defeito_informado' },
