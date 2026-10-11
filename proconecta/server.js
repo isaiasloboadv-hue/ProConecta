@@ -4573,7 +4573,7 @@ function valorTotalProposta(itens) {
 // GET /api/propostas?oportunidade_id= — propostas de uma oportunidade (tela abre a partir dela)
 rota('GET', /^\/api\/propostas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial veem propostas.' });
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial veem orçamentos.' });
   const { query } = url.parse(req.url, true);
   const data = db.load();
   let lista = tenant.listar(data, 'propostas', user.empresa_id);
@@ -4584,7 +4584,7 @@ rota('GET', /^\/api\/propostas$/, async (req, res) => {
 // POST /api/propostas — aberta a partir da tela da Oportunidade
 rota('POST', /^\/api\/propostas$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial cadastram propostas.' });
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial cadastram orçamentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
   const oportunidadeId = Number(body.oportunidade_id);
@@ -4608,11 +4608,11 @@ rota('POST', /^\/api\/propostas$/, async (req, res) => {
 // PUT /api/propostas/:id — edita itens/validade ou muda status (Enviar/Aceitar/Recusar)
 rota('PUT', /^\/api\/propostas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial editam propostas.' });
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial editam orçamentos.' });
   const body = await lerCorpo(req);
   const data = db.load();
   const item = tenant.buscar(data, 'propostas', Number(m[1]), user.empresa_id);
-  if (!item) return enviarJSON(res, 404, { erro: 'Proposta não encontrada.' });
+  if (!item) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
   if (body.itens !== undefined) {
     const itens = sanitizarItensProposta(body.itens);
     if (!itens) return enviarJSON(res, 400, { erro: 'Adicione ao menos um item com descrição, quantidade e valor unitário válidos.' });

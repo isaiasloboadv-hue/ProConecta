@@ -806,9 +806,14 @@ const NAV = {
     // implementar os menus do que falta" — o item "CRM"/"Em breve" saiu; o módulo "comercial"
     // (ver db.js) libera este menu "Comercial" de verdade, com as peças de CRM nativo indo uma
     // por passo (passo 1: Leads/Contatos).
+    // pedido do usuário: "percebi que não tem gerador de orçamento" — o gerador já existia
+    // (Propostas, dentro de uma Oportunidade), só que enterrado 2 níveis de navegação, sem
+    // entrada própria no menu. "Orçamentos" aqui é a mesma coisa (mesmas rotas/dados de
+    // propostas), só com acesso direto — ver renderOrcamentosGeral.
     { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
       { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
       { key: 'oportunidades', label: 'Funil de Oportunidades', page: 'oportunidades-funil' },
+      { key: 'orcamentos', label: 'Orçamentos', page: 'orcamentos-lista' },
     ]},
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
@@ -905,6 +910,7 @@ const NAV = {
     { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
       { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
       { key: 'oportunidades', label: 'Funil de Oportunidades', page: 'oportunidades-funil' },
+      { key: 'orcamentos', label: 'Orçamentos', page: 'orcamentos-lista' },
     ]},
   ],
 };
@@ -1058,6 +1064,7 @@ async function ir(pagina) {
     if (pagina === 'clientes') return renderClientes();
     if (pagina === 'leads-lista') return renderLeads();
     if (pagina === 'oportunidades-funil') return renderOportunidades();
+    if (pagina === 'orcamentos-lista') return renderOrcamentosGeral();
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
     if (pagina === 'equipamentos-menu') return renderEquipamentosMenu();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
@@ -15490,7 +15497,7 @@ async function verHistoricoCliente(id) {
     ...chamados.map((c) => ({ tipo: 'chamado', data: c.criado_em || '', titulo: `Atendimento — ${c.status}` })),
     ...equipamentos.map((e) => ({ tipo: 'equipamento', data: e.data_fabricacao || '', titulo: `Equipamento: ${e.tipo || e.modelo || '—'}` })),
     ...oportunidades.map((o) => ({ tipo: 'oportunidade', data: o.criado_em || '', titulo: `Oportunidade: ${o.titulo} (${ESTAGIO_OPORTUNIDADE_LABEL[o.estagio] || o.estagio})` })),
-    ...propostas.map((p) => ({ tipo: 'proposta', data: p.criado_em || '', titulo: `Proposta — ${STATUS_PROPOSTA_LABEL[p.status] || p.status} — ${fmtMoeda(p.valor_total)}` })),
+    ...propostas.map((p) => ({ tipo: 'proposta', data: p.criado_em || '', titulo: `Orçamento — ${STATUS_PROPOSTA_LABEL[p.status] || p.status} — ${fmtMoeda(p.valor_total)}` })),
   ].sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
   document.getElementById('historico-cliente').innerHTML = `
     <div class="panel"><div class="panel-head">Histórico — ${cliente ? esc(cliente.nome_empresa) : ''}</div>
@@ -15703,7 +15710,7 @@ async function renderOportunidades() {
       ${o.valor_estimado ? `<div style="color:var(--ink-soft); font-size:13px;">${esc(o.valor_estimado)}</div>` : ''}
       ${o.origem === 'devolutivo' ? `<span class="tag tag-blue">Do devolutivo</span>` : ''}
       <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
-        <button class="btn-outline-sm" onclick="renderPropostasOportunidade(${o.id})">Propostas</button>
+        <button class="btn-outline-sm" onclick="renderPropostasOportunidade(${o.id})">Orçamentos</button>
         ${!terminal ? `
           ${proximoEstagio ? `<button class="btn-outline-sm" onclick="moverEstagioOportunidade(${o.id}, '${proximoEstagio}')">Mover para ${ESTAGIO_OPORTUNIDADE_LABEL[proximoEstagio]} →</button>` : ''}
           <button class="btn-outline-sm" onclick="moverEstagioOportunidade(${o.id}, 'perdido')" style="color:var(--red); border-color:var(--red);">Perdido</button>
@@ -15771,36 +15778,113 @@ async function moverEstagioOportunidade(id, estagio) {
 // ---------- COMERCIAL: PROPOSTAS/ORÇAMENTOS (CRM nativo, passo 3) ----------
 // aberta a partir da tela da Oportunidade — itens de linha de verdade (quantidade x valor
 // unitário), diferente do valor_estimado em texto livre da própria Oportunidade.
+// pedido do usuário: "percebi que não tem gerador de orçamento" — o gerador já existia (esse
+// mesmo, por trás da palavra "proposta"), só que só dava pra chegar nele abrindo uma Oportunidade
+// específica primeiro. "Orçamento" é como o usuário chama a mesma coisa — textos visíveis trocados
+// pra esse nome; dado/rota/função continuam "proposta" por baixo (menor risco, já tem teste e4e
+// cobrindo /api/propostas). _propostaContextoAtual guarda se o form foi aberto a partir da tela de
+// uma Oportunidade específica ou da lista geral nova (renderOrcamentosGeral), pra saber pra onde
+// voltar depois de salvar/mudar status.
 const STATUS_PROPOSTA_LABEL = { rascunho: 'Rascunho', enviada: 'Enviada', aceita: 'Aceita', recusada: 'Recusada' };
 let propostaItensDraft = [];
+window._propostaContextoAtual = { tipo: 'oportunidade', id: null };
+
+function atualizarTelaOrcamentos() {
+  const ctx = window._propostaContextoAtual || {};
+  if (ctx.tipo === 'geral') renderOrcamentosGeral();
+  else renderPropostasOportunidade(ctx.id);
+}
 
 async function renderPropostasOportunidade(oportunidadeId) {
+  window._propostaContextoAtual = { tipo: 'oportunidade', id: oportunidadeId };
   const oportunidade = (window._oportunidadesCache || []).find((o) => o.id === oportunidadeId);
   const { propostas } = await api(`/api/propostas?oportunidade_id=${oportunidadeId}`);
   window._propostasCache = propostas;
-  window._propostaOportunidadeAtual = oportunidadeId;
   const main = document.getElementById('main');
   main.innerHTML = `
     <button class="btn-outline-sm" onclick="renderOportunidades()" style="margin-bottom:10px;">‹ Funil de Oportunidades</button>
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
-      <div><h1>Propostas</h1><p>${oportunidade ? esc(oportunidade.titulo) : ''} — ${propostas.length} proposta(s)</p></div>
-      <button class="btn btn-primary btn-sm" onclick="mostrarFormProposta(${oportunidadeId})">+ Nova proposta</button>
+      <div><h1>Orçamentos</h1><p>${oportunidade ? esc(oportunidade.titulo) : ''} — ${propostas.length} orçamento(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormProposta(${oportunidadeId})">+ Novo orçamento</button>
     </div>
     <div id="form-proposta"></div>
+    ${tabelaOrcamentos(propostas)}`;
+}
+
+// pedido do usuário: "percebi que não tem gerador de orçamento" — tela de entrada direta no menu
+// Comercial, listando TODOS os orçamentos (de qualquer oportunidade), sem precisar abrir uma
+// oportunidade específica primeiro pra achar o botão.
+async function renderOrcamentosGeral() {
+  window._propostaContextoAtual = { tipo: 'geral' };
+  const [{ propostas }, { oportunidades }, { clientes }] = await Promise.all([
+    api('/api/propostas'), api('/api/oportunidades'), api('/api/clientes'),
+  ]);
+  window._propostasCache = propostas;
+  window._oportunidadesCache = oportunidades;
+  window._clientesCacheOportunidades = clientes;
+
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Orçamentos</h1><p>${propostas.length} orçamento(s), de todas as oportunidades.</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarSeletorOportunidadeOrcamento()">+ Novo orçamento</button>
+    </div>
+    <div id="form-proposta"></div>
+    ${tabelaOrcamentos(propostas, { comOportunidade: true })}`;
+}
+
+function mostrarSeletorOportunidadeOrcamento() {
+  const oportunidades = window._oportunidadesCache || [];
+  const clientes = window._clientesCacheOportunidades || [];
+  const nomeCliente = (id) => (clientes.find((c) => c.id === id) || {}).nome_empresa;
+  if (!oportunidades.length) {
+    document.getElementById('form-proposta').innerHTML = `
+      <div class="panel">
+        <p>Nenhuma oportunidade cadastrada ainda — um orçamento sempre fica ligado a uma oportunidade do funil comercial.</p>
+        <button class="btn btn-outline-sm" onclick="ir('oportunidades-funil')">Ir pro Funil de Oportunidades</button>
+      </div>`;
+    return;
+  }
+  document.getElementById('form-proposta').innerHTML = `
+    <div class="panel">
+      <div class="panel-head">Novo orçamento</div>
+      <div class="form-grid">
+        <div class="full"><label>Para qual oportunidade?*</label>
+          <select id="orc-oportunidade" onchange="this.value && mostrarFormProposta(Number(this.value))">
+            <option value="">Selecione...</option>
+            ${oportunidades.map((o) => `<option value="${o.id}">${esc(o.titulo)}${o.cliente_id ? ' — ' + esc(nomeCliente(o.cliente_id) || '') : ''}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    </div>`;
+}
+
+function tabelaOrcamentos(propostas, { comOportunidade } = {}) {
+  const oportunidades = window._oportunidadesCache || [];
+  const clientes = window._clientesCacheOportunidades || [];
+  const tituloOportunidade = (id) => (oportunidades.find((o) => o.id === id) || {}).titulo || '—';
+  const nomeClienteDaOportunidade = (id) => {
+    const o = oportunidades.find((op) => op.id === id);
+    const c = o && o.cliente_id ? clientes.find((x) => x.id === o.cliente_id) : null;
+    return c ? c.nome_empresa : '—';
+  };
+  const ordenadas = [...propostas].sort((a, b) => String(b.criado_em || '').localeCompare(String(a.criado_em || '')));
+  const colspan = comOportunidade ? 6 : 4;
+  return `
     <div class="panel"><table>
-      <tr><th>Status</th><th>Itens</th><th>Total</th><th>Validade</th><th></th></tr>
-      ${propostas.length ? propostas.map((p) => `
+      <tr>${comOportunidade ? '<th>Cliente</th><th>Oportunidade</th>' : ''}<th>Status</th><th>Total</th><th>Validade</th><th></th></tr>
+      ${ordenadas.length ? ordenadas.map((p) => `
         <tr>
+          ${comOportunidade ? `<td data-label="Cliente">${esc(nomeClienteDaOportunidade(p.oportunidade_id))}</td><td data-label="Oportunidade">${esc(tituloOportunidade(p.oportunidade_id))}</td>` : ''}
           <td data-label="Status"><span class="tag ${p.status === 'aceita' ? 'tag-green' : p.status === 'recusada' ? 'tag-red' : p.status === 'enviada' ? 'tag-blue' : 'tag-gray'}">${STATUS_PROPOSTA_LABEL[p.status]}</span></td>
-          <td data-label="Itens">${p.itens.length} item(ns)</td>
           <td data-label="Total">${fmtMoeda(p.valor_total)}</td>
           <td data-label="Validade">${p.validade ? esc(p.validade) : '—'}</td>
           <td class="td-acoes">
             <button class="btn-outline-sm" onclick="abrirPdfProposta(${p.id})">PDF</button>
-            ${p.status === 'rascunho' ? `<button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'enviada')">Marcar enviada</button>` : ''}
-            ${p.status === 'enviada' ? `<button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'aceita')">Aceita</button><button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'recusada')">Recusada</button>` : ''}
+            ${p.status === 'rascunho' ? `<button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'enviada')">Marcar enviado</button>` : ''}
+            ${p.status === 'enviada' ? `<button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'aceita')">Aceito</button><button class="btn-outline-sm" onclick="mudarStatusProposta(${p.id}, 'recusada')">Recusado</button>` : ''}
           </td>
-        </tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhuma proposta ainda.</td></tr>`}
+        </tr>`).join('') : `<tr><td colspan="${colspan}" class="empty">Nenhum orçamento ainda.</td></tr>`}
     </table></div>`;
 }
 
@@ -15817,14 +15901,14 @@ function renderItensPropostaDraft() {
 function mostrarFormProposta(oportunidadeId) {
   propostaItensDraft = [{ descricao: '', quantidade: 1, valor_unitario: 0 }];
   document.getElementById('form-proposta').innerHTML = `
-    <div class="panel"><div class="panel-head">Nova proposta</div>
+    <div class="panel"><div class="panel-head">Novo orçamento</div>
       <div id="proposta-itens"></div>
       <button class="btn-outline-sm" onclick="propostaItensDraft.push({descricao:'',quantidade:1,valor_unitario:0}); renderItensPropostaDraft();" style="margin-bottom:12px;">+ Adicionar item</button>
       <div class="form-grid">
         <div><label>Validade</label><input type="date" id="np-validade"></div>
       </div>
       <div style="display:flex; gap:10px;">
-        <button class="btn btn-primary btn-sm" onclick="salvarProposta(${oportunidadeId})">Salvar proposta</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarProposta(${oportunidadeId})">Salvar orçamento</button>
         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-proposta').innerHTML=''">Cancelar</button>
       </div>
     </div>`;
@@ -15835,22 +15919,22 @@ async function salvarProposta(oportunidadeId) {
   const itens = propostaItensDraft.map((i) => ({ descricao: i.descricao, quantidade: Number(i.quantidade), valor_unitario: Number(i.valor_unitario) }));
   try {
     await api('/api/propostas', { method: 'POST', body: { oportunidade_id: oportunidadeId, itens, validade: document.getElementById('np-validade').value } });
-    mostrarToast('Proposta cadastrada.');
-    renderPropostasOportunidade(oportunidadeId);
+    mostrarToast('Orçamento cadastrado.');
+    atualizarTelaOrcamentos();
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
 async function mudarStatusProposta(id, status) {
   try {
     await api(`/api/propostas/${id}`, { method: 'PUT', body: { status } });
-    renderPropostasOportunidade(window._propostaOportunidadeAtual);
+    atualizarTelaOrcamentos();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
 function gerarPdfProposta(p, oportunidade, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  doc.setProperties({ title: `Proposta ${p.id}` });
+  doc.setProperties({ title: `Orçamento ${p.id}` });
   const pageW = doc.internal.pageSize.getWidth();
   const margem = 40;
   const largura = pageW - margem * 2;
@@ -15863,7 +15947,7 @@ function gerarPdfProposta(p, oportunidade, logoDataUri) {
   doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
 
   doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
-  doc.text('Proposta Comercial', margem, y); y += 20;
+  doc.text('Orçamento', margem, y); y += 20;
   doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
   doc.text(limparPdf(oportunidade ? oportunidade.titulo : ''), margem, y); y += 24;
 
