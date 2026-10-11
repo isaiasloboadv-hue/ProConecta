@@ -214,6 +214,18 @@ function empresaEmails() {
   if (window._empresa && Array.isArray(window._empresa.emails) && window._empresa.emails.length) return window._empresa.emails;
   return ehEmpresaPromarking() ? ['suporte@promarking.com.br', 'atendimento@promarking.com.br', 'tecnico@promarking.com.br', 'posvenda@promarking.com.br'] : [];
 }
+// bloco HTML de contato (WhatsApp/Telefone/E-mail) pros painéis "Sobre o equipamento" nas telas
+// de preenchimento (Laudo Técnico, Corretiva etc.) — nunca mostra linha vazia nem herda contato
+// de outra empresa (pedido do usuário: "No aceite de entrega aparece coisas da Promarking").
+function blocoContatoHtml(limiteEmails) {
+  const linhaTel = [
+    empresaWhatsapp() && `<b>WhatsApp:</b> ${empresaWhatsapp()}`,
+    empresaTelefone() && `<b>Telefone:</b> ${empresaTelefone()}`,
+  ].filter(Boolean).join(' &nbsp; ');
+  const emails = limiteEmails ? empresaEmails().slice(0, limiteEmails) : empresaEmails();
+  const linhaEmail = emails.length ? `<b>E-mail:</b> ${emails.join(' / ')}` : '';
+  return [linhaTel, linhaEmail].filter(Boolean).join('<br>');
+}
 
 // o service worker não enxerga o localStorage da página (mundos separados) — pra conseguir
 // responder uma mensagem do chat interno direto pela notificação, sem abrir o app, ele precisa
@@ -3782,9 +3794,7 @@ async function renderRelatorioCorretiva(item) {
       <h2>Sobre o equipamento</h2>
       <p style="font-size:13.5px; line-height:1.6;">
         O equipamento <b>${esc(item.equipamento_modelo || item.equipamento_tipo || '')}</b> está coberto por uma garantia de 1 ano a partir da data de entrega.
-        Esta garantia cobre defeitos de fabricação e mão de obra. Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>
-        <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
-        <b>E-mail:</b> ${empresaEmails().slice(0, 2).join(' / ')}
+        Esta garantia cobre defeitos de fabricação e mão de obra.${blocoContatoHtml(2) ? ' Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>' + blocoContatoHtml(2) : ''}
       </p>
     </div>
 
@@ -4398,14 +4408,13 @@ async function renderLaudoTecnico(item) {
       <textarea id="lt-observacoes" placeholder="Observações adicionais (opcional)" oninput="atualizarRascunhoLaudo()"></textarea>
     </div>
 
-    <div class="panel">
+    ${blocoContatoHtml() ? `<div class="panel">
       <h2>Sobre o equipamento</h2>
       <p style="font-size:13.5px; line-height:1.6;">
         Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios:<br><br>
-        <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
-        <b>E-mail:</b> ${empresaEmails().join(' / ')}
+        ${blocoContatoHtml()}
       </p>
-    </div>
+    </div>` : ''}
 
     <div class="panel">
       <h2>Biblioteca de conhecimento</h2>
@@ -10871,9 +10880,11 @@ function relatorioAceitePadrao() {
 }
 
 function textoSobreEquipamentoAceite(modelo) {
-  return `A máquina está coberta por uma garantia de 1 ano a partir da data de entrega. Esta garantia cobre defeitos de fabricação e mão de obra. Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios de contato.<br><br>
-    <b>WhatsApp:</b> ${empresaWhatsapp()} &nbsp; <b>Telefone:</b> ${empresaTelefone()}<br>
-    <b>E-mail:</b> ${empresaEmails().slice(0, 2).join(' / ')}<br><br>
+  // pedido do usuário: "No aceite de entrega aparece coisas da Promarking" — mesmo tratamento
+  // já aplicado no PDF (ver gerarPdfRelatorioAceite): só mostra os contatos que a empresa
+  // realmente tem configurados, nunca herda o da PRO Marking.
+  const contato = blocoContatoHtml(2);
+  return `A máquina está coberta por uma garantia de 1 ano a partir da data de entrega. Esta garantia cobre defeitos de fabricação e mão de obra.${contato ? ' Para obter assistência durante o período de garantia, entre em contato conosco através dos seguintes meios de contato.<br><br>' + contato : ''}
     Estamos confiantes de que o equipamento${modelo ? ` modelo <b>${esc(modelo)}</b>` : ''} atenderá às suas expectativas e necessidades de produção. Estamos à disposição para quaisquer perguntas adicionais ou assistência que você possa precisar.`;
 }
 
