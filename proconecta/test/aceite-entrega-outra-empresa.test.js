@@ -15,7 +15,7 @@ function carregarRelatorioAceitePadrao() {
   const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const trechoChecklist = src.slice(src.indexOf('const CHECKLIST_CORRETIVA = ['), src.indexOf('\n];\n', src.indexOf('const CHECKLIST_CORRETIVA = [')) + 3);
   const trechoEhPromarking = src.slice(src.indexOf('function ehEmpresaPromarking() {'), src.indexOf('\n', src.indexOf('function ehEmpresaPromarking() {')) + 1);
-  const inicioFn = src.indexOf('function relatorioAceitePadrao() {');
+  const inicioFn = src.indexOf('function relatorioAceitePadrao(checklistAnterior) {');
   const trechoFn = src.slice(inicioFn, src.indexOf('\n}\n', inicioFn) + 2);
   if (!trechoChecklist.includes('CHECKLIST_CORRETIVA') || !trechoFn.includes('relatorioAceitePadrao')) {
     throw new Error('trechos não encontrados em app.js — teste desatualizado?');
@@ -43,4 +43,28 @@ test('empresa diferente de PRO Marking: Termo de Aceite nasce com o check-list e
   const padrao = ctx.relatorioAceitePadrao();
   // [...] copia pra um array do realm de fora — ver nota equivalente em empresa-contato.test.js
   assert.deepEqual([...padrao.checklist], []);
+});
+
+// pedido do usuário: "nos itens no tempo de aceite... usar os mesmos itens colocado no relatório
+// anterior, tbm manter os campos editável" — ver mostrarFormRelatorioAceite, que busca o
+// checklist_anterior em GET /api/relatorios-manutencao/sugestoes-equipamento e passa pra
+// relatorioAceitePadrao(checklistAnterior).
+test('empresa diferente de PRO Marking com Termo de Aceite anterior: nasce com os mesmos itens (resposta/observação em branco)', () => {
+  const ctx = carregarRelatorioAceitePadrao();
+  ctx.window._empresa = { id: 2, nome: 'BRB' };
+  const padrao = ctx.relatorioAceitePadrao(['Vedação', 'Nível de óleo']);
+  // {...c} copia cada item pra um objeto do realm de fora, mesmo motivo do [...] de sempre —
+  // os objetos do checklist também nascem dentro do vm.
+  assert.deepEqual(padrao.checklist.map((c) => ({ ...c })), [
+    { item: 'Vedação', resposta: '', observacao: '' },
+    { item: 'Nível de óleo', resposta: '', observacao: '' },
+  ]);
+});
+
+test('PRO Marking (empresa id 1) ignora checklistAnterior — continua só com CHECKLIST_CORRETIVA', () => {
+  const ctx = carregarRelatorioAceitePadrao();
+  ctx.window._empresa = { id: 1 };
+  const padrao = ctx.relatorioAceitePadrao(['Item de outra empresa']);
+  assert.equal(padrao.checklist.length, ctx.CHECKLIST_CORRETIVA.length);
+  assert.equal(padrao.checklist[0].item, 'Instalação mecânica');
 });

@@ -227,6 +227,28 @@ function blocoContatoHtml(limiteEmails) {
   return [linhaTel, linhaEmail].filter(Boolean).join('<br>');
 }
 
+// pedido do usuário: "não é só em um relatório e sim para todos... cada relatório que é
+// preenchido o sistema salva empresa equipamento, que começa a aparecer em um menu suspenso, mas
+// editável" — busca (sem cache: sempre o histórico mais atual) os modelos/equipamentos que esta
+// empresa já usou em relatórios anteriores, pra alimentar o <datalist> do campo "Modelo da
+// máquina"/"Equipamento" nos relatórios de empresas que não são a PRO Marking (que continua com
+// a lista fixa EQUIPAMENTOS_PREVENTIVA, sem nenhuma mudança). "checklist_anterior" é usado só
+// pelo Termo de Aceite (ver relatorioAceitePadrao).
+async function carregarSugestoesEquipamento() {
+  try {
+    return await api('/api/relatorios-manutencao/sugestoes-equipamento');
+  } catch (e) {
+    return { equipamentos: [], checklist_anterior: [] };
+  }
+}
+// campo de equipamento digitável com sugestão (igual ideia do campoClienteHTML, mas sem id pra
+// resolver — equipamento aqui é só texto livre, nunca trava no que já foi digitado antes).
+function campoEquipamentoHTML(idPrefix, valorAtual, sugestoes, extraAttrs) {
+  return `
+    <input id="${idPrefix}" list="${idPrefix}-lista" value="${esc(valorAtual)}" ${extraAttrs || ''}>
+    <datalist id="${idPrefix}-lista">${(sugestoes || []).map((s) => `<option value="${esc(s)}">`).join('')}</datalist>`;
+}
+
 // o service worker não enxerga o localStorage da página (mundos separados) — pra conseguir
 // responder uma mensagem do chat interno direto pela notificação, sem abrir o app, ele precisa
 // do token de um jeito que também dê pra ler de lá. Mesmo banco/loja que o sw.js usa (ver
@@ -8908,12 +8930,15 @@ function relatorioPreventivaPadrao() {
     empresa: '', endereco: '', numero: '', bairro: '', estado: '', cidade: '', cep: '',
     setor_maquina: '',
     // vazio até o técnico escolher o modelo da máquina — cada modelo carrega seu próprio
-    // check-list e conjunto de fotos (ver EQUIPAMENTOS_PREVENTIVA)
+    // check-list e conjunto de fotos (ver EQUIPAMENTOS_PREVENTIVA). Pedido do usuário ("não é só
+    // em um relatório e sim para todos... os outros relatórios ainda aparece os equipamentos da
+    // Promarking"): quem não é a PRO Marking não vê esse seletor fixo (ver mostrarFormRelatorioPreventiva),
+    // então já nasce com o conjunto de fotos genérico, igual à opção "Outro" de sempre.
     checklist: [],
     observacoes_checklist: '',
     servico_feito: '',
     pecas: [],
-    fotos: [],
+    fotos: ehEmpresaPromarking() ? [] : FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] })),
     observacoes_servico: '',
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
@@ -8924,9 +8949,11 @@ function relatorioPreventivaPadrao() {
   };
 }
 
-function mostrarFormRelatorioPreventiva(existente) {
+async function mostrarFormRelatorioPreventiva(existente) {
   const rascunho = carregarRascunhoManual('preventiva', existente && existente.id);
   const recuperado = !!rascunho;
+  const promarking = ehEmpresaPromarking();
+  const sugestoes = promarking ? { equipamentos: [] } : await carregarSugestoesEquipamento();
   relatorioPreventivaDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioPreventivaPadrao());
   const d = relatorioPreventivaDraft;
   const editando = !!d.id;
@@ -8949,6 +8976,7 @@ function mostrarFormRelatorioPreventiva(existente) {
       <div class="form-grid">
         <div><label>Data inicial*</label><input id="rp-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
         <div><label>Data final*</label><input id="rp-data_final" type="date" value="${esc(d.data_final)}"></div>
+        ${promarking ? `
         <div>
           <label>Modelo da máquina*</label>
           <select id="rp-modelo_maquina" onchange="selecionarModeloPreventiva(this.value)">
@@ -8960,7 +8988,11 @@ function mostrarFormRelatorioPreventiva(existente) {
         <div id="rp-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
           <label>Especifique o modelo*</label>
           <input id="rp-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}">
-        </div>
+        </div>` : `
+        <div class="full">
+          <label>Modelo da máquina*</label>
+          ${campoEquipamentoHTML('rp-modelo_maquina', d.modelo_maquina, sugestoes.equipamentos)}
+        </div>`}
         <div><label>Número de série*</label><input id="rp-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Serviço realizado*</label><input id="rp-servico_realizado" value="${esc(d.servico_realizado)}"></div>
         <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
@@ -9303,7 +9335,8 @@ function lerCamposPreventiva() {
   d.data_inicial = document.getElementById('rp-data_inicial').value;
   d.data_final = document.getElementById('rp-data_final').value;
   const modeloSelecionado = document.getElementById('rp-modelo_maquina').value;
-  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rp-modelo_maquina_outro').value : modeloSelecionado;
+  const elModeloOutroRp = document.getElementById('rp-modelo_maquina_outro');
+  d.modelo_maquina = (modeloSelecionado === 'Outro' && elModeloOutroRp) ? elModeloOutroRp.value : modeloSelecionado;
   d.numero_serie = document.getElementById('rp-numero_serie').value;
   d.servico_realizado = document.getElementById('rp-servico_realizado').value;
   d.empresa = document.getElementById('rp-empresa').value;
@@ -9389,7 +9422,9 @@ function relatorioPreventiva2Padrao() {
     observacoes_checklist: '',
     servico_feito: '',
     pecas: [],
-    fotos: [],
+    // ver relatorioPreventivaPadrao — mesmo motivo: quem não é a PRO Marking já nasce com o
+    // conjunto de fotos genérico, sem passar pelo seletor fixo de modelos.
+    fotos: ehEmpresaPromarking() ? [] : FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] })),
     observacoes_servico: '',
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
@@ -9400,9 +9435,11 @@ function relatorioPreventiva2Padrao() {
   };
 }
 
-function mostrarFormRelatorioPreventiva2(existente) {
+async function mostrarFormRelatorioPreventiva2(existente) {
   const rascunho = carregarRascunhoManual('preventiva2', existente && existente.id);
   const recuperado = !!rascunho;
+  const promarking = ehEmpresaPromarking();
+  const sugestoes = promarking ? { equipamentos: [] } : await carregarSugestoesEquipamento();
   relatorioPreventiva2Draft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioPreventiva2Padrao());
   const d = relatorioPreventiva2Draft;
   const editando = !!d.id;
@@ -9425,6 +9462,7 @@ function mostrarFormRelatorioPreventiva2(existente) {
       <div class="form-grid">
         <div><label>Data inicial*</label><input id="rp2-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
         <div><label>Data final*</label><input id="rp2-data_final" type="date" value="${esc(d.data_final)}"></div>
+        ${promarking ? `
         <div>
           <label>Modelo da máquina*</label>
           <select id="rp2-modelo_maquina" onchange="selecionarModeloPreventiva2(this.value)">
@@ -9436,7 +9474,11 @@ function mostrarFormRelatorioPreventiva2(existente) {
         <div id="rp2-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
           <label>Especifique o modelo*</label>
           <input id="rp2-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}">
-        </div>
+        </div>` : `
+        <div class="full">
+          <label>Modelo da máquina*</label>
+          ${campoEquipamentoHTML('rp2-modelo_maquina', d.modelo_maquina, sugestoes.equipamentos)}
+        </div>`}
         <div><label>Número de série*</label><input id="rp2-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Serviço realizado*</label><input id="rp2-servico_realizado" value="${esc(d.servico_realizado)}"></div>
         <div><label>Responsável*</label><input value="${esc(USER.nome)}" disabled></div>
@@ -9782,7 +9824,8 @@ function lerCamposPreventiva2() {
   d.data_inicial = document.getElementById('rp2-data_inicial').value;
   d.data_final = document.getElementById('rp2-data_final').value;
   const modeloSelecionado = document.getElementById('rp2-modelo_maquina').value;
-  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rp2-modelo_maquina_outro').value : modeloSelecionado;
+  const elModeloOutroRp2 = document.getElementById('rp2-modelo_maquina_outro');
+  d.modelo_maquina = (modeloSelecionado === 'Outro' && elModeloOutroRp2) ? elModeloOutroRp2.value : modeloSelecionado;
   d.numero_serie = document.getElementById('rp2-numero_serie').value;
   d.servico_realizado = document.getElementById('rp2-servico_realizado').value;
   d.empresa = document.getElementById('rp2-empresa').value;
@@ -9915,8 +9958,9 @@ function relatorioCorretivaPadrao() {
     acoes_executadas: '',
     observacoes: '',
     pecas: [],
-    // vazio até o técnico escolher o modelo da máquina, igual no Preventiva
-    fotos: [],
+    // vazio até o técnico escolher o modelo da máquina, igual no Preventiva (ver
+    // relatorioPreventivaPadrao — quem não é a PRO Marking já nasce com fotos genérico).
+    fotos: ehEmpresaPromarking() ? [] : FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] })),
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
     satisfacao_autoriza: '',
@@ -9926,9 +9970,11 @@ function relatorioCorretivaPadrao() {
   };
 }
 
-function mostrarFormRelatorioCorretiva(existente) {
+async function mostrarFormRelatorioCorretiva(existente) {
   const rascunho = carregarRascunhoManual('corretiva', existente && existente.id);
   const recuperado = !!rascunho;
+  const promarking = ehEmpresaPromarking();
+  const sugestoes = promarking ? { equipamentos: [] } : await carregarSugestoesEquipamento();
   relatorioCorretivaDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioCorretivaPadrao());
   const d = relatorioCorretivaDraft;
   const editando = !!d.id;
@@ -9951,6 +9997,7 @@ function mostrarFormRelatorioCorretiva(existente) {
       <div class="form-grid">
         <div><label>Data inicial*</label><input id="rcm-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
         <div><label>Data final*</label><input id="rcm-data_final" type="date" value="${esc(d.data_final)}"></div>
+        ${promarking ? `
         <div>
           <label>Modelo da máquina*</label>
           <select id="rcm-modelo_maquina" onchange="selecionarModeloCorretiva(this.value)">
@@ -9962,7 +10009,11 @@ function mostrarFormRelatorioCorretiva(existente) {
         <div id="rcm-modelo_maquina-outro-wrap" style="display:${d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? 'block' : 'none'};">
           <label>Especifique o modelo*</label>
           <input id="rcm-modelo_maquina_outro" value="${esc(d.modelo_maquina && !EQUIPAMENTOS_PREVENTIVA[d.modelo_maquina] ? d.modelo_maquina : '')}">
-        </div>
+        </div>` : `
+        <div class="full">
+          <label>Modelo da máquina*</label>
+          ${campoEquipamentoHTML('rcm-modelo_maquina', d.modelo_maquina, sugestoes.equipamentos)}
+        </div>`}
         <div><label>Número de série*</label><input id="rcm-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Serviço realizado*</label><input id="rcm-servico_realizado" value="${esc(d.servico_realizado)}"></div>
         <div><label>Técnico*</label><input value="${esc(USER.nome)}" disabled></div>
@@ -10267,7 +10318,8 @@ function lerCamposCorretiva() {
   d.data_inicial = document.getElementById('rcm-data_inicial').value;
   d.data_final = document.getElementById('rcm-data_final').value;
   const modeloSelecionado = document.getElementById('rcm-modelo_maquina').value;
-  d.modelo_maquina = modeloSelecionado === 'Outro' ? document.getElementById('rcm-modelo_maquina_outro').value : modeloSelecionado;
+  const elModeloOutroRcm = document.getElementById('rcm-modelo_maquina_outro');
+  d.modelo_maquina = (modeloSelecionado === 'Outro' && elModeloOutroRcm) ? elModeloOutroRcm.value : modeloSelecionado;
   d.numero_serie = document.getElementById('rcm-numero_serie').value;
   d.servico_realizado = document.getElementById('rcm-servico_realizado').value;
   d.empresa = document.getElementById('rcm-empresa').value;
@@ -10350,9 +10402,11 @@ function relatorioTecnicoPadrao() {
   };
 }
 
-function mostrarFormRelatorioTecnico(existente) {
+async function mostrarFormRelatorioTecnico(existente) {
   const rascunho = carregarRascunhoManual('relatorio_tecnico', existente && existente.id);
   const recuperado = !!rascunho;
+  const promarking = ehEmpresaPromarking();
+  const sugestoes = promarking ? { equipamentos: [] } : await carregarSugestoesEquipamento();
   relatorioTecnicoDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioTecnicoPadrao());
   const d = relatorioTecnicoDraft;
   const editando = !!d.id;
@@ -10384,6 +10438,7 @@ function mostrarFormRelatorioTecnico(existente) {
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
         <div><label>Marca*</label><input id="rt-marca" value="${esc(d.marca)}"></div>
+        ${promarking ? `
         <div>
           <label>${t('equipamento', 'Equipamento')}*</label>
           <select id="rt-equipamento" onchange="document.getElementById('rt-equipamento-outro-wrap').style.display = this.value === 'Outro' ? 'block' : 'none';">
@@ -10395,7 +10450,11 @@ function mostrarFormRelatorioTecnico(existente) {
         <div id="rt-equipamento-outro-wrap" class="full" style="display:${d.equipamento && !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? 'block' : 'none'};">
           <label>Especifique o equipamento*</label>
           <input id="rt-equipamento_outro" value="${esc(d.equipamento && !EQUIPAMENTOS_PREVENTIVA[d.equipamento] ? d.equipamento : '')}">
-        </div>
+        </div>` : `
+        <div class="full">
+          <label>${t('equipamento', 'Equipamento')}*</label>
+          ${campoEquipamentoHTML('rt-equipamento', d.equipamento, sugestoes.equipamentos)}
+        </div>`}
         <div><label>Nº de série*</label><input id="rt-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Data de fabricação (MM/AAAA)</label><input id="rt-data_fabricacao" placeholder="MM/AAAA" maxlength="7" value="${esc(d.data_fabricacao)}"></div>
       </div>
@@ -10530,7 +10589,8 @@ function lerCamposTecnico() {
   d.tipo_servico_outros = document.getElementById('rt-tipo-servico-outros').value;
   d.marca = document.getElementById('rt-marca').value;
   const equipamentoSelecionado = document.getElementById('rt-equipamento').value;
-  d.equipamento = equipamentoSelecionado === 'Outro' ? document.getElementById('rt-equipamento_outro').value : equipamentoSelecionado;
+  const elEquipamentoOutroRt = document.getElementById('rt-equipamento_outro');
+  d.equipamento = (equipamentoSelecionado === 'Outro' && elEquipamentoOutroRt) ? elEquipamentoOutroRt.value : equipamentoSelecionado;
   d.numero_serie = document.getElementById('rt-numero_serie').value;
   d.data_fabricacao = document.getElementById('rt-data_fabricacao').value;
   const garantia = document.querySelector('input[name="rt-garantia"]:checked');
@@ -10861,7 +10921,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
 // e modelo de máquina escolhido de uma lista (mesma EQUIPAMENTOS_PREVENTIVA da Preventiva), sem
 // fotos ou peças.
 let relatorioAceiteDraft = null;
-function relatorioAceitePadrao() {
+function relatorioAceitePadrao(checklistAnterior) {
   return {
     tipo: 'aceite_entrega',
     os_uf: '', os_numero: '', os_ano: '',
@@ -10872,8 +10932,12 @@ function relatorioAceitePadrao() {
     // pedido do usuário: "No aceite de entrega aparece coisas da Promarking" — CHECKLIST_CORRETIVA
     // é a lista de instalação de equipamento a laser, específica da PRO Marking; outra empresa
     // começa com o check-list em branco (igual já acontece com o modelo "Outro" na Preventiva) e
-    // adiciona os itens dela pelo botão "+ Adicionar item".
-    checklist: ehEmpresaPromarking() ? CHECKLIST_CORRETIVA.map((item) => ({ item, resposta: '', observacao: '' })) : [],
+    // adiciona os itens dela pelo botão "+ Adicionar item". Pedido seguinte: "nos itens no tempo
+    // de aceite... usar os mesmos itens colocado no relatório anterior" — se esta empresa já tem
+    // um Termo de Aceite anterior, começa com os mesmos nomes de item dele (resposta/observação
+    // sempre em branco, são específicas desta entrega), continua editável igual a sempre.
+    checklist: ehEmpresaPromarking() ? CHECKLIST_CORRETIVA.map((item) => ({ item, resposta: '', observacao: '' }))
+      : (Array.isArray(checklistAnterior) && checklistAnterior.length ? checklistAnterior.map((item) => ({ item, resposta: '', observacao: '' })) : []),
     observacoes: '',
     aceite: '',
     satisfacao_estrelas: 0, satisfacao_duvidas: '', satisfacao_apto: '',
@@ -10892,10 +10956,14 @@ function textoSobreEquipamentoAceite(modelo) {
     Estamos confiantes de que o equipamento${modelo ? ` modelo <b>${esc(modelo)}</b>` : ''} atenderá às suas expectativas e necessidades de produção. Estamos à disposição para quaisquer perguntas adicionais ou assistência que você possa precisar.`;
 }
 
-function mostrarFormRelatorioAceite(existente) {
+async function mostrarFormRelatorioAceite(existente) {
   const rascunho = carregarRascunhoManual('aceite_entrega', existente && existente.id);
   const recuperado = !!rascunho;
-  relatorioAceiteDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioAceitePadrao());
+  const promarking = ehEmpresaPromarking();
+  // só busca sugestões pra quem não é a PRO Marking — ela continua com EQUIPAMENTOS_PREVENTIVA,
+  // sem nenhuma chamada nova.
+  const sugestoes = promarking ? { equipamentos: [], checklist_anterior: [] } : await carregarSugestoesEquipamento();
+  relatorioAceiteDraft = rascunho ? rascunho.draft : (existente ? JSON.parse(JSON.stringify(existente)) : relatorioAceitePadrao(sugestoes.checklist_anterior));
   const d = relatorioAceiteDraft;
   const editando = !!d.id;
   const main = document.getElementById('main');
@@ -10917,7 +10985,7 @@ function mostrarFormRelatorioAceite(existente) {
       <div class="form-grid">
         <div><label>Data inicial*</label><input id="rae-data_inicial" type="date" value="${esc(d.data_inicial)}"></div>
         <div><label>Data final*</label><input id="rae-data_final" type="date" value="${esc(d.data_final)}"></div>
-        ${ehEmpresaPromarking() ? `
+        ${promarking ? `
         <div>
           <label>Modelo da máquina*</label>
           <select id="rae-modelo_maquina" onchange="selecionarModeloAceite(this.value)">
@@ -10932,7 +11000,7 @@ function mostrarFormRelatorioAceite(existente) {
         </div>` : `
         <div class="full">
           <label>Modelo da máquina*</label>
-          <input id="rae-modelo_maquina" value="${esc(d.modelo_maquina)}" oninput="atualizarSobreEquipamentoAceite();">
+          ${campoEquipamentoHTML('rae-modelo_maquina', d.modelo_maquina, sugestoes.equipamentos, 'oninput="atualizarSobreEquipamentoAceite();"')}
         </div>`}
         <div><label>Nº de série*</label><input id="rae-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Serviço*</label><input id="rae-servico" value="${esc(d.servico)}"></div>

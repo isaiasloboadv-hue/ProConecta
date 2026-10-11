@@ -3542,6 +3542,35 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
 
+// GET /api/relatorios-manutencao/sugestoes-equipamento — pedido do usuário: "não é só em um
+// relatório e sim para todos... cada relatório que é preenchido o sistema salva empresa
+// equipamento, que começa a aparecer em um menu suspenso, mas editável. E nos itens no tempo de
+// aceite... usar os mesmos itens colocado no relatório anterior" — alimenta o campo de
+// equipamento (sugestão em <datalist>, nunca trava o texto) e o check-list inicial do Termo de
+// Aceite com o que esta empresa já usou. Sem tabela nova: só lê o histórico que ela já tem em
+// relatorios_manutencao (já isolado por empresa_id via tenant.listar).
+rota('GET', /^\/api\/relatorios-manutencao\/sugestoes-equipamento$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o técnico ou o administrador usam este relatório.' });
+  const data = db.load();
+  const lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id)
+    .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  const vistos = new Set();
+  const equipamentos = [];
+  for (const r of lista) {
+    // "modelo_maquina" é o campo usado em preventiva/preventiva2/corretiva/aceite_entrega;
+    // "equipamento" no relatório técnico (ver POST /api/relatorios-manutencao acima).
+    const valor = String((r.tipo === 'relatorio_tecnico' ? r.equipamento : r.modelo_maquina) || '').trim();
+    if (!valor || vistos.has(valor.toLowerCase())) continue;
+    vistos.add(valor.toLowerCase());
+    equipamentos.push(valor);
+    if (equipamentos.length >= 30) break;
+  }
+  const ultimoAceite = lista.find((r) => r.tipo === 'aceite_entrega' && Array.isArray(r.checklist) && r.checklist.length);
+  const checklist_anterior = ultimoAceite ? ultimoAceite.checklist.map((c) => String((c && c.item) || '').trim()).filter(Boolean) : [];
+  enviarJSON(res, 200, { equipamentos, checklist_anterior });
+});
+
 // POST /api/relatorios-manutencao/:id/enviar-email — botão "Encaminhar" da tela Relatório: manda
 // o PDF (já gerado no navegador, igual ao botão "PDF") por e-mail em anexo. O envio por WhatsApp
 // não passa por aqui — é feito só no navegador (wa.me / Web Share), sem nada pra guardar no servidor.
