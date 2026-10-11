@@ -213,6 +213,12 @@ function seed() {
     // convertido_cliente_id quando alguém usa o botão "Converter em cliente" (vira um registro de
     // verdade em `clientes`, igual sincronizarClienteDoRelatorio já faz a partir de um relatório).
     leads: [],
+    // oportunidades (CRM nativo, passo 2) — funil comercial por estágio. Nasce manual (origem
+    // 'manual') ou automática a partir de um Devolutivo que marcou
+    // identificou_oportunidade_adicional (origem 'devolutivo', ver POST /api/relatorios-manutencao).
+    // valor_estimado é texto livre (igual valor_agregado do Devolutivo já é hoje: "Descreva como
+    // isso pode virar uma venda de maior valor" — nunca foi um número), não dá pra fingir que é.
+    oportunidades: [],
     // FMEA (RCM/SAP PM, Fase 1 passo 1): catálogo cadastrável pelo administrador, em cascata —
     // Componente (preso a um modelo do catálogo de equipamentos) → Modo de falha (com
     // severidade/ocorrência/detecção, 1-10, pra calcular RPN) → Causa → Efeito. Ainda não é usado
@@ -227,7 +233,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -428,6 +434,9 @@ function migrar(data) {
   // leads/contatos (CRM nativo, passo 1) — menu "Comercial" novo, substitui o esqueleto "CRM".
   if (!data.leads) data.leads = [];
   if (!data._seq.leads) data._seq.leads = 1;
+  // oportunidades (CRM nativo, passo 2) — funil comercial por estágio.
+  if (!data.oportunidades) data.oportunidades = [];
+  if (!data._seq.oportunidades) data._seq.oportunidades = 1;
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];

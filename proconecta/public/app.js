@@ -768,6 +768,7 @@ const NAV = {
     // por passo (passo 1: Leads/Contatos).
     { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
       { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
+      { key: 'oportunidades', label: 'Funil de Oportunidades', page: 'oportunidades-funil' },
     ]},
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
@@ -863,6 +864,7 @@ const NAV = {
     // CRM nativo (passo 1): o papel comercial é quem mais usa Leads/Contatos no dia a dia.
     { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
       { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
+      { key: 'oportunidades', label: 'Funil de Oportunidades', page: 'oportunidades-funil' },
     ]},
   ],
 };
@@ -1015,6 +1017,7 @@ async function ir(pagina) {
     if (pagina === 'solicitacoes-edicao-biblioteca') return renderSolicitacoesEdicao();
     if (pagina === 'clientes') return renderClientes();
     if (pagina === 'leads-lista') return renderLeads();
+    if (pagina === 'oportunidades-funil') return renderOportunidades();
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
     if (pagina === 'equipamentos-menu') return renderEquipamentosMenu();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
@@ -15364,6 +15367,93 @@ async function converterLead(id) {
     await api(`/api/leads/${id}/converter`, { method: 'POST' });
     mostrarToast('Lead convertido em cliente.');
     renderLeads();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- COMERCIAL: FUNIL DE OPORTUNIDADES (CRM nativo, passo 2) ----------
+// nasce manual ou automática a partir de um Devolutivo que marcou identificou_oportunidade_adicional
+// (ver POST /api/relatorios-manutencao em server.js) — sem drag-and-drop, "Mover para →" muda o
+// estágio de uma vez (consistente com o resto do app, que não usa lib de arrastar).
+const ORDEM_FUNIL = ['novo', 'contato', 'proposta', 'negociacao', 'ganho'];
+const ESTAGIO_OPORTUNIDADE_LABEL = { novo: 'Novo', contato: 'Contato', proposta: 'Proposta', negociacao: 'Negociação', ganho: 'Ganho', perdido: 'Perdido' };
+
+async function renderOportunidades() {
+  const [{ oportunidades }, { clientes }] = await Promise.all([api('/api/oportunidades'), api('/api/clientes')]);
+  window._oportunidadesCache = oportunidades;
+  window._clientesCacheOportunidades = clientes;
+  const nomeCliente = (id) => (clientes.find((c) => c.id === id) || {}).nome_empresa;
+  const main = document.getElementById('main');
+  const cartao = (o) => {
+    const proximoEstagio = ORDEM_FUNIL[ORDEM_FUNIL.indexOf(o.estagio) + 1];
+    const terminal = o.estagio === 'ganho' || o.estagio === 'perdido';
+    return `
+    <div class="panel" style="margin-bottom:10px;">
+      <strong>${esc(o.titulo)}</strong>
+      ${o.cliente_id ? `<div>${esc(nomeCliente(o.cliente_id) || '—')}</div>` : ''}
+      ${o.valor_estimado ? `<div style="color:var(--ink-soft); font-size:13px;">${esc(o.valor_estimado)}</div>` : ''}
+      ${o.origem === 'devolutivo' ? `<span class="tag tag-blue">Do devolutivo</span>` : ''}
+      ${!terminal ? `
+        <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+          ${proximoEstagio ? `<button class="btn-outline-sm" onclick="moverEstagioOportunidade(${o.id}, '${proximoEstagio}')">Mover para ${ESTAGIO_OPORTUNIDADE_LABEL[proximoEstagio]} →</button>` : ''}
+          <button class="btn-outline-sm" onclick="moverEstagioOportunidade(${o.id}, 'perdido')" style="color:var(--red); border-color:var(--red);">Perdido</button>
+        </div>
+      ` : ''}
+    </div>`;
+  };
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Funil de Oportunidades</h1><p>${oportunidades.length} oportunidade(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormOportunidade()">+ Nova oportunidade</button>
+    </div>
+    <div id="form-oportunidade"></div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; align-items:start;">
+      ${[...ORDEM_FUNIL, 'perdido'].map((estagio) => {
+        const doEstagio = oportunidades.filter((o) => o.estagio === estagio);
+        return `<div>
+          <div class="panel-head">${ESTAGIO_OPORTUNIDADE_LABEL[estagio]} (${doEstagio.length})</div>
+          ${doEstagio.map(cartao).join('') || `<p class="empty">Nenhuma.</p>`}
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function mostrarFormOportunidade() {
+  const clientes = window._clientesCacheOportunidades || [];
+  document.getElementById('form-oportunidade').innerHTML = `
+    <div class="panel"><div class="panel-head">Nova oportunidade</div>
+      <div class="form-grid">
+        <div class="full"><label>Título*</label><input id="no-titulo" placeholder="Ex.: Retrofit de linha de produção"></div>
+        <div><label>Cliente (opcional)</label><select id="no-cliente"><option value="">Nenhum</option>${clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('')}</select></div>
+        <div><label>Valor estimado</label><input id="no-valor" placeholder="Ex.: ~R$ 50.000 em equipamento"></div>
+        <div class="full"><label>Descrição</label><textarea id="no-descricao"></textarea></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarOportunidade()">Salvar oportunidade</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-oportunidade').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function salvarOportunidade() {
+  const titulo = document.getElementById('no-titulo').value.trim();
+  if (!titulo) return alert('Informe o título da oportunidade.');
+  const body = {
+    titulo,
+    cliente_id: document.getElementById('no-cliente').value || null,
+    valor_estimado: document.getElementById('no-valor').value,
+    descricao: document.getElementById('no-descricao').value,
+  };
+  try {
+    await api('/api/oportunidades', { method: 'POST', body });
+    mostrarToast('Oportunidade cadastrada.');
+    renderOportunidades();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function moverEstagioOportunidade(id, estagio) {
+  try {
+    await api(`/api/oportunidades/${id}`, { method: 'PUT', body: { estagio } });
+    renderOportunidades();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 

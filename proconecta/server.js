@@ -3917,6 +3917,26 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     }
   }
   sincronizarClienteDoRelatorio(data, user.empresa_id, body);
+  // CRM nativo, passo 2: Devolutivo que identificou uma necessidade adicional do cliente nasce
+  // Oportunidade automaticamente no funil, em vez de ficar presa só dentro do relatório (antes só
+  // alimentava um <select> pro Levantamento Técnico — ver devolutivosComOportunidade no front).
+  if (tipo === 'devolutivo' && item.identificou_oportunidade_adicional) {
+    const nomeEmpresa = String(body.empresa || '').trim().toLowerCase();
+    const clienteDaOportunidade = nomeEmpresa
+      ? tenant.listar(data, 'clientes', user.empresa_id).find((c) => String(c.nome_empresa || '').trim().toLowerCase() === nomeEmpresa)
+      : null;
+    tenant.criar(data, 'oportunidades', user.empresa_id, {
+      titulo: `${item.tipo_oportunidade.join(', ') || 'Oportunidade'} — ${body.empresa || 'cliente não identificado'}`,
+      cliente_id: clienteDaOportunidade ? clienteDaOportunidade.id : null,
+      lead_id: null,
+      estagio: 'novo',
+      valor_estimado: item.valor_agregado || '',
+      descricao: item.descricao_oportunidade || '',
+      observacoes: '',
+      origem: 'devolutivo',
+      devolutivo_id: item.id,
+    });
+  }
   db.save(data);
   enviarJSON(res, 201, { relatorio: item });
 });
@@ -4311,6 +4331,72 @@ rota('POST', /^\/api\/leads\/(\d+)\/converter$/, async (req, res, m) => {
   lead.convertido_cliente_id = cliente.id;
   db.save(data);
   enviarJSON(res, 200, { lead, cliente });
+});
+
+const ESTAGIOS_OPORTUNIDADE_VALIDOS = ['novo', 'contato', 'proposta', 'negociacao', 'ganho', 'perdido'];
+
+// GET /api/oportunidades — funil comercial (menu Comercial), por estágio
+rota('GET', /^\/api\/oportunidades$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial veem oportunidades.' });
+  const data = db.load();
+  enviarJSON(res, 200, { oportunidades: tenant.listar(data, 'oportunidades', user.empresa_id) });
+});
+
+// POST /api/oportunidades — cadastro manual (a automática nasce no POST /api/relatorios-manutencao
+// do Devolutivo, ver mais abaixo)
+rota('POST', /^\/api\/oportunidades$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial cadastram oportunidades.' });
+  const body = await lerCorpo(req);
+  if (!body.titulo || !String(body.titulo).trim()) {
+    return enviarJSON(res, 400, { erro: 'Título é obrigatório.' });
+  }
+  const data = db.load();
+  const clienteId = body.cliente_id ? Number(body.cliente_id) : null;
+  if (clienteId && !tenant.buscar(data, 'clientes', clienteId, user.empresa_id)) {
+    return enviarJSON(res, 400, { erro: 'Cliente não encontrado.' });
+  }
+  const leadId = body.lead_id ? Number(body.lead_id) : null;
+  if (leadId && !tenant.buscar(data, 'leads', leadId, user.empresa_id)) {
+    return enviarJSON(res, 400, { erro: 'Lead não encontrado.' });
+  }
+  const item = tenant.criar(data, 'oportunidades', user.empresa_id, {
+    titulo: body.titulo.trim(),
+    cliente_id: clienteId,
+    lead_id: leadId,
+    estagio: 'novo',
+    valor_estimado: body.valor_estimado || '',
+    descricao: body.descricao || '',
+    observacoes: body.observacoes || '',
+    origem: 'manual',
+    devolutivo_id: null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { oportunidade: item });
+});
+
+// PUT /api/oportunidades/:id — edita dados ou move de estágio ("Mover para →" no funil)
+rota('PUT', /^\/api\/oportunidades\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial editam oportunidades.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const item = tenant.buscar(data, 'oportunidades', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Oportunidade não encontrada.' });
+  if (body.titulo !== undefined && !String(body.titulo).trim()) {
+    return enviarJSON(res, 400, { erro: 'Título é obrigatório.' });
+  }
+  if (body.titulo !== undefined) item.titulo = body.titulo.trim();
+  if (body.estagio !== undefined) {
+    if (!ESTAGIOS_OPORTUNIDADE_VALIDOS.includes(body.estagio)) return enviarJSON(res, 400, { erro: 'Estágio inválido.' });
+    item.estagio = body.estagio;
+  }
+  if (body.valor_estimado !== undefined) item.valor_estimado = body.valor_estimado || '';
+  if (body.descricao !== undefined) item.descricao = body.descricao || '';
+  if (body.observacoes !== undefined) item.observacoes = body.observacoes || '';
+  db.save(data);
+  enviarJSON(res, 200, { oportunidade: item });
 });
 
 // GET /api/equipamentos
