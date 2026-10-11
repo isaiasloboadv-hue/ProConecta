@@ -597,7 +597,10 @@ function renderHeaderRight() {
       </button>
       <div class="bell-panel" id="bell-panel"></div>
     </div>
-    <button class="btn-logout" onclick="sair()">Sair</button>
+    <button class="btn-logout" onclick="sair()" title="Sair">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="btn-logout-label">Sair</span>
+    </button>
   `;
 }
 
