@@ -4332,7 +4332,10 @@ rota('DELETE', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
 // GET /api/clientes — administrador: lista de empresas-cliente (para vincular usuário/chamado)
 rota('GET', /^\/api\/clientes$/, async (req, res) => {
   const user = usuarioAutenticado(req);
-  if (!exigirPapel(user, ['administrador', 'producao', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção veem clientes.' });
+  // "comercial" precisa listar clientes pra resolver nome na tela de Leads/Funil/Orçamentos (ver
+  // renderOportunidades/renderOrcamentosGeral, app.js) — sem isso, essas telas ficam travadas em
+  // "Carregando..." pra qualquer empresa com um vendedor dedicado (ver papelExigeDepartamentalizacao).
+  if (!exigirPapel(user, ['administrador', 'producao', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador, produção ou comercial veem clientes.' });
   const data = db.load();
   enviarJSON(res, 200, { clientes: tenant.listar(data, 'clientes', user.empresa_id) });
 });
@@ -4618,6 +4621,9 @@ rota('POST', /^\/api\/propostas$/, async (req, res) => {
     itens,
     valor_total: valorTotalProposta(itens),
     validade: body.validade || '',
+    // pedido do usuário: "gerador de orçamento profissional" — condições de pagamento/entrega/
+    // garantia que entram no PDF junto do que foi orçado, texto livre.
+    observacoes: body.observacoes || '',
     status: 'rascunho',
     criado_em: new Date().toISOString(),
   });
@@ -4625,7 +4631,7 @@ rota('POST', /^\/api\/propostas$/, async (req, res) => {
   enviarJSON(res, 201, { proposta: item });
 });
 
-// PUT /api/propostas/:id — edita itens/validade ou muda status (Enviar/Aceitar/Recusar)
+// PUT /api/propostas/:id — edita itens/validade/observações ou muda status (Enviar/Aceitar/Recusar)
 rota('PUT', /^\/api\/propostas\/(\d+)$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial editam orçamentos.' });
@@ -4640,6 +4646,7 @@ rota('PUT', /^\/api\/propostas\/(\d+)$/, async (req, res, m) => {
     item.valor_total = valorTotalProposta(itens);
   }
   if (body.validade !== undefined) item.validade = body.validade || '';
+  if (body.observacoes !== undefined) item.observacoes = body.observacoes || '';
   if (body.status !== undefined) {
     if (!STATUS_PROPOSTA_VALIDOS.includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
     item.status = body.status;

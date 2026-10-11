@@ -89,12 +89,24 @@ test('propostas: cadastro com itens calcula total, fluxo de status, validações
           { descricao: 'Instalação', quantidade: 1, valor_unitario: 1200 },
         ],
         validade: '2026-12-31',
+        observacoes: '50% de entrada, 50% na entrega. Garantia de 12 meses.',
       }),
     });
     assert.equal(criar.status, 201);
     const proposta = (await criar.json()).proposta;
     assert.equal(proposta.valor_total, 2200);
     assert.equal(proposta.status, 'rascunho');
+    // pedido do usuário: "gerador de orçamento profissional" — condições de pagamento/garantia
+    // que entram no PDF (ver gerarPdfProposta, app.js).
+    assert.equal(proposta.observacoes, '50% de entrada, 50% na entrega. Garantia de 12 meses.');
+
+    // edita só as observações, sem mexer nos itens
+    const editaObs = await fetch(`${base}/api/propostas/${proposta.id}`, {
+      method: 'PUT', headers: authPro, body: JSON.stringify({ observacoes: 'Frete por conta do cliente.' }),
+    });
+    const propostaEditada = (await editaObs.json()).proposta;
+    assert.equal(propostaEditada.observacoes, 'Frete por conta do cliente.');
+    assert.equal(propostaEditada.valor_total, 2200);
 
     // fluxo de status
     const enviar = await fetch(`${base}/api/propostas/${proposta.id}`, { method: 'PUT', headers: authPro, body: JSON.stringify({ status: 'enviada' }) });

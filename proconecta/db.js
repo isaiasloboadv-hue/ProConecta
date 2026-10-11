@@ -487,6 +487,9 @@ function migrar(data) {
   // data real de criação retroativamente).
   for (const o of data.oportunidades) { if (!o.criado_em) o.criado_em = new Date().toISOString(); }
   for (const p of data.propostas) { if (!p.criado_em) p.criado_em = new Date().toISOString(); }
+  // pedido do usuário: "gerador de orçamento profissional" — condições (pagamento/entrega/
+  // garantia) entraram depois no PDF; quem já tinha orçamento sem o campo ganha string vazia.
+  for (const p of data.propostas) { if (p.observacoes === undefined) p.observacoes = ''; }
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];

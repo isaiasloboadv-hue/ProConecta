@@ -15847,30 +15847,47 @@ async function renderOrcamentosGeral() {
     ${tabelaOrcamentos(propostas, { comOportunidade: true })}`;
 }
 
+// pedido do usuário: "crio um orçamento e vai pro funil, mas só pedi algumas informações... eu
+// quero um gerador de orçamento profissional" — antes, sem nenhuma oportunidade cadastrada, o
+// botão só mandava o usuário pro Funil "se vira lá", um beco sem saída que parava bem antes do
+// orçamento de verdade (itens/PDF). Agora sempre oferece as duas opções aqui mesmo: escolher uma
+// oportunidade já existente OU criar uma rápida (título + cliente) que já emenda direto no
+// formulário de itens — fluxo contínuo, sem trocar de tela no meio.
 function mostrarSeletorOportunidadeOrcamento() {
   const oportunidades = window._oportunidadesCache || [];
   const clientes = window._clientesCacheOportunidades || [];
   const nomeCliente = (id) => (clientes.find((c) => c.id === id) || {}).nome_empresa;
-  if (!oportunidades.length) {
-    document.getElementById('form-proposta').innerHTML = `
-      <div class="panel">
-        <p>Nenhuma oportunidade cadastrada ainda — um orçamento sempre fica ligado a uma oportunidade do funil comercial.</p>
-        <button class="btn btn-outline-sm" onclick="ir('oportunidades-funil')">Ir pro Funil de Oportunidades</button>
-      </div>`;
-    return;
-  }
   document.getElementById('form-proposta').innerHTML = `
     <div class="panel">
       <div class="panel-head">Novo orçamento</div>
-      <div class="form-grid">
-        <div class="full"><label>Para qual oportunidade?*</label>
-          <select id="orc-oportunidade" onchange="this.value && mostrarFormProposta(Number(this.value))">
-            <option value="">Selecione...</option>
-            ${oportunidades.map((o) => `<option value="${o.id}">${esc(o.titulo)}${o.cliente_id ? ' — ' + esc(nomeCliente(o.cliente_id) || '') : ''}</option>`).join('')}
-          </select>
+      ${oportunidades.length ? `
+        <div class="form-grid">
+          <div class="full"><label>Pra uma oportunidade já existente</label>
+            <select id="orc-oportunidade" onchange="this.value && mostrarFormProposta(Number(this.value))">
+              <option value="">Selecione...</option>
+              ${oportunidades.map((o) => `<option value="${o.id}">${esc(o.titulo)}${o.cliente_id ? ' — ' + esc(nomeCliente(o.cliente_id) || '') : ''}</option>`).join('')}
+            </select>
+          </div>
         </div>
+        <p style="color:var(--ink-soft); font-size:13px; margin:4px 0 14px;">ou crie uma rápida agora:</p>
+      ` : `<p style="color:var(--ink-soft); font-size:13px; margin:0 0 14px;">Nenhuma oportunidade ainda — crie uma rápida pra já montar o orçamento:</p>`}
+      <div class="form-grid">
+        <div class="full"><label>Para quem é este orçamento?*</label><input id="orc-rapido-titulo" placeholder="Ex.: Montagem de Painel — Empresa Tal"></div>
+        <div><label>Cliente (opcional)</label><select id="orc-rapido-cliente"><option value="">Nenhum/ainda não cadastrado</option>${clientes.map((c) => `<option value="${c.id}">${esc(c.nome_empresa)}</option>`).join('')}</select></div>
       </div>
+      <button class="btn btn-primary btn-sm" onclick="criarOportunidadeRapidaEOrcar()">Continuar pro orçamento →</button>
     </div>`;
+}
+
+async function criarOportunidadeRapidaEOrcar() {
+  const titulo = document.getElementById('orc-rapido-titulo').value.trim();
+  if (!titulo) return alert('Informe pra quem é este orçamento (ex.: o nome do cliente).');
+  const clienteId = document.getElementById('orc-rapido-cliente').value || null;
+  try {
+    const { oportunidade } = await api('/api/oportunidades', { method: 'POST', body: { titulo, cliente_id: clienteId } });
+    window._oportunidadesCache = [...(window._oportunidadesCache || []), oportunidade];
+    mostrarFormProposta(oportunidade.id);
+  } catch (e) { alert('Erro ao criar: ' + e.message); }
 }
 
 function tabelaOrcamentos(propostas, { comOportunidade } = {}) {
@@ -15914,12 +15931,23 @@ function renderItensPropostaDraft() {
 
 function mostrarFormProposta(oportunidadeId) {
   propostaItensDraft = [{ descricao: '', quantidade: 1, valor_unitario: 0 }];
+  const oportunidade = (window._oportunidadesCache || []).find((o) => o.id === oportunidadeId);
+  const cliente = oportunidade && oportunidade.cliente_id
+    ? (window._clientesCacheOportunidades || []).find((c) => c.id === oportunidade.cliente_id) : null;
+  // validade padrão de 15 dias — todo orçamento profissional já nasce com um prazo, não em branco.
+  const validadePadrao = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   document.getElementById('form-proposta').innerHTML = `
     <div class="panel"><div class="panel-head">Novo orçamento</div>
+      ${oportunidade ? `
+        <p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">
+          Para: <strong style="color:var(--ink);">${esc(cliente ? cliente.nome_empresa : oportunidade.titulo)}</strong>
+          ${cliente && cliente.contato ? ` — ${esc(cliente.contato)}` : ''}
+        </p>` : ''}
       <div id="proposta-itens"></div>
       <button class="btn-outline-sm" onclick="propostaItensDraft.push({descricao:'',quantidade:1,valor_unitario:0}); renderItensPropostaDraft();" style="margin-bottom:12px;">+ Adicionar item</button>
       <div class="form-grid">
-        <div><label>Validade</label><input type="date" id="np-validade"></div>
+        <div><label>Validade</label><input type="date" id="np-validade" value="${validadePadrao}"></div>
+        <div class="full"><label>Condições (pagamento, entrega, garantia...)</label><textarea id="np-observacoes" placeholder="Ex.: 50% de entrada, 50% na entrega. Prazo de entrega: 10 dias úteis. Garantia de 12 meses."></textarea></div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarProposta(${oportunidadeId})">Salvar orçamento</button>
@@ -15932,9 +15960,17 @@ function mostrarFormProposta(oportunidadeId) {
 async function salvarProposta(oportunidadeId) {
   const itens = propostaItensDraft.map((i) => ({ descricao: i.descricao, quantidade: Number(i.quantidade), valor_unitario: Number(i.valor_unitario) }));
   try {
-    await api('/api/propostas', { method: 'POST', body: { oportunidade_id: oportunidadeId, itens, validade: document.getElementById('np-validade').value } });
+    const { proposta } = await api('/api/propostas', {
+      method: 'POST',
+      body: { oportunidade_id: oportunidadeId, itens, validade: document.getElementById('np-validade').value, observacoes: document.getElementById('np-observacoes').value },
+    });
     mostrarToast('Orçamento cadastrado.');
     atualizarTelaOrcamentos();
+    // já abre o PDF pra conferir/baixar na hora — é esse o resultado que o usuário veio buscar.
+    // usa o objeto que acabou de voltar da API (não a cache, que só é atualizada pelo
+    // atualizarTelaOrcamentos() acima, assíncrono — ainda não terminou nesse ponto).
+    const oportunidade = (window._oportunidadesCache || []).find((o) => o.id === oportunidadeId);
+    abrirPdfPropostaObjeto(proposta, oportunidade);
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }
 
@@ -15945,11 +15981,17 @@ async function mudarStatusProposta(id, status) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
-function gerarPdfProposta(p, oportunidade, logoDataUri) {
+// pedido do usuário: "eu quero um gerador de orçamento profissional que gere um PDF pra enviar
+// pro cliente" — antes era uma lista de itens crua, sem pra quem era nem condições nenhuma.
+// Agora tem número/data de emissão, um bloco "Para:" com os dados do cliente (quando a
+// oportunidade está vinculada a um), as condições que o usuário escreveu e o rodapé de contato
+// da empresa — a mesma informação que qualquer orçamento comercial de verdade carrega.
+function gerarPdfProposta(p, oportunidade, cliente, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   doc.setProperties({ title: `Orçamento ${p.id}` });
   const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const margem = 40;
   const largura = pageW - margem * 2;
   let y = margem;
@@ -15957,13 +15999,32 @@ function gerarPdfProposta(p, oportunidade, logoDataUri) {
   if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, y - 10, 24, 28); } catch (e) {} }
   doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(empresaNome(), margem + (logoDataUri ? 32 : 0), y + 8);
-  y += 30;
-  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
+  doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`ORÇAMENTO Nº ${String(p.id).padStart(4, '0')}`, pageW - margem, y + 4, { align: 'right' });
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  const dataEmissao = p.criado_em ? new Date(p.criado_em) : new Date();
+  doc.text(`Emitido em ${dataEmissao.toLocaleDateString('pt-BR')}`, pageW - margem, y + 18, { align: 'right' });
+  y += 32;
+  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 22;
 
-  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
-  doc.text('Orçamento', margem, y); y += 20;
-  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(limparPdf(oportunidade ? oportunidade.titulo : ''), margem, y); y += 24;
+  // bloco "Para:" — dados do cliente vinculado à oportunidade, ou só o título quando ainda não
+  // tem cliente cadastrado (orçamento pra um prospect novo).
+  const nomeDestinatario = cliente ? cliente.nome_empresa : (oportunidade ? oportunidade.titulo : '');
+  if (nomeDestinatario) {
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('PARA', margem, y); y += 14;
+    doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(nomeDestinatario), margem, y); y += 15;
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    const linhasContato = cliente ? [
+      cliente.contato && `Contato: ${cliente.contato}`,
+      cliente.telefone && `Telefone: ${cliente.telefone}`,
+      cliente.email && `E-mail: ${cliente.email}`,
+      (cliente.endereco || cliente.cidade) && [cliente.endereco, cliente.numero, cliente.bairro, cliente.cidade, cliente.estado].filter(Boolean).join(', '),
+    ].filter(Boolean) : [];
+    linhasContato.forEach((linha) => { doc.text(limparPdf(linha), margem, y); y += 13; });
+    y += 10;
+  }
 
   doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 20, 'F');
@@ -15973,7 +16034,8 @@ function gerarPdfProposta(p, oportunidade, logoDataUri) {
   doc.text('SUBTOTAL', margem + largura * 0.87, y + 14);
   y += 20;
   doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-  p.itens.forEach((item) => {
+  p.itens.forEach((item, i) => {
+    if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 18, 'F'); }
     doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.rect(margem, y, largura, 18, 'S');
     doc.text(limparPdf(item.descricao), margem + 8, y + 13);
     doc.text(String(item.quantidade), margem + largura * 0.6, y + 13);
@@ -15981,24 +16043,49 @@ function gerarPdfProposta(p, oportunidade, logoDataUri) {
     doc.text(fmtMoeda(item.quantidade * item.valor_unitario), margem + largura * 0.87, y + 13);
     y += 18;
   });
-  y += 16;
-  doc.setFont(undefined, 'bold'); doc.setFontSize(12);
-  doc.text(`Total: ${fmtMoeda(p.valor_total)}`, pageW - margem, y, { align: 'right' });
-  y += 20;
-  doc.setFontSize(9); doc.setFont(undefined, 'normal');
-  doc.text(`Validade: ${p.validade || '—'}`, margem, y);
+  y += 10;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem + largura * 0.6, y, largura * 0.4, 26, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
+  doc.text(`TOTAL: ${fmtMoeda(p.valor_total)}`, pageW - margem - 8, y + 18, { align: 'right' });
+  y += 40;
+
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text(`Validade da proposta: ${p.validade ? new Date(p.validade + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}`, margem, y);
+  y += 22;
+
+  if (p.observacoes) {
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('CONDIÇÕES', margem, y); y += 14;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(p.observacoes), largura);
+    linhas.forEach((linha) => { doc.text(linha, margem, y); y += 13; });
+  }
+
+  // rodapé de contato — mesmo padrão dos outros PDFs do sistema (nunca cai no contato da PRO
+  // Marking pra outra empresa, ver empresaWhatsapp()/Telefone()/Emails()).
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, pageH - 48, pageW - margem, pageH - 48);
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  const contatos = [empresaWhatsapp() && `WhatsApp: ${empresaWhatsapp()}`, empresaTelefone() && `Telefone: ${empresaTelefone()}`, empresaEmails().length && `E-mail: ${empresaEmails()[0]}`].filter(Boolean);
+  if (contatos.length) doc.text(contatos.join('   ·   '), pageW / 2, pageH - 32, { align: 'center' });
+
   return doc.output('bloburl');
+}
+
+async function abrirPdfPropostaObjeto(p, oportunidade) {
+  const cliente = oportunidade && oportunidade.cliente_id
+    ? (window._clientesCacheOportunidades || []).find((c) => c.id === oportunidade.cliente_id) : null;
+  try {
+    const logo = await carregarLogoVariantes();
+    const url = gerarPdfProposta(p, oportunidade, cliente, logo);
+    window.open(url, '_blank');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
 async function abrirPdfProposta(id) {
   const p = (window._propostasCache || []).find((x) => x.id === id);
   if (!p) return;
   const oportunidade = (window._oportunidadesCache || []).find((o) => o.id === p.oportunidade_id);
-  try {
-    const logo = await carregarLogoVariantes();
-    const url = gerarPdfProposta(p, oportunidade, logo);
-    window.open(url, '_blank');
-  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+  abrirPdfPropostaObjeto(p, oportunidade);
 }
 
 // ---------- EQUIPAMENTOS ----------
