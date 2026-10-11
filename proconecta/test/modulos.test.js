@@ -12,7 +12,7 @@ test('moduloAtivo devolve true só pro módulo que está na lista da empresa', (
   const data = empresaFake(['os_chamados', 'biblioteca']);
   assert.equal(db.moduloAtivo(data, 1, 'os_chamados'), true);
   assert.equal(db.moduloAtivo(data, 1, 'biblioteca'), true);
-  assert.equal(db.moduloAtivo(data, 1, 'crm'), false);
+  assert.equal(db.moduloAtivo(data, 1, 'comercial'), false);
 });
 
 test('moduloAtivo devolve false pra chave de módulo que não existe', () => {
@@ -41,7 +41,7 @@ test('desativar um módulo não afeta os outros da mesma empresa', () => {
 test('MODULOS_DISPONIVEIS lista todos os 8 módulos da spec', () => {
   const chaves = db.MODULOS_DISPONIVEIS.map((m) => m.chave).sort();
   assert.deepEqual(chaves, [
-    'agendamento', 'assistente_ia', 'biblioteca', 'crm',
+    'agendamento', 'assistente_ia', 'biblioteca', 'comercial',
     'financeiro', 'os_chamados', 'prestacao_contas', 'smp_preventivas',
   ].sort());
 });

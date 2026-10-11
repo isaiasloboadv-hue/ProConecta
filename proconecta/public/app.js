@@ -761,7 +761,9 @@ const NAV = {
     // esqueleto dos módulos novos — sem tela de verdade ainda, só prova que o pipeline de
     // ativação funciona ponta a ponta (ver renderModuloEmBreve). Só aparece se a empresa tiver
     // contratado o módulo (moduloAtivoNoMenu, igual qualquer outro item com `modulo`).
-    { key: 'crm', modulo: 'crm', label: 'CRM', page: 'crm-em-breve' },
+    // pedido do usuário: "o menu CRM é praticamente o que meu sistema já faz... vamos
+    // implementar os menus do que falta" — o item "CRM"/"Em breve" saiu; o módulo "comercial"
+    // (ver db.js) passa a liberar o menu "Comercial" de verdade, adicionado no próximo passo.
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
@@ -1028,7 +1030,6 @@ async function ir(pagina) {
     if (pagina === 'plataforma-nova-empresa') return renderPlataformaNovaEmpresa();
     if (pagina === 'plataforma-cadastros') return renderPlataformaCadastros();
     if (pagina === 'minha-empresa') return renderMinhaEmpresa();
-    if (pagina === 'crm-em-breve') return renderModuloEmBreve('crm', 'CRM');
     if (pagina === 'agendamento-em-breve') return renderModuloEmBreve('agendamento', 'Agendamento Online');
     if (pagina === 'financeiro-em-breve') return renderModuloEmBreve('financeiro', 'Financeiro');
     if (pagina === 'prestacao-contas-minhas') return renderPrestacaoContasMinhas();
@@ -1624,7 +1625,7 @@ async function salvarMinhaEmpresa() {
   }
 }
 
-// ---------- esqueleto dos módulos novos (crm, agendamento, financeiro, prestação de contas) ----------
+// ---------- esqueleto dos módulos novos (agendamento, financeiro) ----------
 // sem tela de verdade ainda — chama a rota de status (gated pelo módulo certo, ver
 // rotas-modulo.js) só pra provar que o pipeline de ativação funciona ponta a ponta: se o item de
 // menu apareceu é porque o módulo está ativo, e a chamada abaixo confirma que o backend concorda.

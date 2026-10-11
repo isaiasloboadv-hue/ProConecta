@@ -79,7 +79,7 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(listaInicial.empresas[0].nome, 'PRO Marking');
 
     const modulos = await (await fetch(`${base}/api/plataforma/modulos`, { headers: authSuper })).json();
-    assert.ok(modulos.modulos.some((m) => m.chave === 'crm'));
+    assert.ok(modulos.modulos.some((m) => m.chave === 'comercial'));
 
     // cria empresa nova com a versão Manutenção
     const criarResp = await fetch(`${base}/api/plataforma/empresas`, {
@@ -91,14 +91,14 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(nova.id, 2);
     assert.deepEqual(nova.modulos_ativos.sort(), ['biblioteca', 'os_chamados', 'smp_preventivas'].sort());
 
-    // liga crm e desliga smp_preventivas (módulo avulso, independente da versão original)
+    // liga comercial e desliga smp_preventivas (módulo avulso, independente da versão original)
     const modulosResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/modulos`, {
       method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modulos: ['os_chamados', 'biblioteca', 'crm'] }),
+      body: JSON.stringify({ modulos: ['os_chamados', 'biblioteca', 'comercial'] }),
     });
     assert.equal(modulosResp.status, 200);
-    const { empresa: comCrm } = await modulosResp.json();
-    assert.deepEqual(comCrm.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+    const { empresa: comComercial } = await modulosResp.json();
+    assert.deepEqual(comComercial.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados'].sort());
 
     // módulo inexistente é rejeitado
     const modInvalido = await fetch(`${base}/api/plataforma/empresas/${nova.id}/modulos`, {
@@ -116,11 +116,11 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     const { empresa: comTerm } = await termResp.json();
     assert.equal(comTerm.terminologia.equipamento, 'Paciente');
 
-    // um usuário da empresa nova já enxerga o módulo crm ativo na checagem de módulo (dispatcher)
-    // — prova que ativar pelo painel realmente libera a rota, não só grava no banco
+    // um usuário da empresa nova já enxerga o módulo comercial ativo na checagem de módulo
+    // (dispatcher) — prova que ativar pelo painel realmente libera a rota, não só grava no banco
     const listaFinal = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
     const empresaFinal = listaFinal.empresas.find((e) => e.id === nova.id);
-    assert.ok(empresaFinal.modulos_ativos.includes('crm'));
+    assert.ok(empresaFinal.modulos_ativos.includes('comercial'));
     assert.ok(!empresaFinal.modulos_ativos.includes('smp_preventivas'));
 
     // empresa recém-criada nasce sem administrador nenhum — ninguém consegue logar nela ainda
@@ -152,7 +152,7 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(loginNovoAdmin.status, 200);
     const loginBody = await loginNovoAdmin.json();
     assert.equal(loginBody.usuario.papel, 'administrador');
-    assert.deepEqual(loginBody.usuario.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+    assert.deepEqual(loginBody.usuario.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados'].sort());
 
     // login também identifica de qual empresa é a sessão — é o que o front usa pra mostrar o
     // nome da empresa no cabeçalho (sem isso, quem loga não tem como saber em qual empresa está)
@@ -196,7 +196,7 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(empresaEditada.nome, 'Clínica Teste Renomeada');
     assert.equal(empresaEditada.site, 'clinica.com.br');
     // módulos/versão não foram afetados pela edição de dados básicos
-    assert.deepEqual(empresaEditada.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+    assert.deepEqual(empresaEditada.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados'].sort());
 
     // nome vazio é rejeitado
     const editarEmpresaVazio = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {

@@ -61,10 +61,10 @@ test('migrar dá empresa 1 os módulos da versão Manutenção ativos', () => {
 test('migrar não sobrescreve modulos_ativos de empresa que já tinha sido migrada/customizada', () => {
   const data = dadosAntigos();
   data.empresas[0].versao_id = 1;
-  data.empresas[0].modulos_ativos = ['os_chamados', 'crm']; // admin já desativou/ativou módulos avulsos
+  data.empresas[0].modulos_ativos = ['os_chamados', 'comercial']; // admin já desativou/ativou módulos avulsos
   data.empresas[0].terminologia = { equipamento: 'Paciente' };
   const depois = db.migrar(data);
-  assert.deepEqual(depois.empresas[0].modulos_ativos.sort(), ['crm', 'os_chamados'].sort());
+  assert.deepEqual(depois.empresas[0].modulos_ativos.sort(), ['comercial', 'os_chamados'].sort());
   assert.equal(depois.empresas[0].terminologia.equipamento, 'Paciente');
 });
 
@@ -109,6 +109,6 @@ test('depois de migrar, os módulos da empresa 1 ficam ativos de acordo com modu
   assert.equal(db.moduloAtivo(data, 1, 'os_chamados'), true);
   assert.equal(db.moduloAtivo(data, 1, 'smp_preventivas'), true);
   assert.equal(db.moduloAtivo(data, 1, 'biblioteca'), true);
-  assert.equal(db.moduloAtivo(data, 1, 'crm'), false);
+  assert.equal(db.moduloAtivo(data, 1, 'comercial'), false);
   assert.equal(db.moduloAtivo(data, 1, 'financeiro'), false);
 });

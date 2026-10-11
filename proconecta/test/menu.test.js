@@ -81,5 +81,5 @@ test('moduloAtivoNoMenu trata módulo núcleo/vazio como sempre ativo', () => {
   ctx.USER = { modulos_ativos: [] };
   assert.equal(ctx.moduloAtivoNoMenu.call(ctx, undefined), true);
   assert.equal(ctx.moduloAtivoNoMenu.call(ctx, 'nucleo'), true);
-  assert.equal(ctx.moduloAtivoNoMenu.call(ctx, 'crm'), false);
+  assert.equal(ctx.moduloAtivoNoMenu.call(ctx, 'comercial'), false);
 });

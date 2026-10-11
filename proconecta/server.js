@@ -6285,13 +6285,13 @@ rota('GET', /^\/api\/admin\/diagnostico-memoria$/, async (req, res) => {
   });
 });
 
-// ---------- esqueleto dos módulos novos (crm, agendamento, financeiro) ----------
+// ---------- esqueleto dos módulos novos (agendamento, financeiro) ----------
 // ainda não têm tela nem dado nenhum — só provam que o pipeline de ativação funciona ponta a
 // ponta: rota gated pelo módulo certo (ver rotas-modulo.js), menu que só aparece se o módulo
 // estiver ativo (ver NAV em public/app.js) levando a uma tela "Em breve". Quando um desses módulos
 // ganhar telas de verdade, essa rota de status é substituída pelas rotas reais — como já aconteceu
-// com prestacao_contas (ver rotas de verdade abaixo, seção "prestação de contas").
-for (const chave of ['crm', 'agendamento', 'financeiro']) {
+// com prestacao_contas, e agora com "comercial" (ver rotas de Leads/Oportunidades/Propostas).
+for (const chave of ['agendamento', 'financeiro']) {
   rota('GET', new RegExp(`^/api/${chave}/status$`), async (req, res) => {
     const user = usuarioAutenticado(req);
     if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });

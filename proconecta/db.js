@@ -37,7 +37,11 @@ const MODULOS_DISPONIVEIS = [
   { chave: 'smp_preventivas', nome: 'Procedimentos e Preventivas' },
   { chave: 'biblioteca', nome: 'Biblioteca' },
   { chave: 'prestacao_contas', nome: 'Prestação de Contas' },
-  { chave: 'crm', nome: 'CRM' },
+  // pedido do usuário: "o menu CRM é praticamente o que meu sistema já faz... vamos implementar
+  // os menus do que falta" — o item "CRM" (esqueleto "Em breve" da Etapa 8) foi removido; este
+  // módulo renomeado é quem vai liberar as telas de verdade (Leads, Funil, Propostas) que chegam
+  // nos próximos passos, reaproveitando todo o pipeline de ativação já validado.
+  { chave: 'comercial', nome: 'Comercial' },
   { chave: 'agendamento', nome: 'Agendamento Online' },
   { chave: 'financeiro', nome: 'Financeiro' },
   { chave: 'assistente_ia', nome: 'Assistente IA' },

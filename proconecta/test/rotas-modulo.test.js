@@ -43,8 +43,7 @@ test('rota nova sem prefixo conhecido cai em núcleo por padrão', () => {
   assert.equal(moduloDaRota(/^\/api\/algo-que-nao-existe$/), 'nucleo');
 });
 
-test('rotas dos módulos novos (crm, agendamento, financeiro, prestação de contas)', () => {
-  assert.equal(moduloDaRota(/^\/api\/crm\/status$/), 'crm');
+test('rotas dos módulos novos (agendamento, financeiro, prestação de contas)', () => {
   assert.equal(moduloDaRota(/^\/api\/agendamento\/status$/), 'agendamento');
   assert.equal(moduloDaRota(/^\/api\/financeiro\/status$/), 'financeiro');
   assert.equal(moduloDaRota(/^\/api\/prestacao-contas\/status$/), 'prestacao_contas');
