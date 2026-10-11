@@ -1083,6 +1083,7 @@ async function ir(pagina) {
     if (pagina === 'painel-plataforma') return renderPainelPlataforma();
     if (pagina === 'plataforma-nova-empresa') return renderPlataformaNovaEmpresa();
     if (pagina === 'plataforma-cadastros') return renderPlataformaCadastros();
+    if (pagina === 'plataforma-planos') return renderPlataformaPlanos();
     if (pagina === 'minha-empresa') return renderMinhaEmpresa();
     if (pagina === 'agendamento-em-breve') return renderModuloEmBreve('agendamento', 'Agendamento Online');
     if (pagina === 'financeiro-em-breve') return renderModuloEmBreve('financeiro', 'Financeiro');
@@ -1135,6 +1136,11 @@ async function renderPainelPlataforma() {
       <div class="equipe-card-titulo">Cadastros</div>
       <div class="stat-valor">${empresas.length}</div>
       <div class="stat-label">empresa(s) cadastrada(s)</div>
+    </div>
+    <div class="equipe-card" onclick="ir('plataforma-planos')">
+      <div class="equipe-card-icone">📦</div>
+      <div class="equipe-card-titulo">Planos</div>
+      <div class="stat-label">categorias de plano (cascata de módulos)</div>
     </div>`;
 }
 
@@ -1178,6 +1184,177 @@ async function renderPlataformaNovaEmpresa() {
       </div>
       <button class="btn btn-primary btn-sm" onclick="criarEmpresaPlataforma()">Cadastrar empresa</button>
     </div>`;
+}
+
+// ---------- Planos (categorias de plano em cascata) ----------
+// pedido do usuário: "ajude a criar categorias de plano. Ao selecionar já é selecionado automático
+// o que é liberado até o plano em que todas as funções é liberada" — cada plano tem uma ordem
+// (1 = mais básico); ao editar um plano, os módulos de todo plano com ordem menor já vêm marcados
+// e travados (entram automaticamente), o admin só marca o que esse plano libera A MAIS. O plano de
+// maior ordem acaba acumulando todos os módulos do catálogo.
+let _planosCache = [];
+let _planosModulosCache = [];
+
+async function renderPlataformaPlanos() {
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Planos</h1><p>Categorias de plano — cada uma acumula os módulos das anteriores (por ordem), até a de maior ordem liberar tudo.</p>
+      <button class="btn-outline-sm" onclick="ir('painel-plataforma')">‹ Plataforma</button>
+    </div>
+    <button class="btn btn-primary btn-sm" style="margin-bottom:14px;" onclick="abrirFormPlano()">+ Novo plano</button>
+    <div id="planos-lista"><div class="empty">Carregando...</div></div>`;
+
+  const [{ versoes }, { modulos }] = await Promise.all([api('/api/plataforma/versoes'), api('/api/plataforma/modulos')]);
+  _planosCache = versoes;
+  _planosModulosCache = modulos;
+  renderListaPlanos();
+}
+
+function nomeModuloPlano(chave) {
+  const m = _planosModulosCache.find((x) => x.chave === chave);
+  return m ? m.nome : chave;
+}
+
+function renderListaPlanos() {
+  const container = document.getElementById('planos-lista');
+  if (!container) return;
+  const ordenados = [...(_planosCache || [])].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  container.innerHTML = ordenados.length ? ordenados.map((v) => {
+    const total = _planosModulosCache.length;
+    const liberados = (v.modulos || []).length;
+    const completo = total > 0 && liberados >= total;
+    return `
+    <div class="panel" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span class="tag" style="background:var(--blue-pale); color:var(--blue);">Ordem ${v.ordem}</span>
+            <strong style="font-size:15px;">${esc(v.nome)}</strong>
+            ${completo ? `<span class="tag tag-green">Todas as funções liberadas</span>` : ''}
+          </div>
+          <div style="color:var(--ink-soft); font-size:13px; margin-top:4px;">
+            ${v.preco_mensal != null ? fmtMoeda(v.preco_mensal) + '/mês' : 'Preço a combinar'} · ${liberados}/${total} módulo(s) liberado(s)
+          </div>
+          <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">
+            ${(v.modulos || []).length
+              ? v.modulos.map((chave) => `<span class="tag" style="font-size:11px;">${esc(nomeModuloPlano(chave))}</span>`).join('')
+              : '<span style="color:var(--ink-soft); font-size:12.5px;">Nenhum módulo liberado ainda</span>'}
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <button class="btn-outline-sm" onclick="abrirFormPlano(${v.id})">Editar</button>
+          <button class="btn-outline-sm" style="color:var(--red); border-color:var(--red);" onclick="excluirPlano(${v.id})">Excluir</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">Nenhum plano cadastrado ainda.</div>';
+}
+
+// módulos "herdados" pra um dado valor de ordem: a união do que todo OUTRO plano de ordem menor
+// já libera (v.modulos já vem cumulativo do servidor) — exclui o próprio plano sendo editado, pra
+// não travar nele mesmo seus próprios módulos ao reabrir o formulário.
+function calcularModulosHerdadosPlano(ordemAtual, idExcluir) {
+  const herdados = new Set();
+  for (const v of _planosCache || []) {
+    if (v.id === idExcluir) continue;
+    if ((v.ordem || 0) < ordemAtual) (v.modulos || []).forEach((chave) => herdados.add(chave));
+  }
+  return herdados;
+}
+
+function abrirFormPlano(id) {
+  const existente = id ? _planosCache.find((v) => v.id === id) : null;
+  let modal = document.getElementById('modal-form-plano');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-form-plano';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  const maiorOrdem = (_planosCache || []).reduce((max, v) => Math.max(max, v.ordem || 0), 0);
+  const ordemPadrao = existente ? existente.ordem : maiorOrdem + 1;
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:520px;">
+      <h3>${existente ? 'Editar plano' : 'Novo plano'}</h3>
+      <div class="form-grid">
+        <div><label>Nome*</label><input id="pl-nome" value="${existente ? esc(existente.nome) : ''}"></div>
+        <div><label>Ordem*</label><input id="pl-ordem" type="number" min="1" value="${ordemPadrao}" oninput="renderChecklistPlano()"></div>
+        <div class="full"><label>Preço mensal</label><input id="pl-preco" type="number" step="0.01" min="0" placeholder="Deixe em branco pra combinar depois" value="${existente && existente.preco_mensal != null ? existente.preco_mensal : ''}"></div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Módulos de planos com ordem menor já vêm marcados e travados — entram automaticamente. Marque só o que esse plano libera a mais.</p>
+      <div id="pl-modulos" class="form-grid" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarPlano(${existente ? existente.id : 'null'})">${existente ? 'Salvar' : 'Criar plano'}</button>
+        <button class="btn-ghost btn-sm" onclick="document.getElementById('modal-form-plano').classList.remove('show')">Cancelar</button>
+      </div>
+    </div>`;
+  window._planoEditandoId = existente ? existente.id : null;
+  window._planoEditandoModulosProprios = existente ? [...(existente.modulos_proprios || [])] : [];
+  renderChecklistPlano();
+}
+
+function renderChecklistPlano() {
+  const container = document.getElementById('pl-modulos');
+  const ordemInput = document.getElementById('pl-ordem');
+  if (!container || !ordemInput) return;
+  const ordemAtual = Number(ordemInput.value) || 1;
+  const herdados = calcularModulosHerdadosPlano(ordemAtual, window._planoEditandoId);
+  const proprios = new Set(window._planoEditandoModulosProprios || []);
+  container.innerHTML = _planosModulosCache.map((m) => {
+    const herdado = herdados.has(m.chave);
+    const marcado = herdado || proprios.has(m.chave);
+    return `
+      <label style="display:flex; align-items:center; gap:8px; font-weight:400; ${herdado ? 'opacity:.65;' : ''}">
+        <input type="checkbox" data-chave="${m.chave}" ${marcado ? 'checked' : ''} ${herdado ? 'disabled' : ''} onchange="atualizarModuloPlano(this)">
+        ${esc(m.nome)}${herdado ? ' <span style="font-size:11px;">(incluso no plano anterior)</span>' : ''}
+      </label>`;
+  }).join('');
+}
+
+function atualizarModuloPlano(checkbox) {
+  const set = new Set(window._planoEditandoModulosProprios || []);
+  if (checkbox.checked) set.add(checkbox.dataset.chave); else set.delete(checkbox.dataset.chave);
+  window._planoEditandoModulosProprios = [...set];
+}
+
+async function salvarPlano(id) {
+  const nome = document.getElementById('pl-nome').value.trim();
+  const ordem = Number(document.getElementById('pl-ordem').value);
+  const precoInput = document.getElementById('pl-preco').value.trim();
+  if (!nome) return mostrarToast('Informe o nome do plano.');
+  if (!ordem || ordem < 1) return mostrarToast('Informe uma ordem válida.');
+  const body = {
+    nome,
+    ordem,
+    preco_mensal: precoInput === '' ? null : Number(precoInput),
+    // os checkboxes herdados vêm desabilitados — só os habilitados e marcados são módulos
+    // PRÓPRIOS deste plano (os herdados o servidor já recalcula sozinho, via ordem).
+    modulos_proprios: [...document.querySelectorAll('#pl-modulos input[type="checkbox"]:checked:not(:disabled)')].map((c) => c.dataset.chave),
+  };
+  try {
+    if (id) await api(`/api/plataforma/versoes/${id}`, { method: 'PUT', body });
+    else await api('/api/plataforma/versoes', { method: 'POST', body });
+    document.getElementById('modal-form-plano').classList.remove('show');
+    mostrarToast(id ? 'Plano atualizado.' : 'Plano criado.');
+    const { versoes } = await api('/api/plataforma/versoes');
+    _planosCache = versoes;
+    renderListaPlanos();
+  } catch (e) {
+    mostrarToast('Não deu pra salvar: ' + e.message);
+  }
+}
+
+async function excluirPlano(id) {
+  if (!(await mostrarConfirmacao('Excluir esse plano? Essa ação não pode ser desfeita.'))) return;
+  try {
+    const { versoes } = await api(`/api/plataforma/versoes/${id}`, { method: 'DELETE' });
+    _planosCache = versoes;
+    renderListaPlanos();
+    mostrarToast('Plano excluído.');
+  } catch (e) {
+    mostrarToast('Não deu pra excluir: ' + e.message);
+  }
 }
 
 async function renderPlataformaCadastros() {

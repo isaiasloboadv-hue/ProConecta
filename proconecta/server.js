@@ -7212,6 +7212,86 @@ rota('GET', /^\/api\/plataforma\/versoes$/, async (req, res) => {
   enviarJSON(res, 200, { versoes: data.versoes });
 });
 
+// categorias de plano em cascata (pedido do usuário: "ajude a criar categorias de plano. Ao
+// selecionar já é selecionado automático o que é liberado até o plano em que todas as funções é
+// liberada") — cada versão só manda modulos_proprios (os módulos que ELA introduz); o campo
+// modulos final (cumulativo, o que toda troca de plano já consumia) é sempre recalculado por
+// db.recalcularModulosVersoes logo depois de qualquer criação/edição/exclusão, porque mexer numa
+// versão de ordem baixa muda o acumulado de todas as de ordem mais alta também.
+function validarModulosProprios(valor) {
+  if (!Array.isArray(valor)) return { erro: 'Informe a lista de módulos deste plano.' };
+  const invalido = valor.find((chave) => !db.CHAVES_MODULOS.includes(chave));
+  if (invalido) return { erro: `Módulo desconhecido: ${invalido}` };
+  return { modulos: [...new Set(valor)] };
+}
+
+// POST /api/plataforma/versoes — cria uma nova categoria de plano
+rota('POST', /^\/api\/plataforma\/versoes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  const nome = String(body.nome || '').trim();
+  if (!nome) return enviarJSON(res, 400, { erro: 'Nome do plano é obrigatório.' });
+  const validacao = validarModulosProprios(body.modulos_proprios || []);
+  if (validacao.erro) return enviarJSON(res, 400, { erro: validacao.erro });
+  const data = db.load();
+  const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
+  const ordem = Number.isFinite(Number(body.ordem)) && Number(body.ordem) > 0 ? Math.trunc(Number(body.ordem)) : maiorOrdemAtual + 1;
+  const precoMensal = body.preco_mensal === null || body.preco_mensal === '' || body.preco_mensal === undefined ? null : Number(body.preco_mensal);
+  const versao = { id: nextId(data, 'versoes'), nome, ordem, modulos_proprios: validacao.modulos, modulos: [], preco_mensal: precoMensal };
+  data.versoes.push(versao);
+  db.recalcularModulosVersoes(data);
+  db.save(data);
+  enviarJSON(res, 200, { versoes: data.versoes });
+});
+
+// PUT /api/plataforma/versoes/:id — edita nome/ordem/módulos próprios/preço de uma categoria
+rota('PUT', /^\/api\/plataforma\/versoes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const versao = data.versoes.find((v) => v.id === Number(m[1]));
+  if (!versao) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  if (body.nome !== undefined) {
+    const nome = String(body.nome || '').trim();
+    if (!nome) return enviarJSON(res, 400, { erro: 'Nome do plano é obrigatório.' });
+    versao.nome = nome;
+  }
+  if (body.modulos_proprios !== undefined) {
+    const validacao = validarModulosProprios(body.modulos_proprios);
+    if (validacao.erro) return enviarJSON(res, 400, { erro: validacao.erro });
+    versao.modulos_proprios = validacao.modulos;
+  }
+  if (body.ordem !== undefined) {
+    if (!Number.isFinite(Number(body.ordem)) || Number(body.ordem) <= 0) return enviarJSON(res, 400, { erro: 'Ordem inválida.' });
+    versao.ordem = Math.trunc(Number(body.ordem));
+  }
+  if (body.preco_mensal !== undefined) {
+    versao.preco_mensal = body.preco_mensal === null || body.preco_mensal === '' ? null : Number(body.preco_mensal);
+  }
+  db.recalcularModulosVersoes(data);
+  db.save(data);
+  enviarJSON(res, 200, { versoes: data.versoes });
+});
+
+// DELETE /api/plataforma/versoes/:id — remove uma categoria de plano (bloqueado se alguma empresa
+// ainda estiver nela, pra não deixar empresa.versao_id apontando pro nada)
+rota('DELETE', /^\/api\/plataforma\/versoes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['super_admin'])) return enviarJSON(res, 403, { erro: 'Só o super admin acessa o painel da plataforma.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const versao = data.versoes.find((v) => v.id === id);
+  if (!versao) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  const emUso = data.empresas.filter((e) => e.versao_id === id).length;
+  if (emUso > 0) return enviarJSON(res, 400, { erro: `Esse plano está em uso por ${emUso} empresa(s) — troque o plano delas antes de excluir.` });
+  data.versoes = data.versoes.filter((v) => v.id !== id);
+  db.recalcularModulosVersoes(data);
+  db.save(data);
+  enviarJSON(res, 200, { versoes: data.versoes });
+});
+
 // GET /api/plataforma/perfis — catálogo de perfil/segmento (Etapa 8), usado no cadastro de
 // empresa nova (atalho de preenchimento) e na tela de edição do Super Admin.
 rota('GET', /^\/api\/plataforma\/perfis$/, async (req, res) => {

@@ -183,6 +183,26 @@ function moduloAtivo(data, empresaId, chave) {
   return !!empresa && Array.isArray(empresa.modulos_ativos) && empresa.modulos_ativos.includes(chave);
 }
 
+// categorias de plano (pedido do usuário: "ajude a criar categorias de plano. Ao selecionar já é
+// selecionado automático o que é liberado até o plano em que todas as funções é liberada") — cada
+// versão tem uma "ordem" (1 = mais básica) e só guarda em modulos_proprios os módulos que ELA
+// introduz; o campo modulos (consumido por toda a troca-de-plano/PUT /api/meu-plano, que já
+// existia antes dessa feature) é sempre recalculado aqui como a UNIÃO cumulativa de
+// modulos_proprios dela com o de toda versão de ordem menor — então uma versão de ordem mais alta
+// automaticamente carrega tudo que já foi liberado nas versões abaixo dela, até a versão de maior
+// ordem acumular todos os módulos do catálogo. Chamar depois de qualquer criação/edição/exclusão
+// de versão, porque mexer numa versão de ordem baixa também muda o acumulado das de ordem mais
+// alta.
+function recalcularModulosVersoes(data) {
+  const ordenadas = [...data.versoes].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  let acumulado = [];
+  for (const v of ordenadas) {
+    const proprios = Array.isArray(v.modulos_proprios) ? v.modulos_proprios : [];
+    acumulado = [...new Set([...acumulado, ...proprios])];
+    v.modulos = [...acumulado];
+  }
+}
+
 // banco novo começa vazio — o primeiro acesso vem do bootstrap de admin master
 // (ADMIN_EMAIL/ADMIN_SENHA) ou de um convite criado manualmente por quem tiver acesso ao banco.
 function seed() {
@@ -237,7 +257,7 @@ function seed() {
     // preco_mensal (SaaS, passo 3): só exibição por enquanto — sem gateway de pagamento nenhum
     // integrado ainda (ver PUT /api/empresa/plano em server.js), igual plano_valor_mensal da
     // empresa já era antes disso.
-    versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
+    versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
     _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
@@ -469,10 +489,20 @@ function migrar(data) {
   if (!data._seq.fmea_efeitos) data._seq.fmea_efeitos = 1;
   // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
-  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }];
+  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }];
   if (!data._seq.versoes) data._seq.versoes = 2;
   // preco_mensal (SaaS, passo 3) — não existia antes; só exibição, sem gateway de pagamento.
   for (const v of data.versoes) { if (v.preco_mensal === undefined) v.preco_mensal = null; }
+  // categorias de plano em cascata (pedido do usuário) — versão sem "ordem" ainda é a única que
+  // existia antes dessa feature (nunca houve mais de uma na prática); ganha ordem 1 e
+  // modulos_proprios = o próprio modulos que ela já tinha, pra não perder nada no recálculo
+  // abaixo.
+  let precisaRecalcularVersoes = false;
+  data.versoes.forEach((v, indice) => {
+    if (v.ordem === undefined) { v.ordem = indice + 1; precisaRecalcularVersoes = true; }
+    if (!Array.isArray(v.modulos_proprios)) { v.modulos_proprios = Array.isArray(v.modulos) ? [...v.modulos] : []; precisaRecalcularVersoes = true; }
+  });
+  if (precisaRecalcularVersoes) recalcularModulosVersoes(data);
   // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
   // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
   if (!data._seq.empresas) data._seq.empresas = 2;
@@ -1233,7 +1263,7 @@ module.exports = {
   supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga, empresaIdDaFoto,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
-  MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,
+  MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar, recalcularModulosVersoes,
   PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento, PRESETS_PERFIL_SEGMENTO,
   obterPool, COLECOES_EM_TABELA,
 };
