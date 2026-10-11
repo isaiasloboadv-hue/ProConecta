@@ -115,6 +115,23 @@ function papelGerenciavelPorAdmin(admin, papelAlvo) {
   return false;
 }
 
+// pedido do usuário: "o perfil comercial é quando já é uma empresa grande e já é dividido em
+// vários departamento comercial, financeiro, etc" — alinhado com o modelo de Greiner de estágios
+// de crescimento organizacional (a departamentalização por função, ex. vendas/financeiro como
+// setores PRÓPRIOS com gente dedicada, é característica do estágio em que o dono não dá mais
+// conta de fazer tudo sozinho, não do estágio inicial/autônomo). Um perfil de login dedicado
+// "comercial" ou "financeiro" (alguém cuja função é só aquilo, separado do administrador) só faz
+// sentido a partir desse estágio — por isso exige o módulo "equipe_avancado" (o mesmo que já
+// marca "a equipe cresceu" nos planos, ver db.js), e não o módulo "comercial"/"financeiro" em si
+// (esses liberam a FERRAMENTA — orçamento, despesas — que o próprio dono usa sozinho desde o
+// plano de entrada). Toda empresa que já tinha "os_chamados" ativo antes desta mudança (inclusive
+// a PRO Marking) já ganhou "equipe_avancado" automaticamente na migração de divisão de módulos —
+// então nenhum uso já existente desses perfis é afetado por esta checagem.
+const PAPEIS_DEPARTAMENTALIZADOS = ['comercial', 'financeiro'];
+function papelExigeDepartamentalizacao(data, empresaId, papel) {
+  return PAPEIS_DEPARTAMENTALIZADOS.includes(papel) && !db.moduloAtivo(data, empresaId, 'equipe_avancado');
+}
+
 // bônus de viagem (R$200/diária) — nem toda O.S. dá direito (depende da região), então o
 // administrador marca isso manualmente ao abrir/editar a O.S. e informa o dia em que o técnico
 // precisa começar a se deslocar e o dia previsto de retorno; o bônus conta 1 diária por dia
@@ -5687,6 +5704,9 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   if (!papelGerenciavelPorAdmin(admin, body.papel)) {
     return enviarJSON(res, 403, { erro: 'Você só pode cadastrar usuários do seu departamento e clientes.' });
   }
+  if (papelExigeDepartamentalizacao(data, user.empresa_id, body.papel)) {
+    return enviarJSON(res, 400, { erro: 'Perfis de departamento (Comercial/Financeiro) ficam disponíveis a partir do plano em que a equipe cresce ("Equipe e Escala"). Até lá, use o próprio administrador pras funções de orçamento/despesas.' });
+  }
   if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
@@ -5762,6 +5782,12 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   }
   if (!editandoASiMesmo && (!papelGerenciavelPorAdmin(admin, alvo.papel) || !papelGerenciavelPorAdmin(admin, body.papel))) {
     return enviarJSON(res, 403, { erro: 'Você só pode editar usuários do seu departamento e clientes.' });
+  }
+  // só bloqueia ao TROCAR pra um perfil de departamento — editar quem já é comercial/financeiro
+  // (ex. corrigir telefone) não deve travar por conta de uma empresa que nunca tinha esse perfil
+  // antes desta regra existir.
+  if (body.papel !== alvo.papel && papelExigeDepartamentalizacao(data, user.empresa_id, body.papel)) {
+    return enviarJSON(res, 400, { erro: 'Perfis de departamento (Comercial/Financeiro) ficam disponíveis a partir do plano em que a equipe cresce ("Equipe e Escala"). Até lá, use o próprio administrador pras funções de orçamento/despesas.' });
   }
   if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.id !== alvo.id && u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });

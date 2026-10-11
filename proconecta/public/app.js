@@ -17341,7 +17341,14 @@ function papeisCadastraveis(usuario) {
   if (USER.papel === 'administrador' && USER.departamento) return [USER.departamento, 'cliente'];
   // supervisor (só visualização) e financeiro (aprova prestação de contas) — Etapa 6 do briefing
   // white label — só o administrador geral cadastra, igual administrador.
-  return ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro', 'comercial'];
+  const base = ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro', 'comercial'];
+  // pedido do usuário: "o perfil comercial é quando já é uma empresa grande e já é dividido em
+  // vários departamento" — Comercial/Financeiro como login PRÓPRIO (separado do administrador)
+  // só faz sentido numa empresa já dividida em departamentos, o mesmo estágio que o módulo
+  // "equipe_avancado" já marca nos planos (ver server.js: papelExigeDepartamentalizacao). Mantém
+  // a opção visível se o usuário editado já tem esse papel, pra não sumir o próprio valor atual.
+  if ((USER.modulos_ativos || []).includes('equipe_avancado')) return base;
+  return base.filter((p) => (p !== 'comercial' && p !== 'financeiro') || (usuario && usuario.papel === p));
 }
 function mostrarFormUsuario(usuario) {
   usuarioEmEdicaoId = usuario ? usuario.id : null;
