@@ -299,6 +299,11 @@ function sincronizarEmpresaPadrao(data) {
   // plano e cobrança (Etapa 7/passo 2) — só exibição, sem integração de pagamento nesta etapa.
   if (empresa.plano_valor_mensal === undefined) empresa.plano_valor_mensal = null;
   if (empresa.plano_dia_vencimento === undefined) empresa.plano_dia_vencimento = null;
+  // criado_em (SaaS, passo 1) — não existia antes do cadastro self-service; necessário pra medir
+  // o trial (passo 2). Quem já existia ganha a data de hoje no backfill — não afeta ninguém porque
+  // só habilita a contagem de trial daqui pra frente, e só empresa com status 'teste' é afetada
+  // pela validade (empresa 'ativa'/'suspensa' nunca checa isso).
+  if (empresa.criado_em === undefined) empresa.criado_em = new Date().toISOString();
   // Perfil/Segmento (Etapa 8): null = sem perfil escolhido (comportamento de hoje, preservado pra
   // quem já existia); tipos_os/relatorio_ativos null = "todos" (ver tiposOsAtivos/tiposRelatorioAtivos
   // em server.js, nunca lê o campo bruto direto); escala_ativa true = Escala de Folga visível, igual hoje.

@@ -1216,6 +1216,60 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   } });
 });
 
+// POST /api/cadastro — SaaS, passo 1: cadastro/trial self-service. Cria a empresa (sempre nasce
+// status 'teste', criado_em agora) e o primeiro administrador numa chamada só, pra quem ainda não
+// é cliente decidir sozinho experimentar o sistema, sem depender do Super Admin. Mesmo corpo de
+// POST /api/plataforma/empresas, só que público e sem escolher versão/subdomínio/cores (sempre
+// nasce com a versão "Manutenção", igual a instalação principal — dá pra trocar depois).
+rota('POST', /^\/api\/cadastro$/, async (req, res) => {
+  const body = await lerCorpo(req);
+  if (!body.nome_empresa || !String(body.nome_empresa).trim()) return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Seu nome é obrigatório.' });
+  if (!body.email || !String(body.email).trim()) return enviarJSON(res, 400, { erro: 'E-mail é obrigatório.' });
+  if (!body.senha || String(body.senha).length < 6) return enviarJSON(res, 400, { erro: 'A senha precisa ter pelo menos 6 caracteres.' });
+  const data = db.load();
+  const email = String(body.email).trim();
+  if (data.usuarios.some((u) => u.email === email)) return enviarJSON(res, 409, { erro: 'Já existe uma conta com este e-mail.' });
+  const versao = data.versoes.find((v) => v.nome === 'Manutenção') || data.versoes[0] || null;
+  const empresa = {
+    id: nextId(data, 'empresas'),
+    nome: String(body.nome_empresa).trim(),
+    subdominio: null,
+    site: '', whatsapp: '', telefone: '', emails: [],
+    cor_primaria: '#0B2D4F', cor_secundaria: '#0891B2',
+    versao_id: versao ? versao.id : null,
+    modulos_ativos: versao ? [...versao.modulos] : [],
+    terminologia: {},
+    perfil: null, segmento: null,
+    tipos_os_ativos: null, tipos_relatorio_ativos: null, escala_ativa: true,
+    limite_tecnicos: versao && versao.limite_tecnicos != null ? versao.limite_tecnicos : null,
+    limite_equipamentos: versao && versao.limite_equipamentos != null ? versao.limite_equipamentos : null,
+    status: 'teste',
+    criado_em: new Date().toISOString(),
+    plano_valor_mensal: null,
+    plano_dia_vencimento: null,
+  };
+  data.empresas.push(empresa);
+  const { salt, hash } = hashSenha(body.senha);
+  const admin = tenant.criar(data, 'usuarios', empresa.id, {
+    nome: String(body.nome).trim(), email, papel: 'administrador',
+    cargo: '', setor: '', celular: '', cliente_id: null,
+    acesso_total: true, menus: [], departamento: null,
+    status: 'ativo', convite_token: null, salt, hash,
+  });
+  db.save(data);
+  const token = gerarToken({ id: admin.id, papel: admin.papel, nome: admin.nome, cliente_id: admin.cliente_id, empresa_id: admin.empresa_id });
+  enviarJSON(res, 201, { token, usuario: {
+    ...usuarioPublico(admin),
+    empresa: await empresaResumo(empresa),
+    modulos_ativos: empresa.modulos_ativos,
+    terminologia: empresa.terminologia,
+    tipos_os_ativos: tiposOsAtivos(empresa),
+    tipos_relatorio_ativos: tiposRelatorioAtivos(empresa),
+    escala_ativa: escalaAtiva(empresa),
+  } });
+});
+
 // dados de marca da empresa (nome, contato, cores, logo) — pública porque a tela de login também
 // usa, antes de qualquer autenticação. Resolvida pelo subdomínio da requisição (ver
 // resolverEmpresaPorRequisicao) — cai na empresa 1 se nenhum subdomínio bater.

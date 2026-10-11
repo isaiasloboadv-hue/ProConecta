@@ -296,6 +296,40 @@ async function fazerLogin() {
   }
 }
 
+// SaaS, passo 1: cadastro/trial self-service — link "Ainda não é cliente?" na própria tela de
+// login alterna pro formulário de criar conta, sem precisar do Super Admin.
+function mostrarFormCadastroSelfService() {
+  document.getElementById('login-form-wrap').style.display = 'none';
+  document.getElementById('cadastro-form-wrap').style.display = 'block';
+}
+
+function mostrarFormLoginNovamente() {
+  document.getElementById('cadastro-form-wrap').style.display = 'none';
+  document.getElementById('login-form-wrap').style.display = 'block';
+}
+
+async function cadastrarSelfService() {
+  const body = {
+    nome_empresa: document.getElementById('cad-empresa').value,
+    nome: document.getElementById('cad-nome').value,
+    email: document.getElementById('cad-email').value,
+    senha: document.getElementById('cad-senha').value,
+  };
+  const erroEl = document.getElementById('cadastro-erro');
+  erroEl.classList.add('hidden');
+  try {
+    const data = await api('/api/cadastro', { method: 'POST', body });
+    TOKEN = data.token;
+    USER = data.usuario;
+    localStorage.setItem('pc_token', TOKEN);
+    salvarTokenSW(TOKEN);
+    entrarNoApp();
+  } catch (e) {
+    erroEl.textContent = e.message;
+    erroEl.classList.remove('hidden');
+  }
+}
+
 // esconde a tela de "carregando..." (só a logo) e mostra o formulário de login — chamada tanto
 // depois de um logout quanto quando descobrimos (ao abrir o app) que não tem sessão salva ou
 // que ela não é mais válida.
@@ -304,6 +338,7 @@ function mostrarTelaLogin() {
   if (splash) splash.style.display = 'none';
   document.getElementById('appView').style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
+  mostrarFormLoginNovamente();
 }
 
 function sair() {

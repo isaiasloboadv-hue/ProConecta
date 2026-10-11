@@ -14,7 +14,10 @@
 // /api/outlook/callback é chamado pelo navegador vindo direto do redirect da Microsoft (fora do
 // fluxo normal de login do sistema) — não carrega o Bearer token da sessão, por isso tem que ser
 // público; quem autentica ali é o próprio "state" assinado (ver GET /api/outlook/callback).
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/outlook/callback'];
+// /api/cadastro (SaaS, passo 1 — cadastro/trial self-service) também é público: quem ainda não é
+// cliente nenhum precisa criar a própria empresa + primeiro administrador antes de ter qualquer
+// login pra autenticar.
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/outlook/callback', '/api/cadastro'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],
