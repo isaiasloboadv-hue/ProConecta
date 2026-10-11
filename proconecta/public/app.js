@@ -706,6 +706,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'biblioteca': 'Biblioteca',
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
+    'fmea-relatorios': 'FMEA — Ranking e Pareto',
     'usuarios': 'Usuários',
     'equipe': 'Equipe',
     'chat-interno': 'Mensagens',
@@ -732,12 +733,15 @@ const NAV = {
     { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
     // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
-    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    // pedido do usuário: "o gerador de orçamento é a base, depois o menu relatório" — Relatório
+    // não exige mais O.S. completo, é módulo próprio ("relatorios", ver db.js) do plano de entrada.
+    { key: 'relatorio-manutencao', modulo: 'relatorios', label: 'Relatório', page: 'relatorio-manutencao' },
     // pedido do usuário: menu com o link dos formulários que o cliente preenche por fora, sem
     // login (hoje só o Briefing de Pré-Visita e a Entrega para Teste têm isso) — igual ele já
     // mandava o link do Briefing, só que centralizado numa lista com botão Encaminhar.
-    { key: 'links-externos', modulo: 'os_chamados', label: 'Links', page: 'links-externos' },
-    { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
+    { key: 'links-externos', modulo: 'relatorios', label: 'Links', page: 'links-externos' },
+    // mostra escala/feriados dos colegas além da própria agenda — visão de equipe, não só pessoal.
+    { key: 'calendario-tecnico', modulo: 'equipe_avancado', label: 'Calendário', page: 'calendario-tecnico' },
     // pedido do usuário: "como conectar minha agenda do outlook, quero criar um menu agendamentos,
     // e puxar tudo que tem na agenda do outlook" — cada técnico conecta a própria conta Microsoft
     // (recebe o convite de reunião no próprio e-mail corporativo e aceita no Outlook, igual sempre
@@ -761,15 +765,17 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'fila-reparo', modulo: 'os_chamados', label: 'Setor Reparo', page: 'fila-reparo' },
-    { key: 'minhas-viagens', modulo: 'os_chamados', label: 'Minhas viagens', page: 'minhas-viagens' },
-    { key: 'solicitacoes-rh', modulo: 'os_chamados', label: 'Solicitações', page: 'solicitacoes-rh' },
+    { key: 'minhas-viagens', modulo: 'equipe_avancado', label: 'Minhas viagens', page: 'minhas-viagens' },
+    { key: 'solicitacoes-rh', modulo: 'equipe_avancado', label: 'Solicitações', page: 'solicitacoes-rh' },
     // pedido do usuário: em dia sem O.S./atendimento o sistema pede pro técnico justificar o que
     // fez (ver statusDiaTecnico/diasDoMesTecnico em server.js) — essa é a tela onde ele preenche.
     { key: 'atividades-dia', modulo: 'os_chamados', label: 'Atividades do Dia', page: 'atividades-dia' },
   ],
   administrador: [
     // pedido do usuário: "colocar o menu home no topo dos menus" — primeiro item da lista.
-    { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
+    // dashboard de KPIs é recurso de equipe maior ("quando a equipe aumenta, precisa de
+    // dashboards" — pedido do usuário), não do O.S. básico.
+    { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
@@ -778,8 +784,10 @@ const NAV = {
     // administrador só vê o Relatório "Promotor" (briefing pré-visita da demonstração técnica) —
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
     // tiposRelatorioManual em renderRelatorioManutencao).
-    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
-    { key: 'links-externos', modulo: 'os_chamados', label: 'Links', page: 'links-externos' },
+    // pedido do usuário: "o gerador de orçamento é a base, depois o menu relatório" — Relatório
+    // não exige mais O.S. completo, é módulo próprio ("relatorios", ver db.js) do plano de entrada.
+    { key: 'relatorio-manutencao', modulo: 'relatorios', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'links-externos', modulo: 'relatorios', label: 'Links', page: 'links-externos' },
     // pedido do usuário: "no menu biblioteca e equipamentos crie só o menu principal... ao clicar
     // irá abrir uma página individual com widgets com cores igual o widgets do home. Eles estão
     // os submenus" — era uma árvore com filhos (Acessar/Aprovação/Solicitações/Adicionar/Ranking);
@@ -787,12 +795,17 @@ const NAV = {
     // de submenu (mesmo componente .kpis-tile do Home).
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', page: 'biblioteca-menu' },
     { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
-    // mesma ideia da Biblioteca acima: Cadastrar/Atrelar/FMEA viram tiles de renderEquipamentosMenu().
-    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', page: 'equipamentos-menu' },
+    // mesma ideia da Biblioteca acima: Cadastrar/Atrelar viram tiles de renderEquipamentosMenu()
+    // — cadastro/catálogo é o módulo "relatorios" (alimenta o Relatório), não exige O.S.
+    { key: 'equipamentos', modulo: 'relatorios', label: 'Equipamentos', page: 'equipamentos-menu' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
-    { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
+    { key: 'equipe', modulo: 'equipe_avancado', label: 'Equipe', page: 'equipe' },
+    // pedido do usuário: "quando a equipe aumenta, precisa de escala de folgas, dashboards etc" —
+    // saiu da tile dentro de Equipamentos (que agora é módulo "relatorios") pra item próprio,
+    // porque FMEA/Ranking e Pareto é análise de confiabilidade de equipe maior, não cadastro.
+    { key: 'fmea-relatorios', modulo: 'equipe_avancado', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     // mesma conexão com o Outlook disponível pro técnico (ver NAV.suporte acima) — o administrador
     // também tem e-mail corporativo próprio e pode querer ver a agenda dele aqui dentro.
     { key: 'agendamentos-outlook', modulo: 'os_chamados', label: 'Agendamentos', page: 'agendamentos-outlook' },
@@ -832,7 +845,7 @@ const NAV = {
       ]},
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
-    { key: 'equipamentos', modulo: 'os_chamados', label: 'Meus equipamentos', page: 'equipamentos' },
+    { key: 'equipamentos', modulo: 'relatorios', label: 'Meus equipamentos', page: 'equipamentos' },
     { key: 'chamados', modulo: 'os_chamados', label: 'Atendimento', page: 'chamados' },
   ],
   producao: [
@@ -849,7 +862,7 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
-    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
+    { key: 'equipamentos', modulo: 'relatorios', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
     ]},
@@ -872,9 +885,9 @@ const NAV = {
   // abordagem rápida escolhida agora; esconder esses botões de verdade fica pra um próximo passo.
   supervisor: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
-    { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
-    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
-    { key: 'links-externos', modulo: 'os_chamados', label: 'Links', page: 'links-externos' },
+    { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
+    { key: 'relatorio-manutencao', modulo: 'relatorios', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'links-externos', modulo: 'relatorios', label: 'Links', page: 'links-externos' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -884,13 +897,13 @@ const NAV = {
       { key: 'ranking', label: 'Ranking de técnicos', page: 'biblioteca-ranking' },
     ]},
     { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
-    { key: 'equipamentos', modulo: 'os_chamados', label: 'Equipamentos', children: [
+    { key: 'equipamentos', modulo: 'relatorios', label: 'Equipamentos', children: [
       { key: 'cadastrar', label: 'Cadastrar equipamento', page: 'equipamentos-cadastrar' },
       { key: 'atrelar', label: 'Atrelar equipamento', page: 'equipamentos-atrelar' },
-      { key: 'fmea-relatorios', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     ]},
+    { key: 'fmea-relatorios', modulo: 'equipe_avancado', label: 'FMEA — Ranking e Pareto', page: 'fmea-relatorios' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
-    { key: 'equipe', modulo: 'os_chamados', label: 'Equipe', page: 'equipe' },
+    { key: 'equipe', modulo: 'equipe_avancado', label: 'Equipe', page: 'equipe' },
   ],
   // financeiro — Etapa 6/passo 2: aprova as prestações de contas lançadas pelos técnicos. Pedido do
   // usuário: "quem aprova é o setor financeiro" / "incluir no menu financeiro despesas se não
@@ -905,7 +918,7 @@ const NAV = {
   // da visita. Despesas e Biblioteca foram removidos depois, a pedido do usuário ("remova
   // despesas e biblioteca do acesso comercial") — fica só o Relatório.
   comercial: [
-    { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'relatorio-manutencao', modulo: 'relatorios', label: 'Relatório', page: 'relatorio-manutencao' },
     // CRM nativo (passo 1): o papel comercial é quem mais usa Leads/Contatos no dia a dia.
     { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
       { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
@@ -940,6 +953,7 @@ const ICONE_MENU = {
   'despesas-justificadas': '🧾',
   'comercial': '💼',
   'agendamentos-outlook': '📅',
+  'fmea-relatorios': '📊',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -16021,7 +16035,7 @@ async function verHistorico(id) {
 async function renderEquipamentosMenu() {
   const main = document.getElementById('main');
   main.innerHTML = `
-    <div class="page-head"><h1>Equipamentos</h1><p>Catálogo, atrelamento a clientes e FMEA.</p></div>
+    <div class="page-head"><h1>Equipamentos</h1><p>Catálogo e atrelamento a clientes.</p></div>
     <div class="kpis-tiles" id="equipamentos-menu-tiles"><div class="empty">Carregando...</div></div>`;
   const { equipamentos } = await api('/api/equipamentos');
   const catalogo = equipamentos.filter((e) => e.cliente_id === null).length;
@@ -16031,10 +16045,11 @@ async function renderEquipamentosMenu() {
       <div class="kpis-tile-label"><span>${esc(titulo)}</span></div>
       <div class="kpis-tile-valor" style="font-size:15px;">${subtitulo}</div>
     </div>`;
+  // FMEA — Ranking e Pareto saiu daqui pra um item de menu próprio (módulo "equipe_avancado",
+  // distinto de "relatorios" que libera esta tela) — ver NAV.administrador/NAV.supervisor.
   document.getElementById('equipamentos-menu-tiles').innerHTML = `
     ${tile('Cadastrar equipamento', `${catalogo} no catálogo`, 'var(--green)', 'equipamentos-cadastrar')}
-    ${tile('Atrelar equipamento', `${atrelados} atrelado(s)`, 'var(--blue)', 'equipamentos-atrelar')}
-    ${tile('FMEA — Ranking e Pareto', 'Ver análise', 'var(--purple)', 'fmea-relatorios')}`;
+    ${tile('Atrelar equipamento', `${atrelados} atrelado(s)`, 'var(--blue)', 'equipamentos-atrelar')}`;
 }
 
 // ---- Cadastrar equipamento (catálogo: tipo/modelo, sem cliente ainda) ----

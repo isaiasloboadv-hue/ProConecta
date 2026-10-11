@@ -26,10 +26,12 @@ function dados() {
     // sem ordem/modulos_proprios de propósito — testa que a migração automática (db.migrar, que
     // roda em todo db.load()) faz o backfill sozinha antes de qualquer rota rodar.
     versoes: [{ id: 1, nome: 'Básico', modulos: ['os_chamados'] }],
-    // já "rodada" de propósito — a criação automática dos planos Profissional/Completo tem teste
-    // próprio em test/migracao.test.js; aqui o que se testa é o CRUD manual, então a flag evita
-    // que a auto-criação mexa na contagem/ids que este teste assume.
+    // já "rodada" de propósito — a criação automática dos planos (Autônomo/Manutenção/Completo)
+    // tem teste próprio em test/migracao.test.js; aqui o que se testa é o CRUD manual, então as
+    // flags evitam que a auto-criação mexa na contagem/ids que este teste assume.
     _migracaoPlanosPadraoV1: true,
+    _migracaoPlanosPadraoV2: true,
+    _migracaoSplitOsChamadosV1: true,
   };
 }
 

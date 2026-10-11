@@ -33,6 +33,11 @@ function gerarTokenConvite() {
 // módulos estão ligados (empresa.modulos_ativos, ver moduloAtivo abaixo) — isso sim é dado.
 // "núcleo" não entra aqui: é sempre ativo pra toda empresa, não passa por essa checagem.
 const MODULOS_DISPONIVEIS = [
+  // pedido do usuário: "nosso sistema deve ser do mais simples ao completo... um gerador de
+  // orçamento é a base, depois o menu relatório" — Relatório (+ Equipamentos/Assistente IA que o
+  // alimentam) sai de dentro de "os_chamados" e vira módulo próprio, pra poder ficar junto do
+  // "comercial" (gerador de orçamento) no plano de entrada, sem exigir O.S. completo.
+  { chave: 'relatorios', nome: 'Relatórios' },
   { chave: 'os_chamados', nome: 'O.S. e Chamados' },
   { chave: 'smp_preventivas', nome: 'Procedimentos e Preventivas' },
   { chave: 'biblioteca', nome: 'Biblioteca' },
@@ -42,6 +47,11 @@ const MODULOS_DISPONIVEIS = [
   // módulo renomeado é quem vai liberar as telas de verdade (Leads, Funil, Propostas) que chegam
   // nos próximos passos, reaproveitando todo o pipeline de ativação já validado.
   { chave: 'comercial', nome: 'Comercial' },
+  // "quando a equipe aumenta, precisa de controle de escala de folgas, controle de gastos,
+  // dashboards" — Equipe, Solicitações/RH, Escala de Folgas, KPIs/Dashboards e FMEA saem de
+  // dentro de "os_chamados" e vão para este módulo de estágio avançado (time maior/operação em
+  // escala), também antes só coberto pelo pacote único de O.S.
+  { chave: 'equipe_avancado', nome: 'Equipe e Escala' },
   { chave: 'agendamento', nome: 'Agendamento Online' },
   { chave: 'financeiro', nome: 'Financeiro' },
   { chave: 'assistente_ia', nome: 'Assistente IA' },
@@ -519,10 +529,62 @@ function migrar(data) {
     recalcularModulosVersoes(data);
     data._migracaoPlanosPadraoV1 = true;
   }
+  // pedido do usuário: "nosso sistema deve ser do mais simples ao completo: orçamento é a base,
+  // depois relatório... o plano básico precisa ser criar orçamento e relatório, intermediário
+  // inclui o.s. etc" — a V1 acima não tinha esse chão (começava já em "Manutenção", que exige
+  // O.S. completo). V2 corrige em cima do que já existir (seja V1 recém-criada ou já rodada em
+  // produção antes deste pedido): cria/realinha "Autônomo" (ordem 1: comercial+relatórios, sem
+  // O.S.), empurra "Manutenção" pra ordem 2 (ela acrescenta o O.S. completo) e funde o que o
+  // "Profissional" acrescentava (prestação de contas, agendamento) dentro do "Completo" (ordem 3,
+  // junto do novo módulo de equipe/escala) — "Profissional" deixa de existir como categoria
+  // própria, porque sua combinação não corresponde a nenhum estágio da jornada descrita. Roda
+  // uma vez só (flag); segue tudo editável depois pelo Super Admin.
+  if (!data._migracaoPlanosPadraoV2) {
+    let autonomo = data.versoes.find((v) => v.nome === 'Autônomo');
+    if (!autonomo) {
+      autonomo = { id: nextId(data, 'versoes'), nome: 'Autônomo', ordem: 1, modulos_proprios: ['comercial', 'relatorios'], modulos: [], preco_mensal: null };
+      data.versoes.push(autonomo);
+    } else {
+      autonomo.ordem = 1;
+      autonomo.modulos_proprios = ['comercial', 'relatorios'];
+    }
+    const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
+    if (manutencao) manutencao.ordem = 2;
+    const completo = data.versoes.find((v) => v.nome === 'Completo');
+    if (completo) {
+      completo.ordem = 3;
+      completo.modulos_proprios = [...new Set([...(Array.isArray(completo.modulos_proprios) ? completo.modulos_proprios : []), 'equipe_avancado', 'prestacao_contas', 'agendamento'])];
+    }
+    const profissional = data.versoes.find((v) => v.nome === 'Profissional');
+    if (profissional) {
+      if (completo) {
+        for (const e of data.empresas) { if (e.versao_id === profissional.id) e.versao_id = completo.id; }
+      }
+      data.versoes = data.versoes.filter((v) => v.id !== profissional.id);
+    }
+    recalcularModulosVersoes(data);
+    data._migracaoPlanosPadraoV2 = true;
+  }
   // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
   // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
   if (!data._seq.empresas) data._seq.empresas = 2;
   sincronizarEmpresaPadrao(data);
+  // divisão do módulo "os_chamados" em 3 (pedido do usuário, ver MODULOS_DISPONIVEIS acima): quem
+  // já tinha "os_chamados" ativo hoje (toda empresa migrada até aqui) precisa continuar com
+  // acesso a tudo que já usava — Relatório/Equipamentos/Assistente IA (agora "relatorios") e
+  // Equipe/Escala/RH/KPIs/FMEA (agora "equipe_avancado") estavam dentro dele. Backfill uma vez
+  // só; dali em diante os 3 módulos passam a ser controlados de forma independente pelo Super
+  // Admin/plano de cada empresa. Roda DEPOIS de sincronizarEmpresaPadrao (acima), que é quem dá a
+  // empresa 1 o modulos_ativos inicial — senão, no primeiro boot, essa empresa ainda não teria
+  // "os_chamados" no momento desta checagem e ficaria de fora do backfill.
+  if (!data._migracaoSplitOsChamadosV1) {
+    for (const e of data.empresas) {
+      if (Array.isArray(e.modulos_ativos) && e.modulos_ativos.includes('os_chamados')) {
+        e.modulos_ativos = [...new Set([...e.modulos_ativos, 'relatorios', 'equipe_avancado'])];
+      }
+    }
+    data._migracaoSplitOsChamadosV1 = true;
+  }
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
   for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao, data.solicitacoes_rh, data.mensagens_internas, data.feriados, data.escala_folgas]) {
@@ -867,9 +929,17 @@ function carregarDoArquivo() {
   // depois (ver _migracaoContratoNaoInformadoV1 em migrar()).
   const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
   const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
+  const tinhaFlagPlanosPadraoV2 = !!bruto._migracaoPlanosPadraoV2;
+  const tinhaFlagSplitOsChamados = !!bruto._migracaoSplitOsChamadosV1;
   const data = migrar(bruto);
   const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-  if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1) || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)) salvarNoArquivo(data);
+  if (
+    criouAlguem
+    || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)
+    || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)
+    || (!tinhaFlagPlanosPadraoV2 && data._migracaoPlanosPadraoV2)
+    || (!tinhaFlagSplitOsChamados && data._migracaoSplitOsChamadosV1)
+  ) salvarNoArquivo(data);
   return data;
 }
 
@@ -973,9 +1043,17 @@ async function inicializarPostgres() {
     // (no caso dos planos automáticos abaixo, duplicando os planos a cada reinício).
     const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
     const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
+    const tinhaFlagPlanosPadraoV2 = !!bruto._migracaoPlanosPadraoV2;
+    const tinhaFlagSplitOsChamados = !!bruto._migracaoSplitOsChamadosV1;
     const data = migrar(bruto);
     const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-    if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1) || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)) {
+    if (
+      criouAlguem
+      || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)
+      || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)
+      || (!tinhaFlagPlanosPadraoV2 && data._migracaoPlanosPadraoV2)
+      || (!tinhaFlagSplitOsChamados && data._migracaoSplitOsChamadosV1)
+    ) {
       await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);
     }
     cache = data;

@@ -23,16 +23,22 @@ const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],
   ['/api/visitas', 'os_chamados'],
   ['/api/chamados', 'os_chamados'],
-  ['/api/solicitacoes-rh', 'os_chamados'],
-  ['/api/equipamentos', 'os_chamados'],
-  ['/api/relatorios-manutencao', 'os_chamados'],
-  ['/api/ia', 'os_chamados'],
-  ['/api/fmea', 'os_chamados'],
-  ['/api/kpis', 'os_chamados'],
-  ['/api/tecnicos', 'os_chamados'],
-  ['/api/tecnico', 'os_chamados'],
-  ['/api/feriados', 'os_chamados'],
-  ['/api/escala-folgas', 'os_chamados'],
+  // pedido do usuário: "nosso sistema deve ser do mais simples ao completo: orçamento é a base,
+  // depois relatório... em terceiro O.S., quando a demanda aumenta precisa de equipe, escala de
+  // folgas, controle de gastos, dashboards" — "os_chamados" (O.S./Chamados) virou 3 módulos:
+  // Relatório/Equipamentos/Assistente IA não exigem mais O.S. completo (liberam já no plano de
+  // entrada, junto do "comercial"), e Equipe/RH/Escala/KPIs/FMEA passam a exigir o estágio de
+  // equipe maior ("equipe_avancado"), em vez de vir de brinde com o O.S. básico.
+  ['/api/relatorios-manutencao', 'relatorios'],
+  ['/api/equipamentos', 'relatorios'],
+  ['/api/ia', 'relatorios'],
+  ['/api/solicitacoes-rh', 'equipe_avancado'],
+  ['/api/fmea', 'equipe_avancado'],
+  ['/api/kpis', 'equipe_avancado'],
+  ['/api/tecnicos', 'equipe_avancado'],
+  ['/api/tecnico', 'equipe_avancado'],
+  ['/api/feriados', 'equipe_avancado'],
+  ['/api/escala-folgas', 'equipe_avancado'],
   ['/api/registros', 'biblioteca'],
   ['/api/leads', 'comercial'],
   ['/api/oportunidades', 'comercial'],

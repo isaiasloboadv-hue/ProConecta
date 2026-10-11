@@ -1222,8 +1222,11 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
 // POST /api/cadastro — SaaS, passo 1: cadastro/trial self-service. Cria a empresa (sempre nasce
 // status 'teste', criado_em agora) e o primeiro administrador numa chamada só, pra quem ainda não
 // é cliente decidir sozinho experimentar o sistema, sem depender do Super Admin. Mesmo corpo de
-// POST /api/plataforma/empresas, só que público e sem escolher versão/subdomínio/cores (sempre
-// nasce com a versão "Manutenção", igual a instalação principal — dá pra trocar depois).
+// POST /api/plataforma/empresas, só que público e sem escolher versão/subdomínio/cores.
+// pedido do usuário: "nosso sistema deve ser do mais simples ao completo... o gerador de
+// orçamento é a base" — quem ainda nem é cliente começa no plano de entrada da cascata (menor
+// "ordem", hoje "Autônomo": comercial+relatório, sem exigir O.S.), não direto em "Manutenção"
+// (que já pressupõe O.S. completo). Dá pra trocar de plano depois (ver PUT /api/meu-plano).
 rota('POST', /^\/api\/cadastro$/, async (req, res) => {
   const body = await lerCorpo(req);
   if (!body.nome_empresa || !String(body.nome_empresa).trim()) return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
@@ -1233,7 +1236,7 @@ rota('POST', /^\/api\/cadastro$/, async (req, res) => {
   const data = db.load();
   const email = String(body.email).trim();
   if (data.usuarios.some((u) => u.email === email)) return enviarJSON(res, 409, { erro: 'Já existe uma conta com este e-mail.' });
-  const versao = data.versoes.find((v) => v.nome === 'Manutenção') || data.versoes[0] || null;
+  const versao = [...data.versoes].sort((a, b) => (a.ordem || 0) - (b.ordem || 0))[0] || data.versoes[0] || null;
   const empresa = {
     id: nextId(data, 'empresas'),
     nome: String(body.nome_empresa).trim(),

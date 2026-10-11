@@ -18,19 +18,33 @@ test('rotas de núcleo exigem login mas não módulo específico', () => {
   assert.equal(moduloDaRota(/^\/api\/chat-interno\/contatos$/), 'nucleo');
 });
 
-test('rotas de agenda/visitas/chamados/equipamentos pertencem a os_chamados', () => {
+test('rotas de agenda/visitas/chamados pertencem a os_chamados (núcleo do O.S.)', () => {
   assert.equal(moduloDaRota(/^\/api\/agenda$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/agenda\/(\d+)\/finalizar$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/visitas\/(\d+)\/aprovar$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/chamados\/(\d+)\/assumir$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/equipamentos\/buscar-por-serie$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/solicitacoes-rh$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/tecnicos\/viagens$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/tecnico\/online$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/relatorios-manutencao\/(\d+)$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/fmea\/componentes$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/fmea\/modos-falha\/(\d+)$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/kpis$/), 'os_chamados');
+});
+
+// pedido do usuário: plano básico = orçamento + relatório, sem exigir O.S. completo — Relatório,
+// Equipamentos e Assistente IA saíram de "os_chamados" e viraram o módulo "relatorios".
+test('rotas de relatório/equipamentos/IA pertencem a relatorios', () => {
+  assert.equal(moduloDaRota(/^\/api\/equipamentos\/buscar-por-serie$/), 'relatorios');
+  assert.equal(moduloDaRota(/^\/api\/relatorios-manutencao\/(\d+)$/), 'relatorios');
+  assert.equal(moduloDaRota(/^\/api\/ia\/assistente-relatorio$/), 'relatorios');
+});
+
+// pedido do usuário: "quando a equipe aumenta, precisa de escala de folgas, dashboards etc" —
+// Solicitações/RH, Técnicos, Feriados, Escala de Folgas, KPIs e FMEA saíram de "os_chamados" e
+// viraram o módulo "equipe_avancado".
+test('rotas de equipe/escala/kpis/fmea pertencem a equipe_avancado', () => {
+  assert.equal(moduloDaRota(/^\/api\/solicitacoes-rh$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/tecnicos\/viagens$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/tecnico\/online$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/feriados$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/escala-folgas$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/fmea\/componentes$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/fmea\/modos-falha\/(\d+)$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/kpis$/), 'equipe_avancado');
 });
 
 test('rotas de registros pertencem a biblioteca', () => {

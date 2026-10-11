@@ -47,13 +47,19 @@ test('migrar cria a versão Manutenção pra quem não tinha versoes', () => {
   assert.ok(Array.isArray(data.versoes));
   const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
   assert.ok(manutencao);
-  assert.deepEqual(manutencao.modulos.sort(), ['biblioteca', 'os_chamados', 'smp_preventivas'].sort());
+  // "modulos" é o campo cumulativo (ver recalcularModulosVersoes) — Manutenção, de ordem 2, herda
+  // comercial+relatorios do plano "Autônomo" (ordem 1) além do que ela mesma acrescenta.
+  assert.deepEqual(manutencao.modulos.sort(), ['biblioteca', 'comercial', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
 });
 
 test('migrar dá empresa 1 os módulos da versão Manutenção ativos', () => {
   const data = db.migrar(dadosAntigos());
   const empresa = data.empresas.find((e) => e.id === 1);
-  assert.deepEqual(empresa.modulos_ativos.sort(), ['biblioteca', 'os_chamados', 'smp_preventivas'].sort());
+  // empresa.modulos_ativos (diferente de versao.modulos) só ganha exatamente
+  // MODULOS_VERSAO_MANUTENCAO na sincronização inicial — "relatorios"/"equipe_avancado" entram
+  // depois, pela migração de divisão de os_chamados (ver teste dedicado mais abaixo), não por
+  // esta sincronização.
+  assert.deepEqual(empresa.modulos_ativos.sort(), ['biblioteca', 'equipe_avancado', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
   assert.equal(empresa.versao_id, 1);
   assert.deepEqual(empresa.terminologia, {});
 });
@@ -64,7 +70,11 @@ test('migrar não sobrescreve modulos_ativos de empresa que já tinha sido migra
   data.empresas[0].modulos_ativos = ['os_chamados', 'comercial']; // admin já desativou/ativou módulos avulsos
   data.empresas[0].terminologia = { equipamento: 'Paciente' };
   const depois = db.migrar(data);
-  assert.deepEqual(depois.empresas[0].modulos_ativos.sort(), ['comercial', 'os_chamados'].sort());
+  // a sincronização em si não sobrescreve o array customizado (continua tendo exatamente
+  // "os_chamados"+"comercial" como base) — o que muda é a extensão separada da divisão de
+  // os_chamados, que dá relatorios/equipe_avancado a quem já tinha os_chamados (ver teste
+  // dedicado "migrar dá relatorios e equipe_avancado..." mais abaixo); nada é removido.
+  assert.deepEqual(depois.empresas[0].modulos_ativos.sort(), ['comercial', 'equipe_avancado', 'os_chamados', 'relatorios'].sort());
   assert.equal(depois.empresas[0].terminologia.equipamento, 'Paciente');
 });
 
@@ -113,24 +123,31 @@ test('depois de migrar, os módulos da empresa 1 ficam ativos de acordo com modu
   assert.equal(db.moduloAtivo(data, 1, 'financeiro'), false);
 });
 
-// pedido do usuário: "crie automático planos com as suas funções inclusas... crie o nome dos
-// planos também" — além da versão Manutenção (ordem 1, já testada acima), a migração cria duas
-// categorias a mais (uma vez só), em cascata: "Profissional" e "Completo", até liberar o catálogo
-// inteiro na de maior ordem.
-test('migrar cria automaticamente os planos Profissional e Completo, em cascata acima da Manutenção', () => {
+// pedido do usuário: "nosso sistema deve ser do mais simples ao completo: orçamento é a base,
+// depois relatório... o plano básico precisa ser criar orçamento e relatório, intermediário
+// inclui o.s. etc, até a equipe aumentar e precisar de escala/financeiro/dashboards" — a migração
+// cria 3 categorias em cascata: "Autônomo" (comercial+relatórios, sem O.S.), "Manutenção" (+ O.S.
+// completo) e "Completo" (+ equipe/escala + o resto do catálogo).
+test('migrar cria automaticamente os planos Autônomo e Completo, em cascata ao redor da Manutenção', () => {
   const data = db.migrar(dadosAntigos());
   const nomes = data.versoes.map((v) => v.nome).sort();
-  assert.deepEqual(nomes, ['Completo', 'Manutenção', 'Profissional'].sort());
+  assert.deepEqual(nomes, ['Autônomo', 'Completo', 'Manutenção'].sort());
 
+  const autonomo = data.versoes.find((v) => v.nome === 'Autônomo');
   const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
-  const profissional = data.versoes.find((v) => v.nome === 'Profissional');
   const completo = data.versoes.find((v) => v.nome === 'Completo');
 
-  assert.ok(profissional.ordem > manutencao.ordem);
-  assert.ok(completo.ordem > profissional.ordem);
+  assert.ok(manutencao.ordem > autonomo.ordem);
+  assert.ok(completo.ordem > manutencao.ordem);
 
-  // cascata: Profissional acumula tudo da Manutenção + o que ele mesmo acrescenta
-  for (const chave of manutencao.modulos) assert.ok(profissional.modulos.includes(chave));
+  // "Autônomo" é o chão da cascata: só orçamento (comercial) + relatório, nada de O.S.
+  assert.deepEqual([...autonomo.modulos].sort(), ['comercial', 'relatorios'].sort());
+  assert.ok(!autonomo.modulos.includes('os_chamados'));
+
+  // cascata: Manutenção acumula tudo do Autônomo + o que ela mesma acrescenta (O.S. completo)
+  for (const chave of autonomo.modulos) assert.ok(manutencao.modulos.includes(chave));
+  assert.ok(manutencao.modulos.includes('os_chamados'));
+
   // Completo libera o catálogo inteiro — "até o plano em que todas as funções é liberada"
   assert.deepEqual([...completo.modulos].sort(), [...db.CHAVES_MODULOS].sort());
 });
@@ -142,11 +159,34 @@ test('migrar dos planos automáticos é idempotente: rodar de novo não duplica 
   assert.equal(duas.versoes.length, 3);
   assert.deepEqual(duas.versoes, uma.versoes);
 
-  // Super Admin apaga o "Profissional" — rodar a migração de novo não deve recriá-lo (a flag
-  // impede, senão apagar um plano automático seria impossível de verdade)
-  const semProfissional = JSON.parse(JSON.stringify(uma));
-  semProfissional.versoes = semProfissional.versoes.filter((v) => v.nome !== 'Profissional');
-  const depoisDeApagar = db.migrar(semProfissional);
-  assert.equal(depoisDeApagar.versoes.find((v) => v.nome === 'Profissional'), undefined);
+  // Super Admin apaga o "Autônomo" — rodar a migração de novo não deve recriá-lo (a flag impede,
+  // senão apagar um plano automático seria impossível de verdade)
+  const semAutonomo = JSON.parse(JSON.stringify(uma));
+  semAutonomo.versoes = semAutonomo.versoes.filter((v) => v.nome !== 'Autônomo');
+  const depoisDeApagar = db.migrar(semAutonomo);
+  assert.equal(depoisDeApagar.versoes.find((v) => v.nome === 'Autônomo'), undefined);
   assert.equal(depoisDeApagar.versoes.length, 2);
+});
+
+// backward-compat crítico: quem já tinha "os_chamados" ativo (ex. PRO Marking, migrada do sistema
+// antigo) não pode perder nenhuma função com a divisão desse módulo em 3 — "relatorios" e
+// "equipe_avancado" têm que vir ligados automaticamente pra quem já tinha "os_chamados".
+test('migrar dá relatorios e equipe_avancado a quem já tinha os_chamados ativo (não perde nada na divisão)', () => {
+  const data = db.migrar(dadosAntigos());
+  const empresa = data.empresas.find((e) => e.id === 1);
+  assert.ok(empresa.modulos_ativos.includes('os_chamados'));
+  assert.ok(empresa.modulos_ativos.includes('relatorios'));
+  assert.ok(empresa.modulos_ativos.includes('equipe_avancado'));
+});
+
+test('migrar da divisão de os_chamados é idempotente e não dá os módulos novos a quem nunca teve os_chamados', () => {
+  const uma = db.migrar(dadosAntigos());
+  const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
+  assert.deepEqual(duas.empresas[0].modulos_ativos.sort(), uma.empresas[0].modulos_ativos.sort());
+
+  const semOsChamados = dadosAntigos();
+  semOsChamados.empresas[0].versao_id = 1;
+  semOsChamados.empresas[0].modulos_ativos = ['comercial'];
+  const depois = db.migrar(semOsChamados);
+  assert.deepEqual(depois.empresas.find((e) => e.id === 1).modulos_ativos.sort(), ['comercial'].sort());
 });

@@ -29,6 +29,13 @@ function dadosComVersoes() {
       { id: 1, nome: 'Básico', modulos: ['os_chamados'], preco_mensal: 199, limite_tecnicos: 3, limite_equipamentos: null },
       { id: 2, nome: 'Completo', modulos: ['os_chamados', 'biblioteca', 'comercial', 'smp_preventivas'], preco_mensal: 499, limite_tecnicos: null, limite_equipamentos: null },
     ],
+    // este teste usa suas próprias 2 versões (Básico/Completo) pra testar só a troca de plano —
+    // as flags evitam que a criação automática dos planos padrão (Autônomo/Manutenção/Completo,
+    // ver test/migracao.test.js) ou o backfill de relatorios/equipe_avancado colidam com esse
+    // fixture, já que "Completo" coincide de nome com o plano que o Super Admin cria de verdade.
+    _migracaoPlanosPadraoV1: true,
+    _migracaoPlanosPadraoV2: true,
+    _migracaoSplitOsChamadosV1: true,
   };
 }
 

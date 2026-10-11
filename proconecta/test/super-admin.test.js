@@ -89,7 +89,9 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(criarResp.status, 201);
     const { empresa: nova } = await criarResp.json();
     assert.equal(nova.id, 2);
-    assert.deepEqual(nova.modulos_ativos.sort(), ['biblioteca', 'os_chamados', 'smp_preventivas'].sort());
+    // "Manutenção" agora é ordem 2 na cascata (ver db.js: migração dos planos padrão) — herda
+    // comercial+relatorios do plano "Autônomo" (ordem 1) além do que ela mesma acrescenta.
+    assert.deepEqual(nova.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
 
     // liga comercial e desliga smp_preventivas (módulo avulso, independente da versão original)
     const modulosResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/modulos`, {

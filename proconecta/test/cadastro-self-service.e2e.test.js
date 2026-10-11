@@ -74,7 +74,10 @@ test('cadastro self-service: valida campos, cria empresa em teste + administrado
     assert.ok(token, 'devolve token pra já entrar logado');
     assert.equal(usuario.papel, 'administrador');
     assert.equal(usuario.empresa.nome, 'Empresa Nova');
-    assert.deepEqual(usuario.modulos_ativos.sort(), ['biblioteca', 'os_chamados', 'smp_preventivas'].sort());
+    // pedido do usuário: "nosso sistema deve ser do mais simples ao completo" — quem se cadastra
+    // sozinho (ainda não é cliente) começa no plano de menor ordem da cascata ("Autônomo":
+    // comercial+relatório), não direto em "Manutenção" (O.S. completo).
+    assert.deepEqual(usuario.modulos_ativos.sort(), ['comercial', 'relatorios'].sort());
 
     // o token devolvido já funciona de verdade
     const me = await fetch(`${base}/api/clientes`, { headers: { Authorization: `Bearer ${token}` } });
