@@ -4238,6 +4238,81 @@ rota('DELETE', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { ok: true });
 });
 
+const ESTAGIOS_LEAD_VALIDOS = ['novo', 'contatado', 'desqualificado'];
+
+// GET /api/leads — menu Comercial: prospects que ainda não são clientes oficiais
+rota('GET', /^\/api\/leads$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial veem leads.' });
+  const data = db.load();
+  enviarJSON(res, 200, { leads: tenant.listar(data, 'leads', user.empresa_id) });
+});
+
+// POST /api/leads — cadastra um novo lead/contato
+rota('POST', /^\/api\/leads$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial cadastram leads.' });
+  const body = await lerCorpo(req);
+  if (!body.nome_empresa || !String(body.nome_empresa).trim()) {
+    return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  }
+  const data = db.load();
+  const item = tenant.criar(data, 'leads', user.empresa_id, {
+    nome_empresa: body.nome_empresa.trim(),
+    contato: body.contato || '',
+    telefone: body.telefone || '',
+    email: body.email || '',
+    origem: body.origem || '',
+    estagio: ESTAGIOS_LEAD_VALIDOS.includes(body.estagio) ? body.estagio : 'novo',
+    observacoes: body.observacoes || '',
+    convertido_cliente_id: null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { lead: item });
+});
+
+// PUT /api/leads/:id — edita um lead (dados ou estágio)
+rota('PUT', /^\/api\/leads\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial editam leads.' });
+  const body = await lerCorpo(req);
+  if (!body.nome_empresa || !String(body.nome_empresa).trim()) {
+    return enviarJSON(res, 400, { erro: 'Nome da empresa é obrigatório.' });
+  }
+  const data = db.load();
+  const lead = tenant.buscar(data, 'leads', Number(m[1]), user.empresa_id);
+  if (!lead) return enviarJSON(res, 404, { erro: 'Lead não encontrado.' });
+  Object.assign(lead, {
+    nome_empresa: body.nome_empresa.trim(),
+    contato: body.contato || '', telefone: body.telefone || '', email: body.email || '',
+    origem: body.origem || '',
+    estagio: ESTAGIOS_LEAD_VALIDOS.includes(body.estagio) ? body.estagio : lead.estagio,
+    observacoes: body.observacoes || '',
+  });
+  db.save(data);
+  enviarJSON(res, 200, { lead });
+});
+
+// POST /api/leads/:id/converter — cria um cliente de verdade a partir do lead (igual
+// sincronizarClienteDoRelatorio já faz a partir de um relatório) e marca convertido_cliente_id
+rota('POST', /^\/api\/leads\/(\d+)\/converter$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou comercial convertem leads.' });
+  const data = db.load();
+  const lead = tenant.buscar(data, 'leads', Number(m[1]), user.empresa_id);
+  if (!lead) return enviarJSON(res, 404, { erro: 'Lead não encontrado.' });
+  if (lead.convertido_cliente_id) return enviarJSON(res, 400, { erro: 'Este lead já foi convertido em cliente.' });
+  const cliente = tenant.criar(data, 'clientes', user.empresa_id, {
+    nome_empresa: lead.nome_empresa,
+    contato: lead.contato || '', telefone: lead.telefone || '', email: lead.email || '',
+    nivel_acesso: 'completo', setor: '',
+    endereco: '', numero: '', bairro: '', cep: '', cidade: '', estado: '',
+  });
+  lead.convertido_cliente_id = cliente.id;
+  db.save(data);
+  enviarJSON(res, 200, { lead, cliente });
+});
+
 // GET /api/equipamentos
 rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   const user = usuarioAutenticado(req);

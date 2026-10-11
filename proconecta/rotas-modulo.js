@@ -30,6 +30,7 @@ const PREFIXO_MODULO = [
   ['/api/feriados', 'os_chamados'],
   ['/api/escala-folgas', 'os_chamados'],
   ['/api/registros', 'biblioteca'],
+  ['/api/leads', 'comercial'],
   ['/api/agendamento', 'agendamento'],
   ['/api/financeiro', 'financeiro'],
   ['/api/prestacao-contas', 'prestacao_contas'],

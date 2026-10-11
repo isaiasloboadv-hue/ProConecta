@@ -669,6 +669,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'usuarios': 'Usuários',
     'equipe': 'Equipe',
     'chat-interno': 'Mensagens',
+    'comercial': 'Comercial',
   },
   cliente: {
     'biblioteca': 'Biblioteca',
@@ -763,7 +764,11 @@ const NAV = {
     // contratado o módulo (moduloAtivoNoMenu, igual qualquer outro item com `modulo`).
     // pedido do usuário: "o menu CRM é praticamente o que meu sistema já faz... vamos
     // implementar os menus do que falta" — o item "CRM"/"Em breve" saiu; o módulo "comercial"
-    // (ver db.js) passa a liberar o menu "Comercial" de verdade, adicionado no próximo passo.
+    // (ver db.js) libera este menu "Comercial" de verdade, com as peças de CRM nativo indo uma
+    // por passo (passo 1: Leads/Contatos).
+    { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
+      { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
+    ]},
     { key: 'agendamento', modulo: 'agendamento', label: 'Agendamento Online', page: 'agendamento-em-breve' },
     { key: 'financeiro', modulo: 'financeiro', label: 'Financeiro', page: 'financeiro-em-breve' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-fila' },
@@ -855,6 +860,10 @@ const NAV = {
   // despesas e biblioteca do acesso comercial") — fica só o Relatório.
   comercial: [
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    // CRM nativo (passo 1): o papel comercial é quem mais usa Leads/Contatos no dia a dia.
+    { key: 'comercial', modulo: 'comercial', label: 'Comercial', children: [
+      { key: 'leads', label: 'Leads/Contatos', page: 'leads-lista' },
+    ]},
   ],
 };
 
@@ -881,6 +890,7 @@ const ICONE_MENU = {
   'solicitacoes-rh': '🙋',
   'atividades-dia': '🕒',
   'despesas-justificadas': '🧾',
+  'comercial': '💼',
   'agendamentos-outlook': '📅',
 };
 
@@ -1004,6 +1014,7 @@ async function ir(pagina) {
     if (pagina === 'aprovacoes-biblioteca') return renderAprovacoesBiblioteca();
     if (pagina === 'solicitacoes-edicao-biblioteca') return renderSolicitacoesEdicao();
     if (pagina === 'clientes') return renderClientes();
+    if (pagina === 'leads-lista') return renderLeads();
     if (pagina === 'equipamentos') return renderMeusEquipamentos();
     if (pagina === 'equipamentos-menu') return renderEquipamentosMenu();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
@@ -15252,6 +15263,107 @@ async function excluirCliente(id) {
     await api(`/api/clientes/${id}`, { method: 'DELETE' });
     mostrarToast('Cliente excluído.');
     renderClientes();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- COMERCIAL: LEADS/CONTATOS (CRM nativo, passo 1) ----------
+// prospect que ainda não é cliente oficial — vira cliente de verdade só quando alguém usa o
+// botão "Converter em cliente" (ver POST /api/leads/:id/converter em server.js).
+const ESTAGIO_LEAD_LABEL = { novo: 'Novo', contatado: 'Contatado', desqualificado: 'Desqualificado' };
+
+async function renderLeads() {
+  const { leads } = await api('/api/leads');
+  window._leadsCache = leads;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end;">
+      <div><h1>Leads/Contatos</h1><p>${leads.length} cadastrado(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormLead()">+ Novo lead</button>
+    </div>
+    <div id="form-lead"></div>
+    <div class="panel"><table>
+      <tr><th>Empresa</th><th>Contato</th><th>Telefone</th><th>Origem</th><th>Estágio</th><th></th></tr>
+      ${leads.length ? leads.map((l) => `
+        <tr>
+          <td data-label="Empresa">${esc(l.nome_empresa)}</td>
+          <td data-label="Contato">${esc(l.contato || '—')}</td>
+          <td data-label="Telefone">${esc(l.telefone || '—')}</td>
+          <td data-label="Origem">${esc(l.origem || '—')}</td>
+          <td data-label="Estágio">${esc(ESTAGIO_LEAD_LABEL[l.estagio] || l.estagio)}</td>
+          <td class="td-acoes">
+            ${l.convertido_cliente_id ? `<span class="tag tag-green">Convertido em cliente</span>` : `
+              <button class="btn-outline-sm" onclick="editarLead(${l.id})">Editar</button>
+              <button class="btn-outline-sm" onclick="converterLead(${l.id})">Converter em cliente</button>
+            `}
+          </td>
+        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum lead cadastrado ainda.</td></tr>`}
+    </table></div>`;
+}
+
+let leadEmEdicaoId = null;
+function mostrarFormLead(lead) {
+  leadEmEdicaoId = lead ? lead.id : null;
+  document.getElementById('form-lead').innerHTML = `
+    <div class="panel"><div class="panel-head">${lead ? 'Editar lead' : 'Novo lead'}</div>
+      <div class="form-grid">
+        <div class="full"><label>Nome da empresa*</label><input id="nl-nome" value="${lead ? esc(lead.nome_empresa) : ''}"></div>
+        <div><label>Contato</label><input id="nl-contato" placeholder="Nome de quem atendeu" value="${lead ? esc(lead.contato || '') : ''}"></div>
+        <div><label>Telefone</label><input id="nl-telefone" value="${lead ? esc(lead.telefone || '') : ''}"></div>
+        <div><label>E-mail</label><input id="nl-email" value="${lead ? esc(lead.email || '') : ''}"></div>
+        <div><label>Origem</label><input id="nl-origem" placeholder="Ex.: Indicação, site, visita" value="${lead ? esc(lead.origem || '') : ''}"></div>
+        <div><label>Estágio</label><select id="nl-estagio">${Object.entries(ESTAGIO_LEAD_LABEL).map(([v, label]) => `<option value="${v}" ${lead && lead.estagio === v ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+        <div class="full"><label>Observações</label><textarea id="nl-observacoes">${lead ? esc(lead.observacoes || '') : ''}</textarea></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarLead()">${lead ? 'Salvar alterações' : 'Salvar lead'}</button>
+        ${lead ? `<button class="btn btn-ghost btn-sm" onclick="cancelarEdicaoLead()">Cancelar</button>` : ''}
+      </div>
+    </div>`;
+}
+
+function editarLead(id) {
+  const lead = (window._leadsCache || []).find((l) => l.id === id);
+  if (!lead) return;
+  mostrarFormLead(lead);
+  document.getElementById('form-lead').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cancelarEdicaoLead() {
+  leadEmEdicaoId = null;
+  document.getElementById('form-lead').innerHTML = '';
+}
+
+async function salvarLead() {
+  const nome = document.getElementById('nl-nome').value.trim();
+  if (!nome) return alert('Informe o nome da empresa.');
+  const body = {
+    nome_empresa: nome,
+    contato: document.getElementById('nl-contato').value,
+    telefone: document.getElementById('nl-telefone').value,
+    email: document.getElementById('nl-email').value,
+    origem: document.getElementById('nl-origem').value,
+    estagio: document.getElementById('nl-estagio').value,
+    observacoes: document.getElementById('nl-observacoes').value,
+  };
+  try {
+    if (leadEmEdicaoId) {
+      await api(`/api/leads/${leadEmEdicaoId}`, { method: 'PUT', body });
+      leadEmEdicaoId = null;
+      mostrarToast('Lead atualizado.');
+    } else {
+      await api('/api/leads', { method: 'POST', body });
+      mostrarToast('Lead cadastrado.');
+    }
+    renderLeads();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function converterLead(id) {
+  if (!(await mostrarConfirmacao('Converter este lead em cliente? Um cadastro de cliente será criado a partir dos dados do lead.'))) return;
+  try {
+    await api(`/api/leads/${id}/converter`, { method: 'POST' });
+    mostrarToast('Lead convertido em cliente.');
+    renderLeads();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
