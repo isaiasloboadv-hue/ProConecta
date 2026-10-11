@@ -105,6 +105,59 @@ const PRESETS_PERFIL_SEGMENTO = {
     tipos_relatorio_ativos: ['completo', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
     escala_ativa: false,
   },
+  // pedido do usuário: "pesquisar modelos tipos de relatório que é compatível com cada
+  // atividade de empresas" — presets por segmento real de manutenção técnica. Padrão: toda
+  // "prestadora_manutencao" (atende cliente externo) ganha aceite_entrega (formaliza a entrega
+  // do serviço pro cliente); toda "industria_equipe_propria" (manutenção interna, sem cliente
+  // externo) fica só com os 4 tipos universais, sem aceite_entrega (não tem a quem "entregar").
+  // "promotor"/"entrega_teste"/"devolutivo" (fluxo de demonstração/venda de equipamento) e
+  // "preventiva2" (modelo de referência específico da PRO Marking) ficam de fora de todos —
+  // são do negócio de marcação/gravação, não de manutenção em geral.
+  'prestadora_manutencao:refrigeracao_climatizacao': {
+    terminologia: { equipamento: 'Unidade' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+  },
+  'prestadora_manutencao:elevadores': {
+    terminologia: { equipamento: 'Elevador' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega', 'levantamento_tecnico'],
+  },
+  'prestadora_manutencao:geradores_nobreak': {
+    terminologia: { equipamento: 'Gerador' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+  },
+  'prestadora_manutencao:automacao_cftv_seguranca': {
+    terminologia: { equipamento: 'Sistema' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega', 'levantamento_tecnico'],
+  },
+  'prestadora_manutencao:hidraulica_bombas': {
+    terminologia: { equipamento: 'Bomba' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+  },
+  'industria_equipe_propria:eletrica_industrial': {
+    terminologia: { equipamento: 'Quadro Elétrico' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+  'industria_equipe_propria:mecanica_industrial': {
+    terminologia: { equipamento: 'Máquina' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+  'industria_equipe_propria:refrigeracao_climatizacao': {
+    terminologia: { equipamento: 'Unidade' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+  'industria_equipe_propria:hidraulica': {
+    terminologia: { equipamento: 'Bomba' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
 };
 function presetPerfilSegmento(perfil, segmento) {
   const preset = PRESETS_PERFIL_SEGMENTO[`${perfil}:${segmento}`];
@@ -1139,6 +1192,6 @@ module.exports = {
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,
-  PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento,
+  PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento, PRESETS_PERFIL_SEGMENTO,
   obterPool, COLECOES_EM_TABELA,
 };
