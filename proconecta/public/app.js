@@ -649,6 +649,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'agenda': 'Agenda',
     'fila-atendimento': 'Chat',
     'relatorio-manutencao': 'Relatório',
+    'links-externos': 'Links',
     'calendario-tecnico': 'Calendário',
     'biblioteca': 'Biblioteca',
     'fila-reparo': 'Setor Reparo',
@@ -661,6 +662,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'chat-admin': 'Chat',
     'aprovacoes-visitas': 'Ordem de Serviço',
     'relatorio-manutencao': 'Relatório',
+    'links-externos': 'Links',
     'biblioteca': 'Biblioteca',
     'clientes': 'Clientes',
     'equipamentos': 'Equipamentos',
@@ -690,6 +692,10 @@ const NAV = {
     // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    // pedido do usuário: menu com o link dos formulários que o cliente preenche por fora, sem
+    // login (hoje só o Briefing de Pré-Visita e a Entrega para Teste têm isso) — igual ele já
+    // mandava o link do Briefing, só que centralizado numa lista com botão Encaminhar.
+    { key: 'links-externos', modulo: 'os_chamados', label: 'Links', page: 'links-externos' },
     { key: 'calendario-tecnico', modulo: 'os_chamados', label: 'Calendário', page: 'calendario-tecnico' },
     // pedido do usuário: "como conectar minha agenda do outlook, quero criar um menu agendamentos,
     // e puxar tudo que tem na agenda do outlook" — cada técnico conecta a própria conta Microsoft
@@ -732,6 +738,7 @@ const NAV = {
     // os outros tipos (Completo, Preventiva...) continuam exclusivos do técnico (ver
     // tiposRelatorioManual em renderRelatorioManutencao).
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'links-externos', modulo: 'os_chamados', label: 'Links', page: 'links-externos' },
     // pedido do usuário: "no menu biblioteca e equipamentos crie só o menu principal... ao clicar
     // irá abrir uma página individual com widgets com cores igual o widgets do home. Eles estão
     // os submenus" — era uma árvore com filhos (Acessar/Aprovação/Solicitações/Adicionar/Ranking);
@@ -814,6 +821,7 @@ const NAV = {
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     { key: 'kpis', modulo: 'os_chamados', label: 'Home', page: 'kpis-dashboard' },
     { key: 'relatorio-manutencao', modulo: 'os_chamados', label: 'Relatório', page: 'relatorio-manutencao' },
+    { key: 'links-externos', modulo: 'os_chamados', label: 'Links', page: 'links-externos' },
     { key: 'prestacao-contas', modulo: 'prestacao_contas', label: 'Prestação de Contas', page: 'prestacao-contas-minhas' },
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
       { key: 'acessar', label: 'Acessar biblioteca', children: [
@@ -854,6 +862,7 @@ const ICONE_MENU = {
   agenda: '📅',
   'fila-atendimento': '💬',
   'relatorio-manutencao': '📝',
+  'links-externos': '🔗',
   'calendario-tecnico': '🗓️',
   biblioteca: '📚',
   'fila-reparo': '🔧',
@@ -978,6 +987,7 @@ async function ir(pagina) {
   try {
     if (pagina === 'agenda') return renderAgenda();
     if (pagina === 'relatorio-manutencao') return renderRelatorioManutencao();
+    if (pagina === 'links-externos') return renderLinksExternos();
     if (pagina === 'relatorio-automatico') return renderRelatorioAutomatico();
     if (pagina === 'relatorio-ciclagem') return mostrarFormCiclagem();
     if (pagina === 'calendario-tecnico') return renderCalendarioTecnico();
@@ -7895,6 +7905,43 @@ let relatorioManutModoTodos = false;
 function alternarFiltroRelatorioManutTodos(valor) {
   relatorioManutModoTodos = valor;
   renderRelatorioManutencao();
+}
+
+// pedido do usuário: menu com o link dos formulários que o cliente preenche por fora, sem
+// precisar logar no sistema — hoje só existem dois: o Briefing de Pré-Visita (página solta,
+// public/briefing-pre-visita.html, sempre o mesmo link) e a Entrega para Teste (um link por
+// atendimento, gerado dentro do próprio formulário — ver gerarLinkEntregaTeste). Lista simples,
+// um botão Encaminhar por item.
+async function copiarLinkExterno(link) {
+  try { await navigator.clipboard.writeText(link); mostrarToast('Link copiado.'); }
+  catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o link manualmente.'); }
+}
+function linhaLinkExterno(titulo, descricao, acoesHtml) {
+  return `
+    <div class="step-item" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div style="flex:1; min-width:220px;">
+          <b>${esc(titulo)}</b>
+          <p style="color:var(--ink-soft); font-size:13px; margin:2px 0 0;">${esc(descricao)}</p>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">${acoesHtml}</div>
+      </div>
+    </div>`;
+}
+function renderLinksExternos() {
+  const linkBriefing = `${window.location.origin}/briefing-pre-visita.html`;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Links</h1><p>Formulários que o cliente preenche por fora, sem precisar de login — encaminhe o link de cada um.</p></div>
+    <div class="panel">
+      ${linhaLinkExterno('Briefing de Pré-Visita', 'Levantamento preenchido antes da visita técnica, direto por quem recebe o link.', `
+        <button class="btn-outline-sm" onclick="copiarLinkExterno('${esc(linkBriefing)}')">Copiar link</button>
+        <a class="btn-outline-sm" href="https://wa.me/?text=${encodeURIComponent('Segue o link para preencher o briefing de pré-visita: ' + linkBriefing)}" target="_blank" rel="noopener">Encaminhar no WhatsApp</a>
+      `)}
+      ${linhaLinkExterno('Entrega para Teste', 'Cliente confirma o recebimento (e depois a devolução) de um equipamento em teste, com assinatura — o link é gerado por atendimento, dentro do formulário.', `
+        <button class="btn btn-outline-sm" onclick="mostrarFormRelatorioManual('entrega_teste')">Abrir e gerar link</button>
+      `)}
+    </div>`;
 }
 
 async function renderRelatorioManutencao() {
