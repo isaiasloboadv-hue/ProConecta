@@ -55,6 +55,13 @@ function encontrarOuCriarChamado(data, nextId, telefone, textoPrimeiraMensagem) 
   const cliente = encontrarClientePorTelefone(data, telefone);
   chamado = {
     id: nextId(data, 'chamados'),
+    // pedido do usuário (varredura de vazamento PRO Marking): o WhatsApp hoje usa um único
+    // WHATSAPP_TOKEN/WHATSAPP_PHONE_ID global (ver topo do arquivo) — ainda não existe número de
+    // WhatsApp por empresa, então todo chamado que chega por aqui é mesmo da empresa que tem essa
+    // integração configurada (PRO Marking). Fixar isso explicitamente, em vez de deixar
+    // empresa_id undefined, evita qualquer dado de outra empresa aparecer aqui por acaso e deixa
+    // claro, se um dia existir WhatsApp por empresa, que este é o lugar a trocar.
+    empresa_id: 1,
     cliente_id: cliente ? cliente.id : null,
     telefone_whatsapp: telefone,
     origem: 'whatsapp',

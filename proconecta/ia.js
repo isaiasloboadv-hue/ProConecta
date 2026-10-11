@@ -12,8 +12,12 @@ function ativa() {
   return !!ANTHROPIC_API_KEY;
 }
 
-function buscarBiblioteca(data, { termo, equipamento } = {}) {
-  let lista = data.registros.filter((r) => r.status === 'aprovado');
+// pedido do usuário (varredura de vazamento PRO Marking): sem empresaId aqui, a IA buscava na
+// biblioteca de TODAS as empresas — qualquer cliente no chat/WhatsApp de outra empresa recebia
+// defeitos/soluções da PRO Marking (e de qualquer outra empresa) misturados nos resultados. Cada
+// empresa só pode ver a própria biblioteca aprovada, igual toda rota de /api/registros já faz.
+function buscarBiblioteca(data, { termo, equipamento } = {}, empresaId) {
+  let lista = data.registros.filter((r) => r.status === 'aprovado' && r.empresa_id === empresaId);
   if (equipamento) {
     const eq = String(equipamento).toLowerCase();
     lista = lista.filter((r) => (r.equipamento_tipo || '').toLowerCase().includes(eq) || (r.equipamento_modelo || '').toLowerCase().includes(eq));
@@ -270,7 +274,11 @@ const MAX_MENSAGENS_HISTORICO = 20;
 // direto no chamado, acrescenta a resposta da IA em chamado.mensagens e devolve esse texto —
 // quem chamou decide o que fazer com ele (mostrar no chat, mandar por WhatsApp, etc.).
 async function processarTurno(data, chamado) {
-  const nomeEmpresa = (data.empresas.find((e) => e.id === 1) || {}).nome || 'nossa empresa';
+  // pedido do usuário (varredura de vazamento PRO Marking): isso estava fixo em "empresa id 1" —
+  // qualquer chamado de qualquer outra empresa fazia a IA se apresentar como "assistente de
+  // suporte técnico da PRO Marking". Cada chamado já nasce com o empresa_id de quem criou
+  // (tenant.criar em server.js), então usa esse, nunca o id 1 fixo.
+  const nomeEmpresa = (data.empresas.find((e) => e.id === chamado.empresa_id) || {}).nome || 'nossa empresa';
   const historico = chamado.mensagens
     .filter((m) => m.autor === 'cliente' || m.autor === 'ia')
     .slice(-MAX_MENSAGENS_HISTORICO)
@@ -290,7 +298,7 @@ async function processarTurno(data, chamado) {
       const resultados = blocosFerramenta.map((bloco) => {
         let resultado;
         if (bloco.name === 'buscar_biblioteca') {
-          resultado = buscarBiblioteca(data, bloco.input);
+          resultado = buscarBiblioteca(data, bloco.input, chamado.empresa_id);
         } else if (bloco.name === 'listar_equipamentos_cliente') {
           resultado = chamado.cliente_id ? listarEquipamentosCliente(data, chamado.cliente_id) : { erro: 'Cliente não identificado no cadastro.' };
         } else if (bloco.name === 'escalar_tecnico') {
@@ -347,4 +355,4 @@ async function processarTurno(data, chamado) {
   return textoFinal;
 }
 
-module.exports = { ativa, processarTurno, lerEtiqueta, lerRecibo, calcularSla, PERGUNTAS_SLA };
+module.exports = { ativa, processarTurno, buscarBiblioteca, lerEtiqueta, lerRecibo, calcularSla, PERGUNTAS_SLA };

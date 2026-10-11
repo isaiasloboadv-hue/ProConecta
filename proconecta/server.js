@@ -5882,7 +5882,10 @@ rota('POST', /^\/api\/chamados\/(\d+)\/assumir$/, async (req, res, m) => {
   db.save(data);
 
   if (chamado.origem === 'whatsapp' && chamado.telefone_whatsapp) {
-    const nomeEmpresa = (data.empresas.find((e) => e.id === 1) || {}).nome || 'a empresa';
+    // pedido do usuário (varredura de vazamento PRO Marking): isso estava fixo em "empresa id 1",
+    // mesmo esta função já sendo isolada por empresa (user.empresa_id/chamado em outros pontos) —
+    // usa o empresa_id do próprio chamado, igual o resto da função já faz.
+    const nomeEmpresa = (data.empresas.find((e) => e.id === chamado.empresa_id) || {}).nome || 'a empresa';
     whatsapp.enviarMensagemWhatsApp(chamado.telefone_whatsapp, `${user.nome}, de ${nomeEmpresa}, assumiu seu atendimento e vai continuar por aqui.`).catch(() => {});
   }
   enviarJSON(res, 200, { chamado: await chamadoComMensagens(data, chamado), agenda: agendaComDetalhes(data, osItem) });

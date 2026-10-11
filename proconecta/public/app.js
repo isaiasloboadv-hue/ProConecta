@@ -206,6 +206,11 @@ function aplicarMarcaNaTela() {
 // carregada (window._empresa null — preview sem login, ambiente de teste), trata como padrão
 // (mesmo comportamento de sempre) só pra esses casos sem contexto real nenhum.
 function ehEmpresaPromarking() { return !window._empresa || window._empresa.id === 1; }
+// pedido do usuário (varredura de vazamento PRO Marking): "Código PMK" é a sigla interna de peça
+// da PRO Marking (fornecedor/catálogo próprio) — aparecia sem nenhuma adaptação em toda tela e
+// PDF de peças fornecidas/utilizadas, pra qualquer empresa. Rótulo genérico pra quem não é a PRO
+// Marking.
+function rotuloCodigoPeca() { return ehEmpresaPromarking() ? 'Código PMK' : 'Código da peça'; }
 function empresaNome() { return (window._empresa && window._empresa.nome) || 'PRO Marking'; }
 function empresaSite() { return (window._empresa && window._empresa.site) || (ehEmpresaPromarking() ? 'promarking.com.br' : ''); }
 function empresaWhatsapp() { return (window._empresa && window._empresa.whatsapp) || (ehEmpresaPromarking() ? '12 99718-7506' : ''); }
@@ -3036,7 +3041,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <h2>Dados do equipamento</h2>
       <div class="form-grid">
         <div class="full" id="na-equip-select-wrap"><label>${t('equipamento', 'Equipamento')}</label><select id="na-equip" onchange="preencherNumeroSerieNovaAtividade()"></select></div>
-        <div class="full hidden" id="na-equip-manual-wrap"><label>Equipamento*</label><input id="na-equip-manual" placeholder="Ex.: MP5-80P" value="${agendaItem ? esc(agendaItem.equipamento_manual || '') : ''}"></div>
+        <div class="full hidden" id="na-equip-manual-wrap"><label>Equipamento*</label><input id="na-equip-manual" placeholder="Ex.: Compressor XYZ-200" value="${agendaItem ? esc(agendaItem.equipamento_manual || '') : ''}"></div>
         <div class="full" id="na-problema-wrap"><label>Problema relatado / serviço</label><textarea id="na-problema" placeholder="Descreva o problema relatado pelo cliente ou o serviço a ser feito...">${agendaItem ? esc(agendaItem.problema || '') : ''}</textarea></div>
       </div>
       <div class="form-grid" id="na-laudo-equip-wrap">
@@ -3086,7 +3091,7 @@ async function mostrarFormNovaAtividade(agendaItem, origemSolicitacao) {
       <div id="na-sla-perguntas" class="form-grid hidden">
         ${PERGUNTAS_SLA.map((p) => `
           <div class="full">
-            <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
+            <label style="text-transform:none; font-weight:600;">${esc(perguntaSla(p))}</label>
             <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="sim" style="width:auto;" onchange="atualizarSugestaoSlaNovaAtividade()"> Sim</label>
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="na-sla-${p.chave}" value="nao" style="width:auto;" onchange="atualizarSugestaoSlaNovaAtividade()"> Não</label>
@@ -6793,7 +6798,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
 
   tituloEsquerda('Peças fornecidas');
   {
-    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.6 }, { t: 'Código PMK', frac: 0.28 }];
+    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.6 }, { t: rotuloCodigoPeca(), frac: 0.28 }];
     const larguras = cols.map((c) => largura * c.frac);
     if (y + 20 > pageH - margem) novaPagina();
     let cx = margem;
@@ -7239,7 +7244,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   {
     // pedido do usuário: cabeçalho de texto fino (sem barra navy) e coluna "Qtd." extra, igual
     // à tabela do check-list do Termo — mesmo padrão visual nas 2 tabelas do documento.
-    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.48 }, { t: 'Código PMK', frac: 0.27 }, { t: 'Qtd.', frac: 0.15 }];
+    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.48 }, { t: rotuloCodigoPeca(), frac: 0.27 }, { t: 'Qtd.', frac: 0.15 }];
     const larguras = cols.map((c) => largura * c.frac);
     if (y + 24 > pageH - margem) novaPagina();
     let cx = margem;
@@ -7501,7 +7506,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 
   tituloEsquerda('Peças fornecidas');
   {
-    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.52 }, { t: 'Código PMK', frac: 0.24 }, { t: 'Qtd.', frac: 0.14 }];
+    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.52 }, { t: rotuloCodigoPeca(), frac: 0.24 }, { t: 'Qtd.', frac: 0.14 }];
     const larguras = cols.map((c) => largura * c.frac);
     if (y + 20 > pageH - margem) novaPagina();
     let cx = margem;
@@ -8690,7 +8695,7 @@ function renderPecasRelatorioManut() {
       <div class="step-main">
         <div class="step-num">${i + 1}</div>
         <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioManutDraft.pecas[${i}].descricao=this.value;">
-        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioManutDraft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="${rotuloCodigoPeca()}" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioManutDraft.pecas[${i}].codigo_pmk=this.value;">
         <input placeholder="Qtd" value="${esc(p.quantidade || '')}" style="flex:0 0 60px;" oninput="relatorioManutDraft.pecas[${i}].quantidade=this.value;">
         <button class="step-rm" onclick="removerPecaRelatorioManut(${i})">×</button>
       </div>
@@ -9144,7 +9149,7 @@ function renderPecasPreventiva() {
       <div class="step-main">
         <div class="step-num">${i + 1}</div>
         <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioPreventivaDraft.pecas[${i}].descricao=this.value;">
-        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioPreventivaDraft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="${rotuloCodigoPeca()}" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioPreventivaDraft.pecas[${i}].codigo_pmk=this.value;">
         <button class="step-rm" onclick="removerPecaPreventiva(${i})">×</button>
       </div>
     </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
@@ -9634,7 +9639,7 @@ function renderPecasPreventiva2() {
       <div class="step-main">
         <div class="step-num">${i + 1}</div>
         <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioPreventiva2Draft.pecas[${i}].descricao=this.value;">
-        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioPreventiva2Draft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="${rotuloCodigoPeca()}" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioPreventiva2Draft.pecas[${i}].codigo_pmk=this.value;">
         <button class="step-rm" onclick="removerPecaPreventiva2(${i})">×</button>
       </div>
     </div>`).join('') || '<p style="color:var(--ink-soft); font-size:13px;">Nenhuma peça adicionada.</p>';
@@ -10129,7 +10134,7 @@ function renderPecasCorretiva() {
       <div class="step-main">
         <div class="step-num">${i + 1}</div>
         <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioCorretivaDraft.pecas[${i}].descricao=this.value;">
-        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioCorretivaDraft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="${rotuloCodigoPeca()}" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioCorretivaDraft.pecas[${i}].codigo_pmk=this.value;">
         <input placeholder="Qtd" value="${esc(p.quantidade || '')}" style="flex:0 0 60px;" oninput="relatorioCorretivaDraft.pecas[${i}].quantidade=this.value;">
         <button class="step-rm" onclick="removerPecaCorretiva(${i})">×</button>
       </div>
@@ -10550,7 +10555,7 @@ function renderPecasTecnico() {
       <div class="step-main">
         <div class="step-num">${i + 1}</div>
         <input placeholder="Descrição da peça" value="${esc(p.descricao || '')}" style="flex:2;" oninput="relatorioTecnicoDraft.pecas[${i}].descricao=this.value;">
-        <input placeholder="Código PMK" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioTecnicoDraft.pecas[${i}].codigo_pmk=this.value;">
+        <input placeholder="${rotuloCodigoPeca()}" value="${esc(p.codigo_pmk || '')}" style="flex:1;" oninput="relatorioTecnicoDraft.pecas[${i}].codigo_pmk=this.value;">
         <input placeholder="Qtd" value="${esc(p.quantidade || '')}" style="flex:0 0 60px;" oninput="relatorioTecnicoDraft.pecas[${i}].quantidade=this.value;">
         <button class="step-rm" onclick="removerPecaTecnico(${i})">×</button>
       </div>
@@ -10807,7 +10812,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
 
   tituloEsquerda('Peças fornecidas');
   {
-    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.52 }, { t: 'Código PMK', frac: 0.24 }, { t: 'Qtd.', frac: 0.14 }];
+    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.52 }, { t: rotuloCodigoPeca(), frac: 0.24 }, { t: 'Qtd.', frac: 0.14 }];
     const larguras = cols.map((c) => largura * c.frac);
     if (y + 20 > pageH - margem) novaPagina();
     let cx = margem;
@@ -11603,7 +11608,7 @@ function mostrarFormRelatorioEntregaTeste(existente) {
     <div class="panel">
       <h2>Equipamento e prazo do teste</h2>
       <div class="form-grid">
-        <div><label>Equipamento*</label><input id="ret-equipamento" placeholder="Ex.: MP5-80P" value="${esc(d.equipamento)}"></div>
+        <div><label>Equipamento*</label><input id="ret-equipamento" placeholder="Ex.: Compressor XYZ-200" value="${esc(d.equipamento)}"></div>
         <div><label>Nº de série</label><input id="ret-numero_serie" placeholder="Ex.: SN-000000" value="${esc(d.numero_serie)}"></div>
         <div><label>Data de entrega*</label><input id="ret-data_entrega" type="date" value="${esc(d.data_entrega)}"></div>
         <div><label>Data prevista de devolução*</label><input id="ret-data_prevista_devolucao" type="date" value="${esc(d.data_prevista_devolucao)}"></div>
@@ -13216,7 +13221,7 @@ function wTabelaPecas(pecas) {
     children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, bold: true, color: 'FFFFFF', size: 18 })] })],
   });
   const cell = (t, i) => new docx.TableCell({ width: { size: larguras[i], type: docx.WidthType.DXA }, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: t, size: 18, color: WORD_COR.ink })] })] });
-  const linhas = [new docx.TableRow({ children: [headerCell('Item', 0), headerCell('Descrição da peça', 1), headerCell('Código PMK', 2), headerCell('Qtd.', 3)] })];
+  const linhas = [new docx.TableRow({ children: [headerCell('Item', 0), headerCell('Descrição da peça', 1), headerCell(rotuloCodigoPeca(), 2), headerCell('Qtd.', 3)] })];
   if (!pecas.length) {
     linhas.push(new docx.TableRow({ children: [new docx.TableCell({ columnSpan: 4, margins, children: [new docx.Paragraph({ children: [new docx.TextRun({ text: 'Nenhuma peça informada', italics: true, color: WORD_COR.inkSoft, size: 18 })] })] })] }));
   } else {
@@ -14273,7 +14278,7 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
 
   tituloEsquerda('Peças Fornecidas');
   {
-    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.48 }, { t: 'Código PMK', frac: 0.22 }, { t: 'Qtd.', frac: 0.18 }];
+    const cols = [{ t: 'Item', frac: 0.12 }, { t: 'Descrição da peça', frac: 0.48 }, { t: rotuloCodigoPeca(), frac: 0.22 }, { t: 'Qtd.', frac: 0.18 }];
     const larguras = cols.map((c) => largura * c.frac);
     if (y + 20 > pageH - margem) novaPagina();
     let cx = margem;
@@ -14790,7 +14795,7 @@ function renderFormDefeito(main, prefill) {
       <div class="form-grid">
         <div class="full"><label>Título resumo</label><input id="fd-titulo" value="${esc(prefill ? prefill.titulo : '')}" placeholder="ex: Máquina não liga após queda de energia"></div>
         <div><label>${t('equipamento', 'Equipamento')}</label><input id="fd-equip-tipo" value="${esc(prefill ? prefill.equipamento_tipo : '')}" placeholder="ex: Máquina de Gelo"></div>
-        <div><label>Modelo</label><input id="fd-equip-modelo" value="${esc(prefill ? prefill.equipamento_modelo : '')}" placeholder="ex: MP5-80P"></div>
+        <div><label>Modelo</label><input id="fd-equip-modelo" value="${esc(prefill ? prefill.equipamento_modelo : '')}" placeholder="ex: XYZ-200"></div>
         <div><label>Número de série (opcional)</label><input id="fd-serie" value="${esc(prefill ? prefill.numero_serie : '')}"></div>
         <div class="full"><label>Defeito/sintoma encontrado</label><textarea id="fd-sintoma" placeholder="O que foi observado...">${esc(prefill ? prefill.sintoma : '')}</textarea></div>
         <div class="full"><label>Causa identificada</label><textarea id="fd-causa" placeholder="Por que aconteceu...">${esc(prefill ? prefill.causa : '')}</textarea></div>
@@ -16923,13 +16928,18 @@ const PERGUNTAS_SLA = [
   { chave: 'linha_parada', pergunta: 'A linha de produção está parada por causa desse problema?' },
   { chave: 'plano_preventiva_ativo', pergunta: 'O cliente tem plano de manutenção preventiva ativo?' },
   { chave: 'possui_maquina_reserva', pergunta: 'O cliente possui mais máquinas para a mesma função (reserva/backup)?' },
-  { chave: 'compromete_qualidade', pergunta: 'O problema compromete a qualidade da gravação/marcação?' },
+  { chave: 'compromete_qualidade', pergunta: 'O problema compromete a qualidade da gravação/marcação?', pergunta_generica: 'O problema compromete a qualidade do serviço/produto final?' },
   { chave: 'erro_intermitente', pergunta: 'O erro ocorre de forma intermitente (vai e volta)?' },
   { chave: 'reparo_sem_sucesso', pergunta: 'A máquina já passou por tentativas de reparo sem sucesso?' },
   { chave: 'acesso_remoto', pergunta: 'A máquina permite acesso remoto pra diagnóstico?' },
   { chave: 'duvida_comum_top5', pergunta: 'O erro relatado faz parte das dúvidas mais comuns (Top 5)?' },
   { chave: 'solucao_no_manual', pergunta: 'A informação/solução pra esse problema está no manual do equipamento?' },
 ];
+// pedido do usuário (varredura de vazamento PRO Marking): "gravação/marcação" na pergunta de
+// qualidade é específico do negócio de equipamento a laser da PRO Marking — qualquer outra
+// empresa vê a versão genérica (pergunta_generica, ver PERGUNTAS_SLA acima); quem não tem uma
+// versão genérica (as outras 10 perguntas) usa a mesma pergunta de sempre, pra ninguém.
+function perguntaSla(p) { return (!ehEmpresaPromarking() && p.pergunta_generica) ? p.pergunta_generica : p.pergunta; }
 
 function cardAtendimentoFila(c) {
   const naoLido = c.tecnico_id && !c.lida_tecnico;
@@ -17053,7 +17063,7 @@ async function encaminharPosVenda(agendaId) {
       <div id="pv-sla-perguntas" class="form-grid hidden">
         ${PERGUNTAS_SLA.map((p) => `
           <div class="full">
-            <label style="text-transform:none; font-weight:600;">${esc(p.pergunta)}</label>
+            <label style="text-transform:none; font-weight:600;">${esc(perguntaSla(p))}</label>
             <div style="display:flex; gap:18px; margin-top:4px; margin-bottom:6px;">
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="pv-sla-${p.chave}" value="sim" style="width:auto;"> Sim</label>
               <label style="display:flex; align-items:center; gap:6px; font-weight:400; text-transform:none;"><input type="radio" name="pv-sla-${p.chave}" value="nao" style="width:auto;"> Não</label>
