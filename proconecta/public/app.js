@@ -16000,15 +16000,30 @@ function gerarPdfProposta(p, oportunidade, cliente, logoDataUri) {
   const largura = pageW - margem * 2;
   let y = margem;
 
-  if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, y - 10, 24, 28); } catch (e) {} }
-  doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text(empresaNome(), margem + (logoDataUri ? 32 : 0), y + 8);
+  // Cabeçalho da marca: monograma N + NexorConnect, slogan embaixo.
+  // O título em destaque é o nome da empresa logada. O restante do PDF não muda.
+  const mx = margem;
+  const my = y - 4;
+  doc.setFillColor(...PDF_COR.navy);
+  doc.roundedRect(mx, my, 28, 28, 5, 5, 'F');
+  doc.setFillColor(...PDF_COR.orange);
+  doc.triangle(mx + 15, my + 28, mx + 28, my + 15, mx + 28, my + 28, 'F');
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('N', mx + 8, my + 19);
+  const textoX = mx + 36;
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('NexorConnect', textoX, my + 12);
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text('Tecnologia', textoX, my + 24);
   doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
   doc.text(`ORÇAMENTO Nº ${String(p.id).padStart(4, '0')}`, pageW - margem, y + 4, { align: 'right' });
   doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
   const dataEmissao = p.criado_em ? new Date(p.criado_em) : new Date();
   doc.text(`Emitido em ${dataEmissao.toLocaleDateString('pt-BR')}`, pageW - margem, y + 18, { align: 'right' });
-  y += 32;
+  y += 40;
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(limparPdf(empresaNome()), margem, y);
+  y += 16;
   doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 22;
 
   // bloco "Para:" — dados do cliente vinculado à oportunidade, ou só o título quando ainda não
