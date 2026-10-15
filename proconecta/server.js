@@ -3562,6 +3562,12 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       tenant.listar(data, 'agenda', user.empresa_id)
         .filter((a) => a.tecnico_id === user.id && !a.lida_tecnico)
         .map((a) => {
+          // versão Restaurantes/rede multiunidade: O.S. de loja usa o mesmo sinalizador
+          // (lida_tecnico) mas tem tela própria (Minha loja), não a Agenda de cliente externo.
+          if (a.filial_id != null) {
+            const filial = data.filiais.find((f) => f.id === a.filial_id && f.empresa_id === a.empresa_id);
+            return { id: a.id, tipo: 'os_filial_atribuida', texto: `Nova O.S. — ${filial ? filial.nome : 'sua loja'}: ${a.problema || ''}`, registro_id: a.id };
+          }
           const cliente = data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id);
           return { id: a.id, tipo: 'os_atribuida', texto: `Nova Ordem de Serviço atribuída a você${cliente ? ' — ' + cliente.nome_empresa : ''}`, registro_id: a.id };
         })
@@ -3617,6 +3623,54 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
           const tecnico = data.usuarios.find((u) => u.id === s.tecnico_id && u.empresa_id === user.empresa_id);
           return { id: s.id, tipo: 'solicitacao_rh_pendente', texto: `${tecnico ? tecnico.nome : 'Um técnico'} pediu ${LABEL_SOLICITACAO_RH[s.tipo]}`, registro_id: s.id };
         })
+    );
+    // versão Restaurantes/rede multiunidade (Fase 5 — Gestão e comunicação): administrador é a
+    // "diretoria" que decide a última etapa de autorização de compra de peça.
+    notificacoes = notificacoes.concat(
+      tenant.listar(data, 'solicitacoes_peca', user.empresa_id)
+        .filter((s) => s.status === 'aguardando_diretoria')
+        .map((s) => ({ id: s.id, tipo: 'peca_aguardando_diretoria', texto: `Autorização de compra pendente: ${s.descricao}`, registro_id: s.id }))
+    );
+  } else if (user.papel === 'gerente_loja' || user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
+    // versão Restaurantes/rede multiunidade (Fase 5): os 3 papéis novos não tinham sininho
+    // nenhum até aqui (caíam no "nenhum bloco corresponde" = lista sempre vazia) — cada um só
+    // vê o que precisa de AÇÃO dele agora, dentro do próprio escopo (ver escopo.js).
+    const completo = usuarioCompleto(data, user);
+    const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, completo).map((f) => f.id));
+    const solicitacoesEscopo = tenant.listar(data, 'solicitacoes_peca', user.empresa_id).filter((s) => filiaisIds.has(s.filial_id));
+    if (user.papel === 'gerente_loja' || user.papel === 'coordenador_tecnico') {
+      const campoCiente = user.papel === 'gerente_loja' ? 'ciente_gerente_id' : 'ciente_coordenador_id';
+      notificacoes = notificacoes.concat(
+        solicitacoesEscopo.filter((s) => s.status === 'pendente' && !s[campoCiente])
+          .map((s) => ({ id: s.id, tipo: 'peca_ciente_pendente', texto: `Nova solicitação de peça: ${s.descricao}`, registro_id: s.id }))
+      );
+      notificacoes = notificacoes.concat(
+        tenant.listar(data, 'agenda', user.empresa_id).filter((a) => filiaisIds.has(a.filial_id) && a.etapa === 'concluida')
+          .map((a) => ({ id: a.id, tipo: 'os_filial_aguardando_validacao', texto: `O.S. ${a.numero_os} concluída — validar`, registro_id: a.id }))
+      );
+    }
+    if (user.papel === 'consultor_mercado') {
+      notificacoes = notificacoes.concat(
+        solicitacoesEscopo.filter((s) => s.status === 'aguardando_consultor')
+          .map((s) => ({ id: s.id, tipo: 'peca_aguardando_consultor', texto: `Autorização de compra pendente: ${s.descricao}`, registro_id: s.id }))
+      );
+    }
+    if (user.papel === 'coordenador_tecnico') {
+      notificacoes = notificacoes.concat(
+        tenant.listar(data, 'apoios', user.empresa_id).filter((a) => a.status === 'pedido' && a.setor_destino_id === completo.setor_id)
+          .map((a) => ({ id: a.id, tipo: 'apoio_pedido_pendente', texto: `Pedido de apoio técnico — ${a.motivo || 'sem motivo informado'}`, registro_id: a.id }))
+      );
+    }
+    notificacoes = notificacoes.concat(
+      tenant.listar(data, 'transferencias', user.empresa_id).filter((t) => (
+        (filiaisIds.has(t.destino_filial_id) && t.status === 'enviada')
+        || (t.origem_tipo === 'filial' && filiaisIds.has(t.origem_filial_id) && t.status === 'pedida')
+      )).map((t) => ({
+        id: t.id,
+        tipo: t.status === 'enviada' ? 'transferencia_aguardando_recebimento' : 'transferencia_pedida',
+        texto: t.status === 'enviada' ? `Peça a caminho: ${t.descricao} — confirme o recebimento` : `Pedido de transferência: ${t.descricao}`,
+        registro_id: t.id,
+      }))
     );
   }
   enviarJSON(res, 200, { notificacoes, contador: notificacoes.length });
@@ -6490,6 +6544,238 @@ rota('PUT', /^\/api\/transferencias\/(\d+)\/confirmar-recebimento$/, async (req,
   }
   db.save(data);
   enviarJSON(res, 200, { transferencia: t, agenda: osGerada ? agendaComDetalhes(data, osGerada) : null });
+});
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 5 (GESTÃO E COMUNICAÇÃO) ----------
+// GET /api/dashboards/filiais?setor_id=&filial_id=&area_id= — pedido do usuário, seção 11.
+// "Equipamentos parados aguardando peça" é o painel principal (lista + cards); o resto (O.S. por
+// loja/SLA estourado, matriz de compras, quebras com pendência perdida, apoios entre setores) vem
+// junto na mesma resposta pra evitar ida e volta. Cada visão (diretoria/consultor/coordenador/
+// gerente/técnico) já sai certa sozinha, porque tudo é filtrado pelo escopo de quem pediu.
+rota('GET', /^\/api\/dashboards\/filiais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const completo = usuarioCompleto(data, user);
+  let filiaisFiltradas = escopo.filiaisVisiveis(data, user.empresa_id, completo);
+  if (query.setor_id) filiaisFiltradas = filiaisFiltradas.filter((f) => f.setor_id === Number(query.setor_id));
+  if (query.filial_id) filiaisFiltradas = filiaisFiltradas.filter((f) => f.id === Number(query.filial_id));
+  const filiaisIds = new Set(filiaisFiltradas.map((f) => f.id));
+
+  // --- equipamentos parados aguardando peça: lista + cards, clique abre a linha do tempo (já
+  // disponível em GET /api/solicitacoes-peca/:id — ver histórico) ---
+  let pendentesPeca = tenant.listar(data, 'solicitacoes_peca', user.empresa_id)
+    .filter((s) => filiaisIds.has(s.filial_id) && !['instalado', 'nao_aprovado'].includes(s.status));
+  if (query.area_id) pendentesPeca = pendentesPeca.filter((s) => s.area_id === Number(query.area_id));
+  const listaParados = pendentesPeca.map((s) => solicitacaoComDetalhes(data, s))
+    .sort((a, b) => (b.dias_parado - a.dias_parado) || ((a.prioridade === 'urgente' ? 0 : 1) - (b.prioridade === 'urgente' ? 0 : 1)));
+  const cardsParados = {
+    total: listaParados.length,
+    aguardando_consultor: listaParados.filter((s) => s.status === 'aguardando_consultor').length,
+    aguardando_diretoria: listaParados.filter((s) => s.status === 'aguardando_diretoria').length,
+    aguardando_entrega: listaParados.filter((s) => s.status === 'comprado').length,
+    media_dias_parado: listaParados.length ? Number((listaParados.reduce((soma, s) => soma + s.dias_parado, 0) / listaParados.length).toFixed(1)) : 0,
+  };
+
+  // --- O.S. abertas por loja/setor, SLA estourado, backlog ---
+  const agendaEscopo = tenant.listar(data, 'agenda', user.empresa_id).filter((a) => a.filial_id != null && filiaisIds.has(a.filial_id));
+  const osAbertas = agendaEscopo.filter((a) => !['concluida', 'validada'].includes(a.etapa));
+  const agora = Date.now();
+  const porLoja = {};
+  for (const a of osAbertas) {
+    if (!porLoja[a.filial_id]) {
+      const filial = tenant.buscar(data, 'filiais', a.filial_id, user.empresa_id);
+      porLoja[a.filial_id] = { filial_id: a.filial_id, filial_nome: filial ? filial.nome : '—', abertas: 0, sla_estourado: 0 };
+    }
+    porLoja[a.filial_id].abertas += 1;
+    if (a.sla_prazo_em && new Date(a.sla_prazo_em).getTime() < agora) porLoja[a.filial_id].sla_estourado += 1;
+  }
+
+  // --- matriz de compras por prioridade x status (igual a planilha que o pedido do usuário cita) ---
+  const BUCKETS_COMPRA = {
+    pendente: ['pendente', 'ciente', 'orcando', 'aguardando_consultor', 'aguardando_diretoria'],
+    aprovado: ['aprovado'], comprado: ['comprado', 'peca_na_loja'], finalizado: ['instalado'], nao_aprovado: ['nao_aprovado'],
+  };
+  const todasSolicitacoes = tenant.listar(data, 'solicitacoes_peca', user.empresa_id).filter((s) => filiaisIds.has(s.filial_id));
+  const matrizCompras = {};
+  for (const prioridade of PRIORIDADES_SOLICITACAO_PECA) {
+    matrizCompras[prioridade] = {};
+    for (const bucket of Object.keys(BUCKETS_COMPRA)) {
+      matrizCompras[prioridade][bucket] = todasSolicitacoes.filter((s) => s.prioridade === prioridade && BUCKETS_COMPRA[bucket].includes(s.status)).length;
+    }
+  }
+
+  // --- quebras que tinham solicitação de peça pendente (indicador de prevenção perdida) ---
+  const quebrasComPendencia = tenant.listar(data, 'equipamentos', user.empresa_id)
+    .filter((e) => filiaisIds.has(e.filial_id) && e.status_operacional === 'parado' && todasSolicitacoes.some((s) => s.equipamento_id === e.id && !['instalado', 'nao_aprovado'].includes(s.status)))
+    .length;
+
+  // --- apoios entre setores envolvendo os setores no escopo ---
+  const setoresIds = new Set(filiaisFiltradas.map((f) => f.setor_id));
+  const apoiosEnvolvidos = tenant.listar(data, 'apoios', user.empresa_id).filter((a) => setoresIds.has(a.setor_origem_id) || setoresIds.has(a.setor_destino_id));
+
+  enviarJSON(res, 200, {
+    parados: { lista: listaParados, cards: cardsParados },
+    os: { por_loja: Object.values(porLoja), total_abertas: osAbertas.length, sla_estourado: osAbertas.filter((a) => a.sla_prazo_em && new Date(a.sla_prazo_em).getTime() < agora).length },
+    matriz_compras: matrizCompras,
+    quebras_com_pendencia: quebrasComPendencia,
+    apoios: { quantidade: apoiosEnvolvidos.length, aceitos: apoiosEnvolvidos.filter((a) => a.status === 'aceito').length },
+  });
+});
+
+// ---- mural de avisos (seção 10.1 do pedido do usuário) ----
+// quem publica: administrador (geral ou qualquer setor) e coordenador técnico/consultor de
+// mercado (só o próprio setor). Quem só lê (gerente/técnico) vê geral + o setor da própria loja.
+function setorEscopoAvisos(data, user, completo) {
+  if (user.papel === 'administrador' || user.papel === 'supervisor') return undefined; // sem filtro — vê tudo
+  if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') return completo.setor_id;
+  if (user.papel === 'gerente_loja' || user.papel === 'suporte') {
+    const filial = completo.filial_id ? tenant.buscar(data, 'filiais', completo.filial_id, user.empresa_id) : null;
+    return filial ? filial.setor_id : null;
+  }
+  return null;
+}
+rota('GET', /^\/api\/avisos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const setorEscopo = setorEscopoAvisos(data, user, usuarioCompleto(data, user));
+  let lista = tenant.listar(data, 'avisos', user.empresa_id);
+  if (setorEscopo !== undefined) lista = lista.filter((a) => a.setor_id === null || a.setor_id === setorEscopo);
+  lista = lista.map((a) => ({
+    ...a,
+    autor_nome: (data.usuarios.find((u) => u.id === a.autor_id && u.empresa_id === a.empresa_id) || {}).nome || null,
+    setor_nome: a.setor_id ? ((tenant.buscar(data, 'setores', a.setor_id, user.empresa_id) || {}).nome || null) : 'Geral',
+  })).sort((a, b) => b.criado_em.localeCompare(a.criado_em));
+  enviarJSON(res, 200, { avisos: lista });
+});
+rota('POST', /^\/api\/avisos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'coordenador_tecnico', 'consultor_mercado'])) return enviarJSON(res, 403, { erro: 'Só administrador, coordenador técnico ou consultor de mercado publicam avisos.' });
+  const data = db.load();
+  const body = await lerCorpo(req);
+  if (!body.titulo || !String(body.titulo).trim() || !body.corpo || !String(body.corpo).trim()) {
+    return enviarJSON(res, 400, { erro: 'Título e corpo são obrigatórios.' });
+  }
+  let setorId = null;
+  if (user.papel === 'administrador') {
+    if (body.setor_id) {
+      const setor = tenant.buscar(data, 'setores', Number(body.setor_id), user.empresa_id);
+      if (!setor) return enviarJSON(res, 400, { erro: 'Setor não encontrado.' });
+      setorId = setor.id;
+    }
+  } else {
+    const completo = usuarioCompleto(data, user);
+    if (!completo.setor_id) return enviarJSON(res, 400, { erro: 'Você não está vinculado a um setor.' });
+    setorId = completo.setor_id;
+  }
+  const aviso = tenant.criar(data, 'avisos', user.empresa_id, {
+    setor_id: setorId, autor_id: user.id, titulo: body.titulo.trim(), corpo: body.corpo.trim(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { aviso });
+});
+rota('DELETE', /^\/api\/avisos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const aviso = tenant.buscar(data, 'avisos', Number(m[1]), user.empresa_id);
+  if (!aviso) return enviarJSON(res, 404, { erro: 'Aviso não encontrado.' });
+  if (user.papel !== 'administrador' && aviso.autor_id !== user.id) return enviarJSON(res, 403, { erro: 'Só quem publicou (ou o administrador) exclui este aviso.' });
+  data.avisos = data.avisos.filter((a) => a.id !== aviso.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- chat por canal (geral/setor/loja — seção 10.1): separado de propósito do chat interno
+// 1-pra-1 já existente (mensagens_internas), que fica intocado. Pode citar O.S./equipamento/
+// solicitação de peça (link clicável no front, a partir de `referencia`). ----
+function canalAcessivel(data, user, completo, canal) {
+  if (user.papel === 'administrador' || user.papel === 'supervisor') return true;
+  if (canal === 'geral') return true;
+  if (canal.startsWith('setor:')) {
+    const setorId = Number(canal.slice(6));
+    if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') return completo.setor_id === setorId;
+    if (user.papel === 'gerente_loja' || user.papel === 'suporte') {
+      const filial = completo.filial_id ? tenant.buscar(data, 'filiais', completo.filial_id, user.empresa_id) : null;
+      return !!filial && filial.setor_id === setorId;
+    }
+    return false;
+  }
+  if (canal.startsWith('filial:')) {
+    const filialId = Number(canal.slice(7));
+    const filial = tenant.buscar(data, 'filiais', filialId, user.empresa_id);
+    if (!filial) return false;
+    if (user.papel === 'gerente_loja' || user.papel === 'suporte') return completo.filial_id === filialId;
+    if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') return completo.setor_id === filial.setor_id;
+    return false;
+  }
+  return false;
+}
+// GET /api/mensagens-canal/canais — canais que o usuário pode usar, já com nome legível pro front.
+rota('GET', /^\/api\/mensagens-canal\/canais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const completo = usuarioCompleto(data, user);
+  const canais = [{ canal: 'geral', nome: 'Geral (toda a rede)' }];
+  if (['administrador', 'supervisor'].includes(user.papel)) {
+    for (const s of tenant.listar(data, 'setores', user.empresa_id)) canais.push({ canal: `setor:${s.id}`, nome: `Setor: ${s.nome}` });
+    for (const f of tenant.listar(data, 'filiais', user.empresa_id)) canais.push({ canal: `filial:${f.id}`, nome: `Loja: ${f.nome}` });
+  } else if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
+    if (completo.setor_id) {
+      const setor = tenant.buscar(data, 'setores', completo.setor_id, user.empresa_id);
+      if (setor) canais.push({ canal: `setor:${setor.id}`, nome: `Setor: ${setor.nome}` });
+      for (const f of tenant.listar(data, 'filiais', user.empresa_id).filter((f) => f.setor_id === completo.setor_id)) canais.push({ canal: `filial:${f.id}`, nome: `Loja: ${f.nome}` });
+    }
+  } else if (user.papel === 'gerente_loja' || user.papel === 'suporte') {
+    if (completo.filial_id) {
+      const filial = tenant.buscar(data, 'filiais', completo.filial_id, user.empresa_id);
+      if (filial) {
+        canais.push({ canal: `filial:${filial.id}`, nome: `Loja: ${filial.nome}` });
+        const setor = tenant.buscar(data, 'setores', filial.setor_id, user.empresa_id);
+        if (setor) canais.push({ canal: `setor:${setor.id}`, nome: `Setor: ${setor.nome}` });
+      }
+    }
+  }
+  enviarJSON(res, 200, { canais });
+});
+rota('GET', /^\/api\/mensagens-canal$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const completo = usuarioCompleto(data, user);
+  const canal = query.canal || 'geral';
+  if (!canalAcessivel(data, user, completo, canal)) return enviarJSON(res, 403, { erro: 'Você não tem acesso a este canal.' });
+  const mensagens = tenant.listar(data, 'mensagens_canal', user.empresa_id).filter((m) => m.canal === canal)
+    .map((m) => ({ ...m, autor_nome: (data.usuarios.find((u) => u.id === m.autor_id && u.empresa_id === m.empresa_id) || {}).nome || null }))
+    .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  enviarJSON(res, 200, { mensagens: await Promise.all(mensagens.map(async (m) => ({ ...m, foto: await hidratarFotosProfundo(m.foto) }))) });
+});
+rota('POST', /^\/api\/mensagens-canal$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const completo = usuarioCompleto(data, user);
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const canal = body.canal || 'geral';
+  if (!canalAcessivel(data, user, completo, canal)) return enviarJSON(res, 403, { erro: 'Você não tem acesso a este canal.' });
+  if (!body.texto || !String(body.texto).trim()) return enviarJSON(res, 400, { erro: 'Escreva uma mensagem.' });
+  let referencia = null;
+  if (body.referencia && body.referencia.tipo && body.referencia.id) {
+    const colecaoPorTipo = { os: 'agenda', equipamento: 'equipamentos', solicitacao: 'solicitacoes_peca' };
+    const colecao = colecaoPorTipo[body.referencia.tipo];
+    if (colecao && tenant.buscar(data, colecao, Number(body.referencia.id), user.empresa_id)) {
+      referencia = { tipo: body.referencia.tipo, id: Number(body.referencia.id) };
+    }
+  }
+  const msg = tenant.criar(data, 'mensagens_canal', user.empresa_id, {
+    canal, autor_id: user.id, texto: body.texto.trim(), foto: body.foto || null, referencia, criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { mensagem: { ...msg, foto: await hidratarFotosProfundo(msg.foto) } });
 });
 
 // GET /api/equipamentos/:id/historico

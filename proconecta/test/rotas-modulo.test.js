@@ -107,3 +107,12 @@ test('rotas de pedidos de compra/estoque/transferências pertencem a filiais', (
   assert.equal(moduloDaRota(/^\/api\/transferencias$/), 'filiais');
   assert.equal(moduloDaRota(/^\/api\/transferencias\/(\d+)\/aceitar$/), 'filiais');
 });
+
+// Fase 5 — Gestão e comunicação: dashboard, mural de avisos e chat por canal também pertencem a "filiais".
+test('rotas de dashboards/avisos/mensagens-canal pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/dashboards\/filiais$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/avisos$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/avisos\/(\d+)$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/mensagens-canal$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/mensagens-canal\/canais$/), 'filiais');
+});

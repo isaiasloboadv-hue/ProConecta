@@ -706,6 +706,9 @@ const MENUS_LABEL_POR_PAPEL = {
     'minha-loja': 'Minha loja',
     'solicitacoes-peca': 'Solicitações de Peça',
     'transferencias': 'Transferência entre Lojas',
+    'dashboard-filiais': 'Dashboard da Rede',
+    'avisos': 'Mural de Avisos',
+    'mensagens-canal': 'Chat entre Lojas',
     'fila-atendimento': 'Chat',
     'relatorio-manutencao': 'Relatório',
     'links-externos': 'Links',
@@ -730,6 +733,9 @@ const MENUS_LABEL_POR_PAPEL = {
     'equipe': 'Equipe',
     'chat-interno': 'Mensagens',
     'comercial': 'Comercial',
+    'dashboard-filiais': 'Dashboard da Rede',
+    'avisos': 'Mural de Avisos',
+    'mensagens-canal': 'Chat entre Lojas',
   },
   cliente: {
     'biblioteca': 'Biblioteca',
@@ -745,9 +751,9 @@ const MENUS_LABEL_POR_PAPEL = {
   pos_venda: { 'fila-pos-venda': 'Pós-venda', 'chat-interno': 'Mensagens' },
   estoque: { 'fila-estoque': 'Estoque', 'chat-interno': 'Mensagens' },
   // versão Restaurantes/rede multiunidade (Fase 1 — Base)
-  gerente_loja: { 'minha-loja': 'Minha loja', 'solicitacoes-peca': 'Solicitações de Peça', 'transferencias': 'Transferência entre Lojas', 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
-  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'catalogo-pecas': 'Catálogo de Peças', 'compras-estoque': 'Compras e Estoque', 'transferencias': 'Transferência entre Lojas', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
-  consultor_mercado: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  gerente_loja: { 'minha-loja': 'Minha loja', 'solicitacoes-peca': 'Solicitações de Peça', 'transferencias': 'Transferência entre Lojas', 'equipamentos': 'Equipamentos da loja', 'dashboard-filiais': 'Dashboard da Rede', 'avisos': 'Mural de Avisos', 'mensagens-canal': 'Chat entre Lojas', 'chat-interno': 'Mensagens' },
+  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'catalogo-pecas': 'Catálogo de Peças', 'compras-estoque': 'Compras e Estoque', 'transferencias': 'Transferência entre Lojas', 'equipamentos': 'Equipamentos do setor', 'dashboard-filiais': 'Dashboard da Rede', 'avisos': 'Mural de Avisos', 'mensagens-canal': 'Chat entre Lojas', 'chat-interno': 'Mensagens' },
+  consultor_mercado: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'equipamentos': 'Equipamentos do setor', 'dashboard-filiais': 'Dashboard da Rede', 'avisos': 'Mural de Avisos', 'mensagens-canal': 'Chat entre Lojas', 'chat-interno': 'Mensagens' },
 };
 
 const NAV = {
@@ -760,6 +766,11 @@ const NAV = {
     // loja e dá baixa de instalação.
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
+    // versão Restaurantes/rede multiunidade — Fase 5 (Gestão e comunicação): dashboard de
+    // equipamentos parados/compras/SLA, mural de avisos e chat por canal (geral/setor/loja).
+    { key: 'dashboard-filiais', modulo: 'filiais', label: 'Dashboard da Rede', page: 'dashboard-filiais' },
+    { key: 'avisos', modulo: 'filiais', label: 'Mural de Avisos', page: 'avisos' },
+    { key: 'mensagens-canal', modulo: 'filiais', label: 'Chat entre Lojas', page: 'mensagens-canal' },
     { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
     // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
@@ -840,6 +851,10 @@ const NAV = {
     // central e transferência entre filiais.
     { key: 'compras-estoque', modulo: 'filiais', label: 'Compras e Estoque', page: 'compras-estoque' },
     { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
+    // versão Restaurantes/rede multiunidade — Fase 5 (Gestão e comunicação).
+    { key: 'dashboard-filiais', modulo: 'filiais', label: 'Dashboard da Rede', page: 'dashboard-filiais' },
+    { key: 'avisos', modulo: 'filiais', label: 'Mural de Avisos', page: 'avisos' },
+    { key: 'mensagens-canal', modulo: 'filiais', label: 'Chat entre Lojas', page: 'mensagens-canal' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
@@ -975,6 +990,10 @@ const NAV = {
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos da loja', page: 'equipamentos' },
+    // versão Restaurantes/rede multiunidade — Fase 5 (Gestão e comunicação).
+    { key: 'dashboard-filiais', modulo: 'filiais', label: 'Dashboard da Rede', page: 'dashboard-filiais' },
+    { key: 'avisos', modulo: 'filiais', label: 'Mural de Avisos', page: 'avisos' },
+    { key: 'mensagens-canal', modulo: 'filiais', label: 'Chat entre Lojas', page: 'mensagens-canal' },
   ],
   coordenador_tecnico: [
     { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
@@ -983,11 +1002,17 @@ const NAV = {
     { key: 'compras-estoque', modulo: 'filiais', label: 'Compras e Estoque', page: 'compras-estoque' },
     { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
+    { key: 'dashboard-filiais', modulo: 'filiais', label: 'Dashboard da Rede', page: 'dashboard-filiais' },
+    { key: 'avisos', modulo: 'filiais', label: 'Mural de Avisos', page: 'avisos' },
+    { key: 'mensagens-canal', modulo: 'filiais', label: 'Chat entre Lojas', page: 'mensagens-canal' },
   ],
   consultor_mercado: [
     { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
+    { key: 'dashboard-filiais', modulo: 'filiais', label: 'Dashboard da Rede', page: 'dashboard-filiais' },
+    { key: 'avisos', modulo: 'filiais', label: 'Mural de Avisos', page: 'avisos' },
+    { key: 'mensagens-canal', modulo: 'filiais', label: 'Chat entre Lojas', page: 'mensagens-canal' },
   ],
 };
 
@@ -1024,6 +1049,9 @@ const ICONE_MENU = {
   'catalogo-pecas': '📦',
   'compras-estoque': '🛒',
   'transferencias': '🔄',
+  'dashboard-filiais': '📊',
+  'avisos': '📣',
+  'mensagens-canal': '🗨️',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1117,6 +1145,9 @@ async function ir(pagina) {
   clearInterval(_atTecPoll);
   clearInterval(_atPvPoll);
   clearInterval(_atAdminPoll);
+  // versão Restaurantes/rede multiunidade — Fase 5: chat por canal também tem poll próprio,
+  // só ativo enquanto a tela 'mensagens-canal' estiver aberta.
+  clearInterval(_canalPoll);
   paginaAtual = pagina;
   // lembra a última página visitada pra, ao recarregar/sincronizar (location.reload), voltar
   // pra onde o usuário estava em vez de sempre abrir a página inicial do papel dele (ver uso
@@ -1162,6 +1193,9 @@ async function ir(pagina) {
     if (pagina === 'catalogo-pecas') return renderCatalogoPecas();
     if (pagina === 'compras-estoque') return renderComprasEstoque();
     if (pagina === 'transferencias') return renderTransferencias();
+    if (pagina === 'dashboard-filiais') return renderDashboardFiliais();
+    if (pagina === 'avisos') return renderAvisos();
+    if (pagina === 'mensagens-canal') return renderMensagensCanal();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -2972,6 +3006,17 @@ async function clicarNotificacao(registroId, tipo) {
   } else if (tipo === 'solicitacao_rh_decidida') {
     try { await api(`/api/solicitacoes-rh/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
     ir('solicitacoes-rh');
+  } else if (tipo === 'os_filial_atribuida') {
+    try { await api(`/api/agenda/${registroId}/marcar-lida`, { method: 'POST' }); } catch (e) {}
+    ir('minha-loja-tecnico');
+  } else if (tipo === 'os_filial_aguardando_validacao') {
+    ir(USER.papel === 'gerente_loja' ? 'minha-loja-gerente' : 'painel-setor');
+  } else if (['peca_ciente_pendente', 'peca_aguardando_consultor', 'peca_aguardando_diretoria'].includes(tipo)) {
+    ir('solicitacoes-peca');
+  } else if (tipo === 'apoio_pedido_pendente') {
+    ir('painel-setor');
+  } else if (tipo === 'transferencia_pedida' || tipo === 'transferencia_aguardando_recebimento') {
+    ir('transferencias');
   } else {
     ir('aprovacoes-biblioteca');
   }
@@ -18810,6 +18855,208 @@ async function confirmarPedirTransferencia(origemFilialId, codigo) {
     mostrarToast('Transferência solicitada.');
     renderTransferencias();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 5 (GESTÃO E COMUNICAÇÃO) ----------
+// dashboard consolidado (equipamentos parados aguardando peça, O.S./SLA por loja, matriz de
+// compras, apoios entre setores — ver GET /api/dashboards/filiais), mural de avisos (geral/setor)
+// e chat por canal (geral/setor/loja). Cada visão já sai certa pro papel de quem pediu, porque o
+// servidor filtra tudo pelo escopo (ver escopo.js) — o front só exibe o que veio.
+async function renderDashboardFiliais() {
+  const d = await api('/api/dashboards/filiais');
+  const main = document.getElementById('main');
+  const tile = (titulo, valor, cor, rodape) => `
+    <div class="kpis-tile" style="background:${cor};">
+      <div class="kpis-tile-label"><span>${esc(titulo)}</span></div>
+      <div class="kpis-tile-valor">${valor}</div>
+      ${rodape ? `<div style="font-size:11.5px; color:#fff; opacity:.85; margin-top:2px;">${rodape}</div>` : ''}
+    </div>`;
+  main.innerHTML = `
+    <div class="page-head"><h1>Dashboard da Rede</h1><p>Visão consolidada do seu escopo — equipamentos parados, O.S./SLA e compras.</p></div>
+    <div class="kpis-tiles">
+      ${tile('Parados aguardando peça', d.parados.cards.total, 'var(--red)')}
+      ${tile('Aguard. consultor', d.parados.cards.aguardando_consultor, 'var(--orange)')}
+      ${tile('Aguard. diretoria', d.parados.cards.aguardando_diretoria, 'var(--purple)')}
+      ${tile('Comprado, aguard. entrega', d.parados.cards.aguardando_entrega, 'var(--blue)')}
+      ${tile('Média de dias parado', d.parados.cards.media_dias_parado + 'd', 'var(--amber)')}
+    </div>
+    <div class="panel"><div class="panel-head">Equipamentos parados aguardando peça</div><table>
+      <tr><th>Loja</th><th>Equipamento</th><th>Prioridade</th><th>Status</th><th>Parado há</th><th></th></tr>
+      ${d.parados.lista.length ? d.parados.lista.map((s) => `
+        <tr>
+          <td data-label="Loja">${esc(s.filial_nome || '—')}</td>
+          <td data-label="Equipamento">${esc(s.equipamento_tipo || '—')} ${esc(s.equipamento_modelo || '')}</td>
+          <td data-label="Prioridade">${s.prioridade === 'urgente' ? tag('Urgente', 'red') : tag('Não urgente', 'gray')}</td>
+          <td data-label="Status">${tagStatusSolicitacao(s)}</td>
+          <td data-label="Parado há">${s.dias_parado}d ${s.atrasada ? tag('Atrasada', 'red') : ''}</td>
+          <td class="td-acoes"><button class="btn-outline-sm" onclick="abrirLinhaDoTempoSolicitacao(${s.id})">Linha do tempo</button></td>
+        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhum equipamento parado aguardando peça — tudo certo!</td></tr>`}
+    </table></div>
+    <div id="linha-tempo-solicitacao"></div>
+    <div class="panel"><div class="panel-head">O.S. por loja</div><table>
+      <tr><th>Loja</th><th>Abertas</th><th>SLA estourado</th></tr>
+      ${d.os.por_loja.length ? d.os.por_loja.map((l) => `
+        <tr><td data-label="Loja">${esc(l.filial_nome)}</td><td data-label="Abertas">${l.abertas}</td>
+        <td data-label="SLA estourado">${l.sla_estourado ? tag(String(l.sla_estourado), 'red') : '0'}</td></tr>`).join('') : `<tr><td colspan="3" class="empty">Nenhuma O.S. aberta.</td></tr>`}
+    </table>
+      <p style="color:var(--ink-soft); font-size:12.5px; margin-top:8px;">${d.os.total_abertas} O.S. aberta(s) no total · ${d.os.sla_estourado} com SLA estourado.</p>
+    </div>
+    <div class="panel"><div class="panel-head">Matriz de compras — prioridade × status</div><table>
+      <tr><th>Prioridade</th><th>Pendente</th><th>Aprovado</th><th>Comprado</th><th>Finalizado</th><th>Não aprovado</th></tr>
+      ${['urgente', 'nao_urgente'].map((p) => `
+        <tr>
+          <td data-label="Prioridade">${p === 'urgente' ? 'Urgente' : 'Não urgente'}</td>
+          <td data-label="Pendente">${d.matriz_compras[p].pendente}</td>
+          <td data-label="Aprovado">${d.matriz_compras[p].aprovado}</td>
+          <td data-label="Comprado">${d.matriz_compras[p].comprado}</td>
+          <td data-label="Finalizado">${d.matriz_compras[p].finalizado}</td>
+          <td data-label="Não aprovado">${d.matriz_compras[p].nao_aprovado}</td>
+        </tr>`).join('')}
+    </table></div>
+    <div class="kpis-tiles">
+      ${tile('Quebras com peça pendente', d.quebras_com_pendencia, 'var(--red)', 'Pararam com solicitação de peça já em aberto.')}
+      ${tile('Apoios entre setores', d.apoios.quantidade, 'var(--teal)', `${d.apoios.aceitos} aceito(s)`)}
+    </div>`;
+}
+async function abrirLinhaDoTempoSolicitacao(id) {
+  const { solicitacao: s } = await api(`/api/solicitacoes-peca/${id}`);
+  const alvo = document.getElementById('linha-tempo-solicitacao');
+  if (!alvo) return;
+  alvo.innerHTML = `
+    <div class="panel"><div class="panel-head">Linha do tempo — ${esc(s.equipamento_tipo || '')} ${esc(s.equipamento_modelo || '')} (${esc(s.filial_nome || '—')})</div>
+      <p style="color:var(--ink-soft);">${esc(s.descricao)}</p>
+      ${(s.historico || []).map((h) => `
+        <div style="padding:7px 0; border-bottom:1px solid var(--line);">
+          <strong>${esc(STATUS_SOLICITACAO_PECA_LABEL[h.para] || h.para)}</strong>
+          <span style="color:var(--ink-soft); font-size:12px;"> — ${fmtDataHora(h.em)}</span>
+          ${h.observacao ? `<div style="font-size:13px; margin-top:2px;">${esc(h.observacao)}</div>` : ''}
+        </div>`).join('')}
+      <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="document.getElementById('linha-tempo-solicitacao').innerHTML=''">Fechar</button>
+    </div>`;
+  alvo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---- mural de avisos (geral/setor) ----
+async function renderAvisos() {
+  const { avisos } = await api('/api/avisos');
+  const podePublicar = ['administrador', 'coordenador_tecnico', 'consultor_mercado'].includes(USER.papel);
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Mural de Avisos</h1><p>${avisos.length} aviso(s)</p></div>
+      ${podePublicar ? `<button class="btn btn-primary btn-sm" onclick="mostrarFormAviso()">+ Novo aviso</button>` : ''}
+    </div>
+    <div id="form-aviso"></div>
+    ${avisos.length ? avisos.map((a) => `
+      <div class="panel">
+        <div class="panel-head" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <span>${esc(a.titulo)} ${tag(esc(a.setor_nome), a.setor_id ? 'blue' : 'gray')}</span>
+          ${USER.papel === 'administrador' || a.autor_id === USER.id ? `<button class="btn-outline-sm" onclick="excluirAviso(${a.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>` : ''}
+        </div>
+        <p style="white-space:pre-wrap;">${esc(a.corpo)}</p>
+        <p style="color:var(--ink-soft); font-size:12px;">${esc(a.autor_nome || '—')} · ${fmtDataHora(a.criado_em)}</p>
+      </div>`).join('') : '<p class="empty">Nenhum aviso publicado ainda.</p>'}`;
+}
+async function mostrarFormAviso() {
+  let setoresOpcoes = '';
+  if (USER.papel === 'administrador') {
+    const { setores } = await api('/api/setores?todos=1');
+    setoresOpcoes = `<div><label>Setor (vazio = toda a rede)</label><select id="av-setor"><option value="">Toda a rede</option>${setores.map((s) => `<option value="${s.id}">${esc(s.nome)}</option>`).join('')}</select></div>`;
+  }
+  document.getElementById('form-aviso').innerHTML = `
+    <div class="panel"><div class="panel-head">Novo aviso</div>
+      <div class="form-grid">
+        <div class="full"><label>Título*</label><input id="av-titulo"></div>
+        ${setoresOpcoes}
+        <div class="full"><label>Mensagem*</label><textarea id="av-corpo" rows="3"></textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarAviso()">Publicar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-aviso').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-aviso').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function salvarAviso() {
+  const titulo = document.getElementById('av-titulo').value.trim();
+  const corpo = document.getElementById('av-corpo').value.trim();
+  if (!titulo || !corpo) return alert('Preencha título e mensagem.');
+  const setorEl = document.getElementById('av-setor');
+  const body = { titulo, corpo, setor_id: setorEl && setorEl.value ? Number(setorEl.value) : null };
+  try {
+    await api('/api/avisos', { method: 'POST', body });
+    mostrarToast('Aviso publicado.');
+    renderAvisos();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirAviso(id) {
+  if (!(await mostrarConfirmacao('Excluir este aviso?'))) return;
+  try {
+    await api(`/api/avisos/${id}`, { method: 'DELETE' });
+    mostrarToast('Aviso excluído.');
+    renderAvisos();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- chat por canal (geral/setor/loja) — separado de propósito do chat interno 1-pra-1
+// (mensagens_internas), que fica intocado. Reaproveita as mesmas classes CSS .chat-mensagens/
+// .chat-compositor/.chat-msg do widget de mensagens internas. ----
+let _canalPoll = null;
+let _canalAtual = 'geral';
+async function renderMensagensCanal() {
+  const { canais } = await api('/api/mensagens-canal/canais');
+  if (!canais.some((c) => c.canal === _canalAtual)) _canalAtual = canais[0] ? canais[0].canal : 'geral';
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Chat entre Lojas</h1><p>Converse por canal — geral, do seu setor ou da sua loja.</p></div>
+    <div class="panel" style="display:flex; flex-direction:column; height:70vh;">
+      <div class="form-grid" style="margin-bottom:10px;">
+        <div><label>Canal</label><select id="canal-select" onchange="trocarCanalMensagens(this.value)">
+          ${canais.map((c) => `<option value="${c.canal}" ${c.canal === _canalAtual ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+        </select></div>
+      </div>
+      <div class="chat-mensagens" id="canal-mensagens" style="flex:1;"></div>
+      <div class="chat-compositor">
+        <textarea id="canal-texto" placeholder="Digite sua mensagem..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensagemCanal();}"></textarea>
+        <button class="btn btn-primary btn-sm" onclick="enviarMensagemCanal()">Enviar</button>
+      </div>
+    </div>`;
+  await atualizarMensagensCanal();
+  clearInterval(_canalPoll);
+  _canalPoll = setInterval(atualizarMensagensCanal, 4000);
+}
+function trocarCanalMensagens(canal) {
+  _canalAtual = canal;
+  atualizarMensagensCanal();
+}
+async function atualizarMensagensCanal() {
+  if (paginaAtual !== 'mensagens-canal') return;
+  try {
+    const { mensagens } = await api(`/api/mensagens-canal?canal=${encodeURIComponent(_canalAtual)}`);
+    const alvo = document.getElementById('canal-mensagens');
+    if (!alvo) return;
+    alvo.innerHTML = mensagens.length ? mensagens.map((m) => {
+      const proprio = m.autor_id === USER.id;
+      return `<div class="chat-msg ${proprio ? 'chat-msg-proprio' : 'chat-msg-outro'}">
+        <div class="chat-msg-rotulo">${esc(m.autor_nome || '—')}</div>
+        ${m.referencia ? `<div style="font-size:11px; opacity:.85; margin-bottom:2px;">↪ ${esc(REFERENCIA_CANAL_LABEL[m.referencia.tipo] || m.referencia.tipo)} #${m.referencia.id}</div>` : ''}
+        <div class="chat-msg-texto">${esc(m.texto)}</div>
+        ${m.foto ? `<img src="${m.foto}" style="max-width:160px; border-radius:8px; margin-top:6px; display:block;">` : ''}
+        <div class="chat-msg-hora">${fmtDataHora(m.criado_em)}</div>
+      </div>`;
+    }).join('') : '<p class="empty">Nenhuma mensagem neste canal ainda.</p>';
+    alvo.scrollTop = alvo.scrollHeight;
+  } catch (e) { /* silencioso — tenta de novo no próximo ciclo */ }
+}
+const REFERENCIA_CANAL_LABEL = { os: 'O.S.', equipamento: t('equipamento', 'Equipamento'), solicitacao: 'Solicitação de peça' };
+async function enviarMensagemCanal() {
+  const campo = document.getElementById('canal-texto');
+  const texto = campo.value.trim();
+  if (!texto) return;
+  campo.value = ''; campo.disabled = true;
+  try {
+    await api('/api/mensagens-canal', { method: 'POST', body: { canal: _canalAtual, texto } });
+    await atualizarMensagensCanal();
+  } catch (e) { alert('Erro: ' + e.message); }
+  finally { campo.disabled = false; campo.focus(); }
 }
 
 // ---------- USUÁRIOS (cadastro por convite) ----------

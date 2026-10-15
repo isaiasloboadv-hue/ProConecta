@@ -70,6 +70,10 @@ const PREFIXO_MODULO = [
   ['/api/estoque-central', 'filiais'],
   ['/api/estoque-loja', 'filiais'],
   ['/api/transferencias', 'filiais'],
+  // Fase 5 — Gestão e comunicação: dashboards, mural de avisos e chat por canal.
+  ['/api/dashboards/filiais', 'filiais'],
+  ['/api/avisos', 'filiais'],
+  ['/api/mensagens-canal', 'filiais'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à
