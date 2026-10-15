@@ -90,3 +90,10 @@ test('rotas de vistorias/apoios pertencem a filiais', () => {
   assert.equal(moduloDaRota(/^\/api\/apoios$/), 'filiais');
   assert.equal(moduloDaRota(/^\/api\/apoios\/(\d+)\/aceitar$/), 'filiais');
 });
+
+// Fase 3 — Peças: catálogo e solicitação de peça também pertencem a "filiais".
+test('rotas de catálogo de peças/solicitações pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/pecas-catalogo$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/solicitacoes-peca$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/solicitacoes-peca\/(\d+)\/ciente$/), 'filiais');
+});

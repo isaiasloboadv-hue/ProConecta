@@ -62,6 +62,9 @@ const PREFIXO_MODULO = [
   // do módulo "filiais" é feita dentro de cada rota (ver server.js).
   ['/api/vistorias', 'filiais'],
   ['/api/apoios', 'filiais'],
+  // Fase 3 — Peças: catálogo compartilhado + solicitação de peça com cadeia de autorização.
+  ['/api/pecas-catalogo', 'filiais'],
+  ['/api/solicitacoes-peca', 'filiais'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à

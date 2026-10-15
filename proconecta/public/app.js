@@ -704,6 +704,7 @@ const MENUS_LABEL_POR_PAPEL = {
   suporte: {
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
+    'solicitacoes-peca': 'Solicitações de Peça',
     'fila-atendimento': 'Chat',
     'relatorio-manutencao': 'Relatório',
     'links-externos': 'Links',
@@ -743,9 +744,9 @@ const MENUS_LABEL_POR_PAPEL = {
   pos_venda: { 'fila-pos-venda': 'Pós-venda', 'chat-interno': 'Mensagens' },
   estoque: { 'fila-estoque': 'Estoque', 'chat-interno': 'Mensagens' },
   // versão Restaurantes/rede multiunidade (Fase 1 — Base)
-  gerente_loja: { 'minha-loja': 'Minha loja', 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
-  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
-  consultor_mercado: { 'painel-setor': 'Painel do Setor', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  gerente_loja: { 'minha-loja': 'Minha loja', 'solicitacoes-peca': 'Solicitações de Peça', 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
+  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'catalogo-pecas': 'Catálogo de Peças', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  consultor_mercado: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
 };
 
 const NAV = {
@@ -754,6 +755,9 @@ const NAV = {
     // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
     // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
     { key: 'minha-loja', modulo: 'filiais', label: 'Minha loja', page: 'minha-loja-tecnico' },
+    // versão Restaurantes/rede multiunidade — Fase 3 (Peças): técnico solicita peça em qualquer
+    // loja e dá baixa de instalação.
+    { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
     // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
@@ -825,6 +829,11 @@ const NAV = {
     // versão Restaurantes/rede multiunidade (Fase 1 — Base, pedido do usuário): hierarquia
     // setores/filiais/áreas, só aparece pra quem contratou o módulo "filiais".
     { key: 'estrutura-filiais', modulo: 'filiais', label: 'Rede e Filiais', page: 'estrutura-filiais' },
+    // versão Restaurantes/rede multiunidade — Fase 3 (Peças): administrador é a "diretoria" que
+    // decide a última etapa de autorização (ver POST .../diretoria-decidir em server.js) e também
+    // gerencia o catálogo compartilhado de peças.
+    { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
+    { key: 'catalogo-pecas', modulo: 'filiais', label: 'Catálogo de Peças', page: 'catalogo-pecas' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
@@ -957,14 +966,18 @@ const NAV = {
   // entre setores (ver escopo.js, que filtra tudo por filial/setor automaticamente).
   gerente_loja: [
     { key: 'minha-loja', modulo: 'filiais', label: 'Minha loja', page: 'minha-loja-gerente' },
+    { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos da loja', page: 'equipamentos' },
   ],
   coordenador_tecnico: [
     { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
+    { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
+    { key: 'catalogo-pecas', modulo: 'filiais', label: 'Catálogo de Peças', page: 'catalogo-pecas' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
   ],
   consultor_mercado: [
     { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
+    { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
   ],
 };
@@ -998,6 +1011,8 @@ const ICONE_MENU = {
   'estrutura-filiais': '🏬',
   'minha-loja': '🧾',
   'painel-setor': '🗺️',
+  'solicitacoes-peca': '🔧',
+  'catalogo-pecas': '📦',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1132,6 +1147,8 @@ async function ir(pagina) {
     if (pagina === 'minha-loja-tecnico') return renderMinhaLojaTecnico();
     if (pagina === 'minha-loja-gerente') return renderMinhaLojaGerente();
     if (pagina === 'painel-setor') return renderPainelSetor();
+    if (pagina === 'solicitacoes-peca') return renderSolicitacoesPeca();
+    if (pagina === 'catalogo-pecas') return renderCatalogoPecas();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -17569,11 +17586,13 @@ async function imprimirEtiquetasFilial(filialId) {
 
 // página do equipamento aberta pelo QR Code (ver GET /api/equipamentos/por-qr/:token) — exige
 // login (chamada só acontece depois de entrarNoApp, ver ?qr= tratado lá).
+window._equipamentoQrAtualToken = null;
 async function abrirEquipamentoPorQr(token) {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">Carregando...</div>';
   try {
-    const { equipamento, agenda_aberta } = await api(`/api/equipamentos/por-qr/${token}`);
+    const { equipamento, agenda_aberta, solicitacoes_abertas } = await api(`/api/equipamentos/por-qr/${token}`);
+    window._equipamentoQrAtualToken = token;
     main.innerHTML = `
       <div class="page-head"><h1>${esc(equipamento.tipo)} — ${esc(equipamento.modelo)}</h1>
         <p>Nº de série ${esc(equipamento.numero_serie)}${equipamento.codigo_interno ? ' · Código ' + esc(equipamento.codigo_interno) : ''}</p></div>
@@ -17586,11 +17605,23 @@ async function abrirEquipamentoPorQr(token) {
       <div class="panel"><div class="panel-head">O.S. já abertas pra este equipamento</div>
         ${agenda_aberta.length ? agenda_aberta.map((a) => `<div style="padding:6px 0; border-bottom:1px solid var(--line);">${TIPO_OS_LABEL[a.tipo] || a.tipo} — ${a.status}</div>`).join('') : '<p class="empty">Nenhuma O.S. aberta pra este equipamento — evita duplicidade antes de abrir uma nova.</p>'}
       </div>
+      <div class="panel"><div class="panel-head" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>Solicitações de peça</span>
+          <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaSolicitacaoPecaQr(${equipamento.id})">+ Solicitar peça</button>
+        </div>
+        <div id="form-solicitar-peca-qr"></div>
+        ${solicitacoes_abertas && solicitacoes_abertas.length ? solicitacoes_abertas.map((s) => `
+          <div style="padding:6px 0; border-bottom:1px solid var(--line);">${esc(s.descricao)} — ${tagStatusSolicitacao(s)} — com: ${esc(s.responsavel_atual || '—')}</div>
+        `).join('') : '<p class="empty">Nenhuma solicitação de peça aberta pra este equipamento.</p>'}
+      </div>
       <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
   } catch (e) {
     main.innerHTML = `<div class="empty">Equipamento não encontrado ou sem permissão pra vê-lo.</div>
       <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
   }
+}
+function mostrarFormNovaSolicitacaoPecaQr(equipamentoId) {
+  mostrarFormNovaSolicitacaoPeca(equipamentoId);
 }
 
 // ---------- SETORES / FILIAIS / ÁREAS (cadastro da estrutura, versão Restaurantes) ----------
@@ -18282,6 +18313,301 @@ async function confirmarRedesignar(agendaId) {
     mostrarToast('Técnico redesignado.');
     renderPainelSetor();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 3 (PEÇAS) ----------
+const STATUS_SOLICITACAO_PECA_LABEL = {
+  pendente: 'Pendente', ciente: 'Ciente', orcando: 'Orçando',
+  aguardando_consultor: 'Aguard. consultor', aguardando_diretoria: 'Aguard. diretoria',
+  aprovado: 'Aprovado', nao_aprovado: 'Não aprovado', comprado: 'Comprado',
+  peca_na_loja: 'Peça na loja', instalado: 'Instalado',
+};
+const STATUS_SOLICITACAO_PECA_TAG = {
+  pendente: 'tag-gray', ciente: 'tag-blue', orcando: 'tag-blue',
+  aguardando_consultor: 'tag-amber', aguardando_diretoria: 'tag-amber',
+  aprovado: 'tag-green', nao_aprovado: 'tag-red', comprado: 'tag-green',
+  peca_na_loja: 'tag-purple', instalado: 'tag-green',
+};
+function tagStatusSolicitacao(s) {
+  return `<span class="tag ${STATUS_SOLICITACAO_PECA_TAG[s.status] || 'tag-gray'}">${esc(STATUS_SOLICITACAO_PECA_LABEL[s.status] || s.status)}</span>`;
+}
+
+async function renderSolicitacoesPeca() {
+  const { solicitacoes } = await api('/api/solicitacoes-peca');
+  solicitacoes.sort((a, b) => b.dias_parado - a.dias_parado);
+  window._solicitacoesPecaCache = solicitacoes;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Solicitações de peça</h1><p>${solicitacoes.length} solicitação(ões)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormNovaSolicitacaoPeca()">+ Nova solicitação</button>
+    </div>
+    <div id="form-nova-solicitacao"></div>
+    <div id="form-acao-solicitacao"></div>
+    <div class="panel"><table>
+      <tr><th>Loja</th><th>Equipamento</th><th>Descrição</th><th>Prioridade</th><th>Valor</th><th>Status</th><th>Com quem está</th><th></th></tr>
+      ${solicitacoes.length ? solicitacoes.map((s) => `
+        <tr>
+          <td data-label="Loja">${esc(s.filial_nome || '—')}</td>
+          <td data-label="Equipamento">${esc(s.equipamento_tipo || '—')} ${esc(s.equipamento_modelo || '')}</td>
+          <td data-label="Descrição">${esc(s.descricao)}</td>
+          <td data-label="Prioridade">${s.prioridade === 'urgente' ? '<span class="tag tag-red">Urgente</span>' : '<span class="tag tag-gray">Não urgente</span>'}</td>
+          <td data-label="Valor">${s.valor_total != null ? fmtMoeda(s.valor_total) : '—'}</td>
+          <td data-label="Status">${tagStatusSolicitacao(s)} ${s.atrasada ? '<span class="tag tag-red">Atrasada</span>' : ''}</td>
+          <td data-label="Com quem está">${esc(s.responsavel_atual || '—')} <small style="color:var(--ink-soft);">(${s.dias_parado}d)</small></td>
+          <td class="td-acoes">${botoesAcaoSolicitacaoPeca(s)}</td>
+        </tr>`).join('') : `<tr><td colspan="8" class="empty">Nenhuma solicitação ainda.</td></tr>`}
+    </table></div>`;
+}
+function botoesAcaoSolicitacaoPeca(s) {
+  const podeGerenteCoord = ['gerente_loja', 'coordenador_tecnico', 'administrador'].includes(USER.papel);
+  const botoes = [];
+  if (s.status === 'pendente' && podeGerenteCoord) {
+    botoes.push(`<button class="btn-outline-sm" onclick="acaoSolicitacaoPeca(${s.id}, 'ciente')">Dar ciente</button>`);
+  }
+  if (['ciente', 'orcando'].includes(s.status) && podeGerenteCoord) {
+    botoes.push(`<button class="btn-outline-sm" onclick="mostrarFormOrcamentoSolicitacao(${s.id})">Orçar</button>`);
+    botoes.push(`<button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${s.id}, 'aprovar-local')">Aprovar local</button>`);
+    botoes.push(`<button class="btn-outline-sm" onclick="mostrarFormAutorizacaoSolicitacao(${s.id})">Pedir autorização</button>`);
+  }
+  if (s.status === 'aguardando_consultor' && ['consultor_mercado', 'administrador'].includes(USER.papel)) {
+    botoes.push(`<button class="btn-outline-sm" onclick="mostrarFormConsultorDecide(${s.id})">Decidir</button>`);
+  }
+  if (s.status === 'aguardando_diretoria' && USER.papel === 'administrador') {
+    botoes.push(`<button class="btn-outline-sm" onclick="mostrarFormDiretoriaDecide(${s.id})">Decidir (diretoria)</button>`);
+  }
+  if (s.status === 'aprovado' && podeGerenteCoord) {
+    botoes.push(`<button class="btn-outline-sm" onclick="mostrarFormMarcarComprado(${s.id})">Marcar comprado</button>`);
+  }
+  if (s.status === 'comprado' && podeGerenteCoord) {
+    botoes.push(`<button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${s.id}, 'marcar-peca-na-loja')">Peça na loja</button>`);
+  }
+  if (s.status === 'peca_na_loja' && ['suporte', 'administrador'].includes(USER.papel)) {
+    botoes.push(`<button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${s.id}, 'marcar-instalado')">Marcar instalado</button>`);
+  }
+  return botoes.join(' ');
+}
+async function acaoSolicitacaoPeca(id, rota, body) {
+  try {
+    await api(`/api/solicitacoes-peca/${id}/${rota}`, { method: 'POST', body: body || {} });
+    mostrarToast('Atualizado.');
+    document.getElementById('form-acao-solicitacao').innerHTML = '';
+    renderSolicitacoesPeca();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+function mostrarFormAutorizacaoSolicitacao(id) {
+  document.getElementById('form-acao-solicitacao').innerHTML = `
+    <div class="panel"><div class="panel-head">Pedir autorização ao consultor</div>
+      <div class="form-grid"><div class="full"><label>Observação</label><input id="pa2-observacao"></div></div>
+      <button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${id}, 'pedir-autorizacao-consultor', { observacao: document.getElementById('pa2-observacao').value })">Pedir autorização</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-acao-solicitacao').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-acao-solicitacao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function mostrarFormConsultorDecide(id) {
+  document.getElementById('form-acao-solicitacao').innerHTML = `
+    <div class="panel"><div class="panel-head">Decisão do consultor</div>
+      <div class="form-grid">
+        <div><label>Decisão</label><select id="cd-decisao">
+          <option value="aprovado">Aprovar</option>
+          <option value="reprovado">Reprovar</option>
+          <option value="encaminhar_diretoria">Encaminhar à diretoria</option>
+        </select></div>
+        <div class="full"><label>Observação</label><input id="cd-observacao"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${id}, 'consultor-decidir', { decisao: document.getElementById('cd-decisao').value, observacao: document.getElementById('cd-observacao').value })">Confirmar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-acao-solicitacao').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-acao-solicitacao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function mostrarFormDiretoriaDecide(id) {
+  document.getElementById('form-acao-solicitacao').innerHTML = `
+    <div class="panel"><div class="panel-head">Decisão da diretoria</div>
+      <div class="form-grid">
+        <div><label>Decisão</label><select id="dd-decisao"><option value="aprovado">Aprovar</option><option value="reprovado">Reprovar</option></select></div>
+        <div class="full"><label>Observação</label><input id="dd-observacao"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${id}, 'diretoria-decidir', { decisao: document.getElementById('dd-decisao').value, observacao: document.getElementById('dd-observacao').value })">Confirmar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-acao-solicitacao').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-acao-solicitacao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function mostrarFormMarcarComprado(id) {
+  document.getElementById('form-acao-solicitacao').innerHTML = `
+    <div class="panel"><div class="panel-head">Marcar como comprado</div>
+      <div class="form-grid"><div class="full"><label>Nº da nota fiscal</label><input id="mc-nf"></div></div>
+      <button class="btn btn-primary btn-sm" onclick="acaoSolicitacaoPeca(${id}, 'marcar-comprado', { nota_fiscal_numero: document.getElementById('mc-nf').value })">Confirmar compra</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-acao-solicitacao').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-acao-solicitacao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function mostrarFormOrcamentoSolicitacao(id) {
+  const s = (window._solicitacoesPecaCache || []).find((x) => x.id === id);
+  document.getElementById('form-acao-solicitacao').innerHTML = `
+    <div class="panel"><div class="panel-head">Orçamento da peça</div>
+      <div class="form-grid">
+        <div><label>Código do produto</label><input id="orc-codigo" value="${s ? esc(s.codigo_produto || '') : ''}"></div>
+        <div><label>Fornecedor</label><input id="orc-fornecedor" value="${s ? esc(s.fornecedor || '') : ''}"></div>
+        <div><label>Quantidade</label><input id="orc-quantidade" type="number" min="1" value="${s ? s.quantidade : 1}"></div>
+        <div><label>Valor unitário (R$)</label><input id="orc-valor" type="number" min="0" step="0.01" value="${s && s.valor_unitario != null ? s.valor_unitario : ''}"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarOrcamentoSolicitacao(${id})">Salvar orçamento</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-acao-solicitacao').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-acao-solicitacao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function salvarOrcamentoSolicitacao(id) {
+  const body = {
+    codigo_produto: document.getElementById('orc-codigo').value, fornecedor: document.getElementById('orc-fornecedor').value,
+    quantidade: Number(document.getElementById('orc-quantidade').value) || 1,
+    valor_unitario: document.getElementById('orc-valor').value === '' ? '' : Number(document.getElementById('orc-valor').value),
+  };
+  try {
+    await api(`/api/solicitacoes-peca/${id}/orcamento`, { method: 'PUT', body });
+    document.getElementById('form-acao-solicitacao').innerHTML = '';
+    mostrarToast('Orçamento salvo.');
+    renderSolicitacoesPeca();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- nova solicitação (reaproveitada pela tela de equipamento via QR também) ----
+async function mostrarFormNovaSolicitacaoPeca(equipamentoIdFixo) {
+  const [{ equipamentos }, { pecas }] = await Promise.all([api('/api/equipamentos'), api('/api/pecas-catalogo')]);
+  const equipFilial = equipamentos.filter((e) => e.filial_id !== null);
+  window._pecasCatalogoCache = pecas;
+  const destino = document.getElementById('form-nova-solicitacao') || document.getElementById('form-solicitar-peca-qr');
+  if (!destino) return;
+  destino.innerHTML = `
+    <div class="panel"><div class="panel-head">Nova solicitação de peça</div>
+      <div class="form-grid">
+        <div class="full"><label>Equipamento*</label>
+          <select id="nsp-equipamento" ${equipamentoIdFixo ? 'disabled' : ''}>
+            ${equipFilial.map((e) => `<option value="${e.id}" ${equipamentoIdFixo === e.id ? 'selected' : ''}>${esc(e.tipo)} ${esc(e.modelo)} — ${esc(e.numero_serie || '')}</option>`).join('')}
+          </select>
+        </div>
+        <div><label>Prioridade</label><select id="nsp-prioridade"><option value="nao_urgente">Não urgente</option><option value="urgente">Urgente</option></select></div>
+        <div><label>Peça do catálogo (opcional)</label>
+          <input id="nsp-peca-busca" list="nsp-pecas-lista" placeholder="Digite o código ou nome..." oninput="resolverPecaCatalogoDigitada()">
+          <datalist id="nsp-pecas-lista">${pecas.map((p) => `<option value="${esc(p.codigo)} — ${esc(p.descricao)}">`).join('')}</datalist>
+        </div>
+        <div><label>Código do produto</label><input id="nsp-codigo"></div>
+        <div><label>Fornecedor</label><input id="nsp-fornecedor"></div>
+        <div><label>Quantidade</label><input id="nsp-quantidade" type="number" min="1" value="1"></div>
+        <div><label>Valor unitário (R$)</label><input id="nsp-valor" type="number" min="0" step="0.01"></div>
+        <div class="full"><label>Descrição*</label><textarea id="nsp-descricao" rows="2"></textarea></div>
+        <div class="full"><label>Justificativa</label><textarea id="nsp-justificativa" rows="2"></textarea></div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('nsp-foto-input').click()">+ Foto</button>
+        <input type="file" id="nsp-foto-input" accept="image/*" multiple style="display:none" onchange="adicionarFotosSolicitacaoPeca(event)">
+        <div id="nsp-fotos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarNovaSolicitacaoPeca(${equipamentoIdFixo || 'null'})">Enviar solicitação</button>
+      <button class="btn btn-ghost btn-sm" onclick="this.closest('.panel').remove()">Cancelar</button>
+    </div>`;
+  destino.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+let solicitacaoPecaFotos = [];
+let solicitacaoPecaCatalogoId = null;
+function resolverPecaCatalogoDigitada() {
+  const texto = document.getElementById('nsp-peca-busca').value;
+  const codigo = texto.split(' — ')[0].trim();
+  const peca = (window._pecasCatalogoCache || []).find((p) => p.codigo === codigo);
+  solicitacaoPecaCatalogoId = peca ? peca.id : null;
+  if (peca) {
+    document.getElementById('nsp-codigo').value = peca.codigo;
+    document.getElementById('nsp-fornecedor').value = peca.fornecedor || '';
+    if (peca.ultimo_preco != null) document.getElementById('nsp-valor').value = peca.ultimo_preco;
+  }
+}
+function adicionarFotosSolicitacaoPeca(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    solicitacaoPecaFotos.push(...dataUrls);
+    document.getElementById('nsp-fotos-preview').innerHTML = solicitacaoPecaFotos.map((f) => `<img src="${f}" style="width:50px; height:50px; object-fit:cover; border-radius:6px;">`).join('');
+  });
+}
+async function salvarNovaSolicitacaoPeca(equipamentoIdFixo) {
+  const equipamentoId = equipamentoIdFixo || Number(document.getElementById('nsp-equipamento').value);
+  const descricao = document.getElementById('nsp-descricao').value.trim();
+  if (!equipamentoId) return alert('Escolha o equipamento.');
+  if (!descricao) return alert('Descreva a peça/material necessário.');
+  const body = {
+    equipamento_id: equipamentoId, prioridade: document.getElementById('nsp-prioridade').value, descricao,
+    peca_catalogo_id: solicitacaoPecaCatalogoId,
+    codigo_produto: document.getElementById('nsp-codigo').value, fornecedor: document.getElementById('nsp-fornecedor').value,
+    quantidade: Number(document.getElementById('nsp-quantidade').value) || 1,
+    valor_unitario: document.getElementById('nsp-valor').value === '' ? null : Number(document.getElementById('nsp-valor').value),
+    justificativa: document.getElementById('nsp-justificativa').value, fotos: solicitacaoPecaFotos,
+  };
+  try {
+    await api('/api/solicitacoes-peca', { method: 'POST', body });
+    solicitacaoPecaFotos = []; solicitacaoPecaCatalogoId = null;
+    mostrarToast('Solicitação enviada.');
+    if (paginaAtual === 'solicitacoes-peca') renderSolicitacoesPeca();
+    else if (window._equipamentoQrAtualToken) abrirEquipamentoPorQr(window._equipamentoQrAtualToken);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- catálogo de peças (administrador / coordenador técnico) ----
+async function renderCatalogoPecas() {
+  const { pecas } = await api('/api/pecas-catalogo');
+  window._pecasCatalogoCache = pecas;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Catálogo de peças</h1><p>${pecas.length} peça(s) cadastrada(s)</p></div>
+    <div id="form-peca-catalogo"></div>
+    <button class="btn btn-primary btn-sm" onclick="mostrarFormPecaCatalogo()" style="margin-bottom:12px;">+ Nova peça</button>
+    <div class="panel"><table>
+      <tr><th>Código</th><th>Descrição</th><th>Fornecedor</th><th>Último preço</th><th></th></tr>
+      ${pecas.length ? pecas.map((p) => `
+        <tr><td data-label="Código">${esc(p.codigo)}</td><td data-label="Descrição">${esc(p.descricao)}</td>
+          <td data-label="Fornecedor">${esc(p.fornecedor || '—')}</td><td data-label="Último preço">${p.ultimo_preco != null ? fmtMoeda(p.ultimo_preco) : '—'}</td>
+          <td class="td-acoes">
+            <button class="btn-outline-sm" onclick="editarPecaCatalogo(${p.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirPecaCatalogo(${p.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          </td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhuma peça cadastrada ainda.</td></tr>`}
+    </table></div>`;
+}
+let pecaCatalogoEmEdicaoId = null;
+function mostrarFormPecaCatalogo(peca) {
+  pecaCatalogoEmEdicaoId = peca ? peca.id : null;
+  document.getElementById('form-peca-catalogo').innerHTML = `
+    <div class="panel"><div class="panel-head">${peca ? 'Editar peça' : 'Nova peça'}</div>
+      <div class="form-grid">
+        <div><label>Código*</label><input id="pc-codigo" value="${peca ? esc(peca.codigo) : ''}"></div>
+        <div class="full"><label>Descrição*</label><input id="pc-descricao" value="${peca ? esc(peca.descricao) : ''}"></div>
+        <div><label>Fornecedor</label><input id="pc-fornecedor" value="${peca ? esc(peca.fornecedor || '') : ''}"></div>
+        <div><label>Último preço (R$)</label><input id="pc-preco" type="number" min="0" step="0.01" value="${peca && peca.ultimo_preco != null ? peca.ultimo_preco : ''}"></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarPecaCatalogo()">${peca ? 'Salvar alterações' : 'Salvar peça'}</button>
+        ${peca ? `<button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-peca-catalogo').innerHTML=''">Cancelar</button>` : ''}
+      </div>
+    </div>`;
+  document.getElementById('form-peca-catalogo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function editarPecaCatalogo(id) {
+  const peca = (window._pecasCatalogoCache || []).find((p) => p.id === id);
+  if (peca) mostrarFormPecaCatalogo(peca);
+}
+async function salvarPecaCatalogo() {
+  const codigo = document.getElementById('pc-codigo').value.trim();
+  const descricao = document.getElementById('pc-descricao').value.trim();
+  if (!codigo || !descricao) return alert('Informe código e descrição.');
+  const body = {
+    codigo, descricao, fornecedor: document.getElementById('pc-fornecedor').value,
+    ultimo_preco: document.getElementById('pc-preco').value === '' ? null : Number(document.getElementById('pc-preco').value),
+  };
+  try {
+    if (pecaCatalogoEmEdicaoId) { await api(`/api/pecas-catalogo/${pecaCatalogoEmEdicaoId}`, { method: 'PUT', body }); pecaCatalogoEmEdicaoId = null; mostrarToast('Peça atualizada.'); }
+    else { await api('/api/pecas-catalogo', { method: 'POST', body }); mostrarToast('Peça cadastrada.'); }
+    renderCatalogoPecas();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function excluirPecaCatalogo(id) {
+  if (!(await mostrarConfirmacao('Excluir esta peça do catálogo? Esta ação não pode ser desfeita.'))) return;
+  try { await api(`/api/pecas-catalogo/${id}`, { method: 'DELETE' }); mostrarToast('Peça excluída.'); renderCatalogoPecas(); }
+  catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- USUÁRIOS (cadastro por convite) ----------

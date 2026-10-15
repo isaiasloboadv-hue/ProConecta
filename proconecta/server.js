@@ -71,16 +71,17 @@ function exigirPapel(user, papeis) {
 // Quem tem acesso_total considera tudo liberado — só restringe de verdade quando acesso_total ===
 // false, e aí só os menus marcados aqui aparecem pra essa pessoa.
 const MENUS_POR_PAPEL = {
-  suporte: ['agenda', 'minha-loja', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
-  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios', 'chat-interno'],
+  suporte: ['agenda', 'minha-loja', 'solicitacoes-peca', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
+  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios', 'chat-interno', 'solicitacoes-peca', 'catalogo-pecas'],
   cliente: ['biblioteca', 'equipamentos', 'chamados'],
   producao: ['biblioteca', 'clientes', 'equipamentos', 'chat-interno'],
   pos_venda: ['fila-pos-venda', 'chat-interno'],
   estoque: ['fila-estoque', 'chat-interno'],
-  // versão Restaurantes/rede multiunidade — Fase 2 (Operação): Minha loja/Painel do Setor.
-  gerente_loja: ['minha-loja', 'equipamentos', 'chat-interno'],
-  coordenador_tecnico: ['painel-setor', 'equipamentos', 'chat-interno'],
-  consultor_mercado: ['painel-setor', 'equipamentos', 'chat-interno'],
+  // versão Restaurantes/rede multiunidade — Fase 2/3 (Operação/Peças): Minha loja/Painel do
+  // Setor/Solicitações de Peça/Catálogo de Peças.
+  gerente_loja: ['minha-loja', 'solicitacoes-peca', 'equipamentos', 'chat-interno'],
+  coordenador_tecnico: ['painel-setor', 'solicitacoes-peca', 'catalogo-pecas', 'equipamentos', 'chat-interno'],
+  consultor_mercado: ['painel-setor', 'solicitacoes-peca', 'equipamentos', 'chat-interno'],
 };
 // todo tipo de acesso interno (todo mundo menos cliente) pode usar o chat interno — é comunicação
 // entre a própria equipe, cliente não faz parte.
@@ -489,6 +490,11 @@ function agendaComDetalhes(data, item) {
     ...(item.filial_id != null ? {
       filial_nome: (data.filiais.find((f) => f.id === item.filial_id && f.empresa_id === item.empresa_id) || {}).nome || null,
       area_nome: item.area_id ? ((data.areas.find((a) => a.id === item.area_id && a.empresa_id === item.empresa_id) || {}).nome || null) : null,
+      // Fase 3 — Peças: solicitações ainda não instaladas pro equipamento desta O.S. (seção 9 —
+      // "a tela da O.S. ... mostra automaticamente as solicitações existentes", evita duplicidade).
+      solicitacoes_peca_abertas: item.equipamento_id ? data.solicitacoes_peca.filter((s) => (
+        s.equipamento_id === item.equipamento_id && s.empresa_id === item.empresa_id && !['instalado', 'nao_aprovado'].includes(s.status)
+      )).map((s) => ({ id: s.id, descricao: s.descricao, status: s.status, responsavel_atual: RESPONSAVEL_POR_STATUS[s.status] || null })) : [],
     } : {}),
   };
 }
@@ -1396,6 +1402,18 @@ rota('PUT', /^\/api\/empresa$/, async (req, res) => {
       novoPrazos[chave] = valor;
     }
     empresa.sla_prazos_horas = novoPrazos;
+  }
+  // versão Restaurantes/rede multiunidade (Fase 3 — Peças): valores-limite da cadeia de
+  // autorização (seção 9 do pedido do usuário) — até o limite 1, gerente/coordenador aprova e
+  // compra; acima dele, precisa do consultor; acima do limite 2, o consultor é OBRIGADO a
+  // encaminhar à diretoria.
+  if (body.limite_aprovacao_1 !== undefined || body.limite_aprovacao_2 !== undefined) {
+    const l1 = body.limite_aprovacao_1 !== undefined ? Number(body.limite_aprovacao_1) : (empresa.limite_aprovacao_1 != null ? empresa.limite_aprovacao_1 : LIMITES_APROVACAO_PADRAO.limite1);
+    const l2 = body.limite_aprovacao_2 !== undefined ? Number(body.limite_aprovacao_2) : (empresa.limite_aprovacao_2 != null ? empresa.limite_aprovacao_2 : LIMITES_APROVACAO_PADRAO.limite2);
+    if (!Number.isFinite(l1) || l1 < 0) return enviarJSON(res, 400, { erro: 'Limite de aprovação 1 inválido.' });
+    if (!Number.isFinite(l2) || l2 < l1) return enviarJSON(res, 400, { erro: 'Limite de aprovação 2 inválido (tem que ser maior ou igual ao limite 1).' });
+    empresa.limite_aprovacao_1 = l1;
+    empresa.limite_aprovacao_2 = l2;
   }
   db.save(data);
   enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
@@ -5029,7 +5047,12 @@ rota('GET', /^\/api\/equipamentos\/por-qr\/([a-f0-9]+)$/, async (req, res, m) =>
   // O.S. e solicitações já abertas pra este equipamento vêm junto — o pedido do usuário é pra
   // mostrar isso ANTES de qualquer ação, pra evitar duplicidade (seção 5).
   const agendaAberta = tenant.listar(data, 'agenda', user.empresa_id).filter((a) => a.equipamento_id === equipamento.id && !a.finalizada);
-  enviarJSON(res, 200, { equipamento, agenda_aberta: agendaAberta });
+  // versão Restaurantes/rede multiunidade (Fase 3 — Peças): solicitações de peça ainda não
+  // instaladas pra este equipamento — linha do tempo de responsabilidade, seção 9.
+  const solicitacoesAbertas = tenant.listar(data, 'solicitacoes_peca', user.empresa_id)
+    .filter((s) => s.equipamento_id === equipamento.id && s.status !== 'instalado' && s.status !== 'nao_aprovado')
+    .map((s) => solicitacaoComDetalhes(data, s));
+  enviarJSON(res, 200, { equipamento, agenda_aberta: agendaAberta, solicitacoes_abertas: solicitacoesAbertas });
 });
 
 // GET /api/equipamentos/buscar-por-serie?numero_serie=XXX — usado pelo Relatório > Automático:
@@ -5736,6 +5759,381 @@ rota('POST', /^\/api\/vistorias\/(\d+)\/concluir$/, async (req, res, m) => {
     if (os.tecnico_id) enviarPush(data, os.tecnico_id, { titulo: 'Nova O.S. — vistoria', corpo: `${filial.nome}: ${os.problema}`, url: '/' }).catch(() => {});
   }
   enviarJSON(res, 200, { vistoria, criadas: criadas.map((os) => agendaComDetalhes(data, os)) });
+});
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 3 (PEÇAS) ----------
+// Catálogo de peças compartilhado entre filiais + solicitação de peça com "ciente", cadeia de
+// autorização por valor (gerente/coordenador -> consultor -> diretoria) e linha do tempo de
+// responsabilidade. Só se aplica a equipamentos com filial_id (versão Restaurantes) — não toca em
+// nada do fluxo de cliente externo.
+
+const LIMITES_APROVACAO_PADRAO = { limite1: 200, limite2: 1000 };
+function limitesAprovacao(empresa) {
+  return {
+    limite1: empresa && empresa.limite_aprovacao_1 != null ? empresa.limite_aprovacao_1 : LIMITES_APROVACAO_PADRAO.limite1,
+    limite2: empresa && empresa.limite_aprovacao_2 != null ? empresa.limite_aprovacao_2 : LIMITES_APROVACAO_PADRAO.limite2,
+  };
+}
+const PRIORIDADES_SOLICITACAO_PECA = ['urgente', 'nao_urgente'];
+const STATUS_SOLICITACAO_PECA = ['pendente', 'ciente', 'orcando', 'aguardando_consultor', 'aguardando_diretoria', 'aprovado', 'nao_aprovado', 'comprado', 'peca_na_loja', 'instalado'];
+// pra quem está a pendência AGORA (seção 9 — "linha do tempo de responsabilidade"/lembretes) —
+// puramente informativo, não é checagem de permissão (essa é feita rota a rota).
+const RESPONSAVEL_POR_STATUS = {
+  pendente: 'Gerente da loja / Coordenador técnico (dar ciente)',
+  ciente: 'Gerente da loja / Coordenador técnico (orçar)',
+  orcando: 'Gerente da loja / Coordenador técnico (decidir ou pedir autorização)',
+  aguardando_consultor: 'Consultor de mercado do setor',
+  aguardando_diretoria: 'Diretoria',
+  aprovado: 'Gerente da loja / Coordenador técnico (comprar)',
+  nao_aprovado: null,
+  comprado: 'Gerente da loja / técnico (confirmar chegada na loja)',
+  peca_na_loja: 'Técnico da loja (instalar)',
+  instalado: null,
+};
+function registrarHistoricoSolicitacao(solicitacao, de, para, userId, observacao) {
+  solicitacao.historico.push({ de, para, por: userId, em: new Date().toISOString(), observacao: observacao || '' });
+  solicitacao.status = para;
+}
+function diasParadoSolicitacao(solicitacao) {
+  if (['nao_aprovado', 'instalado'].includes(solicitacao.status)) return 0;
+  const ultima = solicitacao.historico[solicitacao.historico.length - 1];
+  const desde = ultima ? ultima.em : solicitacao.criado_em;
+  return Math.floor((Date.now() - new Date(desde).getTime()) / 86400000);
+}
+// atrasada = parada no status atual mais tempo do que o prazo de lembrete (menor pra urgente).
+function solicitacaoAtrasada(solicitacao) {
+  if (['nao_aprovado', 'instalado'].includes(solicitacao.status)) return false;
+  const limite = solicitacao.prioridade === 'urgente' ? 1 : 3;
+  return diasParadoSolicitacao(solicitacao) > limite;
+}
+function solicitacaoComDetalhes(data, s) {
+  const equipamento = data.equipamentos.find((e) => e.id === s.equipamento_id && e.empresa_id === s.empresa_id);
+  const filial = data.filiais.find((f) => f.id === s.filial_id && f.empresa_id === s.empresa_id);
+  const area = s.area_id ? data.areas.find((a) => a.id === s.area_id && a.empresa_id === s.empresa_id) : null;
+  const nomeUsuario = (id) => id ? ((data.usuarios.find((u) => u.id === id && u.empresa_id === s.empresa_id) || {}).nome || null) : null;
+  return {
+    ...s,
+    equipamento_tipo: equipamento ? equipamento.tipo : null, equipamento_modelo: equipamento ? equipamento.modelo : null,
+    filial_nome: filial ? filial.nome : null, area_nome: area ? area.nome : null,
+    solicitante_nome: nomeUsuario(s.solicitante_id),
+    responsavel_atual: RESPONSAVEL_POR_STATUS[s.status] || null,
+    dias_parado: diasParadoSolicitacao(s), atrasada: solicitacaoAtrasada(s),
+  };
+}
+
+// escopo de quem pode AGIR numa solicitação, dentro da sua filial/setor (ver escopo.js) — usado
+// por toda rota que o gerente/coordenador/consultor chama sobre uma solicitação específica.
+function solicitacaoNoEscopo(data, user, s) {
+  if (['administrador', 'supervisor', 'suporte'].includes(user.papel)) return true;
+  const completo = usuarioCompleto(data, user);
+  if (user.papel === 'gerente_loja') return completo.filial_id === s.filial_id;
+  if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
+    const filial = data.filiais.find((f) => f.id === s.filial_id && f.empresa_id === s.empresa_id);
+    return !!filial && completo.setor_id === filial.setor_id;
+  }
+  return false;
+}
+
+// ---- catálogo de peças (compartilhado entre filiais) ----
+// GET /api/pecas-catalogo?busca= — autocompletar ao digitar (pedido do usuário, seção 9)
+rota('GET', /^\/api\/pecas-catalogo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso ao catálogo de peças.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'pecas_catalogo', user.empresa_id);
+  if (query.busca) {
+    const termo = String(query.busca).trim().toLowerCase();
+    lista = lista.filter((p) => p.codigo.toLowerCase().includes(termo) || p.descricao.toLowerCase().includes(termo));
+  }
+  enviarJSON(res, 200, { pecas: lista });
+});
+
+rota('POST', /^\/api\/pecas-catalogo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'coordenador_tecnico'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou coordenador técnico cadastram peças no catálogo.' });
+  const data = db.load();
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!body.codigo || !String(body.codigo).trim() || !body.descricao || !String(body.descricao).trim()) {
+    return enviarJSON(res, 400, { erro: 'Código e descrição são obrigatórios.' });
+  }
+  const peca = tenant.criar(data, 'pecas_catalogo', user.empresa_id, {
+    codigo: body.codigo.trim(), descricao: body.descricao.trim(), foto: body.foto || null,
+    fornecedor: body.fornecedor || '', ultimo_preco: body.ultimo_preco != null && body.ultimo_preco !== '' ? Number(body.ultimo_preco) : null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { peca });
+});
+
+rota('PUT', /^\/api\/pecas-catalogo\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'coordenador_tecnico'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou coordenador técnico editam o catálogo.' });
+  const data = db.load();
+  const peca = tenant.buscar(data, 'pecas_catalogo', Number(m[1]), user.empresa_id);
+  if (!peca) return enviarJSON(res, 404, { erro: 'Peça não encontrada.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!body.codigo || !String(body.codigo).trim() || !body.descricao || !String(body.descricao).trim()) {
+    return enviarJSON(res, 400, { erro: 'Código e descrição são obrigatórios.' });
+  }
+  peca.codigo = body.codigo.trim(); peca.descricao = body.descricao.trim();
+  if (body.foto !== undefined) peca.foto = body.foto || null;
+  peca.fornecedor = body.fornecedor || '';
+  peca.ultimo_preco = body.ultimo_preco != null && body.ultimo_preco !== '' ? Number(body.ultimo_preco) : null;
+  db.save(data);
+  enviarJSON(res, 200, { peca });
+});
+
+rota('DELETE', /^\/api\/pecas-catalogo\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui do catálogo.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const peca = tenant.buscar(data, 'pecas_catalogo', id, user.empresa_id);
+  if (!peca) return enviarJSON(res, 404, { erro: 'Peça não encontrada.' });
+  if (tenant.listar(data, 'solicitacoes_peca', user.empresa_id).some((s) => s.peca_catalogo_id === id)) {
+    return enviarJSON(res, 400, { erro: 'Existem solicitações usando esta peça. Não é possível excluir.' });
+  }
+  data.pecas_catalogo = data.pecas_catalogo.filter((p) => p.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- solicitação de peça ----
+// POST /api/solicitacoes-peca { equipamento_id, prioridade, descricao, peca_catalogo_id?,
+// codigo_produto?, fornecedor?, quantidade?, valor_unitario?, justificativa?, fotos?, agenda_id? }
+rota('POST', /^\/api\/solicitacoes-peca$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão pra solicitar peça.' });
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  // equipamento é vínculo OBRIGATÓRIO (pedido do usuário, seção 9) — loja/área vêm dele, não são
+  // escolhidas à parte, pra nunca ficar destalinhadas do equipamento de verdade.
+  const equipamento = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
+  if (!equipamento || equipamento.filial_id === null) return enviarJSON(res, 400, { erro: 'Escolha um equipamento de uma filial.' });
+  const filial = tenant.buscar(data, 'filiais', equipamento.filial_id, user.empresa_id);
+  if (!filial || !filialAcessivel(data, user, filial)) return enviarJSON(res, 403, { erro: 'Você não tem acesso à filial deste equipamento.' });
+  if (!body.descricao || !String(body.descricao).trim()) return enviarJSON(res, 400, { erro: 'Descreva a peça/material necessário.' });
+  const prioridade = PRIORIDADES_SOLICITACAO_PECA.includes(body.prioridade) ? body.prioridade : 'nao_urgente';
+  let pecaCatalogo = null;
+  if (body.peca_catalogo_id) {
+    pecaCatalogo = tenant.buscar(data, 'pecas_catalogo', Number(body.peca_catalogo_id), user.empresa_id);
+    if (!pecaCatalogo) return enviarJSON(res, 400, { erro: 'Peça do catálogo não encontrada.' });
+  }
+  if (body.agenda_id) {
+    const agendaVinculada = tenant.buscar(data, 'agenda', Number(body.agenda_id), user.empresa_id);
+    if (!agendaVinculada || agendaVinculada.equipamento_id !== equipamento.id) return enviarJSON(res, 400, { erro: 'O.S. inválida para este equipamento.' });
+  }
+  const quantidade = Number(body.quantidade) > 0 ? Number(body.quantidade) : 1;
+  const valorUnitario = body.valor_unitario != null && body.valor_unitario !== '' ? Number(body.valor_unitario) : (pecaCatalogo ? pecaCatalogo.ultimo_preco : null);
+  const agora = new Date().toISOString();
+  const solicitacao = tenant.criar(data, 'solicitacoes_peca', user.empresa_id, {
+    filial_id: filial.id, area_id: equipamento.area_id, equipamento_id: equipamento.id, agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
+    prioridade, descricao: body.descricao.trim(),
+    peca_catalogo_id: pecaCatalogo ? pecaCatalogo.id : null,
+    codigo_produto: body.codigo_produto || (pecaCatalogo ? pecaCatalogo.codigo : ''),
+    fornecedor: body.fornecedor || (pecaCatalogo ? pecaCatalogo.fornecedor : ''),
+    quantidade, valor_unitario: valorUnitario, valor_total: valorUnitario != null ? Number((valorUnitario * quantidade).toFixed(2)) : null,
+    justificativa: body.justificativa || '', fotos: Array.isArray(body.fotos) ? body.fotos : [],
+    solicitante_id: user.id, criado_em: agora,
+    ciente_gerente_id: null, ciente_gerente_em: null, ciente_coordenador_id: null, ciente_coordenador_em: null,
+    status: 'pendente', historico: [{ de: null, para: 'pendente', por: user.id, em: agora, observacao: '' }],
+    nota_fiscal_numero: null, instalacao_agenda_id: null, instalado_em: null, instalado_por: null,
+  });
+  db.save(data);
+  if (filial.gerente_id) enviarPush(data, filial.gerente_id, { titulo: 'Nova solicitação de peça', corpo: `${filial.nome}: ${solicitacao.descricao}`, url: '/' }).catch(() => {});
+  enviarJSON(res, 201, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// GET /api/solicitacoes-peca?equipamento_id=&agenda_id=&status= — escopo igual ao de filiais
+rota('GET', /^\/api\/solicitacoes-peca$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso a solicitações de peça.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+  let lista = tenant.listar(data, 'solicitacoes_peca', user.empresa_id).filter((s) => filiaisIds.has(s.filial_id));
+  if (query.equipamento_id) lista = lista.filter((s) => s.equipamento_id === Number(query.equipamento_id));
+  if (query.agenda_id) lista = lista.filter((s) => s.agenda_id === Number(query.agenda_id));
+  if (query.status) lista = lista.filter((s) => s.status === query.status);
+  enviarJSON(res, 200, { solicitacoes: lista.map((s) => solicitacaoComDetalhes(data, s)) });
+});
+
+rota('GET', /^\/api\/solicitacoes-peca\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  enviarJSON(res, 200, { solicitacao: { ...solicitacaoComDetalhes(data, solicitacao), fotos: await hidratarFotosProfundo(solicitacao.fotos) } });
+});
+
+// POST /api/solicitacoes-peca/:id/ciente — gerente da loja e coordenador técnico dão "ciente"
+// (campos independentes — pedido do usuário, seção 9) cada um clica só a própria confirmação.
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/ciente$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['gerente_loja', 'coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o gerente da loja ou o coordenador técnico dão ciente.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  const agora = new Date().toISOString();
+  if (user.papel === 'gerente_loja') { solicitacao.ciente_gerente_id = user.id; solicitacao.ciente_gerente_em = agora; }
+  else if (user.papel === 'coordenador_tecnico') { solicitacao.ciente_coordenador_id = user.id; solicitacao.ciente_coordenador_em = agora; }
+  if (solicitacao.status === 'pendente') registrarHistoricoSolicitacao(solicitacao, 'pendente', 'ciente', user.id, '');
+  db.save(data);
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// PUT /api/solicitacoes-peca/:id/orcamento { codigo_produto?, fornecedor?, valor_unitario?, quantidade? }
+rota('PUT', /^\/api\/solicitacoes-peca\/(\d+)\/orcamento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['gerente_loja', 'coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o gerente da loja ou o coordenador técnico orçam a peça.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (['aprovado', 'nao_aprovado', 'comprado', 'peca_na_loja', 'instalado'].includes(solicitacao.status)) {
+    return enviarJSON(res, 400, { erro: 'Esta solicitação já passou da fase de orçamento.' });
+  }
+  const body = await lerCorpo(req);
+  if (body.codigo_produto !== undefined) solicitacao.codigo_produto = body.codigo_produto;
+  if (body.fornecedor !== undefined) solicitacao.fornecedor = body.fornecedor;
+  if (body.quantidade !== undefined && Number(body.quantidade) > 0) solicitacao.quantidade = Number(body.quantidade);
+  if (body.valor_unitario !== undefined) solicitacao.valor_unitario = body.valor_unitario === '' ? null : Number(body.valor_unitario);
+  solicitacao.valor_total = solicitacao.valor_unitario != null ? Number((solicitacao.valor_unitario * solicitacao.quantidade).toFixed(2)) : null;
+  if (solicitacao.status === 'ciente') registrarHistoricoSolicitacao(solicitacao, 'ciente', 'orcando', user.id, '');
+  db.save(data);
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// POST /api/solicitacoes-peca/:id/aprovar-local — gerente/coordenador aprova e compra direto,
+// só dentro do limite 1 (pedido do usuário, seção 9).
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/aprovar-local$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['gerente_loja', 'coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o gerente da loja ou o coordenador técnico aprovam localmente.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (!['ciente', 'orcando'].includes(solicitacao.status)) return enviarJSON(res, 400, { erro: 'Esta solicitação não está pronta pra aprovação local.' });
+  const empresaAtual = data.empresas.find((e) => e.id === user.empresa_id);
+  const { limite1 } = limitesAprovacao(empresaAtual);
+  if (solicitacao.valor_total == null || solicitacao.valor_total > limite1) {
+    return enviarJSON(res, 400, { erro: `Valor acima do limite de aprovação local (R$ ${limite1}). Peça autorização ao consultor.` });
+  }
+  const body = await lerCorpo(req);
+  registrarHistoricoSolicitacao(solicitacao, solicitacao.status, 'aprovado', user.id, body.observacao || '');
+  db.save(data);
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// POST /api/solicitacoes-peca/:id/pedir-autorizacao-consultor { observacao? }
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/pedir-autorizacao-consultor$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['gerente_loja', 'coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o gerente da loja ou o coordenador técnico pedem autorização.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (!['ciente', 'orcando'].includes(solicitacao.status)) return enviarJSON(res, 400, { erro: 'Esta solicitação não está pronta pra pedir autorização.' });
+  const body = await lerCorpo(req);
+  registrarHistoricoSolicitacao(solicitacao, solicitacao.status, 'aguardando_consultor', user.id, body.observacao || '');
+  db.save(data);
+  const filial = tenant.buscar(data, 'filiais', solicitacao.filial_id, user.empresa_id);
+  const setor = filial ? tenant.buscar(data, 'setores', filial.setor_id, user.empresa_id) : null;
+  if (setor && setor.consultor_id) enviarPush(data, setor.consultor_id, { titulo: 'Autorização de compra pendente', corpo: solicitacao.descricao, url: '/' }).catch(() => {});
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// POST /api/solicitacoes-peca/:id/consultor-decidir { decisao: 'aprovado'|'reprovado'|'encaminhar_diretoria', observacao? }
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/consultor-decidir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['consultor_mercado', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o consultor de mercado do setor decide.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (solicitacao.status !== 'aguardando_consultor') return enviarJSON(res, 400, { erro: 'Esta solicitação não está aguardando o consultor.' });
+  const body = await lerCorpo(req);
+  const empresaAtual = data.empresas.find((e) => e.id === user.empresa_id);
+  const { limite2 } = limitesAprovacao(empresaAtual);
+  const acimaDoLimite2 = solicitacao.valor_total == null || solicitacao.valor_total > limite2;
+  if (acimaDoLimite2 && body.decisao !== 'encaminhar_diretoria') {
+    return enviarJSON(res, 400, { erro: `Valor acima do limite 2 (R$ ${limite2}) — é obrigatório encaminhar à diretoria.` });
+  }
+  const novoStatus = body.decisao === 'aprovado' ? 'aprovado' : body.decisao === 'reprovado' ? 'nao_aprovado' : body.decisao === 'encaminhar_diretoria' ? 'aguardando_diretoria' : null;
+  if (!novoStatus) return enviarJSON(res, 400, { erro: 'Decisão inválida.' });
+  registrarHistoricoSolicitacao(solicitacao, solicitacao.status, novoStatus, user.id, body.observacao || '');
+  db.save(data);
+  if (novoStatus === 'aguardando_diretoria') {
+    const diretoria = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador');
+    await Promise.all(diretoria.map((d) => enviarPush(data, d.id, { titulo: 'Autorização de compra pendente', corpo: solicitacao.descricao, url: '/' }).catch(() => {})));
+  }
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// POST /api/solicitacoes-peca/:id/diretoria-decidir { decisao: 'aprovado'|'reprovado', observacao? }
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/diretoria-decidir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só a diretoria (administrador) decide nesta etapa.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (solicitacao.status !== 'aguardando_diretoria') return enviarJSON(res, 400, { erro: 'Esta solicitação não está aguardando a diretoria.' });
+  const body = await lerCorpo(req);
+  const novoStatus = body.decisao === 'aprovado' ? 'aprovado' : body.decisao === 'reprovado' ? 'nao_aprovado' : null;
+  if (!novoStatus) return enviarJSON(res, 400, { erro: 'Decisão inválida.' });
+  registrarHistoricoSolicitacao(solicitacao, 'aguardando_diretoria', novoStatus, user.id, body.observacao || '');
+  db.save(data);
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// POST /api/solicitacoes-peca/:id/marcar-comprado { nota_fiscal_numero? }
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-comprado$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['gerente_loja', 'coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (solicitacao.status !== 'aprovado') return enviarJSON(res, 400, { erro: 'Esta solicitação ainda não foi aprovada.' });
+  const body = await lerCorpo(req);
+  solicitacao.nota_fiscal_numero = body.nota_fiscal_numero || null;
+  registrarHistoricoSolicitacao(solicitacao, 'aprovado', 'comprado', user.id, '');
+  db.save(data);
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// POST /api/solicitacoes-peca/:id/marcar-peca-na-loja — pedido do usuário, seção 9: "quando o
+// status chega a 'Peça na loja', gerar automaticamente uma O.S. de instalação pro técnico".
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-peca-na-loja$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (solicitacao.status !== 'comprado') return enviarJSON(res, 400, { erro: 'Esta solicitação ainda não foi marcada como comprada.' });
+  registrarHistoricoSolicitacao(solicitacao, 'comprado', 'peca_na_loja', user.id, '');
+  const filial = tenant.buscar(data, 'filiais', solicitacao.filial_id, user.empresa_id);
+  const os = criarOsFilial(data, user, {
+    filial, area_id: solicitacao.area_id, equipamento_id: solicitacao.equipamento_id,
+    problema: `Instalar peça: ${solicitacao.descricao}`, sla_criticidade: solicitacao.prioridade === 'urgente' ? 'alto' : 'medio',
+  });
+  solicitacao.instalacao_agenda_id = os.id;
+  db.save(data);
+  if (os.tecnico_id) enviarPush(data, os.tecnico_id, { titulo: 'Peça na loja — instalar', corpo: solicitacao.descricao, url: '/' }).catch(() => {});
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao), agenda: agendaComDetalhes(data, os) });
+});
+
+// POST /api/solicitacoes-peca/:id/marcar-instalado — técnico dá baixa (seção 5/9 do pedido do
+// usuário); se existir a O.S. de instalação automática, conclui ela também.
+rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-instalado$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico confirma a instalação.' });
+  const data = db.load();
+  const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
+  if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
+  if (solicitacao.status !== 'peca_na_loja') return enviarJSON(res, 400, { erro: 'A peça ainda não chegou na loja.' });
+  registrarHistoricoSolicitacao(solicitacao, 'peca_na_loja', 'instalado', user.id, '');
+  solicitacao.instalado_em = new Date().toISOString();
+  solicitacao.instalado_por = user.id;
+  db.save(data);
+  enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
 });
 
 // GET /api/equipamentos/:id/historico

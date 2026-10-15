@@ -295,6 +295,10 @@ function seed() {
     vistorias: [],
     vistoria_itens: [],
     apoios: [],
+    // versão Restaurantes/rede multiunidade (Fase 3 — Peças): catálogo compartilhado entre
+    // filiais (empresa_id, não filial_id) e solicitação de peça com cadeia de autorização.
+    pecas_catalogo: [],
+    solicitacoes_peca: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -304,7 +308,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -988,6 +992,11 @@ function migrar(data) {
   if (!data._seq.vistorias) data._seq.vistorias = 1;
   if (!data._seq.vistoria_itens) data._seq.vistoria_itens = 1;
   if (!data._seq.apoios) data._seq.apoios = 1;
+  // Fase 3 — Peças: catálogo compartilhado + solicitação de peça com cadeia de autorização.
+  if (!Array.isArray(data.pecas_catalogo)) data.pecas_catalogo = [];
+  if (!Array.isArray(data.solicitacoes_peca)) data.solicitacoes_peca = [];
+  if (!data._seq.pecas_catalogo) data._seq.pecas_catalogo = 1;
+  if (!data._seq.solicitacoes_peca) data._seq.solicitacoes_peca = 1;
   if (!data._migracaoFiliaisV1) {
     for (const e of data.equipamentos) {
       if (e.filial_id === undefined) e.filial_id = null;
