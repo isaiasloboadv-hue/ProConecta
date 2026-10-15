@@ -74,6 +74,9 @@ const PREFIXO_MODULO = [
   ['/api/dashboards/filiais', 'filiais'],
   ['/api/avisos', 'filiais'],
   ['/api/mensagens-canal', 'filiais'],
+  // pedido do usuário (empresa JBPA): registro de atividades diárias pra cliente com contrato
+  // mensal — data/descrição/valor do que foi feito, com PDF comparando o entregue com o contrato.
+  ['/api/atividades-diarias', 'atividades'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à

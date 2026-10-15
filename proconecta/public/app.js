@@ -718,6 +718,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'minhas-viagens': 'Minhas viagens',
     'solicitacoes-rh': 'Solicitações',
     'chat-interno': 'Mensagens',
+    'atividades-diarias': 'Registro de Atividades',
   },
   administrador: {
     'agenda': 'Agenda geral',
@@ -727,6 +728,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'links-externos': 'Links',
     'biblioteca': 'Biblioteca',
     'clientes': 'Clientes',
+    'atividades-diarias': 'Registro de Atividades',
     'equipamentos': 'Equipamentos',
     'fmea-relatorios': 'FMEA — Ranking e Pareto',
     'usuarios': 'Usuários',
@@ -777,6 +779,9 @@ const NAV = {
     // pedido do usuário: "o gerador de orçamento é a base, depois o menu relatório" — Relatório
     // não exige mais O.S. completo, é módulo próprio ("relatorios", ver db.js) do plano de entrada.
     { key: 'relatorio-manutencao', modulo: 'relatorios', label: 'Relatório', page: 'relatorio-manutencao' },
+    // pedido do usuário (empresa JBPA): cliente com contrato mensal — registra tudo que é feito
+    // (data/descrição/valor) pra depois emitir um PDF mostrando o que foi entregue no período.
+    { key: 'atividades-diarias', modulo: 'atividades', label: 'Registro de Atividades', page: 'atividades-diarias' },
     // pedido do usuário: menu com o link dos formulários que o cliente preenche por fora, sem
     // login (hoje só o Briefing de Pré-Visita e a Entrega para Teste têm isso) — igual ele já
     // mandava o link do Briefing, só que centralizado numa lista com botão Encaminhar.
@@ -836,6 +841,9 @@ const NAV = {
     // de submenu (mesmo componente .kpis-tile do Home).
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', page: 'biblioteca-menu' },
     { key: 'clientes', modulo: 'nucleo', label: 'Clientes', page: 'clientes' },
+    // pedido do usuário (empresa JBPA): cliente com contrato mensal — registra tudo que é feito
+    // (data/descrição/valor) pra depois emitir um PDF mostrando o que foi entregue no período.
+    { key: 'atividades-diarias', modulo: 'atividades', label: 'Registro de Atividades', page: 'atividades-diarias' },
     // mesma ideia da Biblioteca acima: Cadastrar/Atrelar viram tiles de renderEquipamentosMenu()
     // — cadastro/catálogo é o módulo "relatorios" (alimenta o Relatório), não exige O.S.
     { key: 'equipamentos', modulo: 'relatorios', label: 'Equipamentos', page: 'equipamentos-menu' },
@@ -1052,6 +1060,7 @@ const ICONE_MENU = {
   'dashboard-filiais': '📊',
   'avisos': '📣',
   'mensagens-canal': '🗨️',
+  'atividades-diarias': '📋',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1196,6 +1205,7 @@ async function ir(pagina) {
     if (pagina === 'dashboard-filiais') return renderDashboardFiliais();
     if (pagina === 'avisos') return renderAvisos();
     if (pagina === 'mensagens-canal') return renderMensagensCanal();
+    if (pagina === 'atividades-diarias') return renderAtividadesDiarias();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -15760,6 +15770,7 @@ function mostrarFormCliente(cliente) {
         <div><label>CEP</label><input id="nc-cep" value="${cliente ? esc(cliente.cep || '') : ''}"></div>
         <div><label>Cidade</label><input id="nc-cidade" value="${cliente ? esc(cliente.cidade || '') : ''}"></div>
         <div><label>Estado</label><select id="nc-estado"><option value="">Selecione</option>${Object.keys(UF_REGIAO).map((uf) => `<option value="${uf}" ${cliente && cliente.estado === uf ? 'selected' : ''}>${uf}</option>`).join('')}</select></div>
+        <div><label>Valor do contrato mensal (R$)</label><input id="nc-valor-contrato" type="number" min="0" step="0.01" placeholder="Opcional — só pra comparar no PDF de Registro de Atividades" value="${cliente && cliente.valor_contrato_mensal != null ? cliente.valor_contrato_mensal : ''}"></div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-primary btn-sm" onclick="salvarCliente()">${cliente ? 'Salvar alterações' : 'Salvar cliente'}</button>
@@ -15795,6 +15806,7 @@ async function salvarCliente() {
     cep: document.getElementById('nc-cep').value,
     cidade: document.getElementById('nc-cidade').value,
     estado: document.getElementById('nc-estado').value,
+    valor_contrato_mensal: document.getElementById('nc-valor-contrato').value === '' ? null : Number(document.getElementById('nc-valor-contrato').value),
   };
   try {
     if (clienteEmEdicaoId) {
@@ -15816,6 +15828,239 @@ async function excluirCliente(id) {
     mostrarToast('Cliente excluído.');
     renderClientes();
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- REGISTRO DE ATIVIDADES DIÁRIAS (pedido do usuário, empresa JBPA) ----------
+// cliente com contrato mensal: registra TUDO que é feito (data/descrição do serviço/valor), pra
+// depois exportar um PDF mostrando o que foi entregue no período e comparar com o valor do
+// contrato — "ver que valeu a pena o contrato". Reaproveita a lista de Clientes já existente
+// (nenhum cadastro novo de cliente aqui), só adiciona o campo opcional "valor do contrato
+// mensal" (ver mostrarFormCliente/salvarCliente acima) pra essa comparação.
+let atividadeDiariaFiltro = { cliente_id: '', periodo_inicio: '', periodo_fim: '' };
+let atividadeDiariaEmEdicaoId = null;
+async function renderAtividadesDiarias() {
+  const { clientes } = await api('/api/clientes');
+  window._clientesAtividadeCache = clientes;
+  await carregarAtividadesDiarias();
+}
+async function carregarAtividadesDiarias() {
+  const params = new URLSearchParams();
+  if (atividadeDiariaFiltro.cliente_id) params.set('cliente_id', atividadeDiariaFiltro.cliente_id);
+  if (atividadeDiariaFiltro.periodo_inicio) params.set('periodo_inicio', atividadeDiariaFiltro.periodo_inicio);
+  if (atividadeDiariaFiltro.periodo_fim) params.set('periodo_fim', atividadeDiariaFiltro.periodo_fim);
+  const { atividades } = await api('/api/atividades-diarias' + (params.toString() ? '?' + params.toString() : ''));
+  window._atividadesDiariasCache = atividades;
+  desenharAtividadesDiarias();
+}
+function desenharAtividadesDiarias() {
+  const atividades = window._atividadesDiariasCache || [];
+  const clientes = window._clientesAtividadeCache || [];
+  const total = atividades.reduce((soma, a) => soma + a.valor, 0);
+  const clienteSelecionado = atividadeDiariaFiltro.cliente_id ? clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id)) : null;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Registro de Atividades</h1><p>Tudo que é feito pra cada cliente, pra justificar o contrato mensal.</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormAtividadeDiaria()">+ Nova atividade</button>
+    </div>
+    <div class="panel">
+      <div class="filtros-row">
+        <div class="field"><label>Cliente</label><select id="ad-filtro-cliente" onchange="aplicarFiltroAtividadeDiaria()">
+          <option value="">Todos</option>
+          ${clientes.map((c) => `<option value="${c.id}" ${String(atividadeDiariaFiltro.cliente_id) === String(c.id) ? 'selected' : ''}>${esc(c.nome_empresa)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>De</label><input id="ad-filtro-inicio" type="date" value="${esc(atividadeDiariaFiltro.periodo_inicio)}" onchange="aplicarFiltroAtividadeDiaria()"></div>
+        <div class="field"><label>Até</label><input id="ad-filtro-fim" type="date" value="${esc(atividadeDiariaFiltro.periodo_fim)}" onchange="aplicarFiltroAtividadeDiaria()"></div>
+        <button class="btn-outline-sm" onclick="limparFiltroAtividadeDiaria()">Limpar filtro</button>
+        ${clienteSelecionado ? `<button class="btn btn-primary btn-sm" onclick="exportarPdfAtividadesDiarias()">📄 Exportar PDF pro cliente</button>` : ''}
+      </div>
+      ${!clienteSelecionado ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:8px;">Escolha um cliente no filtro acima pra poder exportar o PDF — o relatório é sempre de um cliente por vez.</p>` : ''}
+    </div>
+    <div id="form-atividade-diaria"></div>
+    <div class="panel"><table>
+      <tr><th>Data</th><th>Cliente</th><th>Descrição</th><th>Valor</th><th>Registrado por</th><th></th></tr>
+      ${atividades.length ? atividades.map((a) => `
+        <tr>
+          <td data-label="Data">${esc(a.data.split('-').reverse().join('/'))}</td>
+          <td data-label="Cliente">${esc(a.cliente_nome || '—')}</td>
+          <td data-label="Descrição">${esc(a.descricao)}</td>
+          <td data-label="Valor">${fmtMoeda(a.valor)}</td>
+          <td data-label="Registrado por">${esc(a.autor_nome || '—')}</td>
+          <td class="td-acoes">${USER.papel === 'administrador' || a.autor_id === USER.id ? `
+            <button class="btn-outline-sm" onclick="editarAtividadeDiaria(${a.id})">Editar</button>
+            <button class="btn-outline-sm" onclick="excluirAtividadeDiaria(${a.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+          ` : ''}</td>
+        </tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhuma atividade registrada${clienteSelecionado ? ' pra esse cliente' : ''} nesse período.</td></tr>`}
+    </table>
+      ${atividades.length ? `<p style="text-align:right; font-weight:700; margin-top:10px; font-size:14px;">Total: ${fmtMoeda(total)}</p>` : ''}
+    </div>`;
+}
+function aplicarFiltroAtividadeDiaria() {
+  atividadeDiariaFiltro = {
+    cliente_id: document.getElementById('ad-filtro-cliente').value,
+    periodo_inicio: document.getElementById('ad-filtro-inicio').value,
+    periodo_fim: document.getElementById('ad-filtro-fim').value,
+  };
+  carregarAtividadesDiarias();
+}
+function limparFiltroAtividadeDiaria() {
+  atividadeDiariaFiltro = { cliente_id: '', periodo_inicio: '', periodo_fim: '' };
+  carregarAtividadesDiarias();
+}
+function mostrarFormAtividadeDiaria(atividade) {
+  atividadeDiariaEmEdicaoId = atividade ? atividade.id : null;
+  const clientes = window._clientesAtividadeCache || [];
+  document.getElementById('form-atividade-diaria').innerHTML = `
+    <div class="panel" style="background:var(--blue-pale-2);"><div class="panel-head">${atividade ? 'Editar atividade' : 'Nova atividade'}</div>
+      <div class="form-grid">
+        <div><label>Cliente*</label><select id="ad-cliente">
+          ${clientes.map((c) => `<option value="${c.id}" ${atividade ? (atividade.cliente_id === c.id ? 'selected' : '') : (String(atividadeDiariaFiltro.cliente_id) === String(c.id) ? 'selected' : '')}>${esc(c.nome_empresa)}</option>`).join('')}
+        </select></div>
+        <div><label>Data*</label><input id="ad-data" type="date" value="${atividade ? esc(atividade.data) : new Date().toISOString().slice(0, 10)}"></div>
+        <div><label>Valor (R$)*</label><input id="ad-valor" type="number" min="0" step="0.01" value="${atividade ? atividade.valor : ''}"></div>
+        <div class="full"><label>Descrição do serviço*</label><textarea id="ad-descricao" rows="2" placeholder="Ex.: Troca de resistência da fritadeira 2, limpeza do sistema de exaustão...">${atividade ? esc(atividade.descricao) : ''}</textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarAtividadeDiaria()">${atividade ? 'Salvar alterações' : 'Registrar atividade'}</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-atividade-diaria').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-atividade-diaria').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function editarAtividadeDiaria(id) {
+  const atividade = (window._atividadesDiariasCache || []).find((a) => a.id === id);
+  if (atividade) mostrarFormAtividadeDiaria(atividade);
+}
+async function salvarAtividadeDiaria() {
+  const clienteId = document.getElementById('ad-cliente').value;
+  if (!clienteId) return alert('Escolha o cliente.');
+  const data = document.getElementById('ad-data').value;
+  if (!data) return alert('Informe a data.');
+  const descricao = document.getElementById('ad-descricao').value.trim();
+  if (!descricao) return alert('Descreva o serviço realizado.');
+  const valorStr = document.getElementById('ad-valor').value;
+  if (valorStr === '' || Number(valorStr) < 0) return alert('Informe um valor válido.');
+  const body = { cliente_id: Number(clienteId), data, descricao, valor: Number(valorStr) };
+  try {
+    if (atividadeDiariaEmEdicaoId) {
+      await api(`/api/atividades-diarias/${atividadeDiariaEmEdicaoId}`, { method: 'PUT', body });
+      mostrarToast('Atividade atualizada.');
+    } else {
+      await api('/api/atividades-diarias', { method: 'POST', body });
+      mostrarToast('Atividade registrada.');
+    }
+    atividadeDiariaEmEdicaoId = null;
+    document.getElementById('form-atividade-diaria').innerHTML = '';
+    carregarAtividadesDiarias();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirAtividadeDiaria(id) {
+  if (!(await mostrarConfirmacao('Excluir esta atividade? Esta ação não pode ser desfeita.'))) return;
+  try {
+    await api(`/api/atividades-diarias/${id}`, { method: 'DELETE' });
+    mostrarToast('Atividade excluída.');
+    carregarAtividadesDiarias();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// PDF pro cliente — mesmo padrão jsPDF/PDF_COR/carregarLogoVariantes de todo o resto do sistema
+// (ver exportarDespesasJustificadasPdf pra tabela com paginação, gerarPdfProposta pro bloco
+// "PARA" com dados do cliente). Sempre de UM cliente por vez (o filtro de cliente já trava isso).
+async function exportarPdfAtividadesDiarias() {
+  if (typeof window.jspdf === 'undefined') return alert('A biblioteca de exportação de PDF não carregou (sem conexão com o CDN). Tente novamente mais tarde.');
+  const clientes = window._clientesAtividadeCache || [];
+  const cliente = clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id));
+  if (!cliente) return mostrarToast('Escolha um cliente no filtro pra exportar o PDF.');
+  const atividades = window._atividadesDiariasCache || [];
+  if (!atividades.length) return mostrarToast('Nenhuma atividade registrada nesse período pra exportar.');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Atividades — ${cliente.nome_empresa}` });
+  const logo = await carregarLogoVariantes();
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  let y = margem;
+
+  const xTexto = margem + (logo ? 36 : 0);
+  if (logo) { try { doc.addImage(logo.header, 'PNG', margem, y - 8, 28, 32); } catch (e) {} }
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('Registro de Atividades', xTexto, y + 10);
+  doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(limparPdf(empresaNome()), xTexto, y + 26);
+  y += 48;
+  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 22;
+
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text('PARA', margem, y); y += 14;
+  doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text(limparPdf(cliente.nome_empresa), margem, y); y += 15;
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  [cliente.contato && `Contato: ${cliente.contato}`, cliente.email && `E-mail: ${cliente.email}`].filter(Boolean)
+    .forEach((linha) => { doc.text(limparPdf(linha), margem, y); y += 13; });
+  y += 8;
+
+  const periodoTexto = atividadeDiariaFiltro.periodo_inicio || atividadeDiariaFiltro.periodo_fim
+    ? `Período: ${atividadeDiariaFiltro.periodo_inicio ? atividadeDiariaFiltro.periodo_inicio.split('-').reverse().join('/') : '—'} até ${atividadeDiariaFiltro.periodo_fim ? atividadeDiariaFiltro.periodo_fim.split('-').reverse().join('/') : '—'}`
+    : 'Período: todas as atividades registradas';
+  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text(periodoTexto, margem, y); y += 20;
+
+  const colX = { data: margem, desc: margem + 60, valor: pageW - margem - 80 };
+  const largDesc = colX.valor - colX.desc - 10;
+  function cabecalhoTabela() {
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('DATA', colX.data, y);
+    doc.text('DESCRIÇÃO DO SERVIÇO', colX.desc, y);
+    doc.text('VALOR', colX.valor, y);
+    y += 8;
+    doc.setDrawColor(...PDF_COR.line);
+    doc.line(margem, y, pageW - margem, y);
+    y += 16;
+  }
+  cabecalhoTabela();
+
+  const ordenadas = [...atividades].sort((a, b) => a.data.localeCompare(b.data) || a.id - b.id);
+  let totalPeriodo = 0;
+  ordenadas.forEach((a) => {
+    doc.setFontSize(8.5);
+    const linhasDesc = doc.splitTextToSize(limparPdf(a.descricao), largDesc);
+    const alturaLinha = Math.max(linhasDesc.length, 1) * 10.5 + 5;
+    if (y + alturaLinha > pageH - margem - 40) { doc.addPage(); y = margem; cabecalhoTabela(); }
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(a.data.split('-').reverse().join('/'), colX.data, y);
+    doc.text(linhasDesc, colX.desc, y);
+    doc.text(fmtMoeda(a.valor), colX.valor, y);
+    totalPeriodo += a.valor;
+    y += alturaLinha;
+  });
+  y += 4;
+  if (y > pageH - margem - 90) { doc.addPage(); y = margem + 18; }
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, y, pageW - margem, y); y += 20;
+
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem + largura * 0.55, y, largura * 0.45, 26, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(12); doc.setTextColor(...PDF_COR.white);
+  doc.text(`TOTAL ENTREGUE: ${fmtMoeda(totalPeriodo)}`, pageW - margem - 8, y + 18, { align: 'right' });
+  y += 44;
+
+  // comparação com o contrato — só aparece se o cliente tiver o valor cadastrado (ver
+  // mostrarFormCliente), que é exatamente o pedido do usuário: "comparar com o contrato e ver que
+  // valeu a pena".
+  if (cliente.valor_contrato_mensal != null) {
+    if (y > pageH - margem - 90) { doc.addPage(); y = margem + 18; }
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('COMPARATIVO COM O CONTRATO', margem, y); y += 16;
+    doc.setFont(undefined, 'normal'); doc.setFontSize(10); doc.setTextColor(...PDF_COR.ink);
+    doc.text(`Valor do contrato mensal: ${fmtMoeda(cliente.valor_contrato_mensal)}`, margem, y); y += 16;
+    doc.text(`Total de serviços entregues no período acima: ${fmtMoeda(totalPeriodo)}`, margem, y); y += 20;
+  }
+
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, pageH - 48, pageW - margem, pageH - 48);
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  const contatos = [empresaWhatsapp() && `WhatsApp: ${empresaWhatsapp()}`, empresaTelefone() && `Telefone: ${empresaTelefone()}`, empresaEmails().length && `E-mail: ${empresaEmails()[0]}`].filter(Boolean);
+  if (contatos.length) doc.text(contatos.join('   ·   '), pageW / 2, pageH - 32, { align: 'center' });
+
+  doc.save(`atividades-${cliente.nome_empresa.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ---------- COMERCIAL: LEADS/CONTATOS (CRM nativo, passo 1) ----------

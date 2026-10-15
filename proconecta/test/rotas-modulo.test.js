@@ -120,3 +120,9 @@ test('rotas de dashboards/avisos/mensagens-canal pertencem a filiais', () => {
   assert.equal(moduloDaRota(/^\/api\/mensagens-canal$/), 'filiais');
   assert.equal(moduloDaRota(/^\/api\/mensagens-canal\/canais$/), 'filiais');
 });
+
+// pedido do usuário (empresa JBPA): registro de atividades diárias pertence ao módulo "atividades".
+test('rotas de atividades diárias pertencem a atividades', () => {
+  assert.equal(moduloDaRota(/^\/api\/atividades-diarias$/), 'atividades');
+  assert.equal(moduloDaRota(/^\/api\/atividades-diarias\/(\d+)$/), 'atividades');
+});

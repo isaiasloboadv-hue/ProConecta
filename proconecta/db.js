@@ -61,6 +61,11 @@ const MODULOS_DISPONIVEIS = [
   // restaurante) — liga a hierarquia setores/filiais/áreas e os papéis gerente_loja/
   // coordenador_tecnico/consultor_mercado (ver PAPEIS_ESTRUTURA_FILIAIS em server.js).
   { chave: 'filiais', nome: 'Redes e Filiais' },
+  // pedido do usuário (empresa JBPA): cliente com contrato mensal — a empresa registra TUDO que é
+  // feito pra esse cliente (data, descrição do serviço, valor), pra depois emitir um PDF mostrando
+  // o que foi entregue no período e comparando com o valor do contrato ("ver que valeu a pena").
+  // Reaproveitável por qualquer empresa com contrato recorrente, não é exclusivo da JBPA.
+  { chave: 'atividades', nome: 'Registro de Atividades' },
 ];
 const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
 
@@ -316,6 +321,10 @@ function seed() {
     // pra recuperar o mesmo rascunho de qualquer aparelho logado com o mesmo usuário (ver
     // sincronizarRascunhoServidor em app.js).
     rascunhos: [],
+    // registro de atividades diárias (pedido do usuário, empresa JBPA) — cliente com contrato
+    // mensal, data + descrição do serviço + valor, pra gerar um PDF comparando o entregue com o
+    // valor do contrato.
+    atividades_diarias: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -325,7 +334,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -582,7 +591,7 @@ function migrar(data) {
     const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
     data.versoes.push(
       { id: nextId(data, 'versoes'), nome: 'Profissional', ordem: maiorOrdemAtual + 1, modulos_proprios: ['comercial', 'prestacao_contas', 'agendamento'], modulos: [], preco_mensal: null },
-      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia', 'filiais'], modulos: [], preco_mensal: null },
+      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia', 'filiais', 'atividades'], modulos: [], preco_mensal: null },
     );
     recalcularModulosVersoes(data);
     data._migracaoPlanosPadraoV1 = true;
@@ -645,7 +654,7 @@ function migrar(data) {
       const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
       data.versoes.push({
         id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 1,
-        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento', 'filiais'],
+        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento', 'filiais', 'atividades'],
         modulos: [], preco_mensal: null,
       });
     }
@@ -689,23 +698,36 @@ function migrar(data) {
   // (2) toda empresa cujo plano atual já libera "filiais" (olhando versao.modulos, recalculado em
   // seguida) mas cujo modulos_ativos ainda não tem, ganha o módulo de volta — sem precisar
   // reconfigurar nada manualmente.
-  if (!data._migracaoFiliaisDesbloqueioEmpresasV1) {
-    const outrosModulos = CHAVES_MODULOS.filter((chave) => chave !== 'filiais');
+  // helper comum às duas migrações de resgate abaixo (filiais e, depois, atividades): acha o(s)
+  // plano(s) que já liberam TODO o resto do catálogo (a marca inequívoca de "era o plano completo,
+  // só faltou um módulo que não existia ainda" — não depende do nome, que o Super Admin pode ter
+  // mudado) e dá o módulo de volta a eles e a toda empresa que já estava num deles.
+  function desbloquearModuloNosPlanosCompletos(chaveModulo) {
+    const outrosModulos = CHAVES_MODULOS.filter((chave) => chave !== chaveModulo);
     for (const versao of data.versoes) {
-      const jaLiberaTudoMenosFiliais = Array.isArray(versao.modulos) && outrosModulos.every((chave) => versao.modulos.includes(chave));
-      if (!jaLiberaTudoMenosFiliais) continue;
+      const jaLiberaTudoMenosEsse = Array.isArray(versao.modulos) && outrosModulos.every((chave) => versao.modulos.includes(chave));
+      if (!jaLiberaTudoMenosEsse) continue;
       const proprios = Array.isArray(versao.modulos_proprios) ? versao.modulos_proprios : [];
-      if (!proprios.includes('filiais')) versao.modulos_proprios = [...proprios, 'filiais'];
+      if (!proprios.includes(chaveModulo)) versao.modulos_proprios = [...proprios, chaveModulo];
     }
     recalcularModulosVersoes(data);
     for (const empresa of data.empresas) {
       const versao = data.versoes.find((v) => v.id === empresa.versao_id);
-      if (versao && Array.isArray(versao.modulos) && versao.modulos.includes('filiais')
-        && Array.isArray(empresa.modulos_ativos) && !empresa.modulos_ativos.includes('filiais')) {
-        empresa.modulos_ativos = [...empresa.modulos_ativos, 'filiais'];
+      if (versao && Array.isArray(versao.modulos) && versao.modulos.includes(chaveModulo)
+        && Array.isArray(empresa.modulos_ativos) && !empresa.modulos_ativos.includes(chaveModulo)) {
+        empresa.modulos_ativos = [...empresa.modulos_ativos, chaveModulo];
       }
     }
+  }
+  if (!data._migracaoFiliaisDesbloqueioEmpresasV1) {
+    desbloquearModuloNosPlanosCompletos('filiais');
     data._migracaoFiliaisDesbloqueioEmpresasV1 = true;
+  }
+  // mesmo bug, mesmo remédio, pro módulo "atividades" (pedido do usuário, empresa JBPA) — criado
+  // depois da versão de código que já tinha rodado as migrações de plano acima nessa instalação.
+  if (!data._migracaoAtividadesDesbloqueioEmpresasV1) {
+    desbloquearModuloNosPlanosCompletos('atividades');
+    data._migracaoAtividadesDesbloqueioEmpresasV1 = true;
   }
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
@@ -1074,6 +1096,14 @@ function migrar(data) {
   // aparelhos (ver sincronizarRascunhoServidor em app.js).
   if (!Array.isArray(data.rascunhos)) data.rascunhos = [];
   if (!data._seq.rascunhos) data._seq.rascunhos = 1;
+  // pedido do usuário (empresa JBPA): registro de atividades diárias pra cliente com contrato
+  // mensal — data + descrição do serviço + valor, pra depois gerar um PDF mostrando o que foi
+  // entregue no período (ver POST/GET /api/atividades-diarias em server.js).
+  if (!Array.isArray(data.atividades_diarias)) data.atividades_diarias = [];
+  if (!data._seq.atividades_diarias) data._seq.atividades_diarias = 1;
+  // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
+  // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
+  for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }
   if (!data._migracaoFiliaisV1) {
     for (const e of data.equipamentos) {
       if (e.filial_id === undefined) e.filial_id = null;

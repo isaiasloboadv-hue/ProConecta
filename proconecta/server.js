@@ -4474,12 +4474,21 @@ rota('GET', /^\/api\/clientes$/, async (req, res) => {
   // "comercial" precisa listar clientes pra resolver nome na tela de Leads/Funil/Orçamentos (ver
   // renderOportunidades/renderOrcamentosGeral, app.js) — sem isso, essas telas ficam travadas em
   // "Carregando..." pra qualquer empresa com um vendedor dedicado (ver papelExigeDepartamentalizacao).
-  if (!exigirPapel(user, ['administrador', 'producao', 'supervisor', 'comercial'])) return enviarJSON(res, 403, { erro: 'Só o administrador, produção ou comercial veem clientes.' });
+  // "suporte" precisa pro seletor de cliente do Registro de Atividades (ver renderAtividadesDiarias)
+  // — o técnico já vê nome de cliente o dia inteiro via Agenda/Equipamentos, nada novo exposto aqui.
+  if (!exigirPapel(user, ['administrador', 'producao', 'supervisor', 'comercial', 'suporte'])) return enviarJSON(res, 403, { erro: 'Sem acesso a clientes.' });
   const data = db.load();
   enviarJSON(res, 200, { clientes: tenant.listar(data, 'clientes', user.empresa_id) });
 });
 
 // POST /api/clientes — administrador cadastra uma nova empresa-cliente
+// valor do contrato mensal (opcional) — só referência pro PDF de Registro de Atividades (ver
+// POST /api/atividades-diarias/relatorio abaixo); null/vazio = cliente sem contrato de valor fixo.
+function valorContratoMensalDoBody(body) {
+  if (body.valor_contrato_mensal === undefined || body.valor_contrato_mensal === null || body.valor_contrato_mensal === '') return null;
+  const n = Number(body.valor_contrato_mensal);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 rota('POST', /^\/api\/clientes$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, ['administrador', 'producao'])) return enviarJSON(res, 403, { erro: 'Só o administrador ou produção cadastram clientes.' });
@@ -4501,6 +4510,7 @@ rota('POST', /^\/api\/clientes$/, async (req, res) => {
     cep: body.cep || '',
     cidade: body.cidade || '',
     estado: body.estado || '',
+    valor_contrato_mensal: valorContratoMensalDoBody(body),
   });
   db.save(data);
   enviarJSON(res, 201, { cliente: item });
@@ -4522,6 +4532,7 @@ rota('PUT', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
     contato: body.contato || '', telefone: body.telefone || '', email: body.email || '',
     setor: body.setor || '', endereco: body.endereco || '', numero: body.numero || '',
     bairro: body.bairro || '', cep: body.cep || '', cidade: body.cidade || '', estado: body.estado || '',
+    valor_contrato_mensal: valorContratoMensalDoBody(body),
   });
   db.save(data);
   enviarJSON(res, 200, { cliente });
@@ -4538,7 +4549,89 @@ rota('DELETE', /^\/api\/clientes\/(\d+)$/, async (req, res, m) => {
   if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem usuários vinculados a este cliente. Remova ou reatribua-os antes de excluir.' });
   if (tenant.listar(data, 'agenda', user.empresa_id).some((a) => a.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem ordens de serviço vinculadas a este cliente. Exclua-as antes.' });
   if (tenant.listar(data, 'equipamentos', user.empresa_id).some((e) => e.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem equipamentos atrelados a este cliente. Remova-os antes.' });
+  if (tenant.listar(data, 'atividades_diarias', user.empresa_id).some((a) => a.cliente_id === id)) return enviarJSON(res, 400, { erro: 'Existem atividades registradas para este cliente. Exclua-as antes.' });
   data.clientes = data.clientes.filter((c) => c.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---------- registro de atividades diárias (pedido do usuário, empresa JBPA) ----------
+// cliente com contrato mensal: a empresa registra TUDO que é feito (data, descrição do serviço,
+// valor), pra depois comparar com o que o cliente paga e mostrar que o contrato vale a pena — o
+// PDF em si é gerado no navegador (mesmo padrão jsPDF de todo o resto do sistema, ver
+// gerarPdfAtividadesDiarias em app.js); aqui só entram listagem e CRUD dos lançamentos.
+const PAPEIS_ATIVIDADE_DIARIA = ['administrador', 'suporte'];
+function atividadeDiariaComDetalhes(data, a) {
+  const cliente = data.clientes.find((c) => c.id === a.cliente_id && c.empresa_id === a.empresa_id);
+  const autor = data.usuarios.find((u) => u.id === a.autor_id && u.empresa_id === a.empresa_id);
+  return { ...a, cliente_nome: cliente ? cliente.nome_empresa : null, autor_nome: autor ? autor.nome : null };
+}
+// só quem registrou (ou o administrador) edita/exclui — mesma regra de outras telas de lançamento
+// pessoal (ex.: despesas justificadas).
+function podeEditarAtividadeDiaria(user, atividade) {
+  return user.papel === 'administrador' || atividade.autor_id === user.id;
+}
+// GET /api/atividades-diarias?cliente_id=&periodo_inicio=&periodo_fim=
+rota('GET', /^\/api\/atividades-diarias$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_ATIVIDADE_DIARIA)) return enviarJSON(res, 403, { erro: 'Sem acesso ao registro de atividades.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'atividades_diarias', user.empresa_id);
+  if (query.cliente_id) lista = lista.filter((a) => a.cliente_id === Number(query.cliente_id));
+  if (query.periodo_inicio) lista = lista.filter((a) => a.data >= query.periodo_inicio);
+  if (query.periodo_fim) lista = lista.filter((a) => a.data <= query.periodo_fim);
+  lista = lista.map((a) => atividadeDiariaComDetalhes(data, a)).sort((a, b) => b.data.localeCompare(a.data) || b.id - a.id);
+  enviarJSON(res, 200, { atividades: lista });
+});
+// POST /api/atividades-diarias { cliente_id, data, descricao, valor }
+rota('POST', /^\/api\/atividades-diarias$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_ATIVIDADE_DIARIA)) return enviarJSON(res, 403, { erro: 'Sem acesso ao registro de atividades.' });
+  const data = db.load();
+  const body = await lerCorpo(req);
+  const cliente = tenant.buscar(data, 'clientes', Number(body.cliente_id), user.empresa_id);
+  if (!cliente) return enviarJSON(res, 400, { erro: 'Escolha um cliente.' });
+  if (!body.data) return enviarJSON(res, 400, { erro: 'Informe a data da atividade.' });
+  if (!body.descricao || !String(body.descricao).trim()) return enviarJSON(res, 400, { erro: 'Descreva o serviço realizado.' });
+  const valor = Number(body.valor);
+  if (!Number.isFinite(valor) || valor < 0) return enviarJSON(res, 400, { erro: 'Informe um valor válido.' });
+  const atividade = tenant.criar(data, 'atividades_diarias', user.empresa_id, {
+    cliente_id: cliente.id, data: body.data, descricao: String(body.descricao).trim(), valor,
+    autor_id: user.id, criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { atividade: atividadeDiariaComDetalhes(data, atividade) });
+});
+// PUT /api/atividades-diarias/:id — só quem registrou ou o administrador
+rota('PUT', /^\/api\/atividades-diarias\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_ATIVIDADE_DIARIA)) return enviarJSON(res, 403, { erro: 'Sem acesso ao registro de atividades.' });
+  const data = db.load();
+  const atividade = tenant.buscar(data, 'atividades_diarias', Number(m[1]), user.empresa_id);
+  if (!atividade) return enviarJSON(res, 404, { erro: 'Atividade não encontrada.' });
+  if (!podeEditarAtividadeDiaria(user, atividade)) return enviarJSON(res, 403, { erro: 'Só quem registrou (ou o administrador) edita esta atividade.' });
+  const body = await lerCorpo(req);
+  const cliente = tenant.buscar(data, 'clientes', Number(body.cliente_id), user.empresa_id);
+  if (!cliente) return enviarJSON(res, 400, { erro: 'Escolha um cliente.' });
+  if (!body.data) return enviarJSON(res, 400, { erro: 'Informe a data da atividade.' });
+  if (!body.descricao || !String(body.descricao).trim()) return enviarJSON(res, 400, { erro: 'Descreva o serviço realizado.' });
+  const valor = Number(body.valor);
+  if (!Number.isFinite(valor) || valor < 0) return enviarJSON(res, 400, { erro: 'Informe um valor válido.' });
+  atividade.cliente_id = cliente.id; atividade.data = body.data;
+  atividade.descricao = String(body.descricao).trim(); atividade.valor = valor;
+  db.save(data);
+  enviarJSON(res, 200, { atividade: atividadeDiariaComDetalhes(data, atividade) });
+});
+// DELETE /api/atividades-diarias/:id — só quem registrou ou o administrador
+rota('DELETE', /^\/api\/atividades-diarias\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_ATIVIDADE_DIARIA)) return enviarJSON(res, 403, { erro: 'Sem acesso ao registro de atividades.' });
+  const data = db.load();
+  const atividade = tenant.buscar(data, 'atividades_diarias', Number(m[1]), user.empresa_id);
+  if (!atividade) return enviarJSON(res, 404, { erro: 'Atividade não encontrada.' });
+  if (!podeEditarAtividadeDiaria(user, atividade)) return enviarJSON(res, 403, { erro: 'Só quem registrou (ou o administrador) exclui esta atividade.' });
+  data.atividades_diarias = data.atividades_diarias.filter((a) => a.id !== atividade.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
