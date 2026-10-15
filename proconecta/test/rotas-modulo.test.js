@@ -73,3 +73,12 @@ test('agenda e agendamento não se confundem (prefixo de string não é prefixo 
   assert.equal(moduloDaRota(/^\/api\/agendamento\/status$/), 'agendamento');
   assert.notEqual(moduloDaRota(/^\/api\/agendamento\/status$/), 'os_chamados');
 });
+
+// versão Restaurantes/rede multiunidade (Fase 1 — Base): setores/filiais/áreas pertencem ao
+// módulo "filiais" — sem ele, a empresa não tem a hierarquia (ver MODULOS_DISPONIVEIS em db.js).
+test('rotas de setores/filiais/áreas pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/setores$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/filiais$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/filiais\/(\d+)$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/areas$/), 'filiais');
+});

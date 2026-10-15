@@ -18,7 +18,12 @@ function t(chave, padrao) {
   return (USER && USER.terminologia && USER.terminologia[chave]) || padrao;
 }
 
-const PAPEL_LABEL = { suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro', comercial: 'Comercial' };
+const PAPEL_LABEL = {
+  suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro', comercial: 'Comercial',
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base)
+  gerente_loja: 'Gerente de loja', coordenador_tecnico: 'Coordenador técnico', consultor_mercado: 'Consultor de mercado',
+};
+const STATUS_OPERACIONAL_LABEL = { operando: 'Operando', restricao: 'Com restrição', parado: 'Parado' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
 // Produção fica de fora porque usa um único login compartilhado, sem administrador dedicado.
 const DEPARTAMENTO_ADMIN_LABEL = { suporte: 'Suporte', pos_venda: 'Pós-venda' };
@@ -531,7 +536,7 @@ function entrarNoApp() {
   atualizarBadgeSincronizar();
   sincronizarFilaOffline();
   montarWidgetChatInterno();
-  if (['suporte', 'administrador', 'producao', 'cliente', 'pos_venda', 'estoque'].includes(USER.papel)) ativarNotificacoesPush();
+  if (['suporte', 'administrador', 'producao', 'cliente', 'pos_venda', 'estoque', 'gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(USER.papel)) ativarNotificacoesPush();
   const primeiraPaginaPermitida = (function primeiraPagina(nodes) {
     for (const node of nodes) {
       if (node.page) return node.page;
@@ -561,6 +566,17 @@ function entrarNoApp() {
   const outlookResultado = paramsUrl.get('outlook');
   if (outlookResultado && buscarCaminho(navDoUsuario(), 'agendamentos-outlook', [])) {
     paginaAoAbrir = 'agendamentos-outlook';
+  }
+  // QR Code do equipamento (versão Restaurantes/rede multiunidade, Fase 1 — Base, seção 5 do
+  // pedido do usuário): "exige login. Sem login, mostra só a tela de entrada" — como entrarNoApp
+  // só roda DEPOIS do login (ver fazerLogin), o próprio fluxo normal já garante isso: sem login, a
+  // pessoa fica na tela de entrada (authView) e nunca chega aqui; o parâmetro continua na URL e é
+  // tratado assim que o login completa.
+  const qrToken = paramsUrl.get('qr');
+  if (qrToken) {
+    try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+    abrirEquipamentoPorQr(qrToken);
+    return;
   }
   ir(paginaAoAbrir);
   if (outlookResultado === 'conectado') mostrarToast('Conta do Outlook conectada.');
@@ -725,6 +741,10 @@ const MENUS_LABEL_POR_PAPEL = {
   },
   pos_venda: { 'fila-pos-venda': 'Pós-venda', 'chat-interno': 'Mensagens' },
   estoque: { 'fila-estoque': 'Estoque', 'chat-interno': 'Mensagens' },
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base)
+  gerente_loja: { 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
+  coordenador_tecnico: { 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  consultor_mercado: { 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
 };
 
 const NAV = {
@@ -798,6 +818,9 @@ const NAV = {
     // mesma ideia da Biblioteca acima: Cadastrar/Atrelar viram tiles de renderEquipamentosMenu()
     // — cadastro/catálogo é o módulo "relatorios" (alimenta o Relatório), não exige O.S.
     { key: 'equipamentos', modulo: 'relatorios', label: 'Equipamentos', page: 'equipamentos-menu' },
+    // versão Restaurantes/rede multiunidade (Fase 1 — Base, pedido do usuário): hierarquia
+    // setores/filiais/áreas, só aparece pra quem contratou o módulo "filiais".
+    { key: 'estrutura-filiais', modulo: 'filiais', label: 'Rede e Filiais', page: 'estrutura-filiais' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
@@ -926,6 +949,19 @@ const NAV = {
       { key: 'orcamentos', label: 'Orçamentos', page: 'orcamentos-lista' },
     ]},
   ],
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base, pedido do usuário) — telas operacionais
+  // completas (Minha loja/Painel do setor/aprovação de compra etc.) são Fases 2-4; por enquanto,
+  // os 3 papéis novos já entram e veem os equipamentos do próprio escopo (ver GET /api/equipamentos
+  // e escopo.js, que já filtra por filial/setor automaticamente).
+  gerente_loja: [
+    { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos da loja', page: 'equipamentos' },
+  ],
+  coordenador_tecnico: [
+    { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
+  ],
+  consultor_mercado: [
+    { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
+  ],
 };
 
 // ícone de cada item de topo do menu lateral (só o nível principal — os submenus continuam sem
@@ -954,6 +990,7 @@ const ICONE_MENU = {
   'comercial': '💼',
   'agendamentos-outlook': '📅',
   'fmea-relatorios': '📊',
+  'estrutura-filiais': '🏬',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1083,6 +1120,8 @@ async function ir(pagina) {
     if (pagina === 'equipamentos-menu') return renderEquipamentosMenu();
     if (pagina === 'equipamentos-cadastrar') return renderEquipamentosCadastrar();
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
+    if (pagina === 'equipamentos-atrelar-filial') return renderEquipamentosAtrelarFilial();
+    if (pagina === 'estrutura-filiais') return renderEstruturaFiliais();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -16153,9 +16192,11 @@ async function renderEquipamentosMenu() {
     </div>`;
   // FMEA — Ranking e Pareto saiu daqui pra um item de menu próprio (módulo "equipe_avancado",
   // distinto de "relatorios" que libera esta tela) — ver NAV.administrador/NAV.supervisor.
+  const atreladosFilial = equipamentos.filter((e) => e.filial_id !== null).length;
   document.getElementById('equipamentos-menu-tiles').innerHTML = `
     ${tile('Cadastrar equipamento', `${catalogo} no catálogo`, 'var(--green)', 'equipamentos-cadastrar')}
-    ${tile('Atrelar equipamento', `${atrelados} atrelado(s)`, 'var(--blue)', 'equipamentos-atrelar')}`;
+    ${tile('Atrelar equipamento', `${atrelados} atrelado(s)`, 'var(--blue)', 'equipamentos-atrelar')}
+    ${moduloAtivoNoMenu('filiais') ? tile('Atrelar a uma filial', `${atreladosFilial} na rede`, 'var(--purple, #6d28d9)', 'equipamentos-atrelar-filial') : ''}`;
 }
 
 // ---- Cadastrar equipamento (catálogo: tipo/modelo, sem cliente ainda) ----
@@ -17392,6 +17433,384 @@ async function salvarAtrelamento() {
   } catch (e) { alert('Erro ao atrelar: ' + e.message); }
 }
 
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE (Fase 1 — Base) ----------
+// Equivalente ao "Atrelar equipamento" (a cliente) acima, só que atrela a uma FILIAL — gera QR
+// Code automaticamente (ver POST /api/equipamentos/:id/atrelar-filial em server.js).
+async function renderEquipamentosAtrelarFilial() {
+  const [{ equipamentos }, { filiais }, { areas }] = await Promise.all([api('/api/equipamentos'), api('/api/filiais'), api('/api/areas')]);
+  window._filiaisCache = filiais;
+  window._areasCache = areas;
+  window._catalogoCache = equipamentos.filter((e) => e.cliente_id === null && e.filial_id === null);
+  const atrelados = equipamentos.filter((e) => e.filial_id !== null);
+  window._atreladosFilialCache = atrelados;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Atrelar a uma filial</h1><p>${atrelados.length} na rede</p></div>
+      ${botaoVoltarEquipamentosMenu()}
+    </div>
+    <div class="panel"><div class="panel-head">Atrelar a uma filial</div>
+      <div class="form-grid">
+        <div><label>Filial*</label><select id="aef-filial" onchange="atualizarAreasAtrelarFilial()">
+          ${filiais.length ? filiais.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('') : '<option value="">Cadastre uma filial em "Rede e Filiais"</option>'}
+        </select></div>
+        <div><label>Área</label><select id="aef-area"></select></div>
+        <div><label>${t('equipamento', 'Equipamento')} (catálogo)*</label><select id="aef-equipamento">${window._catalogoCache.length ? window._catalogoCache.map((e) => `<option value="${e.id}">${esc(e.tipo)} — ${esc(e.modelo)}</option>`).join('') : '<option value="">Nenhum equipamento no catálogo</option>'}</select></div>
+        <div><label>Número de série*</label><input id="aef-numero-serie"></div>
+        <div><label>Código interno</label><input id="aef-codigo-interno"></div>
+        <div><label>Garantia até</label><input id="aef-garantia" type="date"></div>
+        <div class="full"><label>Fornecedor/assistência</label><input id="aef-fornecedor"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarAtrelamentoFilial()">Atrelar à filial</button>
+    </div>
+    <div class="panel"><div class="panel-head">Imprimir etiquetas QR por filial</div>
+      <div class="form-grid">
+        <div><label>Filial</label><select id="aef-filial-imprimir">${filiais.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
+      </div>
+      <button class="btn-outline-sm" onclick="imprimirEtiquetasFilial(Number(document.getElementById('aef-filial-imprimir').value))">Gerar PDF de etiquetas</button>
+    </div>
+    <div class="panel"><table>
+      <tr><th>Filial</th><th>Área</th><th>Tipo</th><th>Modelo</th><th>Nº série</th><th>Status</th><th></th></tr>
+      ${atrelados.length ? atrelados.map((e) => {
+        const filial = filiais.find((f) => f.id === e.filial_id);
+        const area = areas.find((a) => a.id === e.area_id);
+        return `<tr><td data-label="Filial">${esc(filial ? filial.nome : '—')}</td><td data-label="Área">${esc(area ? area.nome : '—')}</td><td data-label="Tipo">${esc(e.tipo)}</td><td data-label="Modelo">${esc(e.modelo)}</td><td data-label="Nº série">${esc(e.numero_serie)}</td>
+        <td data-label="Status">${STATUS_OPERACIONAL_LABEL[e.status_operacional] || '—'}</td>
+        <td class="td-acoes"><button class="btn btn-ghost btn-sm" onclick="verHistorico(${e.id})">Histórico</button>${USER.papel === 'administrador' ? `<button class="btn-outline-sm" onclick="excluirEquipamento(${e.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>` : ''}</td></tr>`;
+      }).join('') : `<tr><td colspan="7" class="empty">Nenhum equipamento atrelado a uma filial ainda.</td></tr>`}
+    </table></div>
+    <div id="historico-eq"></div>`;
+  atualizarAreasAtrelarFilial();
+}
+function atualizarAreasAtrelarFilial() {
+  const sel = document.getElementById('aef-filial');
+  const destino = document.getElementById('aef-area');
+  if (!sel || !destino) return;
+  const filialId = Number(sel.value);
+  const areas = (window._areasCache || []).filter((a) => a.filial_id === filialId);
+  destino.innerHTML = `<option value="">Nenhuma</option>` + areas.map((a) => `<option value="${a.id}">${esc(a.nome)}</option>`).join('');
+}
+async function salvarAtrelamentoFilial() {
+  const equipamentoId = document.getElementById('aef-equipamento').value;
+  const filialId = document.getElementById('aef-filial').value;
+  const numeroSerie = document.getElementById('aef-numero-serie').value.trim();
+  if (!filialId) return alert('Cadastre uma filial primeiro em "Rede e Filiais".');
+  if (!equipamentoId) return alert('Cadastre um equipamento no catálogo primeiro em Cadastrar equipamento.');
+  if (!numeroSerie) return alert('Informe o número de série.');
+  const body = {
+    filial_id: Number(filialId), area_id: document.getElementById('aef-area').value || null,
+    numero_serie: numeroSerie, codigo_interno: document.getElementById('aef-codigo-interno').value,
+    garantia_ate: document.getElementById('aef-garantia').value, fornecedor_assistencia: document.getElementById('aef-fornecedor').value,
+  };
+  try {
+    await api(`/api/equipamentos/${equipamentoId}/atrelar-filial`, { method: 'POST', body });
+    mostrarToast('Equipamento atrelado à filial.');
+    renderEquipamentosAtrelarFilial();
+  } catch (e) { alert('Erro ao atrelar: ' + e.message); }
+}
+
+// gera um QR Code (canvas) fora da tela e devolve o dataURL — usado tanto na etiqueta em PDF
+// quanto poderia ser usado inline numa tela de detalhe do equipamento.
+function gerarQrDataUrl(texto, tamanho) {
+  if (typeof QRCode === 'undefined') return null;
+  const tmp = document.createElement('div');
+  tmp.style.position = 'fixed';
+  tmp.style.left = '-9999px';
+  document.body.appendChild(tmp);
+  try {
+    new QRCode(tmp, { text: texto, width: tamanho || 240, height: tamanho || 240, correctLevel: QRCode.CorrectLevel.M });
+    const canvas = tmp.querySelector('canvas');
+    return canvas ? canvas.toDataURL('image/png') : null;
+  } finally {
+    document.body.removeChild(tmp);
+  }
+}
+
+// impressão em lote (seção 5 do pedido do usuário): uma etiqueta por equipamento da filial, com
+// nome do equipamento, loja e código escritos embaixo do QR — reaproveita o padrão jsPDF já usado
+// nos outros geradores do sistema.
+async function imprimirEtiquetasFilial(filialId) {
+  if (!filialId) return alert('Escolha uma filial.');
+  const filial = (window._filiaisCache || []).find((f) => f.id === filialId);
+  const { equipamentos } = await api('/api/equipamentos');
+  const itens = equipamentos.filter((e) => e.filial_id === filialId && e.qr_token);
+  if (!itens.length) return alert('Nenhum equipamento com QR nesta filial ainda.');
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const porLinha = 3, porColuna = 4, margem = 36;
+  const pagW = doc.internal.pageSize.getWidth();
+  const cel = (pagW - margem * 2) / porLinha;
+  const alturaCel = 170;
+  itens.forEach((eq, i) => {
+    const porPagina = porLinha * porColuna;
+    if (i > 0 && i % porPagina === 0) doc.addPage();
+    const pos = i % porPagina;
+    const col = pos % porLinha, lin = Math.floor(pos / porLinha);
+    const x = margem + col * cel, y = margem + lin * alturaCel;
+    const dataUrl = gerarQrDataUrl(`${location.origin}${location.pathname}?qr=${eq.qr_token}`, 300);
+    if (dataUrl) doc.addImage(dataUrl, 'PNG', x + cel / 2 - 50, y, 100, 100);
+    doc.setFontSize(9);
+    doc.text(`${eq.tipo} ${eq.modelo}`, x + cel / 2, y + 112, { align: 'center' });
+    doc.text(filial.nome, x + cel / 2, y + 124, { align: 'center' });
+    if (eq.codigo_interno) doc.text(String(eq.codigo_interno), x + cel / 2, y + 136, { align: 'center' });
+  });
+  doc.save(`etiquetas-${filial.nome.replace(/\s+/g, '-')}.pdf`);
+}
+
+// página do equipamento aberta pelo QR Code (ver GET /api/equipamentos/por-qr/:token) — exige
+// login (chamada só acontece depois de entrarNoApp, ver ?qr= tratado lá).
+async function abrirEquipamentoPorQr(token) {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="empty">Carregando...</div>';
+  try {
+    const { equipamento, agenda_aberta } = await api(`/api/equipamentos/por-qr/${token}`);
+    main.innerHTML = `
+      <div class="page-head"><h1>${esc(equipamento.tipo)} — ${esc(equipamento.modelo)}</h1>
+        <p>Nº de série ${esc(equipamento.numero_serie)}${equipamento.codigo_interno ? ' · Código ' + esc(equipamento.codigo_interno) : ''}</p></div>
+      <div class="panel"><div class="form-grid">
+        <div><label>Status</label><div>${STATUS_OPERACIONAL_LABEL[equipamento.status_operacional] || '—'}</div></div>
+        <div><label>Localização</label><div>${esc(equipamento.localizacao || '—')}</div></div>
+        <div><label>Garantia até</label><div>${equipamento.garantia_ate ? esc(equipamento.garantia_ate) : '—'}</div></div>
+        <div><label>Fornecedor/assistência</label><div>${esc(equipamento.fornecedor_assistencia || '—')}</div></div>
+      </div></div>
+      <div class="panel"><div class="panel-head">O.S. já abertas pra este equipamento</div>
+        ${agenda_aberta.length ? agenda_aberta.map((a) => `<div style="padding:6px 0; border-bottom:1px solid var(--line);">${TIPO_OS_LABEL[a.tipo] || a.tipo} — ${a.status}</div>`).join('') : '<p class="empty">Nenhuma O.S. aberta pra este equipamento — evita duplicidade antes de abrir uma nova.</p>'}
+      </div>
+      <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
+  } catch (e) {
+    main.innerHTML = `<div class="empty">Equipamento não encontrado ou sem permissão pra vê-lo.</div>
+      <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
+  }
+}
+
+// ---------- SETORES / FILIAIS / ÁREAS (cadastro da estrutura, versão Restaurantes) ----------
+async function renderEstruturaFiliais() {
+  const [{ setores }, { filiais }, { usuarios }] = await Promise.all([api('/api/setores'), api('/api/filiais'), api('/api/usuarios')]);
+  window._setoresCache = setores;
+  window._filiaisCache = filiais;
+  window._usuariosCache = usuarios;
+  const coordenadores = usuarios.filter((u) => u.papel === 'coordenador_tecnico');
+  const consultores = usuarios.filter((u) => u.papel === 'consultor_mercado');
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
+  const gerentes = usuarios.filter((u) => u.papel === 'gerente_loja');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Rede e Filiais</h1><p>${setores.length} setor(es) · ${filiais.length} filial(is)</p></div>
+    <div class="panel"><div class="panel-head">Setores</div>
+      <div id="form-setor"></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormSetor()" style="margin-bottom:12px;">+ Novo setor</button>
+      <table>
+        <tr><th>Setor</th><th>Coordenador técnico</th><th>Consultor de mercado</th><th></th></tr>
+        ${setores.length ? setores.map((s) => `
+          <tr><td data-label="Setor">${esc(s.nome)}</td>
+            <td data-label="Coordenador">${esc((coordenadores.find((u) => u.id === s.coordenador_id) || {}).nome || '—')}</td>
+            <td data-label="Consultor">${esc((consultores.find((u) => u.id === s.consultor_id) || {}).nome || '—')}</td>
+            <td class="td-acoes">
+              <button class="btn-outline-sm" onclick="editarSetor(${s.id})">Editar</button>
+              <button class="btn-outline-sm" onclick="excluirSetor(${s.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            </td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum setor cadastrado ainda.</td></tr>`}
+      </table>
+    </div>
+    <div class="panel"><div class="panel-head">Filiais (lojas)</div>
+      <div id="form-filial"></div>
+      ${setores.length ? `<button class="btn btn-primary btn-sm" onclick="mostrarFormFilial()" style="margin-bottom:12px;">+ Nova filial</button>` : `<p class="empty">Cadastre um setor antes de criar filiais.</p>`}
+      <table>
+        <tr><th>Filial</th><th>Setor</th><th>Técnico</th><th>Gerente</th><th></th></tr>
+        ${filiais.length ? filiais.map((f) => `
+          <tr><td data-label="Filial">${esc(f.nome)}</td>
+            <td data-label="Setor">${esc((setores.find((s) => s.id === f.setor_id) || {}).nome || '—')}</td>
+            <td data-label="Técnico">${esc((tecnicos.find((u) => u.id === f.tecnico_id) || {}).nome || '—')}</td>
+            <td data-label="Gerente">${esc((gerentes.find((u) => u.id === f.gerente_id) || {}).nome || '—')}</td>
+            <td class="td-acoes">
+              <button class="btn-outline-sm" onclick="abrirAreasFilial(${f.id})">Áreas</button>
+              <button class="btn-outline-sm" onclick="editarFilial(${f.id})">Editar</button>
+              <button class="btn-outline-sm" onclick="excluirFilial(${f.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            </td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhuma filial cadastrada ainda.</td></tr>`}
+      </table>
+    </div>
+    <div id="areas-filial"></div>`;
+}
+
+let setorEmEdicaoId = null;
+function mostrarFormSetor(setor) {
+  setorEmEdicaoId = setor ? setor.id : null;
+  const usuarios = window._usuariosCache || [];
+  const coordenadores = usuarios.filter((u) => u.papel === 'coordenador_tecnico');
+  const consultores = usuarios.filter((u) => u.papel === 'consultor_mercado');
+  document.getElementById('form-setor').innerHTML = `
+    <div class="panel" style="background:var(--blue-pale-2);"><div class="panel-head">${setor ? 'Editar setor' : 'Novo setor'}</div>
+      <div class="form-grid">
+        <div class="full"><label>Nome*</label><input id="ns-nome" value="${setor ? esc(setor.nome) : ''}"></div>
+        <div><label>Coordenador técnico</label><select id="ns-coordenador">
+          <option value="">Nenhum ainda</option>
+          ${coordenadores.map((u) => `<option value="${u.id}" ${setor && setor.coordenador_id === u.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}
+        </select></div>
+        <div><label>Consultor de mercado</label><select id="ns-consultor">
+          <option value="">Nenhum ainda</option>
+          ${consultores.map((u) => `<option value="${u.id}" ${setor && setor.consultor_id === u.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}
+        </select></div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:12.5px; margin-top:-6px;">Só aparecem aqui usuários já cadastrados com o tipo de acesso certo — cadastre-os primeiro em Usuários (sem setor escolhido ainda) e volte aqui pra atribuir.</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarSetor()">${setor ? 'Salvar alterações' : 'Salvar setor'}</button>
+        ${setor ? `<button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-setor').innerHTML=''">Cancelar</button>` : ''}
+      </div>
+    </div>`;
+}
+function editarSetor(id) {
+  const setor = (window._setoresCache || []).find((s) => s.id === id);
+  if (!setor) return;
+  mostrarFormSetor(setor);
+  document.getElementById('form-setor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function salvarSetor() {
+  const nome = document.getElementById('ns-nome').value.trim();
+  if (!nome) return alert('Informe o nome do setor.');
+  const body = {
+    nome,
+    coordenador_id: document.getElementById('ns-coordenador').value || null,
+    consultor_id: document.getElementById('ns-consultor').value || null,
+  };
+  try {
+    if (setorEmEdicaoId) {
+      await api(`/api/setores/${setorEmEdicaoId}`, { method: 'PUT', body });
+      setorEmEdicaoId = null;
+      mostrarToast('Setor atualizado.');
+    } else {
+      await api('/api/setores', { method: 'POST', body });
+      mostrarToast('Setor cadastrado.');
+    }
+    renderEstruturaFiliais();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function excluirSetor(id) {
+  if (!(await mostrarConfirmacao('Excluir este setor? Esta ação não pode ser desfeita.'))) return;
+  try {
+    await api(`/api/setores/${id}`, { method: 'DELETE' });
+    mostrarToast('Setor excluído.');
+    renderEstruturaFiliais();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+let filialEmEdicaoId = null;
+function mostrarFormFilial(filial) {
+  filialEmEdicaoId = filial ? filial.id : null;
+  const setores = window._setoresCache || [];
+  const usuarios = window._usuariosCache || [];
+  const tecnicos = usuarios.filter((u) => u.papel === 'suporte');
+  const gerentes = usuarios.filter((u) => u.papel === 'gerente_loja');
+  document.getElementById('form-filial').innerHTML = `
+    <div class="panel" style="background:var(--blue-pale-2);"><div class="panel-head">${filial ? 'Editar filial' : 'Nova filial'}</div>
+      <div class="form-grid">
+        <div><label>Nome*</label><input id="nf-nome" value="${filial ? esc(filial.nome) : ''}"></div>
+        <div><label>Setor*</label><select id="nf-setor">
+          ${setores.map((s) => `<option value="${s.id}" ${filial && filial.setor_id === s.id ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}
+        </select></div>
+        <div class="full"><label>Endereço</label><input id="nf-endereco" value="${filial ? esc(filial.endereco || '') : ''}"></div>
+        <div><label>Técnico fixo</label><select id="nf-tecnico">
+          <option value="">Nenhum ainda</option>
+          ${tecnicos.map((u) => `<option value="${u.id}" ${filial && filial.tecnico_id === u.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}
+        </select></div>
+        <div><label>Gerente de loja</label><select id="nf-gerente">
+          <option value="">Nenhum ainda</option>
+          ${gerentes.map((u) => `<option value="${u.id}" ${filial && filial.gerente_id === u.id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}
+        </select></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="salvarFilial()">${filial ? 'Salvar alterações' : 'Salvar filial'}</button>
+        ${filial ? `<button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-filial').innerHTML=''">Cancelar</button>` : ''}
+      </div>
+    </div>`;
+}
+function editarFilial(id) {
+  const filial = (window._filiaisCache || []).find((f) => f.id === id);
+  if (!filial) return;
+  mostrarFormFilial(filial);
+  document.getElementById('form-filial').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function salvarFilial() {
+  const nome = document.getElementById('nf-nome').value.trim();
+  if (!nome) return alert('Informe o nome da filial.');
+  const setorId = document.getElementById('nf-setor').value;
+  if (!setorId) return alert('Cadastre um setor primeiro.');
+  const body = {
+    nome, setor_id: Number(setorId), endereco: document.getElementById('nf-endereco').value,
+    tecnico_id: document.getElementById('nf-tecnico').value || null,
+    gerente_id: document.getElementById('nf-gerente').value || null,
+  };
+  try {
+    if (filialEmEdicaoId) {
+      await api(`/api/filiais/${filialEmEdicaoId}`, { method: 'PUT', body });
+      filialEmEdicaoId = null;
+      mostrarToast('Filial atualizada.');
+    } else {
+      await api('/api/filiais', { method: 'POST', body });
+      mostrarToast('Filial cadastrada — já criada com as áreas padrão (Balcão, Cozinha, Fundo, Salão, Área externa, Conservação).');
+    }
+    renderEstruturaFiliais();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+async function excluirFilial(id) {
+  if (!(await mostrarConfirmacao('Excluir esta filial? Esta ação não pode ser desfeita.'))) return;
+  try {
+    await api(`/api/filiais/${id}`, { method: 'DELETE' });
+    mostrarToast('Filial excluída.');
+    renderEstruturaFiliais();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function abrirAreasFilial(filialId) {
+  const filial = (window._filiaisCache || []).find((f) => f.id === filialId);
+  if (!filial) return;
+  const { areas } = await api(`/api/areas?filial_id=${filialId}`);
+  window._areasCache = areas;
+  document.getElementById('areas-filial').innerHTML = `
+    <div class="panel"><div class="panel-head">Áreas — ${esc(filial.nome)}</div>
+      <div class="form-grid">
+        <div class="full"><label>Nova área</label><input id="na-nome" placeholder="ex.: Fundo"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="criarArea(${filialId})" style="margin-bottom:12px;">+ Adicionar área</button>
+      <table>
+        <tr><th>Área</th><th></th></tr>
+        ${areas.length ? areas.map((a) => `
+          <tr><td data-label="Área">${esc(a.nome)}</td>
+            <td class="td-acoes">
+              <button class="btn-outline-sm" onclick="renomearArea(${a.id})">Renomear</button>
+              <button class="btn-outline-sm" onclick="excluirArea(${a.id}, ${filialId})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+            </td></tr>`).join('') : `<tr><td colspan="2" class="empty">Nenhuma área cadastrada.</td></tr>`}
+      </table>
+    </div>`;
+  document.getElementById('areas-filial').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function criarArea(filialId) {
+  const nome = document.getElementById('na-nome').value.trim();
+  if (!nome) return alert('Informe o nome da área.');
+  try {
+    await api('/api/areas', { method: 'POST', body: { filial_id: filialId, nome } });
+    mostrarToast('Área cadastrada.');
+    abrirAreasFilial(filialId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function renomearArea(id) {
+  const area = (window._areasCache || []).find((a) => a.id === id);
+  if (!area) return;
+  const nome = prompt('Novo nome da área:', area.nome);
+  if (!nome || !nome.trim()) return;
+  try {
+    await api(`/api/areas/${id}`, { method: 'PUT', body: { nome: nome.trim() } });
+    mostrarToast('Área renomeada.');
+    abrirAreasFilial(area.filial_id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function excluirArea(id, filialId) {
+  if (!(await mostrarConfirmacao('Excluir esta área? Esta ação não pode ser desfeita.'))) return;
+  try {
+    await api(`/api/areas/${id}`, { method: 'DELETE' });
+    mostrarToast('Área excluída.');
+    abrirAreasFilial(filialId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
 // ---------- USUÁRIOS (cadastro por convite) ----------
 // filtro da lista de usuários por tipo de acesso (fica lembrado enquanto a tela estiver aberta,
 // mesmo depois de criar/editar/excluir alguém — só reseta se sair e voltar pra tela).
@@ -17401,9 +17820,16 @@ function alternarFiltroUsuarios() {
   renderUsuarios();
 }
 async function renderUsuarios() {
-  const [{ usuarios }, { clientes }] = await Promise.all([api('/api/usuarios'), api('/api/clientes')]);
+  const chamadas = [api('/api/usuarios'), api('/api/clientes')];
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base): só busca setores/filiais quando a
+  // empresa tem o módulo — evita um 403 à toa pra quem não contratou.
+  const comFiliais = (USER.modulos_ativos || []).includes('filiais');
+  if (comFiliais) chamadas.push(api('/api/filiais'), api('/api/setores'));
+  const [{ usuarios }, { clientes }, filiaisResp, setoresResp] = await Promise.all(chamadas);
   window._clientesCache = clientes;
   window._usuariosCache = usuarios;
+  window._filiaisCache = comFiliais ? filiaisResp.filiais : [];
+  window._setoresCache = comFiliais ? setoresResp.setores : [];
   const main = document.getElementById('main');
   const papeisPresentes = [...new Set(usuarios.map((u) => u.papel))];
   if (!papeisPresentes.includes(usuariosFiltroPapel)) usuariosFiltroPapel = 'todos';
@@ -17453,8 +17879,14 @@ function papeisCadastraveis(usuario) {
   // só faz sentido numa empresa já dividida em departamentos, o mesmo estágio que o módulo
   // "equipe_avancado" já marca nos planos (ver server.js: papelExigeDepartamentalizacao). Mantém
   // a opção visível se o usuário editado já tem esse papel, pra não sumir o próprio valor atual.
-  if ((USER.modulos_ativos || []).includes('equipe_avancado')) return base;
-  return base.filter((p) => (p !== 'comercial' && p !== 'financeiro') || (usuario && usuario.papel === p));
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base): gerente_loja/coordenador_tecnico/
+  // consultor_mercado só aparecem pra cadastro depois do módulo "filiais" contratado — mesma
+  // lógica de comercial/financeiro acima, condicionada a outro módulo.
+  const comFiliais = (USER.modulos_ativos || []).includes('filiais')
+    ? [...base, 'gerente_loja', 'coordenador_tecnico', 'consultor_mercado']
+    : base.concat(usuario && ['gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(usuario.papel) ? [usuario.papel] : []);
+  if ((USER.modulos_ativos || []).includes('equipe_avancado')) return comFiliais;
+  return comFiliais.filter((p) => (p !== 'comercial' && p !== 'financeiro') || (usuario && usuario.papel === p));
 }
 function mostrarFormUsuario(usuario) {
   usuarioEmEdicaoId = usuario ? usuario.id : null;
@@ -17463,7 +17895,10 @@ function mostrarFormUsuario(usuario) {
     suporte: 'Suporte', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque',
     administrador: 'Administrador', cliente: 'Cliente', supervisor: 'Supervisor', financeiro: 'Financeiro',
     comercial: 'Comercial',
+    gerente_loja: 'Gerente de loja', coordenador_tecnico: 'Coordenador técnico', consultor_mercado: 'Consultor de mercado',
   };
+  const filiais = window._filiaisCache || [];
+  const setores = window._setoresCache || [];
   const permitidos = papeisCadastraveis(usuario);
   const papelPadrao = usuario ? usuario.papel : permitidos[0];
   document.getElementById('form-usuario').innerHTML = `
@@ -17477,6 +17912,18 @@ function mostrarFormUsuario(usuario) {
           ${permitidos.map((p) => `<option value="${p}" ${papelPadrao === p ? 'selected' : ''}>${opcoesPapel[p]}</option>`).join('')}
         </select></div>
         <div id="campo-cliente"><label>Empresa (cliente)</label>${campoClienteHTML('nu-cliente', clientes)}</div>
+        <div id="campo-filial"><label>Filial (loja)${papelPadrao === 'gerente_loja' ? '*' : ' — opcional, loja base'}</label>
+          <select id="nu-filial">
+            <option value="">${papelPadrao === 'suporte' ? 'Nenhuma (vê todas as lojas)' : 'Selecione'}</option>
+            ${filiais.map((f) => `<option value="${f.id}" ${usuario && usuario.filial_id === f.id ? 'selected' : ''}>${esc(f.nome)}</option>`).join('')}
+          </select>
+        </div>
+        <div id="campo-setor"><label>Setor da rede (coordenador/consultor)*</label>
+          <select id="nu-setor-estrutura">
+            <option value="">Selecione</option>
+            ${setores.map((s) => `<option value="${s.id}" ${usuario && usuario.setor_id === s.id ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}
+          </select>
+        </div>
       </div>
       <div id="campo-admin-departamento" class="panel" style="background:var(--blue-pale-2); margin:4px 0 14px;">
         <label>Departamento que este administrador vai gerenciar</label>
@@ -17538,6 +17985,12 @@ function atualizarChecklistMenus() {
 function alternarCampoCliente() {
   const papel = document.getElementById('nu-papel').value;
   document.getElementById('campo-cliente').style.display = papel === 'cliente' ? '' : 'none';
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base): filial só faz sentido pra gerente_loja
+  // (obrigatório) e suporte/técnico (opcional, loja base); setor só pra coordenador/consultor.
+  const campoFilial = document.getElementById('campo-filial');
+  if (campoFilial) campoFilial.style.display = (papel === 'gerente_loja' || papel === 'suporte') ? '' : 'none';
+  const campoSetorEstrutura = document.getElementById('campo-setor');
+  if (campoSetorEstrutura) campoSetorEstrutura.style.display = (papel === 'coordenador_tecnico' || papel === 'consultor_mercado') ? '' : 'none';
   const campoMenus = document.getElementById('campo-menus-acesso');
   if (campoMenus) campoMenus.style.display = MENUS_LABEL_POR_PAPEL[papel] ? '' : 'none';
   const campoDepartamento = document.getElementById('campo-admin-departamento');
@@ -17560,6 +18013,12 @@ async function salvarUsuario() {
   if (papel === 'cliente' && !document.getElementById('nu-cliente').value) {
     return alert('Escolha uma empresa cadastrada na lista.');
   }
+  if (papel === 'gerente_loja' && !document.getElementById('nu-filial').value) {
+    return alert('Escolha a filial deste gerente.');
+  }
+  if ((papel === 'coordenador_tecnico' || papel === 'consultor_mercado') && !document.getElementById('nu-setor-estrutura').value) {
+    return alert('Escolha o setor da rede deste usuário.');
+  }
   const body = {
     nome: document.getElementById('nu-nome').value,
     email: document.getElementById('nu-email').value,
@@ -17567,6 +18026,8 @@ async function salvarUsuario() {
     setor: document.getElementById('nu-setor').value,
     papel,
     cliente_id: papel === 'cliente' ? Number(document.getElementById('nu-cliente').value) : null,
+    filial_id: (papel === 'gerente_loja' || papel === 'suporte') && document.getElementById('nu-filial').value ? Number(document.getElementById('nu-filial').value) : null,
+    setor_id: (papel === 'coordenador_tecnico' || papel === 'consultor_mercado') && document.getElementById('nu-setor-estrutura').value ? Number(document.getElementById('nu-setor-estrutura').value) : null,
   };
   const totalEl = document.getElementById('nu-acesso-total');
   if (totalEl) {
@@ -18577,7 +19038,7 @@ async function estoqueConfirmarSaida(id) {
 // qualquer tela do sistema (não é uma página, vive fora do #main, então navegar não fecha ele).
 
 function temAcessoChatInterno() {
-  if (!['suporte', 'administrador', 'producao', 'pos_venda', 'estoque'].includes(USER.papel)) return false;
+  if (!['suporte', 'administrador', 'producao', 'pos_venda', 'estoque', 'gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(USER.papel)) return false;
   if (USER.acesso_total !== false) return true;
   return Array.isArray(USER.menus) && USER.menus.includes('chat-interno');
 }

@@ -17,6 +17,7 @@ const { gerarToken, verificarToken, cifrar, decifrar } = require('./auth');
 const { hashSenha, conferirSenha, nextId, gerarTokenConvite } = db;
 const { moduloDaRota } = require('./rotas-modulo');
 const tenant = require('./tenant');
+const escopo = require('./escopo');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -76,14 +77,26 @@ const MENUS_POR_PAPEL = {
   producao: ['biblioteca', 'clientes', 'equipamentos', 'chat-interno'],
   pos_venda: ['fila-pos-venda', 'chat-interno'],
   estoque: ['fila-estoque', 'chat-interno'],
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base) — telas operacionais completas (Minha
+  // loja/Painel do setor) chegam nas Fases 2-4; por enquanto só "Equipamentos" (já escopado por
+  // filial/setor, ver escopo.js) e chat interno.
+  gerente_loja: ['equipamentos', 'chat-interno'],
+  coordenador_tecnico: ['equipamentos', 'chat-interno'],
+  consultor_mercado: ['equipamentos', 'chat-interno'],
 };
 // todo tipo de acesso interno (todo mundo menos cliente) pode usar o chat interno — é comunicação
 // entre a própria equipe, cliente não faz parte.
-const PAPEIS_CHAT_INTERNO = ['suporte', 'administrador', 'producao', 'pos_venda', 'estoque'];
+const PAPEIS_CHAT_INTERNO = ['suporte', 'administrador', 'producao', 'pos_venda', 'estoque', 'gerente_loja', 'coordenador_tecnico', 'consultor_mercado'];
 // o token (JWT) só carrega id/papel/nome/cliente_id (ver gerarToken) — acesso_total/menus não vêm
 // nele, então sempre busca o cadastro completo em `data.usuarios` pelo id antes de decidir. Único
 // uso hoje é o submenu "Setor Reparo" do suporte (as outras rotas não são gated por menu, só por
 // papel — o filtro dos demais menus acontece no sidebar do front, ver navDoUsuario em app.js).
+// o token (JWT) só carrega id/papel/nome/cliente_id/empresa_id (ver gerarToken) — filial_id/
+// setor_id (versão Restaurantes/rede multiunidade) não vêm nele, igual acesso_total/menus já não
+// vinham. Mesmo padrão de temAcessoMenu abaixo: relê o cadastro completo antes de decidir escopo.
+function usuarioCompleto(data, user) {
+  return data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
+}
 function temAcessoMenu(data, user, chave) {
   if (!user) return false;
   const completo = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id) || user;
@@ -130,6 +143,39 @@ function papelGerenciavelPorAdmin(admin, papelAlvo) {
 const PAPEIS_DEPARTAMENTALIZADOS = ['comercial', 'financeiro'];
 function papelExigeDepartamentalizacao(data, empresaId, papel) {
   return PAPEIS_DEPARTAMENTALIZADOS.includes(papel) && !db.moduloAtivo(data, empresaId, 'equipe_avancado');
+}
+
+// versão Restaurantes/rede multiunidade (Fase 1 — Base, pedido do usuário): gerente_loja/
+// coordenador_tecnico/consultor_mercado só fazem sentido numa empresa que já tem a hierarquia de
+// setores/filiais (módulo "filiais") — mesmo padrão de papelExigeDepartamentalizacao acima.
+function papelExigeEstruturaFiliais(data, empresaId, papel) {
+  return escopo.PAPEIS_ESTRUTURA_FILIAIS.includes(papel) && !db.moduloAtivo(data, empresaId, 'filiais');
+}
+
+// resolve/valida filial_id (gerente_loja) ou setor_id (coordenador_tecnico/consultor_mercado) no
+// cadastro/edição de usuário — gerente só pode gerenciar a própria loja, coordenador/consultor só
+// o próprio setor, então o vínculo nasce aqui, não é escolha livre de qualquer id. Técnico
+// (suporte) tem filial_id opcional (loja base, em destaque — ele continua vendo todas). Demais
+// papéis (administrador, cliente, comercial/financeiro, etc.) não participam da estrutura.
+function validarReferenciasEstruturaFiliais(data, empresaId, papel, body) {
+  if (papel === 'gerente_loja') {
+    if (!body.filial_id) return { erro: 'Informe a filial deste gerente.' };
+    const filial = tenant.buscar(data, 'filiais', Number(body.filial_id), empresaId);
+    if (!filial) return { erro: 'Filial não encontrada.' };
+    return { filial_id: filial.id, setor_id: null };
+  }
+  if (papel === 'coordenador_tecnico' || papel === 'consultor_mercado') {
+    if (!body.setor_id) return { erro: 'Informe o setor deste usuário.' };
+    const setor = tenant.buscar(data, 'setores', Number(body.setor_id), empresaId);
+    if (!setor) return { erro: 'Setor não encontrado.' };
+    return { filial_id: null, setor_id: setor.id };
+  }
+  if (papel === 'suporte' && body.filial_id) {
+    const filial = tenant.buscar(data, 'filiais', Number(body.filial_id), empresaId);
+    if (!filial) return { erro: 'Filial não encontrada.' };
+    return { filial_id: filial.id, setor_id: null };
+  }
+  return { filial_id: null, setor_id: null };
 }
 
 // bônus de viagem (R$200/diária) — nem toda O.S. dá direito (depende da região), então o
@@ -4432,6 +4478,247 @@ rota('GET', /^\/api\/clientes\/(\d+)\/historico$/, async (req, res, m) => {
   enviarJSON(res, 200, { agenda, relatorios, chamados, equipamentos, oportunidades, propostas });
 });
 
+// ---------- SETORES / FILIAIS / ÁREAS (versão Restaurantes/rede multiunidade, Fase 1 — Base) ----------
+// Hierarquia nova, abaixo da empresa: setores -> filiais -> áreas (ver seed() em db.js e o módulo
+// "filiais" em MODULOS_DISPONIVEIS). Só administrador cadastra/edita a estrutura em si — os papéis
+// novos (coordenador_tecnico/consultor_mercado/gerente_loja) só a consultam, dentro do próprio
+// escopo (ver escopo.js).
+const PAPEIS_VEEM_ESTRUTURA_FILIAIS = ['administrador', 'supervisor', 'coordenador_tecnico', 'consultor_mercado', 'gerente_loja', 'suporte'];
+
+// GET /api/setores
+rota('GET', /^\/api\/setores$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_VEEM_ESTRUTURA_FILIAIS)) return enviarJSON(res, 403, { erro: 'Sem acesso a setores.' });
+  const data = db.load();
+  let setores = tenant.listar(data, 'setores', user.empresa_id);
+  // coordenador/consultor só veem o próprio setor; os demais papéis desta lista veem todos
+  // (gerente_loja/suporte precisam ver o nome do setor da própria filial/loja base).
+  if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
+    const completo = usuarioCompleto(data, user);
+    setores = setores.filter((s) => s.id === completo.setor_id);
+  }
+  enviarJSON(res, 200, { setores });
+});
+
+// POST /api/setores { nome, coordenador_id?, consultor_id? }
+rota('POST', /^\/api\/setores$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra setores.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome do setor é obrigatório.' });
+  const data = db.load();
+  const refs = resolverCoordenadorConsultor(data, user.empresa_id, body);
+  if (refs.erro) return enviarJSON(res, 400, { erro: refs.erro });
+  const setor = tenant.criar(data, 'setores', user.empresa_id, {
+    nome: body.nome.trim(), coordenador_id: refs.coordenador_id, consultor_id: refs.consultor_id,
+  });
+  // atribuir aqui já marca o escopo do usuário — evita um segundo passo em "Usuários" pra cada setor novo.
+  if (refs.coordenador) refs.coordenador.setor_id = setor.id;
+  if (refs.consultor) refs.consultor.setor_id = setor.id;
+  db.save(data);
+  enviarJSON(res, 201, { setor });
+});
+
+function resolverCoordenadorConsultor(data, empresaId, body) {
+  let coordenador = null, consultor = null;
+  if (body.coordenador_id) {
+    coordenador = tenant.buscar(data, 'usuarios', Number(body.coordenador_id), empresaId);
+    if (!coordenador || coordenador.papel !== 'coordenador_tecnico') return { erro: 'Coordenador técnico inválido.' };
+  }
+  if (body.consultor_id) {
+    consultor = tenant.buscar(data, 'usuarios', Number(body.consultor_id), empresaId);
+    if (!consultor || consultor.papel !== 'consultor_mercado') return { erro: 'Consultor de mercado inválido.' };
+  }
+  return { coordenador, consultor, coordenador_id: coordenador ? coordenador.id : null, consultor_id: consultor ? consultor.id : null };
+}
+
+// PUT /api/setores/:id
+rota('PUT', /^\/api\/setores\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita setores.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome do setor é obrigatório.' });
+  const data = db.load();
+  const setor = tenant.buscar(data, 'setores', Number(m[1]), user.empresa_id);
+  if (!setor) return enviarJSON(res, 404, { erro: 'Setor não encontrado.' });
+  const refs = resolverCoordenadorConsultor(data, user.empresa_id, body);
+  if (refs.erro) return enviarJSON(res, 400, { erro: refs.erro });
+  setor.nome = body.nome.trim();
+  setor.coordenador_id = refs.coordenador_id;
+  setor.consultor_id = refs.consultor_id;
+  if (refs.coordenador) refs.coordenador.setor_id = setor.id;
+  if (refs.consultor) refs.consultor.setor_id = setor.id;
+  db.save(data);
+  enviarJSON(res, 200, { setor });
+});
+
+// DELETE /api/setores/:id — bloqueado se houver filial vinculada
+rota('DELETE', /^\/api\/setores\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui setores.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const setor = tenant.buscar(data, 'setores', id, user.empresa_id);
+  if (!setor) return enviarJSON(res, 404, { erro: 'Setor não encontrado.' });
+  if (tenant.listar(data, 'filiais', user.empresa_id).some((f) => f.setor_id === id)) {
+    return enviarJSON(res, 400, { erro: 'Existem filiais vinculadas a este setor. Remova-as ou mude o setor delas antes.' });
+  }
+  data.setores = data.setores.filter((s) => s.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/filiais — cada papel vê só o que seu escopo permite (ver escopo.js)
+rota('GET', /^\/api\/filiais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_VEEM_ESTRUTURA_FILIAIS)) return enviarJSON(res, 403, { erro: 'Sem acesso a filiais.' });
+  const data = db.load();
+  enviarJSON(res, 200, { filiais: escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)) });
+});
+
+// POST /api/filiais { nome, setor_id, endereco?, tecnico_id?, gerente_id? }
+rota('POST', /^\/api\/filiais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra filiais.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da filial é obrigatório.' });
+  const data = db.load();
+  if (!body.setor_id) return enviarJSON(res, 400, { erro: 'Informe o setor desta filial.' });
+  const setor = tenant.buscar(data, 'setores', Number(body.setor_id), user.empresa_id);
+  if (!setor) return enviarJSON(res, 400, { erro: 'Setor não encontrado.' });
+  const refs = resolverTecnicoGerente(data, user.empresa_id, body);
+  if (refs.erro) return enviarJSON(res, 400, { erro: refs.erro });
+  const filial = tenant.criar(data, 'filiais', user.empresa_id, {
+    nome: body.nome.trim(), setor_id: setor.id, endereco: body.endereco || '',
+    tecnico_id: refs.tecnico_id, gerente_id: refs.gerente_id,
+  });
+  if (refs.tecnico) refs.tecnico.filial_id = filial.id;
+  if (refs.gerente) refs.gerente.filial_id = filial.id;
+  // áreas padrão (editáveis depois) — pedido do usuário: "Balcão, Cozinha, Fundo, Salão, Área
+  // externa, Conservação".
+  for (const nome of AREAS_PADRAO) tenant.criar(data, 'areas', user.empresa_id, { filial_id: filial.id, nome });
+  db.save(data);
+  enviarJSON(res, 201, { filial });
+});
+const AREAS_PADRAO = ['Balcão', 'Cozinha', 'Fundo', 'Salão', 'Área externa', 'Conservação'];
+
+function resolverTecnicoGerente(data, empresaId, body) {
+  let tecnico = null, gerente = null;
+  if (body.tecnico_id) {
+    tecnico = tenant.buscar(data, 'usuarios', Number(body.tecnico_id), empresaId);
+    if (!tecnico || tecnico.papel !== 'suporte') return { erro: 'Técnico inválido.' };
+  }
+  if (body.gerente_id) {
+    gerente = tenant.buscar(data, 'usuarios', Number(body.gerente_id), empresaId);
+    if (!gerente || gerente.papel !== 'gerente_loja') return { erro: 'Gerente de loja inválido.' };
+  }
+  return { tecnico, gerente, tecnico_id: tecnico ? tecnico.id : null, gerente_id: gerente ? gerente.id : null };
+}
+
+// PUT /api/filiais/:id
+rota('PUT', /^\/api\/filiais\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita filiais.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da filial é obrigatório.' });
+  const data = db.load();
+  const filial = tenant.buscar(data, 'filiais', Number(m[1]), user.empresa_id);
+  if (!filial) return enviarJSON(res, 404, { erro: 'Filial não encontrada.' });
+  if (!body.setor_id) return enviarJSON(res, 400, { erro: 'Informe o setor desta filial.' });
+  const setor = tenant.buscar(data, 'setores', Number(body.setor_id), user.empresa_id);
+  if (!setor) return enviarJSON(res, 400, { erro: 'Setor não encontrado.' });
+  const refs = resolverTecnicoGerente(data, user.empresa_id, body);
+  if (refs.erro) return enviarJSON(res, 400, { erro: refs.erro });
+  filial.nome = body.nome.trim();
+  filial.setor_id = setor.id;
+  filial.endereco = body.endereco || '';
+  filial.tecnico_id = refs.tecnico_id;
+  filial.gerente_id = refs.gerente_id;
+  if (refs.tecnico) refs.tecnico.filial_id = filial.id;
+  if (refs.gerente) refs.gerente.filial_id = filial.id;
+  db.save(data);
+  enviarJSON(res, 200, { filial });
+});
+
+// DELETE /api/filiais/:id — bloqueado se houver área/equipamento/usuário vinculado
+rota('DELETE', /^\/api\/filiais\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui filiais.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const filial = tenant.buscar(data, 'filiais', id, user.empresa_id);
+  if (!filial) return enviarJSON(res, 404, { erro: 'Filial não encontrada.' });
+  if (tenant.listar(data, 'equipamentos', user.empresa_id).some((e) => e.filial_id === id)) {
+    return enviarJSON(res, 400, { erro: 'Existem equipamentos nesta filial. Transfira-os antes de excluir.' });
+  }
+  if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.filial_id === id)) {
+    return enviarJSON(res, 400, { erro: 'Existem usuários vinculados a esta filial. Reatribua-os antes de excluir.' });
+  }
+  data.filiais = data.filiais.filter((f) => f.id !== id);
+  data.areas = data.areas.filter((a) => a.filial_id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/areas?filial_id=123
+rota('GET', /^\/api\/areas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_VEEM_ESTRUTURA_FILIAIS)) return enviarJSON(res, 403, { erro: 'Sem acesso a áreas.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let areas = tenant.listar(data, 'areas', user.empresa_id);
+  if (['gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(user.papel)) {
+    const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+    areas = areas.filter((a) => filiaisIds.has(a.filial_id));
+  }
+  if (query.filial_id) areas = areas.filter((a) => a.filial_id === Number(query.filial_id));
+  enviarJSON(res, 200, { areas });
+});
+
+// POST /api/areas { filial_id, nome }
+rota('POST', /^\/api\/areas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador cadastra áreas.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da área é obrigatório.' });
+  const data = db.load();
+  const filial = tenant.buscar(data, 'filiais', Number(body.filial_id), user.empresa_id);
+  if (!filial) return enviarJSON(res, 400, { erro: 'Filial não encontrada.' });
+  const area = tenant.criar(data, 'areas', user.empresa_id, { filial_id: filial.id, nome: body.nome.trim() });
+  db.save(data);
+  enviarJSON(res, 201, { area });
+});
+
+// PUT /api/areas/:id — só o nome muda de filial (área não "muda de loja"); pra isso, exclua e recrie.
+rota('PUT', /^\/api\/areas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador edita áreas.' });
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome da área é obrigatório.' });
+  const data = db.load();
+  const area = tenant.buscar(data, 'areas', Number(m[1]), user.empresa_id);
+  if (!area) return enviarJSON(res, 404, { erro: 'Área não encontrada.' });
+  area.nome = body.nome.trim();
+  db.save(data);
+  enviarJSON(res, 200, { area });
+});
+
+// DELETE /api/areas/:id — bloqueado se houver equipamento vinculado
+rota('DELETE', /^\/api\/areas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador exclui áreas.' });
+  const data = db.load();
+  const id = Number(m[1]);
+  const area = tenant.buscar(data, 'areas', id, user.empresa_id);
+  if (!area) return enviarJSON(res, 404, { erro: 'Área não encontrada.' });
+  if (tenant.listar(data, 'equipamentos', user.empresa_id).some((e) => e.area_id === id)) {
+    return enviarJSON(res, 400, { erro: 'Existem equipamentos nesta área. Mova-os antes de excluir.' });
+  }
+  data.areas = data.areas.filter((a) => a.id !== id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 const ESTAGIOS_LEAD_VALIDOS = ['novo', 'contatado', 'desqualificado'];
 
 // GET /api/leads — menu Comercial: prospects que ainda não são clientes oficiais
@@ -4662,7 +4949,40 @@ rota('GET', /^\/api\/equipamentos$/, async (req, res) => {
   const data = db.load();
   let lista = tenant.listar(data, 'equipamentos', user.empresa_id);
   if (user.papel === 'cliente') lista = lista.filter((e) => e.cliente_id === user.cliente_id);
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base): gerente/coordenador/consultor só veem
+  // os equipamentos das filiais do próprio escopo (ver escopo.js) — catálogo (sem filial_id nem
+  // cliente_id) continua visível pra todo mundo com acesso a este módulo, igual já era.
+  else if (['gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(user.papel)) {
+    const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+    lista = lista.filter((e) => e.filial_id === null || filiaisIds.has(e.filial_id));
+  }
   enviarJSON(res, 200, { equipamentos: lista });
+});
+
+// GET /api/equipamentos/por-qr/:token — página do equipamento aberta pelo QR Code (exige login;
+// sem login, o front mostra só a tela de entrada — ver fluxo ?qr= no app.js). Mesmo escopo da
+// listagem acima: quem não pode ver a filial deste equipamento recebe 404, não um erro de permissão
+// que denuncie que o equipamento existe.
+rota('GET', /^\/api\/equipamentos\/por-qr\/([a-f0-9]+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const equipamento = tenant.listar(data, 'equipamentos', user.empresa_id).find((e) => e.qr_token === m[1]);
+  if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
+  if (['gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(user.papel)) {
+    const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+    if (equipamento.filial_id === null || !filiaisIds.has(equipamento.filial_id)) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
+  }
+  // registro de presença (seção 5 do pedido do usuário): cada scan do técnico/gerente/coordenador
+  // gera um registro simples de quem leu o QR e quando — não precisa de coleção própria: é um
+  // array curto dentro do próprio equipamento, mais que suficiente pra "visto por último".
+  if (!Array.isArray(equipamento.scans_qr)) equipamento.scans_qr = [];
+  equipamento.scans_qr.push({ usuario_id: user.id, em: new Date().toISOString() });
+  db.save(data);
+  // O.S. e solicitações já abertas pra este equipamento vêm junto — o pedido do usuário é pra
+  // mostrar isso ANTES de qualquer ação, pra evitar duplicidade (seção 5).
+  const agendaAberta = tenant.listar(data, 'agenda', user.empresa_id).filter((a) => a.equipamento_id === equipamento.id && !a.finalizada);
+  enviarJSON(res, 200, { equipamento, agenda_aberta: agendaAberta });
 });
 
 // GET /api/equipamentos/buscar-por-serie?numero_serie=XXX — usado pelo Relatório > Automático:
@@ -4715,6 +5035,12 @@ rota('POST', /^\/api\/equipamentos$/, async (req, res) => {
   const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
     cliente_id: null, catalogo_id: null, // é o próprio catálogo — não referencia outro (RCM/FMEA, passo 2)
     tipo: body.tipo.trim(), modelo: body.modelo.trim(), numero_serie: '', data_fabricacao: '', localizacao: '',
+    // versão Restaurantes/rede multiunidade (Fase 1 — Base): campos da unidade física atrelada a
+    // uma filial (ver atrelar-filial abaixo) — null aqui porque isto ainda é só o catálogo, sem
+    // unidade nenhuma. Têm que nascer com o campo (não só "undefined") pra uma comparação
+    // === null/!== null em qualquer outro lugar do código classificar certo "isto é catálogo".
+    filial_id: null, area_id: null, qr_token: null, codigo_interno: null,
+    status_operacional: null, garantia_ate: null, fornecedor_assistencia: null,
   });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
@@ -4729,7 +5055,10 @@ rota('PUT', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
   const data = db.load();
   const equipamento = tenant.buscar(data, 'equipamentos', Number(m[1]), user.empresa_id);
   if (!equipamento) return enviarJSON(res, 404, { erro: 'Equipamento não encontrado.' });
-  if (equipamento.cliente_id === null) {
+  // catálogo (tipo/modelo, sem unidade física ainda) = sem cliente E sem filial. Unidade física
+  // atrelada a uma filial (versão Restaurantes) também tem cliente_id null, então cliente_id só
+  // decide "é catálogo" quando filial_id também é null — senão cairia no ramo errado.
+  if (equipamento.cliente_id === null && equipamento.filial_id === null) {
     if (!body.tipo || !String(body.tipo).trim() || !body.modelo || !String(body.modelo).trim()) {
       return enviarJSON(res, 400, { erro: 'Tipo e modelo são obrigatórios.' });
     }
@@ -4747,10 +5076,25 @@ rota('PUT', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
     if (body.tem_contrato_manutencao === true || body.tem_contrato_manutencao === false || body.tem_contrato_manutencao === null) {
       equipamento.tem_contrato_manutencao = body.tem_contrato_manutencao;
     }
+    // campos só da unidade atrelada a uma filial (versão Restaurantes/rede multiunidade, Fase 1)
+    if (equipamento.filial_id !== null) {
+      if (body.area_id !== undefined) {
+        if (body.area_id) {
+          const area = tenant.buscar(data, 'areas', Number(body.area_id), user.empresa_id);
+          if (!area || area.filial_id !== equipamento.filial_id) return enviarJSON(res, 400, { erro: 'Área inválida para esta filial.' });
+          equipamento.area_id = area.id;
+        } else equipamento.area_id = null;
+      }
+      if (body.codigo_interno !== undefined) equipamento.codigo_interno = body.codigo_interno || null;
+      if (STATUS_OPERACIONAL_VALIDOS.includes(body.status_operacional)) equipamento.status_operacional = body.status_operacional;
+      if (body.garantia_ate !== undefined) equipamento.garantia_ate = body.garantia_ate || null;
+      if (body.fornecedor_assistencia !== undefined) equipamento.fornecedor_assistencia = body.fornecedor_assistencia || '';
+    }
   }
   db.save(data);
   enviarJSON(res, 200, { equipamento });
 });
+const STATUS_OPERACIONAL_VALIDOS = ['operando', 'restricao', 'parado'];
 
 // DELETE /api/equipamentos/:id — bloqueado se houver O.S. vinculadas a este equipamento
 rota('DELETE', /^\/api\/equipamentos\/(\d+)$/, async (req, res, m) => {
@@ -4792,6 +5136,49 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar$/, async (req, res, m) => {
     data_fabricacao: body.data_fabricacao || '',
     localizacao: body.localizacao || '',
     tem_contrato_manutencao: body.tem_contrato_manutencao === true ? true : body.tem_contrato_manutencao === false ? false : null,
+    // versão Restaurantes/rede multiunidade: esta unidade é atrelada a um CLIENTE, não a uma
+    // filial — nasce explicitamente null (nunca "undefined"), ver comentário equivalente em
+    // POST /api/equipamentos.
+    filial_id: null, area_id: null, qr_token: null, codigo_interno: null,
+    status_operacional: null, garantia_ate: null, fornecedor_assistencia: null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { equipamento: item });
+});
+
+// POST /api/equipamentos/:id/atrelar-filial — versão Restaurantes/rede multiunidade (Fase 1 —
+// Base): mesma ideia do /atrelar acima, mas pra uma FILIAL (loja) em vez de um cliente externo —
+// cria a unidade física com nº de série próprio e já ganha QR Code (seção 5 do pedido do usuário).
+rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar-filial$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador', 'producao', 'gerente_loja'])) return enviarJSON(res, 403, { erro: 'Sem permissão pra atrelar equipamento a uma filial.' });
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await lerCorpo(req);
+  const catalogo = tenant.buscar(data, 'equipamentos', Number(m[1]), user.empresa_id);
+  if (!catalogo || catalogo.cliente_id !== null || catalogo.filial_id !== null) return enviarJSON(res, 404, { erro: 'Equipamento do catálogo não encontrado.' });
+  if (!body.filial_id || !body.numero_serie || !String(body.numero_serie).trim()) {
+    return enviarJSON(res, 400, { erro: 'Filial e número de série são obrigatórios.' });
+  }
+  const filial = tenant.buscar(data, 'filiais', Number(body.filial_id), user.empresa_id);
+  if (!filial) return enviarJSON(res, 404, { erro: 'Filial não encontrada.' });
+  if (user.papel === 'gerente_loja' && filial.id !== usuarioCompleto(data, user).filial_id) {
+    return enviarJSON(res, 403, { erro: 'Você só pode atrelar equipamentos à sua própria filial.' });
+  }
+  let area = null;
+  if (body.area_id) {
+    area = tenant.buscar(data, 'areas', Number(body.area_id), user.empresa_id);
+    if (!area || area.filial_id !== filial.id) return enviarJSON(res, 400, { erro: 'Área inválida para esta filial.' });
+  }
+  const erroLimite = erroLimiteEquipamentos(data, user.empresa_id);
+  if (erroLimite) return enviarJSON(res, 400, { erro: erroLimite });
+  const item = tenant.criar(data, 'equipamentos', user.empresa_id, {
+    cliente_id: null, filial_id: filial.id, area_id: area ? area.id : null,
+    catalogo_id: catalogo.id, tipo: catalogo.tipo, modelo: catalogo.modelo,
+    numero_serie: body.numero_serie.trim(), data_fabricacao: body.data_fabricacao || '', localizacao: body.localizacao || '',
+    codigo_interno: body.codigo_interno || null, status_operacional: 'operando',
+    garantia_ate: body.garantia_ate || null, fornecedor_assistencia: body.fornecedor_assistencia || '',
+    qr_token: db.gerarQrToken(), scans_qr: [],
   });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
@@ -5714,6 +6101,11 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   if (papelExigeDepartamentalizacao(data, user.empresa_id, body.papel)) {
     return enviarJSON(res, 400, { erro: 'Perfis de departamento (Comercial/Financeiro) ficam disponíveis a partir do plano em que a equipe cresce ("Equipe e Escala"). Até lá, use o próprio administrador pras funções de orçamento/despesas.' });
   }
+  if (papelExigeEstruturaFiliais(data, user.empresa_id, body.papel)) {
+    return enviarJSON(res, 400, { erro: 'Gerente de loja/Coordenador técnico/Consultor de mercado ficam disponíveis a partir do módulo "Redes e Filiais". Cadastre primeiro os setores/filiais da empresa.' });
+  }
+  const refsFilial = validarReferenciasEstruturaFiliais(data, user.empresa_id, body.papel, body);
+  if (refsFilial.erro) return enviarJSON(res, 400, { erro: refsFilial.erro });
   if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.email === body.email)) {
     return enviarJSON(res, 409, { erro: 'Já existe usuário com este e-mail.' });
   }
@@ -5737,6 +6129,7 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', foto_perfil: '', cliente_id: body.cliente_id || null,
+    filial_id: refsFilial.filial_id, setor_id: refsFilial.setor_id,
     acesso_total, menus, departamento,
     status: 'convite_enviado', convite_token,
     salt: null, hash: null,
@@ -5793,6 +6186,14 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
   // só bloqueia ao TROCAR pra um perfil de departamento — editar quem já é comercial/financeiro
   // (ex. corrigir telefone) não deve travar por conta de uma empresa que nunca tinha esse perfil
   // antes desta regra existir.
+  // só bloqueia ao TROCAR pra um perfil da estrutura de filiais — editar quem já é gerente/
+  // coordenador/consultor (ex. corrigir telefone) não trava, mesmo pedido já aplicado acima pra
+  // comercial/financeiro (papelExigeDepartamentalizacao).
+  if (body.papel !== alvo.papel && papelExigeEstruturaFiliais(data, user.empresa_id, body.papel)) {
+    return enviarJSON(res, 400, { erro: 'Gerente de loja/Coordenador técnico/Consultor de mercado ficam disponíveis a partir do módulo "Redes e Filiais". Cadastre primeiro os setores/filiais da empresa.' });
+  }
+  const refsFilial = validarReferenciasEstruturaFiliais(data, user.empresa_id, body.papel, body, alvo);
+  if (refsFilial.erro) return enviarJSON(res, 400, { erro: refsFilial.erro });
   if (body.papel !== alvo.papel && papelExigeDepartamentalizacao(data, user.empresa_id, body.papel)) {
     return enviarJSON(res, 400, { erro: 'Perfis de departamento (Comercial/Financeiro) ficam disponíveis a partir do plano em que a equipe cresce ("Equipe e Escala"). Até lá, use o próprio administrador pras funções de orçamento/despesas.' });
   }
@@ -5808,6 +6209,7 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', foto_perfil: body.foto_perfil !== undefined ? body.foto_perfil : (alvo.foto_perfil || ''),
     cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
+    filial_id: refsFilial.filial_id, setor_id: refsFilial.setor_id,
     acesso_total, menus, departamento,
   });
   db.save(data);

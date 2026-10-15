@@ -41,11 +41,11 @@ test('desativar um módulo não afeta os outros da mesma empresa', () => {
 // "relatorios" e "equipe_avancado" entraram no catálogo pedido do usuário: "nosso sistema deve
 // ser do mais simples ao completo" — Relatório/Equipamentos/IA e Equipe/Escala/KPIs/FMEA saíram
 // de dentro de "os_chamados" e viraram módulos próprios (ver rotas-modulo.js).
-test('MODULOS_DISPONIVEIS lista todos os 10 módulos da spec', () => {
+test('MODULOS_DISPONIVEIS lista todos os 11 módulos da spec', () => {
   const chaves = db.MODULOS_DISPONIVEIS.map((m) => m.chave).sort();
   assert.deepEqual(chaves, [
     'agendamento', 'assistente_ia', 'biblioteca', 'comercial', 'equipe_avancado',
-    'financeiro', 'os_chamados', 'prestacao_contas', 'relatorios', 'smp_preventivas',
+    'financeiro', 'filiais', 'os_chamados', 'prestacao_contas', 'relatorios', 'smp_preventivas',
   ].sort());
 });
 

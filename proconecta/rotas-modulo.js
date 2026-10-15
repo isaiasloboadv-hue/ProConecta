@@ -51,6 +51,11 @@ const PREFIXO_MODULO = [
   ['/api/agendamento', 'agendamento'],
   ['/api/financeiro', 'financeiro'],
   ['/api/prestacao-contas', 'prestacao_contas'],
+  // versão Restaurantes/rede multiunidade (Fase 1 — Base, pedido do usuário): setores, filiais e
+  // áreas só existem pra empresa que contratou o módulo "filiais".
+  ['/api/setores', 'filiais'],
+  ['/api/filiais', 'filiais'],
+  ['/api/areas', 'filiais'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à

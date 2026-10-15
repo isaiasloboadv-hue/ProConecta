@@ -55,6 +55,12 @@ const MODULOS_DISPONIVEIS = [
   { chave: 'agendamento', nome: 'Agendamento Online' },
   { chave: 'financeiro', nome: 'Financeiro' },
   { chave: 'assistente_ia', nome: 'Assistente IA' },
+  // pedido do usuário: versão "Restaurantes" — franqueado com muitas lojas divididas em setores,
+  // cada loja com técnico/gerente próprio e cada setor com coordenador técnico/consultor de
+  // mercado. Reaproveitável por qualquer empresa com essa mesma estrutura (não é exclusivo de
+  // restaurante) — liga a hierarquia setores/filiais/áreas e os papéis gerente_loja/
+  // coordenador_tecnico/consultor_mercado (ver PAPEIS_ESTRUTURA_FILIAIS em server.js).
+  { chave: 'filiais', nome: 'Redes e Filiais' },
 ];
 const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
 
@@ -92,6 +98,17 @@ const PERFIS_DISPONIVEIS = [
     segmentos: [
       { chave: 'montagem_painel_eletrico', nome: 'Montagem de painel elétrico' },
       { chave: 'instalacao_eletrica', nome: 'Instalação elétrica' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  // pedido do usuário: franqueado com muitas lojas (ex. rede de restaurantes), cada uma com
+  // técnico/gerente fixo, agrupadas em setores com coordenador técnico/consultor de mercado —
+  // perfil reutilizável por qualquer rede multiunidade, não só alimentação.
+  {
+    chave: 'rede_multiunidade',
+    nome: 'Rede com múltiplas unidades (franquia)',
+    segmentos: [
+      { chave: 'franquia_alimentacao', nome: 'Franquia de alimentação' },
       { chave: 'generico', nome: 'Genérico' },
     ],
   },
@@ -187,6 +204,12 @@ function presetPerfilSegmento(perfil, segmento) {
 // (só a PRO Marking, por enquanto) já usa hoje.
 const MODULOS_VERSAO_MANUTENCAO = ['os_chamados', 'smp_preventivas', 'biblioteca'];
 
+// token do QR Code do equipamento (Fase 1 — versão Restaurantes) — string aleatória opaca, nunca
+// o id sequencial (evitaria que alguém adivinhasse/enumerasse etiquetas de outro equipamento).
+function gerarQrToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
 function moduloAtivo(data, empresaId, chave) {
   if (!CHAVES_MODULOS.includes(chave)) return false;
   const empresa = data.empresas.find((e) => e.id === empresaId);
@@ -261,6 +284,12 @@ function seed() {
     fmea_modos_falha: [],
     fmea_causas: [],
     fmea_efeitos: [],
+    // versão "Restaurantes"/rede multiunidade (Fase 1 — Base): hierarquia setores → filiais →
+    // áreas, abaixo da empresa (ver módulo "filiais" acima). Vazia até o módulo ser contratado e
+    // alguém cadastrar a estrutura — não afeta nenhuma empresa que não usa esse módulo.
+    setores: [],
+    filiais: [],
+    areas: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -270,7 +299,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -527,7 +556,7 @@ function migrar(data) {
     const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
     data.versoes.push(
       { id: nextId(data, 'versoes'), nome: 'Profissional', ordem: maiorOrdemAtual + 1, modulos_proprios: ['comercial', 'prestacao_contas', 'agendamento'], modulos: [], preco_mensal: null },
-      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia'], modulos: [], preco_mensal: null },
+      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia', 'filiais'], modulos: [], preco_mensal: null },
     );
     recalcularModulosVersoes(data);
     data._migracaoPlanosPadraoV1 = true;
@@ -590,7 +619,7 @@ function migrar(data) {
       const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
       data.versoes.push({
         id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 1,
-        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento'],
+        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento', 'filiais'],
         modulos: [], preco_mensal: null,
       });
     }
@@ -938,6 +967,31 @@ function migrar(data) {
   if (!data._seq.integracoes_colaborador) data._seq.integracoes_colaborador = 1;
   if (!data.competencias_colaborador) data.competencias_colaborador = [];
   if (!data._seq.competencias_colaborador) data._seq.competencias_colaborador = 1;
+  // versão "Restaurantes"/rede multiunidade (Fase 1 — Base, pedido do usuário) — hierarquia nova
+  // setores/filiais/áreas (ver seed()) e campos novos em equipamentos/usuários pra ela. Tudo
+  // opcional/null por padrão: nenhuma empresa que não usa o módulo "filiais" é afetada.
+  if (!Array.isArray(data.setores)) data.setores = [];
+  if (!Array.isArray(data.filiais)) data.filiais = [];
+  if (!Array.isArray(data.areas)) data.areas = [];
+  if (!data._seq.setores) data._seq.setores = 1;
+  if (!data._seq.filiais) data._seq.filiais = 1;
+  if (!data._seq.areas) data._seq.areas = 1;
+  if (!data._migracaoFiliaisV1) {
+    for (const e of data.equipamentos) {
+      if (e.filial_id === undefined) e.filial_id = null;
+      if (e.area_id === undefined) e.area_id = null;
+      if (e.qr_token === undefined) e.qr_token = null;
+      if (e.codigo_interno === undefined) e.codigo_interno = null;
+      if (e.status_operacional === undefined) e.status_operacional = 'operando';
+      if (e.garantia_ate === undefined) e.garantia_ate = null;
+      if (e.fornecedor_assistencia === undefined) e.fornecedor_assistencia = null;
+    }
+    for (const u of data.usuarios) {
+      if (u.filial_id === undefined) u.filial_id = null;
+      if (u.setor_id === undefined) u.setor_id = null;
+    }
+    data._migracaoFiliaisV1 = true;
+  }
   protegerAdminMaster(data);
   return data;
 }
@@ -1403,5 +1457,6 @@ module.exports = {
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar, recalcularModulosVersoes,
   PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento, PRESETS_PERFIL_SEGMENTO,
+  gerarQrToken,
   obterPool, COLECOES_EM_TABELA,
 };
