@@ -200,3 +200,39 @@ test('migrar da divisão de os_chamados é idempotente e não dá os módulos no
   const depois = db.migrar(semOsChamados);
   assert.deepEqual(depois.empresas.find((e) => e.id === 1).modulos_ativos.sort(), ['comercial'].sort());
 });
+
+// bug real pós-deploy (versão Restaurantes/rede multiunidade): instalação que já tinha rodado as
+// migrações de plano (V1/V2/V3, flags já true) ANTES do módulo "filiais" existir no código fica
+// com o plano "Completo" congelado sem ele pra sempre — e uma empresa que já estava nesse plano
+// continua marcada "Completo" (plano atual) mas nunca ganha o menu "Rede e Filiais", porque
+// empresa.modulos_ativos só é recalculado quando a própria empresa troca de plano de novo (ver
+// PUT /api/meu-plano). A migração nova (_migracaoFiliaisDesbloqueioEmpresasV1) resgata os dois:
+// o plano em si e quem já estava nele.
+test('migrar resgata "filiais" pro plano Completo e pra quem já estava nele, de uma instalação anterior a esse módulo existir', () => {
+  const jaMigrada = db.migrar(dadosAntigos());
+  const completo = jaMigrada.versoes.find((v) => v.nome === 'Completo');
+  // volta no tempo: tira "filiais" do plano, igual uma instalação migrada antes desse módulo
+  // existir (as flags de migração de plano continuam true — elas não rodam de novo sozinhas).
+  completo.modulos_proprios = completo.modulos_proprios.filter((m) => m !== 'filiais');
+  completo.modulos = completo.modulos.filter((m) => m !== 'filiais');
+  const empresa = jaMigrada.empresas.find((e) => e.id === 1);
+  empresa.versao_id = completo.id;
+  empresa.modulos_ativos = [...completo.modulos]; // já sem "filiais", igual o plano na época
+  delete jaMigrada._migracaoFiliaisDesbloqueioEmpresasV1; // só essa migração (nova) ainda não rodou
+
+  const depois = db.migrar(jaMigrada);
+  const completoDepois = depois.versoes.find((v) => v.nome === 'Completo');
+  assert.ok(completoDepois.modulos_proprios.includes('filiais'));
+  assert.ok(completoDepois.modulos.includes('filiais'));
+  const empresaDepois = depois.empresas.find((e) => e.id === 1);
+  assert.ok(empresaDepois.modulos_ativos.includes('filiais'));
+});
+
+test('migrar do resgate de "filiais" é idempotente e não mexe em empresa de plano que nunca teve "filiais"', () => {
+  const data = dadosAntigos();
+  data.empresas[0].versao_id = 1; // "Intermediário" (legado "Manutenção") nunca libera "filiais"
+  const uma = db.migrar(data);
+  assert.ok(!uma.empresas[0].modulos_ativos.includes('filiais'));
+  const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
+  assert.deepEqual(duas.empresas[0].modulos_ativos.sort(), uma.empresas[0].modulos_ativos.sort());
+});

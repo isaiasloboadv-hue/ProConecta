@@ -668,6 +668,41 @@ function migrar(data) {
     }
     data._migracaoSplitOsChamadosV1 = true;
   }
+  // bug real pós-deploy (versão Restaurantes/rede multiunidade): qualquer instalação que já tinha
+  // rodado as migrações de plano acima ANTES do módulo "filiais" existir no código fica com a flag
+  // (_migracaoPlanosPadraoV1/V3) já marcada true pra sempre — os blocos acima nunca rodam de novo,
+  // então o plano "libera tudo" dessa instalação nunca ganha "filiais" em modulos_proprios. E mesmo
+  // que o Super Admin edite o plano depois (Painel da Plataforma > Planos) pra adicionar o módulo,
+  // isso só atualiza versao.modulos — quem já tinha ESCOLHIDO aquele plano fica com
+  // empresa.modulos_ativos congelado no retrato antigo (só PUT /api/meu-plano, a própria empresa
+  // "trocando de plano" de novo, recalcula a partir de versao.modulos). Resultado: empresa continua
+  // marcada "Completo" (plano atual) mas nunca ganha o menu "Rede e Filiais". Acha o(s) plano(s)
+  // afetado(s) pelo que eles já liberam, não pelo nome (o Super Admin pode ter renomeado, e um
+  // fixture de teste qualquer pode coincidir de ter um plano também chamado "Completo" sem ter
+  // nada a ver com este módulo): só mexe num plano que já libera TODO o resto do catálogo — a
+  // marca inequívoca de "era o plano completo, só faltou um módulo que não existia ainda". Backfill
+  // em duas partes, uma vez só: (1) esse(s) plano(s) ganham "filiais" de volta em modulos_proprios;
+  // (2) toda empresa cujo plano atual já libera "filiais" (olhando versao.modulos, recalculado em
+  // seguida) mas cujo modulos_ativos ainda não tem, ganha o módulo de volta — sem precisar
+  // reconfigurar nada manualmente.
+  if (!data._migracaoFiliaisDesbloqueioEmpresasV1) {
+    const outrosModulos = CHAVES_MODULOS.filter((chave) => chave !== 'filiais');
+    for (const versao of data.versoes) {
+      const jaLiberaTudoMenosFiliais = Array.isArray(versao.modulos) && outrosModulos.every((chave) => versao.modulos.includes(chave));
+      if (!jaLiberaTudoMenosFiliais) continue;
+      const proprios = Array.isArray(versao.modulos_proprios) ? versao.modulos_proprios : [];
+      if (!proprios.includes('filiais')) versao.modulos_proprios = [...proprios, 'filiais'];
+    }
+    recalcularModulosVersoes(data);
+    for (const empresa of data.empresas) {
+      const versao = data.versoes.find((v) => v.id === empresa.versao_id);
+      if (versao && Array.isArray(versao.modulos) && versao.modulos.includes('filiais')
+        && Array.isArray(empresa.modulos_ativos) && !empresa.modulos_ativos.includes('filiais')) {
+        empresa.modulos_ativos = [...empresa.modulos_ativos, 'filiais'];
+      }
+    }
+    data._migracaoFiliaisDesbloqueioEmpresasV1 = true;
+  }
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
   for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao, data.solicitacoes_rh, data.mensagens_internas, data.feriados, data.escala_folgas]) {
