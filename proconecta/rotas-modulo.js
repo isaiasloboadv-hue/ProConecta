@@ -65,6 +65,11 @@ const PREFIXO_MODULO = [
   // Fase 3 — Peças: catálogo compartilhado + solicitação de peça com cadeia de autorização.
   ['/api/pecas-catalogo', 'filiais'],
   ['/api/solicitacoes-peca', 'filiais'],
+  // Fase 4 — Compras: pedido em atacado, estoque e transferências entre filiais/central.
+  ['/api/pedidos-compra', 'filiais'],
+  ['/api/estoque-central', 'filiais'],
+  ['/api/estoque-loja', 'filiais'],
+  ['/api/transferencias', 'filiais'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à

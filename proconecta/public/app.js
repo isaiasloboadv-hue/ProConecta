@@ -705,6 +705,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
     'solicitacoes-peca': 'Solicitações de Peça',
+    'transferencias': 'Transferência entre Lojas',
     'fila-atendimento': 'Chat',
     'relatorio-manutencao': 'Relatório',
     'links-externos': 'Links',
@@ -744,8 +745,8 @@ const MENUS_LABEL_POR_PAPEL = {
   pos_venda: { 'fila-pos-venda': 'Pós-venda', 'chat-interno': 'Mensagens' },
   estoque: { 'fila-estoque': 'Estoque', 'chat-interno': 'Mensagens' },
   // versão Restaurantes/rede multiunidade (Fase 1 — Base)
-  gerente_loja: { 'minha-loja': 'Minha loja', 'solicitacoes-peca': 'Solicitações de Peça', 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
-  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'catalogo-pecas': 'Catálogo de Peças', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  gerente_loja: { 'minha-loja': 'Minha loja', 'solicitacoes-peca': 'Solicitações de Peça', 'transferencias': 'Transferência entre Lojas', 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
+  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'catalogo-pecas': 'Catálogo de Peças', 'compras-estoque': 'Compras e Estoque', 'transferencias': 'Transferência entre Lojas', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
   consultor_mercado: { 'painel-setor': 'Painel do Setor', 'solicitacoes-peca': 'Solicitações de Peça', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
 };
 
@@ -758,6 +759,7 @@ const NAV = {
     // versão Restaurantes/rede multiunidade — Fase 3 (Peças): técnico solicita peça em qualquer
     // loja e dá baixa de instalação.
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
+    { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
     { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
     // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
@@ -834,6 +836,10 @@ const NAV = {
     // gerencia o catálogo compartilhado de peças.
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'catalogo-pecas', modulo: 'filiais', label: 'Catálogo de Peças', page: 'catalogo-pecas' },
+    // versão Restaurantes/rede multiunidade — Fase 4 (Compras): pedido em atacado, estoque
+    // central e transferência entre filiais.
+    { key: 'compras-estoque', modulo: 'filiais', label: 'Compras e Estoque', page: 'compras-estoque' },
+    { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
     { key: 'usuarios', modulo: 'nucleo', label: 'Usuários', page: 'usuarios' },
     // era um submenu com 3 telas separadas (Acompanhamento de viagens, Escala de Folga,
     // Solicitações) — virou um item só, que abre um painel com um widget de cada (ver renderEquipe).
@@ -967,12 +973,15 @@ const NAV = {
   gerente_loja: [
     { key: 'minha-loja', modulo: 'filiais', label: 'Minha loja', page: 'minha-loja-gerente' },
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
+    { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos da loja', page: 'equipamentos' },
   ],
   coordenador_tecnico: [
     { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
     { key: 'solicitacoes-peca', modulo: 'filiais', label: 'Solicitações de Peça', page: 'solicitacoes-peca' },
     { key: 'catalogo-pecas', modulo: 'filiais', label: 'Catálogo de Peças', page: 'catalogo-pecas' },
+    { key: 'compras-estoque', modulo: 'filiais', label: 'Compras e Estoque', page: 'compras-estoque' },
+    { key: 'transferencias', modulo: 'filiais', label: 'Transferência entre Lojas', page: 'transferencias' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
   ],
   consultor_mercado: [
@@ -1013,6 +1022,8 @@ const ICONE_MENU = {
   'painel-setor': '🗺️',
   'solicitacoes-peca': '🔧',
   'catalogo-pecas': '📦',
+  'compras-estoque': '🛒',
+  'transferencias': '🔄',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1149,6 +1160,8 @@ async function ir(pagina) {
     if (pagina === 'painel-setor') return renderPainelSetor();
     if (pagina === 'solicitacoes-peca') return renderSolicitacoesPeca();
     if (pagina === 'catalogo-pecas') return renderCatalogoPecas();
+    if (pagina === 'compras-estoque') return renderComprasEstoque();
+    if (pagina === 'transferencias') return renderTransferencias();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -18608,6 +18621,195 @@ async function excluirPecaCatalogo(id) {
   if (!(await mostrarConfirmacao('Excluir esta peça do catálogo? Esta ação não pode ser desfeita.'))) return;
   try { await api(`/api/pecas-catalogo/${id}`, { method: 'DELETE' }); mostrarToast('Peça excluída.'); renderCatalogoPecas(); }
   catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 4 (COMPRAS) ----------
+// ---- Compras e Estoque (administrador / coordenador técnico) ----
+async function renderComprasEstoque() {
+  const [{ sugestoes }, { pedidos }, { estoque: estoqueCentral }] = await Promise.all([
+    api('/api/pedidos-compra/sugestoes'), api('/api/pedidos-compra'), api('/api/estoque-central'),
+  ]);
+  window._sugestoesComprasCache = sugestoes;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Compras e Estoque</h1><p>${pedidos.length} pedido(s) de compra registrado(s)</p></div>
+    <div class="panel"><div class="panel-head">Sugestões de compra em atacado</div>
+      ${sugestoes.length ? sugestoes.map((g, i) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:8px;">
+          <span>${esc(g.codigo_produto)} — ${esc(g.descricao)} — ${g.quantidade_total} unidade(s) em ${g.solicitacoes.length} solicitação(ões) (${[...new Set(g.solicitacoes.map((s) => s.filial_nome))].map(esc).join(', ')})</span>
+          <button class="btn btn-primary btn-sm" onclick="mostrarFormPedidoCompra(${i})">Criar pedido de compra</button>
+        </div>`).join('') : '<p class="empty">Nenhuma solicitação aprovada aguardando compra.</p>'}
+    </div>
+    <div id="form-pedido-compra"></div>
+    <div class="panel"><div class="panel-head">Estoque central</div>
+      <table><tr><th>Código</th><th>Descrição</th><th>Saldo</th><th></th></tr>
+        ${estoqueCentral.length ? estoqueCentral.map((e) => `
+          <tr><td data-label="Código">${esc(e.codigo_produto)}</td><td data-label="Descrição">${esc(e.descricao)}</td><td data-label="Saldo">${e.saldo}</td>
+          <td class="td-acoes">${e.saldo > 0 ? `<button class="btn-outline-sm" onclick="mostrarFormDistribuir('${esc(e.codigo_produto)}', ${JSON.stringify(e.descricao)})">Distribuir</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="4" class="empty">Estoque central vazio.</td></tr>`}
+      </table>
+    </div>
+    <div id="form-distribuir"></div>
+    <div class="panel"><div class="panel-head">Pedidos de compra</div>
+      <table><tr><th>Fornecedor</th><th>NF</th><th>Data</th><th></th></tr>
+        ${pedidos.length ? pedidos.map((p) => `<tr><td data-label="Fornecedor">${esc(p.fornecedor)}</td><td data-label="NF">${esc(p.nota_fiscal_numero || '—')}</td><td data-label="Data">${fmtData(p.criado_em)}</td><td class="td-acoes"><button class="btn-outline-sm" onclick="verDetalhePedidoCompra(${p.id})">Ver itens</button></td></tr>`).join('') : `<tr><td colspan="4" class="empty">Nenhum pedido registrado ainda.</td></tr>`}
+      </table>
+    </div>
+    <div id="detalhe-pedido-compra"></div>`;
+}
+function mostrarFormPedidoCompra(i) {
+  const g = window._sugestoesComprasCache[i];
+  document.getElementById('form-pedido-compra').innerHTML = `
+    <div class="panel"><div class="panel-head">Novo pedido de compra — ${esc(g.codigo_produto)}</div>
+      <div class="form-grid">
+        <div><label>Fornecedor*</label><input id="pcf-fornecedor"></div>
+        <div><label>Nº da nota fiscal</label><input id="pcf-nf"></div>
+        <div><label>Quantidade a comprar</label><input id="pcf-quantidade" type="number" min="${g.quantidade_total}" value="${g.quantidade_total}"></div>
+        <div><label>Valor unitário (R$)*</label><input id="pcf-valor" type="number" min="0" step="0.01"></div>
+      </div>
+      <p style="color:var(--ink-soft); font-size:12.5px;">Atende: ${g.solicitacoes.map((s) => esc(s.filial_nome)).join(', ')}</p>
+      <button class="btn btn-primary btn-sm" onclick="confirmarPedidoCompra(${i})">Criar pedido</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-pedido-compra').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-pedido-compra').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarPedidoCompra(i) {
+  const g = window._sugestoesComprasCache[i];
+  const fornecedor = document.getElementById('pcf-fornecedor').value.trim();
+  const valorUnitario = Number(document.getElementById('pcf-valor').value);
+  if (!fornecedor) return alert('Informe o fornecedor.');
+  if (!(valorUnitario >= 0)) return alert('Informe o valor unitário.');
+  const body = {
+    fornecedor, nota_fiscal_numero: document.getElementById('pcf-nf').value,
+    itens: [{
+      codigo_produto: g.codigo_produto, descricao: g.descricao,
+      quantidade: Number(document.getElementById('pcf-quantidade').value), valor_unitario: valorUnitario,
+      solicitacoes_atendidas: g.solicitacoes.map((s) => s.id),
+    }],
+  };
+  try {
+    await api('/api/pedidos-compra', { method: 'POST', body });
+    mostrarToast('Pedido de compra criado — estoque central atualizado.');
+    renderComprasEstoque();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function mostrarFormDistribuir(codigo, descricao) {
+  const { filiais } = await api('/api/filiais');
+  document.getElementById('form-distribuir').innerHTML = `
+    <div class="panel"><div class="panel-head">Distribuir ${esc(codigo)}</div>
+      <div class="form-grid">
+        <div><label>Filial</label><select id="dist-filial">${filiais.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
+        <div><label>Quantidade</label><input id="dist-quantidade" type="number" min="1" value="1"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick='confirmarDistribuir(${JSON.stringify(codigo)}, ${JSON.stringify(descricao)})'>Enviar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-distribuir').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-distribuir').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarDistribuir(codigo, descricao) {
+  const body = {
+    origem_tipo: 'central', destino_filial_id: Number(document.getElementById('dist-filial').value),
+    codigo_produto: codigo, descricao, quantidade: Number(document.getElementById('dist-quantidade').value),
+  };
+  try {
+    await api('/api/transferencias', { method: 'POST', body });
+    document.getElementById('form-distribuir').innerHTML = '';
+    mostrarToast('Peça enviada pra filial — aguardando confirmação de recebimento.');
+    renderComprasEstoque();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function verDetalhePedidoCompra(id) {
+  const { pedido, itens } = await api(`/api/pedidos-compra/${id}`);
+  document.getElementById('detalhe-pedido-compra').innerHTML = `
+    <div class="panel"><div class="panel-head">Pedido #${pedido.id} — ${esc(pedido.fornecedor)}</div>
+      ${itens.map((i) => `
+        <div style="padding:8px 0; border-bottom:1px solid var(--line);">
+          <b>${esc(i.codigo_produto)}</b> — ${esc(i.descricao)} — ${i.quantidade} un. x ${fmtMoeda(i.valor_unitario)} = ${fmtMoeda(i.valor_total)}
+          <div style="font-size:12.5px; color:var(--ink-soft);">Atende: ${i.solicitacoes.map((s) => esc(s.filial_nome)).join(', ')}</div>
+        </div>`).join('')}
+    </div>`;
+  document.getElementById('detalhe-pedido-compra').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---- Transferência entre lojas (gerente/coordenador/consultor/técnico) ----
+const TRANSFERENCIA_STATUS_LABEL = { pedida: 'Pedida', aceita: 'Aceita', recusada: 'Recusada', enviada: 'Enviada', recebida: 'Recebida' };
+async function renderTransferencias() {
+  const { transferencias } = await api('/api/transferencias');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Transferência entre lojas</h1><p>${transferencias.length} registro(s)</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormBuscarPeca()">Buscar peça no grupo</button>
+    </div>
+    <div id="form-buscar-peca"></div>
+    <div class="panel"><table>
+      <tr><th>Código</th><th>Origem</th><th>Destino</th><th>Qtd</th><th>Status</th><th></th></tr>
+      ${transferencias.length ? transferencias.map((t) => `
+        <tr><td data-label="Código">${esc(t.codigo_produto)}</td><td data-label="Origem">${esc(t.origem_nome || '—')}</td><td data-label="Destino">${esc(t.destino_nome || '—')}</td>
+        <td data-label="Qtd">${t.quantidade}</td><td data-label="Status">${TRANSFERENCIA_STATUS_LABEL[t.status] || t.status}</td>
+        <td class="td-acoes">${botoesAcaoTransferencia(t)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">Nenhuma transferência ainda.</td></tr>`}
+    </table></div>`;
+}
+function botoesAcaoTransferencia(t) {
+  if (t.status === 'pedida' && t.origem_tipo === 'filial') {
+    return `<button class="btn btn-primary btn-sm" onclick="acaoTransferencia(${t.id}, 'aceitar')">Aceitar</button><button class="btn-outline-sm" onclick="acaoTransferencia(${t.id}, 'recusar')">Recusar</button>`;
+  }
+  if (t.status === 'aceita') return `<button class="btn btn-primary btn-sm" onclick="acaoTransferencia(${t.id}, 'enviar')">Marcar enviado</button>`;
+  if (t.status === 'enviada') return `<button class="btn btn-primary btn-sm" onclick="acaoTransferencia(${t.id}, 'confirmar-recebimento')">Confirmar recebimento</button>`;
+  return '';
+}
+async function acaoTransferencia(id, rota) {
+  try {
+    await api(`/api/transferencias/${id}/${rota}`, { method: 'PUT', body: {} });
+    mostrarToast('Atualizado.');
+    renderTransferencias();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+function mostrarFormBuscarPeca() {
+  document.getElementById('form-buscar-peca').innerHTML = `
+    <div class="panel"><div class="panel-head">Buscar peça no grupo</div>
+      <div class="form-grid"><div><label>Código do produto</label><input id="bp-codigo"></div></div>
+      <button class="btn btn-primary btn-sm" onclick="buscarPecaNoGrupo()">Buscar</button>
+      <div id="bp-resultado" style="margin-top:12px;"></div>
+    </div>`;
+  document.getElementById('form-buscar-peca').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function buscarPecaNoGrupo() {
+  const codigo = document.getElementById('bp-codigo').value.trim();
+  if (!codigo) return alert('Informe o código.');
+  try {
+    const { nas_lojas, no_central } = await api(`/api/estoque-loja/buscar?codigo_produto=${encodeURIComponent(codigo)}`);
+    document.getElementById('bp-resultado').innerHTML = `
+      <p>Estoque central: <b>${no_central}</b></p>
+      ${nas_lojas.length ? nas_lojas.map((l) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:8px;">
+          <span>${esc(l.filial_nome)} — ${l.saldo} em estoque</span>
+          <button class="btn-outline-sm" onclick='mostrarFormPedirTransferencia(${l.filial_id}, ${JSON.stringify(codigo)})'>Pedir transferência</button>
+        </div>`).join('') : '<p class="empty">Nenhuma loja com esse código em estoque.</p>'}`;
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function mostrarFormPedirTransferencia(origemFilialId, codigo) {
+  const { filiais } = await api('/api/filiais');
+  document.getElementById('bp-resultado').innerHTML += `
+    <div class="panel" style="background:var(--blue-pale-2); margin-top:10px;"><div class="panel-head">Pedir transferência — ${esc(codigo)}</div>
+      <div class="form-grid">
+        <div><label>Para qual loja (destino)</label><select id="pt-destino">${filiais.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
+        <div><label>Descrição</label><input id="pt-descricao" value="${esc(codigo)}"></div>
+        <div><label>Quantidade</label><input id="pt-quantidade" type="number" min="1" value="1"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick='confirmarPedirTransferencia(${origemFilialId}, ${JSON.stringify(codigo)})'>Pedir</button>
+    </div>`;
+}
+async function confirmarPedirTransferencia(origemFilialId, codigo) {
+  const body = {
+    origem_tipo: 'filial', origem_filial_id: origemFilialId, destino_filial_id: Number(document.getElementById('pt-destino').value),
+    codigo_produto: codigo, descricao: document.getElementById('pt-descricao').value || codigo,
+    quantidade: Number(document.getElementById('pt-quantidade').value) || 1,
+  };
+  try {
+    await api('/api/transferencias', { method: 'POST', body });
+    mostrarToast('Transferência solicitada.');
+    renderTransferencias();
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- USUÁRIOS (cadastro por convite) ----------

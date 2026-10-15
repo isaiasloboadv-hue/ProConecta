@@ -97,3 +97,13 @@ test('rotas de catálogo de peças/solicitações pertencem a filiais', () => {
   assert.equal(moduloDaRota(/^\/api\/solicitacoes-peca$/), 'filiais');
   assert.equal(moduloDaRota(/^\/api\/solicitacoes-peca\/(\d+)\/ciente$/), 'filiais');
 });
+
+// Fase 4 — Compras: pedido de compra, estoque e transferências também pertencem a "filiais".
+test('rotas de pedidos de compra/estoque/transferências pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/pedidos-compra$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/pedidos-compra\/sugestoes$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/estoque-central$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/estoque-loja$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/transferencias$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/transferencias\/(\d+)\/aceitar$/), 'filiais');
+});

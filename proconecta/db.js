@@ -299,6 +299,14 @@ function seed() {
     // filiais (empresa_id, não filial_id) e solicitação de peça com cadeia de autorização.
     pecas_catalogo: [],
     solicitacoes_peca: [],
+    // versão Restaurantes/rede multiunidade (Fase 4 — Compras): compra em atacado (consolidando
+    // solicitações de várias lojas pelo mesmo código), estoque central/por loja e transferência
+    // (central->loja ou entre filiais) — ver server.js.
+    pedidos_compra: [],
+    pedido_itens: [],
+    estoque_central: [],
+    estoque_loja: [],
+    transferencias: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -308,7 +316,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -997,6 +1005,17 @@ function migrar(data) {
   if (!Array.isArray(data.solicitacoes_peca)) data.solicitacoes_peca = [];
   if (!data._seq.pecas_catalogo) data._seq.pecas_catalogo = 1;
   if (!data._seq.solicitacoes_peca) data._seq.solicitacoes_peca = 1;
+  // Fase 4 — Compras: pedido em atacado, estoque central/por loja e transferências.
+  if (!Array.isArray(data.pedidos_compra)) data.pedidos_compra = [];
+  if (!Array.isArray(data.pedido_itens)) data.pedido_itens = [];
+  if (!Array.isArray(data.estoque_central)) data.estoque_central = [];
+  if (!Array.isArray(data.estoque_loja)) data.estoque_loja = [];
+  if (!Array.isArray(data.transferencias)) data.transferencias = [];
+  if (!data._seq.pedidos_compra) data._seq.pedidos_compra = 1;
+  if (!data._seq.pedido_itens) data._seq.pedido_itens = 1;
+  if (!data._seq.estoque_central) data._seq.estoque_central = 1;
+  if (!data._seq.estoque_loja) data._seq.estoque_loja = 1;
+  if (!data._seq.transferencias) data._seq.transferencias = 1;
   if (!data._migracaoFiliaisV1) {
     for (const e of data.equipamentos) {
       if (e.filial_id === undefined) e.filial_id = null;

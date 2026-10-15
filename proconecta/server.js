@@ -71,16 +71,15 @@ function exigirPapel(user, papeis) {
 // Quem tem acesso_total considera tudo liberado — só restringe de verdade quando acesso_total ===
 // false, e aí só os menus marcados aqui aparecem pra essa pessoa.
 const MENUS_POR_PAPEL = {
-  suporte: ['agenda', 'minha-loja', 'solicitacoes-peca', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
-  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios', 'chat-interno', 'solicitacoes-peca', 'catalogo-pecas'],
+  suporte: ['agenda', 'minha-loja', 'solicitacoes-peca', 'transferencias', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
+  administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios', 'chat-interno', 'solicitacoes-peca', 'catalogo-pecas', 'compras-estoque', 'transferencias'],
   cliente: ['biblioteca', 'equipamentos', 'chamados'],
   producao: ['biblioteca', 'clientes', 'equipamentos', 'chat-interno'],
   pos_venda: ['fila-pos-venda', 'chat-interno'],
   estoque: ['fila-estoque', 'chat-interno'],
-  // versão Restaurantes/rede multiunidade — Fase 2/3 (Operação/Peças): Minha loja/Painel do
-  // Setor/Solicitações de Peça/Catálogo de Peças.
-  gerente_loja: ['minha-loja', 'solicitacoes-peca', 'equipamentos', 'chat-interno'],
-  coordenador_tecnico: ['painel-setor', 'solicitacoes-peca', 'catalogo-pecas', 'equipamentos', 'chat-interno'],
+  // versão Restaurantes/rede multiunidade — Fase 2/3/4 (Operação/Peças/Compras).
+  gerente_loja: ['minha-loja', 'solicitacoes-peca', 'transferencias', 'equipamentos', 'chat-interno'],
+  coordenador_tecnico: ['painel-setor', 'solicitacoes-peca', 'catalogo-pecas', 'compras-estoque', 'transferencias', 'equipamentos', 'chat-interno'],
   consultor_mercado: ['painel-setor', 'solicitacoes-peca', 'equipamentos', 'chat-interno'],
 };
 // todo tipo de acesso interno (todo mundo menos cliente) pode usar o chat interno — é comunicação
@@ -5939,6 +5938,7 @@ rota('POST', /^\/api\/solicitacoes-peca$/, async (req, res) => {
     ciente_gerente_id: null, ciente_gerente_em: null, ciente_coordenador_id: null, ciente_coordenador_em: null,
     status: 'pendente', historico: [{ de: null, para: 'pendente', por: user.id, em: agora, observacao: '' }],
     nota_fiscal_numero: null, instalacao_agenda_id: null, instalado_em: null, instalado_por: null,
+    pedido_item_id: null, // Fase 4 — Compras: preenchido se esta solicitação entrou num pedido em atacado
   });
   db.save(data);
   if (filial.gerente_id) enviarPush(data, filial.gerente_id, { titulo: 'Nova solicitação de peça', corpo: `${filial.nome}: ${solicitacao.descricao}`, url: '/' }).catch(() => {});
@@ -6099,6 +6099,22 @@ rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-comprado$/, async (req, r
   enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
 });
 
+// avança a solicitação pra "peça na loja" e já gera a O.S. de instalação pro técnico fixo —
+// reaproveitado tanto pela baixa manual (rota abaixo) quanto pela confirmação de recebimento de
+// uma transferência vinda da Fase 4 (Compras/estoque) — nunca db.save/enviarJSON aqui, isso fica
+// por conta de quem chama, pra poder salvar tudo numa única escrita.
+function marcarSolicitacaoPecaNaLoja(data, user, solicitacao) {
+  registrarHistoricoSolicitacao(solicitacao, solicitacao.status, 'peca_na_loja', user.id, '');
+  const filial = tenant.buscar(data, 'filiais', solicitacao.filial_id, user.empresa_id);
+  const os = criarOsFilial(data, user, {
+    filial, area_id: solicitacao.area_id, equipamento_id: solicitacao.equipamento_id,
+    problema: `Instalar peça: ${solicitacao.descricao}`, sla_criticidade: solicitacao.prioridade === 'urgente' ? 'alto' : 'medio',
+  });
+  solicitacao.instalacao_agenda_id = os.id;
+  if (os.tecnico_id) enviarPush(data, os.tecnico_id, { titulo: 'Peça na loja — instalar', corpo: solicitacao.descricao, url: '/' }).catch(() => {});
+  return os;
+}
+
 // POST /api/solicitacoes-peca/:id/marcar-peca-na-loja — pedido do usuário, seção 9: "quando o
 // status chega a 'Peça na loja', gerar automaticamente uma O.S. de instalação pro técnico".
 rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-peca-na-loja$/, async (req, res, m) => {
@@ -6108,15 +6124,8 @@ rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-peca-na-loja$/, async (re
   const solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(m[1]), user.empresa_id);
   if (!solicitacao || !solicitacaoNoEscopo(data, user, solicitacao)) return enviarJSON(res, 404, { erro: 'Solicitação não encontrada.' });
   if (solicitacao.status !== 'comprado') return enviarJSON(res, 400, { erro: 'Esta solicitação ainda não foi marcada como comprada.' });
-  registrarHistoricoSolicitacao(solicitacao, 'comprado', 'peca_na_loja', user.id, '');
-  const filial = tenant.buscar(data, 'filiais', solicitacao.filial_id, user.empresa_id);
-  const os = criarOsFilial(data, user, {
-    filial, area_id: solicitacao.area_id, equipamento_id: solicitacao.equipamento_id,
-    problema: `Instalar peça: ${solicitacao.descricao}`, sla_criticidade: solicitacao.prioridade === 'urgente' ? 'alto' : 'medio',
-  });
-  solicitacao.instalacao_agenda_id = os.id;
+  const os = marcarSolicitacaoPecaNaLoja(data, user, solicitacao);
   db.save(data);
-  if (os.tecnico_id) enviarPush(data, os.tecnico_id, { titulo: 'Peça na loja — instalar', corpo: solicitacao.descricao, url: '/' }).catch(() => {});
   enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao), agenda: agendaComDetalhes(data, os) });
 });
 
@@ -6134,6 +6143,353 @@ rota('POST', /^\/api\/solicitacoes-peca\/(\d+)\/marcar-instalado$/, async (req, 
   solicitacao.instalado_por = user.id;
   db.save(data);
   enviarJSON(res, 200, { solicitacao: solicitacaoComDetalhes(data, solicitacao) });
+});
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 4 (COMPRAS) ----------
+// Compra em atacado (consolida solicitações de várias lojas pelo mesmo código), estoque central e
+// por loja, e transferência (central->loja ou entre filiais, com pedido/aceite/envio/recebimento
+// quando é entre lojas — pedido do usuário, seções 10 e 10.1).
+
+const PAPEIS_COMPRAS = ['administrador', 'coordenador_tecnico'];
+
+function upsertEstoqueCentral(data, empresaId, codigoProduto, descricao, delta) {
+  let linha = tenant.listar(data, 'estoque_central', empresaId).find((e) => e.codigo_produto.trim().toLowerCase() === codigoProduto.trim().toLowerCase());
+  if (!linha) linha = tenant.criar(data, 'estoque_central', empresaId, { codigo_produto: codigoProduto, descricao, saldo: 0 });
+  linha.saldo += delta;
+  return linha;
+}
+function upsertEstoqueLoja(data, empresaId, filialId, codigoProduto, descricao, delta) {
+  let linha = tenant.listar(data, 'estoque_loja', empresaId).find((e) => e.filial_id === filialId && e.codigo_produto.trim().toLowerCase() === codigoProduto.trim().toLowerCase());
+  if (!linha) linha = tenant.criar(data, 'estoque_loja', empresaId, { filial_id: filialId, codigo_produto: codigoProduto, descricao, saldo: 0 });
+  linha.saldo += delta;
+  return linha;
+}
+
+// GET /api/pedidos-compra/sugestoes — consolidação (seção 10 passo 1): agrupa solicitações
+// aprovadas, ainda sem pedido de compra, pelo código do produto — "compra no atacado em vez de
+// uma por uma".
+rota('GET', /^\/api\/pedidos-compra\/sugestoes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_COMPRAS)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const pendentes = tenant.listar(data, 'solicitacoes_peca', user.empresa_id).filter((s) => s.status === 'aprovado' && !s.pedido_item_id && s.codigo_produto);
+  const grupos = {};
+  for (const s of pendentes) {
+    const chave = s.codigo_produto.trim().toLowerCase();
+    if (!grupos[chave]) grupos[chave] = { codigo_produto: s.codigo_produto, descricao: s.descricao, quantidade_total: 0, solicitacoes: [] };
+    grupos[chave].quantidade_total += s.quantidade;
+    grupos[chave].solicitacoes.push(solicitacaoComDetalhes(data, s));
+  }
+  enviarJSON(res, 200, { sugestoes: Object.values(grupos) });
+});
+
+// POST /api/pedidos-compra { fornecedor, nota_fiscal_numero?, nota_fiscal_arquivo?, itens:
+// [{codigo_produto, descricao, quantidade, valor_unitario, solicitacoes_atendidas:[ids]}] }
+rota('POST', /^\/api\/pedidos-compra$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_COMPRAS)) return enviarJSON(res, 403, { erro: 'Sem permissão pra registrar pedido de compra.' });
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!body.fornecedor || !String(body.fornecedor).trim()) return enviarJSON(res, 400, { erro: 'Fornecedor é obrigatório.' });
+  if (!Array.isArray(body.itens) || !body.itens.length) return enviarJSON(res, 400, { erro: 'Informe ao menos um item.' });
+  // valida tudo ANTES de criar qualquer coisa, pra nunca gravar pedido pela metade.
+  const itensValidados = [];
+  for (const item of body.itens) {
+    if (!item.codigo_produto || !item.descricao || !(Number(item.quantidade) > 0) || !(Number(item.valor_unitario) >= 0)) {
+      return enviarJSON(res, 400, { erro: 'Cada item precisa de código, descrição, quantidade e valor unitário.' });
+    }
+    const solicitacoes = [];
+    for (const solId of (item.solicitacoes_atendidas || [])) {
+      const s = tenant.buscar(data, 'solicitacoes_peca', Number(solId), user.empresa_id);
+      if (!s || s.status !== 'aprovado' || s.pedido_item_id) return enviarJSON(res, 400, { erro: `Solicitação #${solId} não está disponível pra entrar num pedido (precisa estar aprovada e sem pedido ainda).` });
+      solicitacoes.push(s);
+    }
+    itensValidados.push({ ...item, solicitacoesObjs: solicitacoes });
+  }
+  const agora = new Date().toISOString();
+  const pedido = tenant.criar(data, 'pedidos_compra', user.empresa_id, {
+    fornecedor: body.fornecedor.trim(), nota_fiscal_numero: body.nota_fiscal_numero || null,
+    nota_fiscal_arquivo: body.nota_fiscal_arquivo || null, comprado_por: user.id, criado_em: agora,
+  });
+  const itensCriados = [];
+  for (const item of itensValidados) {
+    const quantidade = Number(item.quantidade), valorUnitario = Number(item.valor_unitario);
+    const pedidoItem = tenant.criar(data, 'pedido_itens', user.empresa_id, {
+      pedido_id: pedido.id, codigo_produto: String(item.codigo_produto).trim(), descricao: String(item.descricao).trim(),
+      quantidade, valor_unitario: valorUnitario, valor_total: Number((quantidade * valorUnitario).toFixed(2)),
+      solicitacoes_atendidas: item.solicitacoesObjs.map((s) => s.id),
+    });
+    for (const s of item.solicitacoesObjs) {
+      s.pedido_item_id = pedidoItem.id;
+      s.nota_fiscal_numero = pedido.nota_fiscal_numero;
+      registrarHistoricoSolicitacao(s, 'aprovado', 'comprado', user.id, `Pedido de compra #${pedido.id} — ${pedido.fornecedor}`);
+    }
+    upsertEstoqueCentral(data, user.empresa_id, pedidoItem.codigo_produto, pedidoItem.descricao, quantidade);
+    itensCriados.push(pedidoItem);
+  }
+  db.save(data);
+  enviarJSON(res, 201, { pedido, itens: itensCriados });
+});
+
+rota('GET', /^\/api\/pedidos-compra$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, [...PAPEIS_COMPRAS, 'consultor_mercado'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const pedidos = tenant.listar(data, 'pedidos_compra', user.empresa_id);
+  enviarJSON(res, 200, { pedidos });
+});
+
+rota('GET', /^\/api\/pedidos-compra\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, [...PAPEIS_COMPRAS, 'consultor_mercado'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const pedido = tenant.buscar(data, 'pedidos_compra', Number(m[1]), user.empresa_id);
+  if (!pedido) return enviarJSON(res, 404, { erro: 'Pedido não encontrado.' });
+  const itens = tenant.listar(data, 'pedido_itens', user.empresa_id).filter((i) => i.pedido_id === pedido.id).map((i) => ({
+    ...i, solicitacoes: i.solicitacoes_atendidas.map((id) => tenant.buscar(data, 'solicitacoes_peca', id, user.empresa_id)).filter(Boolean).map((s) => solicitacaoComDetalhes(data, s)),
+  }));
+  enviarJSON(res, 200, { pedido, itens });
+});
+
+// GET /api/pedidos-compra/rastreio?codigo_produto=|nota_fiscal=|pedido_id= — consulta de rastreio
+// (seção 10): quantas foram compradas, pra onde foram, quantas instaladas e quantas paradas onde.
+rota('GET', /^\/api\/pedidos-compra\/rastreio$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, [...PAPEIS_COMPRAS, 'consultor_mercado'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let itens = tenant.listar(data, 'pedido_itens', user.empresa_id);
+  if (query.pedido_id) itens = itens.filter((i) => i.pedido_id === Number(query.pedido_id));
+  if (query.codigo_produto) itens = itens.filter((i) => i.codigo_produto.trim().toLowerCase() === String(query.codigo_produto).trim().toLowerCase());
+  if (query.nota_fiscal) {
+    const pedidosComNf = tenant.listar(data, 'pedidos_compra', user.empresa_id).filter((p) => p.nota_fiscal_numero === query.nota_fiscal).map((p) => p.id);
+    itens = itens.filter((i) => pedidosComNf.includes(i.pedido_id));
+  }
+  const resultado = itens.map((item) => {
+    const transferencias = tenant.listar(data, 'transferencias', user.empresa_id).filter((t) => t.pedido_item_id === item.id);
+    const solicitacoes = item.solicitacoes_atendidas.map((id) => tenant.buscar(data, 'solicitacoes_peca', id, user.empresa_id)).filter(Boolean);
+    return {
+      item, pedido: tenant.buscar(data, 'pedidos_compra', item.pedido_id, user.empresa_id),
+      distribuido: transferencias.reduce((soma, t) => soma + (t.status !== 'recusada' ? t.quantidade : 0), 0),
+      recebido_nas_lojas: transferencias.filter((t) => t.status === 'recebida').reduce((soma, t) => soma + t.quantidade, 0),
+      instalado: solicitacoes.filter((s) => s.status === 'instalado').length,
+      parado_na_loja: solicitacoes.filter((s) => s.status === 'peca_na_loja').map((s) => solicitacaoComDetalhes(data, s)),
+      transferencias,
+    };
+  });
+  enviarJSON(res, 200, { rastreio: resultado });
+});
+
+// GET /api/pedidos-compra/custos?agrupar_por=filial|setor|area|equipamento — custo real a partir
+// do valor de verdade pago (pedido_itens quando veio de compra em atacado; senão o valor_total da
+// própria solicitação, pra cobrir também a compra direta sem pedido).
+rota('GET', /^\/api\/pedidos-compra\/custos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, [...PAPEIS_COMPRAS, 'consultor_mercado'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const agruparPor = ['filial', 'setor', 'area', 'equipamento'].includes(query.agrupar_por) ? query.agrupar_por : 'filial';
+  const data = db.load();
+  const solicitacoes = tenant.listar(data, 'solicitacoes_peca', user.empresa_id).filter((s) => !['pendente', 'ciente', 'orcando', 'aguardando_consultor', 'aguardando_diretoria', 'nao_aprovado'].includes(s.status));
+  const grupos = {};
+  for (const s of solicitacoes) {
+    const pedidoItem = s.pedido_item_id ? tenant.buscar(data, 'pedido_itens', s.pedido_item_id, user.empresa_id) : null;
+    const valor = pedidoItem ? Number((pedidoItem.valor_unitario * s.quantidade).toFixed(2)) : (s.valor_total || 0);
+    let chave, label;
+    if (agruparPor === 'filial') { chave = s.filial_id; label = (tenant.buscar(data, 'filiais', s.filial_id, user.empresa_id) || {}).nome || '—'; }
+    else if (agruparPor === 'area') { chave = s.area_id; label = s.area_id ? ((tenant.buscar(data, 'areas', s.area_id, user.empresa_id) || {}).nome || '—') : '—'; }
+    else if (agruparPor === 'equipamento') { chave = s.equipamento_id; const e = tenant.buscar(data, 'equipamentos', s.equipamento_id, user.empresa_id); label = e ? `${e.tipo} ${e.modelo}` : '—'; }
+    else { const filial = tenant.buscar(data, 'filiais', s.filial_id, user.empresa_id); chave = filial ? filial.setor_id : null; label = filial ? ((tenant.buscar(data, 'setores', filial.setor_id, user.empresa_id) || {}).nome || '—') : '—'; }
+    if (!grupos[chave]) grupos[chave] = { chave, label, total: 0, quantidade_solicitacoes: 0 };
+    grupos[chave].total = Number((grupos[chave].total + valor).toFixed(2));
+    grupos[chave].quantidade_solicitacoes += 1;
+  }
+  enviarJSON(res, 200, { custos: Object.values(grupos).sort((a, b) => b.total - a.total) });
+});
+
+// ---- estoque ----
+rota('GET', /^\/api\/estoque-central$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_COMPRAS)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  enviarJSON(res, 200, { estoque: tenant.listar(data, 'estoque_central', user.empresa_id) });
+});
+
+rota('GET', /^\/api\/estoque-loja$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+  let lista = tenant.listar(data, 'estoque_loja', user.empresa_id).filter((e) => filiaisIds.has(e.filial_id));
+  if (query.filial_id) lista = lista.filter((e) => e.filial_id === Number(query.filial_id));
+  enviarJSON(res, 200, { estoque: lista.map((e) => ({ ...e, filial_nome: (tenant.buscar(data, 'filiais', e.filial_id, user.empresa_id) || {}).nome || null })) });
+});
+
+// GET /api/estoque-loja/buscar?codigo_produto= — "busca de peça no grupo" (seção 10.1): quais
+// filiais já têm a peça, antes de comprar/pedir de novo. Cross-filial de propósito (não aplica o
+// escopo normal) — é só contagem de estoque, não dado operacional sensível.
+rota('GET', /^\/api\/estoque-loja\/buscar$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  if (!query.codigo_produto) return enviarJSON(res, 400, { erro: 'Informe o código do produto.' });
+  const data = db.load();
+  const termo = String(query.codigo_produto).trim().toLowerCase();
+  const resultado = tenant.listar(data, 'estoque_loja', user.empresa_id)
+    .filter((e) => e.codigo_produto.trim().toLowerCase() === termo && e.saldo > 0)
+    .map((e) => ({ filial_id: e.filial_id, filial_nome: (tenant.buscar(data, 'filiais', e.filial_id, user.empresa_id) || {}).nome || null, saldo: e.saldo }));
+  const noCentral = tenant.listar(data, 'estoque_central', user.empresa_id).find((e) => e.codigo_produto.trim().toLowerCase() === termo);
+  enviarJSON(res, 200, { nas_lojas: resultado, no_central: noCentral ? noCentral.saldo : 0 });
+});
+
+// ---- transferências (central->loja ou entre filiais) ----
+// POST /api/transferencias { origem_tipo: 'central'|'filial', origem_filial_id?, destino_filial_id,
+// codigo_produto, descricao, quantidade, pedido_item_id?, solicitacao_id? }
+rota('POST', /^\/api\/transferencias$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await lerCorpo(req);
+  const destino = tenant.buscar(data, 'filiais', Number(body.destino_filial_id), user.empresa_id);
+  if (!destino) return enviarJSON(res, 404, { erro: 'Filial de destino não encontrada.' });
+  if (!body.codigo_produto || !body.descricao || !(Number(body.quantidade) > 0)) {
+    return enviarJSON(res, 400, { erro: 'Código, descrição e quantidade são obrigatórios.' });
+  }
+  let solicitacao = null;
+  if (body.solicitacao_id) {
+    solicitacao = tenant.buscar(data, 'solicitacoes_peca', Number(body.solicitacao_id), user.empresa_id);
+    if (!solicitacao || solicitacao.filial_id !== destino.id) return enviarJSON(res, 400, { erro: 'Solicitação inválida para esta filial de destino.' });
+  }
+  const quantidade = Number(body.quantidade);
+  const agora = new Date().toISOString();
+
+  if (body.origem_tipo === 'central') {
+    if (!exigirPapel(user, PAPEIS_COMPRAS)) return enviarJSON(res, 403, { erro: 'Só administrador/coordenador técnico distribuem do estoque central.' });
+    const linhaCentral = tenant.listar(data, 'estoque_central', user.empresa_id).find((e) => e.codigo_produto.trim().toLowerCase() === body.codigo_produto.trim().toLowerCase());
+    if (!linhaCentral || linhaCentral.saldo < quantidade) return enviarJSON(res, 400, { erro: 'Saldo insuficiente no estoque central.' });
+    linhaCentral.saldo -= quantidade;
+    const transferencia = tenant.criar(data, 'transferencias', user.empresa_id, {
+      origem_tipo: 'central', origem_filial_id: null, destino_filial_id: destino.id,
+      codigo_produto: body.codigo_produto.trim(), descricao: body.descricao.trim(), quantidade,
+      pedido_item_id: body.pedido_item_id ? Number(body.pedido_item_id) : null, solicitacao_id: solicitacao ? solicitacao.id : null,
+      status: 'enviada', criado_por: user.id, criado_em: agora, decidido_por: null, decidido_em: null,
+      enviado_por: user.id, enviado_em: agora, recebido_por: null, recebido_em: null,
+    });
+    db.save(data);
+    if (destino.gerente_id) enviarPush(data, destino.gerente_id, { titulo: 'Peça enviada pra sua loja', corpo: `${body.descricao} — confirme o recebimento.`, url: '/' }).catch(() => {});
+    return enviarJSON(res, 201, { transferencia });
+  }
+
+  // entre filiais: pedido do usuário, seção 10.1 — "pedido -> aceite da loja que envia -> envio
+  // -> confirmação de recebimento". Quem pede é o lado que PRECISA (destino) — gerente/coordenador/
+  // administrador — e a filial de ORIGEM (quem tem a peça) precisa aceitar antes de enviar.
+  if (body.origem_tipo !== 'filial') return enviarJSON(res, 400, { erro: 'origem_tipo inválido.' });
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const origem = tenant.buscar(data, 'filiais', Number(body.origem_filial_id), user.empresa_id);
+  if (!origem) return enviarJSON(res, 404, { erro: 'Filial de origem não encontrada.' });
+  if (origem.id === destino.id) return enviarJSON(res, 400, { erro: 'Origem e destino não podem ser a mesma filial.' });
+  if (!filialAcessivel(data, user, destino)) return enviarJSON(res, 403, { erro: 'Você não tem acesso à filial de destino.' });
+  const transferencia = tenant.criar(data, 'transferencias', user.empresa_id, {
+    origem_tipo: 'filial', origem_filial_id: origem.id, destino_filial_id: destino.id,
+    codigo_produto: body.codigo_produto.trim(), descricao: body.descricao.trim(), quantidade,
+    pedido_item_id: null, solicitacao_id: solicitacao ? solicitacao.id : null,
+    status: 'pedida', criado_por: user.id, criado_em: agora, decidido_por: null, decidido_em: null,
+    enviado_por: null, enviado_em: null, recebido_por: null, recebido_em: null,
+  });
+  db.save(data);
+  if (origem.gerente_id) enviarPush(data, origem.gerente_id, { titulo: 'Pedido de transferência de peça', corpo: `${destino.nome} precisa de ${body.descricao}.`, url: '/' }).catch(() => {});
+  enviarJSON(res, 201, { transferencia });
+});
+
+rota('GET', /^\/api\/transferencias$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+  let lista = tenant.listar(data, 'transferencias', user.empresa_id).filter((t) => filiaisIds.has(t.destino_filial_id) || filiaisIds.has(t.origem_filial_id));
+  if (query.status) lista = lista.filter((t) => t.status === query.status);
+  enviarJSON(res, 200, { transferencias: lista.map((t) => ({
+    ...t,
+    origem_nome: t.origem_filial_id ? (tenant.buscar(data, 'filiais', t.origem_filial_id, user.empresa_id) || {}).nome : 'Estoque central',
+    destino_nome: (tenant.buscar(data, 'filiais', t.destino_filial_id, user.empresa_id) || {}).nome || null,
+  })) });
+});
+
+function filialAcessivelOuAdmin(data, user, filial) { return user.papel === 'administrador' || filialAcessivel(data, user, filial); }
+
+// PUT /api/transferencias/:id/aceitar — a filial de ORIGEM aceita enviar.
+rota('PUT', /^\/api\/transferencias\/(\d+)\/aceitar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const t = tenant.buscar(data, 'transferencias', Number(m[1]), user.empresa_id);
+  if (!t || t.origem_tipo !== 'filial') return enviarJSON(res, 404, { erro: 'Transferência não encontrada.' });
+  if (t.status !== 'pedida') return enviarJSON(res, 400, { erro: 'Esta transferência já foi decidida.' });
+  const origem = tenant.buscar(data, 'filiais', t.origem_filial_id, user.empresa_id);
+  if (!filialAcessivelOuAdmin(data, user, origem)) return enviarJSON(res, 403, { erro: 'Só a filial de origem decide este pedido.' });
+  t.status = 'aceita'; t.decidido_por = user.id; t.decidido_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { transferencia: t });
+});
+
+rota('PUT', /^\/api\/transferencias\/(\d+)\/recusar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const t = tenant.buscar(data, 'transferencias', Number(m[1]), user.empresa_id);
+  if (!t || t.origem_tipo !== 'filial') return enviarJSON(res, 404, { erro: 'Transferência não encontrada.' });
+  if (t.status !== 'pedida') return enviarJSON(res, 400, { erro: 'Esta transferência já foi decidida.' });
+  const origem = tenant.buscar(data, 'filiais', t.origem_filial_id, user.empresa_id);
+  if (!filialAcessivelOuAdmin(data, user, origem)) return enviarJSON(res, 403, { erro: 'Só a filial de origem decide este pedido.' });
+  t.status = 'recusada'; t.decidido_por = user.id; t.decidido_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { transferencia: t });
+});
+
+// PUT /api/transferencias/:id/enviar — a filial de origem despacha de verdade (decrementa o
+// próprio estoque só agora, não na aceitação — o saldo pode ter mudado entre as duas).
+rota('PUT', /^\/api\/transferencias\/(\d+)\/enviar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const t = tenant.buscar(data, 'transferencias', Number(m[1]), user.empresa_id);
+  if (!t || t.origem_tipo !== 'filial') return enviarJSON(res, 404, { erro: 'Transferência não encontrada.' });
+  if (t.status !== 'aceita') return enviarJSON(res, 400, { erro: 'Esta transferência ainda não foi aceita.' });
+  const origem = tenant.buscar(data, 'filiais', t.origem_filial_id, user.empresa_id);
+  if (!filialAcessivelOuAdmin(data, user, origem)) return enviarJSON(res, 403, { erro: 'Só a filial de origem despacha esta transferência.' });
+  const linhaOrigem = tenant.listar(data, 'estoque_loja', user.empresa_id).find((e) => e.filial_id === origem.id && e.codigo_produto.trim().toLowerCase() === t.codigo_produto.trim().toLowerCase());
+  if (!linhaOrigem || linhaOrigem.saldo < t.quantidade) return enviarJSON(res, 400, { erro: 'Saldo insuficiente na filial de origem pra enviar.' });
+  linhaOrigem.saldo -= t.quantidade;
+  t.status = 'enviada'; t.enviado_por = user.id; t.enviado_em = new Date().toISOString();
+  db.save(data);
+  const destino = tenant.buscar(data, 'filiais', t.destino_filial_id, user.empresa_id);
+  if (destino && destino.gerente_id) enviarPush(data, destino.gerente_id, { titulo: 'Peça a caminho', corpo: t.descricao, url: '/' }).catch(() => {});
+  enviarJSON(res, 200, { transferencia: t });
+});
+
+// PUT /api/transferencias/:id/confirmar-recebimento — a filial de DESTINO confirma (seção 10
+// passo 4) — credita o estoque da loja e, se vinculada a uma solicitação, já avança ela pra
+// "peça na loja" (gera a O.S. de instalação automaticamente, ver marcarSolicitacaoPecaNaLoja).
+rota('PUT', /^\/api\/transferencias\/(\d+)\/confirmar-recebimento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const t = tenant.buscar(data, 'transferencias', Number(m[1]), user.empresa_id);
+  if (!t) return enviarJSON(res, 404, { erro: 'Transferência não encontrada.' });
+  if (t.status !== 'enviada') return enviarJSON(res, 400, { erro: 'Esta transferência ainda não foi enviada.' });
+  const destino = tenant.buscar(data, 'filiais', t.destino_filial_id, user.empresa_id);
+  if (!filialAcessivelOuAdmin(data, user, destino)) return enviarJSON(res, 403, { erro: 'Só a filial de destino confirma o recebimento.' });
+  upsertEstoqueLoja(data, user.empresa_id, destino.id, t.codigo_produto, t.descricao, t.quantidade);
+  t.status = 'recebida'; t.recebido_por = user.id; t.recebido_em = new Date().toISOString();
+  let osGerada = null;
+  if (t.solicitacao_id) {
+    const solicitacao = tenant.buscar(data, 'solicitacoes_peca', t.solicitacao_id, user.empresa_id);
+    if (solicitacao && solicitacao.status === 'comprado') osGerada = marcarSolicitacaoPecaNaLoja(data, user, solicitacao);
+  }
+  db.save(data);
+  enviarJSON(res, 200, { transferencia: t, agenda: osGerada ? agendaComDetalhes(data, osGerada) : null });
 });
 
 // GET /api/equipamentos/:id/historico
