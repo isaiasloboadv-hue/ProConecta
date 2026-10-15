@@ -81,11 +81,14 @@ test('categorias de plano: CRUD em cascata via /api/plataforma/versoes', async (
     const negadoDelete = await fetch(`${base}/api/plataforma/versoes/1`, { method: 'DELETE', headers: authAdmin });
     assert.equal(negadoDelete.status, 403);
 
-    // --- migração automática: a versão seedada sem ordem/modulos_proprios ganhou os dois ---
+    // --- migração automática: a versão seedada sem ordem/modulos_proprios ganhou os dois — e,
+    // por ser o único plano (ordem mais baixa da instalação), também ganhou "atividades" de volta
+    // (pedido do usuário, empresa JBPA: "coloque no plano básico" — ver
+    // desbloquearModuloNoChaoDaCascata em db.js) ---
     const listaInicial = await (await fetch(`${base}/api/plataforma/versoes`, { headers: authSuper })).json();
     assert.equal(listaInicial.versoes.length, 1);
     assert.equal(listaInicial.versoes[0].ordem, 1);
-    assert.deepEqual(listaInicial.versoes[0].modulos_proprios, ['os_chamados']);
+    assert.deepEqual(listaInicial.versoes[0].modulos_proprios, ['os_chamados', 'atividades']);
 
     // --- validação: nome vazio e módulo inexistente são recusados ---
     const semNome = await fetch(`${base}/api/plataforma/versoes`, { method: 'POST', headers: authSuper, body: JSON.stringify({ nome: '', modulos_proprios: [] }) });
@@ -94,14 +97,14 @@ test('categorias de plano: CRUD em cascata via /api/plataforma/versoes', async (
     assert.equal(moduloInvalido.status, 400);
 
     // --- criação em cascata: plano "Intermediário" (ordem 2) libera "biblioteca" a mais —
-    // o campo "modulos" final tem que vir com os_chamados (herdado do Básico) + biblioteca ---
+    // o campo "modulos" final tem que vir com os_chamados+atividades (herdado do Básico) + biblioteca ---
     const criarIntermediario = await fetch(`${base}/api/plataforma/versoes`, {
       method: 'POST', headers: authSuper, body: JSON.stringify({ nome: 'Intermediário', ordem: 2, modulos_proprios: ['biblioteca'] }),
     });
     assert.equal(criarIntermediario.status, 200);
     const { versoes: aposIntermediario } = await criarIntermediario.json();
     const intermediario = aposIntermediario.find((v) => v.nome === 'Intermediário');
-    assert.deepEqual([...intermediario.modulos].sort(), ['biblioteca', 'os_chamados'].sort());
+    assert.deepEqual([...intermediario.modulos].sort(), ['atividades', 'biblioteca', 'os_chamados'].sort());
 
     // --- criação do plano "Completo" (ordem 3) com TODOS os módulos que faltam — tem que acumular
     // o catálogo inteiro (pedido do usuário: "até o plano em que todas as funções é liberada") ---

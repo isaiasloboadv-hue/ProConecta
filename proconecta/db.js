@@ -591,7 +591,7 @@ function migrar(data) {
     const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
     data.versoes.push(
       { id: nextId(data, 'versoes'), nome: 'Profissional', ordem: maiorOrdemAtual + 1, modulos_proprios: ['comercial', 'prestacao_contas', 'agendamento'], modulos: [], preco_mensal: null },
-      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia', 'filiais', 'atividades'], modulos: [], preco_mensal: null },
+      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia', 'filiais'], modulos: [], preco_mensal: null },
     );
     recalcularModulosVersoes(data);
     data._migracaoPlanosPadraoV1 = true;
@@ -607,13 +607,16 @@ function migrar(data) {
   // própria, porque sua combinação não corresponde a nenhum estágio da jornada descrita. Roda
   // uma vez só (flag); segue tudo editável depois pelo Super Admin.
   if (!data._migracaoPlanosPadraoV2) {
+    // pedido do usuário (empresa JBPA): "coloque [Registro de Atividades] no plano básico" — entra
+    // já no chão da cascata (ordem 1), junto do orçamento/relatório, pra TODO plano acima dele
+    // herdar automaticamente (recalcularModulosVersoes é cumulativo por ordem).
     let autonomo = data.versoes.find((v) => v.nome === 'Autônomo');
     if (!autonomo) {
-      autonomo = { id: nextId(data, 'versoes'), nome: 'Autônomo', ordem: 1, modulos_proprios: ['comercial', 'relatorios'], modulos: [], preco_mensal: null };
+      autonomo = { id: nextId(data, 'versoes'), nome: 'Autônomo', ordem: 1, modulos_proprios: ['comercial', 'relatorios', 'atividades'], modulos: [], preco_mensal: null };
       data.versoes.push(autonomo);
     } else {
       autonomo.ordem = 1;
-      autonomo.modulos_proprios = ['comercial', 'relatorios'];
+      autonomo.modulos_proprios = ['comercial', 'relatorios', 'atividades'];
     }
     const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
     if (manutencao) manutencao.ordem = 2;
@@ -654,7 +657,7 @@ function migrar(data) {
       const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
       data.versoes.push({
         id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 1,
-        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento', 'filiais', 'atividades'],
+        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento', 'filiais'],
         modulos: [], preco_mensal: null,
       });
     }
@@ -682,26 +685,21 @@ function migrar(data) {
     data._migracaoSplitOsChamadosV1 = true;
   }
   // bug real pós-deploy (versão Restaurantes/rede multiunidade): qualquer instalação que já tinha
-  // rodado as migrações de plano acima ANTES do módulo "filiais" existir no código fica com a flag
-  // (_migracaoPlanosPadraoV1/V3) já marcada true pra sempre — os blocos acima nunca rodam de novo,
-  // então o plano "libera tudo" dessa instalação nunca ganha "filiais" em modulos_proprios. E mesmo
+  // rodado as migrações de plano acima ANTES de um módulo novo existir no código fica com a flag
+  // (_migracaoPlanosPadraoV1/V2/V3) já marcada true pra sempre — os blocos acima nunca rodam de
+  // novo, então nenhum plano dessa instalação ganha o módulo em modulos_proprios sozinho. E mesmo
   // que o Super Admin edite o plano depois (Painel da Plataforma > Planos) pra adicionar o módulo,
   // isso só atualiza versao.modulos — quem já tinha ESCOLHIDO aquele plano fica com
   // empresa.modulos_ativos congelado no retrato antigo (só PUT /api/meu-plano, a própria empresa
   // "trocando de plano" de novo, recalcula a partir de versao.modulos). Resultado: empresa continua
-  // marcada "Completo" (plano atual) mas nunca ganha o menu "Rede e Filiais". Acha o(s) plano(s)
-  // afetado(s) pelo que eles já liberam, não pelo nome (o Super Admin pode ter renomeado, e um
-  // fixture de teste qualquer pode coincidir de ter um plano também chamado "Completo" sem ter
-  // nada a ver com este módulo): só mexe num plano que já libera TODO o resto do catálogo — a
-  // marca inequívoca de "era o plano completo, só faltou um módulo que não existia ainda". Backfill
-  // em duas partes, uma vez só: (1) esse(s) plano(s) ganham "filiais" de volta em modulos_proprios;
-  // (2) toda empresa cujo plano atual já libera "filiais" (olhando versao.modulos, recalculado em
-  // seguida) mas cujo modulos_ativos ainda não tem, ganha o módulo de volta — sem precisar
-  // reconfigurar nada manualmente.
-  // helper comum às duas migrações de resgate abaixo (filiais e, depois, atividades): acha o(s)
-  // plano(s) que já liberam TODO o resto do catálogo (a marca inequívoca de "era o plano completo,
-  // só faltou um módulo que não existia ainda" — não depende do nome, que o Super Admin pode ter
-  // mudado) e dá o módulo de volta a eles e a toda empresa que já estava num deles.
+  // marcada no mesmo plano de sempre, mas nunca ganha o menu novo. Os dois helpers abaixo resolvem
+  // isso achando o plano certo (nunca pelo nome, que o Super Admin pode ter mudado, e que um
+  // fixture de teste qualquer pode coincidir de ter) e, uma vez só, dando o módulo de volta a ele
+  // e a toda empresa que já estava num plano afetado — sem precisar reconfigurar nada manualmente.
+  //
+  // variante 1: módulo que entrou só no topo da cascata (plano "libera tudo") — acha o(s) plano(s)
+  // que já liberam TODO o resto do catálogo, a marca inequívoca de "era o plano completo, só
+  // faltou um módulo que não existia ainda".
   function desbloquearModuloNosPlanosCompletos(chaveModulo) {
     const outrosModulos = CHAVES_MODULOS.filter((chave) => chave !== chaveModulo);
     for (const versao of data.versoes) {
@@ -711,6 +709,21 @@ function migrar(data) {
       if (!proprios.includes(chaveModulo)) versao.modulos_proprios = [...proprios, chaveModulo];
     }
     recalcularModulosVersoes(data);
+    propagarModuloParaEmpresas(chaveModulo);
+  }
+  // variante 2: módulo que entrou no CHÃO da cascata (plano de ordem mais baixa) — sobe sozinho
+  // pra todo plano acima dele (recalcularModulosVersoes é cumulativo por ordem), então basta dar
+  // o módulo ao plano de ordem mais baixa pra TODA empresa, em qualquer plano, ganhar.
+  function desbloquearModuloNoChaoDaCascata(chaveModulo) {
+    const maisBaixo = data.versoes.reduce((menor, v) => (!menor || (v.ordem || 0) < (menor.ordem || 0)) ? v : menor, null);
+    if (maisBaixo) {
+      const proprios = Array.isArray(maisBaixo.modulos_proprios) ? maisBaixo.modulos_proprios : [];
+      if (!proprios.includes(chaveModulo)) maisBaixo.modulos_proprios = [...proprios, chaveModulo];
+    }
+    recalcularModulosVersoes(data);
+    propagarModuloParaEmpresas(chaveModulo);
+  }
+  function propagarModuloParaEmpresas(chaveModulo) {
     for (const empresa of data.empresas) {
       const versao = data.versoes.find((v) => v.id === empresa.versao_id);
       if (versao && Array.isArray(versao.modulos) && versao.modulos.includes(chaveModulo)
@@ -723,11 +736,16 @@ function migrar(data) {
     desbloquearModuloNosPlanosCompletos('filiais');
     data._migracaoFiliaisDesbloqueioEmpresasV1 = true;
   }
-  // mesmo bug, mesmo remédio, pro módulo "atividades" (pedido do usuário, empresa JBPA) — criado
-  // depois da versão de código que já tinha rodado as migrações de plano acima nessa instalação.
   if (!data._migracaoAtividadesDesbloqueioEmpresasV1) {
     desbloquearModuloNosPlanosCompletos('atividades');
     data._migracaoAtividadesDesbloqueioEmpresasV1 = true;
+  }
+  // pedido do usuário (empresa JBPA): "coloque [Registro de Atividades] no plano básico" — desce
+  // a entrada do módulo pro chão da cascata, que sobe automaticamente pra todo plano acima
+  // (inclusive onde a variante 1 acima já tinha colocado, sem conflito — idempotente).
+  if (!data._migracaoAtividadesNoBasicoV1) {
+    desbloquearModuloNoChaoDaCascata('atividades');
+    data._migracaoAtividadesNoBasicoV1 = true;
   }
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.

@@ -52,8 +52,9 @@ test('migrar cria a versão Intermediário (legado "Manutenção") pra quem não
   assert.ok(intermediario);
   assert.equal(intermediario.nome, 'Intermediário');
   // "modulos" é o campo cumulativo (ver recalcularModulosVersoes) — Intermediário, de ordem 2,
-  // herda comercial+relatorios do plano "Básico" (ordem 1) além do que ela mesma acrescenta.
-  assert.deepEqual(intermediario.modulos.sort(), ['biblioteca', 'comercial', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
+  // herda comercial+relatorios+atividades do plano "Básico" (ordem 1, "atividades" entrou nele a
+  // pedido do usuário — empresa JBPA) além do que ela mesma acrescenta.
+  assert.deepEqual(intermediario.modulos.sort(), ['atividades', 'biblioteca', 'comercial', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
 });
 
 test('migrar dá empresa 1 os módulos da versão Intermediário (legado "Manutenção") ativos', () => {
@@ -61,9 +62,10 @@ test('migrar dá empresa 1 os módulos da versão Intermediário (legado "Manute
   const empresa = data.empresas.find((e) => e.id === 1);
   // empresa.modulos_ativos (diferente de versao.modulos) só ganha exatamente
   // MODULOS_VERSAO_MANUTENCAO na sincronização inicial — "relatorios"/"equipe_avancado" entram
-  // depois, pela migração de divisão de os_chamados (ver teste dedicado mais abaixo), não por
-  // esta sincronização.
-  assert.deepEqual(empresa.modulos_ativos.sort(), ['biblioteca', 'equipe_avancado', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
+  // depois, pela migração de divisão de os_chamados (ver teste dedicado mais abaixo), e
+  // "atividades" pelo resgate do plano "libera tudo"/chão da cascata (ver teste dedicado também
+  // mais abaixo) — nenhum dos dois pela sincronização inicial em si.
+  assert.deepEqual(empresa.modulos_ativos.sort(), ['atividades', 'biblioteca', 'equipe_avancado', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
   assert.equal(empresa.versao_id, 1);
   assert.deepEqual(empresa.terminologia, {});
 });
@@ -75,10 +77,12 @@ test('migrar não sobrescreve modulos_ativos de empresa que já tinha sido migra
   data.empresas[0].terminologia = { equipamento: 'Paciente' };
   const depois = db.migrar(data);
   // a sincronização em si não sobrescreve o array customizado (continua tendo exatamente
-  // "os_chamados"+"comercial" como base) — o que muda é a extensão separada da divisão de
-  // os_chamados, que dá relatorios/equipe_avancado a quem já tinha os_chamados (ver teste
-  // dedicado "migrar dá relatorios e equipe_avancado..." mais abaixo); nada é removido.
-  assert.deepEqual(depois.empresas[0].modulos_ativos.sort(), ['comercial', 'equipe_avancado', 'os_chamados', 'relatorios'].sort());
+  // "os_chamados"+"comercial" como base) — o que muda são as extensões separadas: a divisão de
+  // os_chamados dá relatorios/equipe_avancado a quem já tinha os_chamados (ver teste dedicado
+  // "migrar dá relatorios e equipe_avancado..." mais abaixo), e o resgate do chão da cascata dá
+  // "atividades" a quem está num plano que já o inclui (versao_id 1 = Intermediário, que herda do
+  // Básico); nada é removido.
+  assert.deepEqual(depois.empresas[0].modulos_ativos.sort(), ['atividades', 'comercial', 'equipe_avancado', 'os_chamados', 'relatorios'].sort());
   assert.equal(depois.empresas[0].terminologia.equipamento, 'Paciente');
 });
 
@@ -146,8 +150,9 @@ test('migrar cria automaticamente os 4 planos em cascata: Básico, Intermediári
   assert.ok(profissional.ordem > intermediario.ordem);
   assert.ok(completo.ordem > profissional.ordem);
 
-  // "Básico" é o chão da cascata: só orçamento (comercial) + relatório, nada de O.S.
-  assert.deepEqual([...basico.modulos].sort(), ['comercial', 'relatorios'].sort());
+  // "Básico" é o chão da cascata: orçamento (comercial) + relatório + registro de atividades
+  // (pedido do usuário, empresa JBPA — "coloque no plano básico"), nada de O.S.
+  assert.deepEqual([...basico.modulos].sort(), ['atividades', 'comercial', 'relatorios'].sort());
   assert.ok(!basico.modulos.includes('os_chamados'));
 
   // cascata: Intermediário acumula tudo do Básico + o que ele mesmo acrescenta (O.S. completo)
@@ -198,7 +203,11 @@ test('migrar da divisão de os_chamados é idempotente e não dá os módulos no
   semOsChamados.empresas[0].versao_id = 1;
   semOsChamados.empresas[0].modulos_ativos = ['comercial'];
   const depois = db.migrar(semOsChamados);
-  assert.deepEqual(depois.empresas.find((e) => e.id === 1).modulos_ativos.sort(), ['comercial'].sort());
+  // continua sem relatorios/equipe_avancado (a divisão de os_chamados não dá nada a quem nunca
+  // teve os_chamados) — "atividades" entra mesmo assim, por um mecanismo totalmente separado (o
+  // resgate do chão da cascata, ver teste dedicado mais abaixo), já que o plano 1 (Intermediário,
+  // herdando do Básico) inclui "atividades" independente de os_chamados.
+  assert.deepEqual(depois.empresas.find((e) => e.id === 1).modulos_ativos.sort(), ['atividades', 'comercial'].sort());
 });
 
 // bug real pós-deploy (versão Restaurantes/rede multiunidade): instalação que já tinha rodado as
@@ -234,5 +243,42 @@ test('migrar do resgate de "filiais" é idempotente e não mexe em empresa de pl
   const uma = db.migrar(data);
   assert.ok(!uma.empresas[0].modulos_ativos.includes('filiais'));
   const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
+  assert.deepEqual(duas.empresas[0].modulos_ativos.sort(), uma.empresas[0].modulos_ativos.sort());
+});
+
+// pedido do usuário (empresa JBPA): "coloque [Registro de Atividades] no plano básico" — diferente
+// do resgate de "filiais" acima (só pro plano "libera tudo"), esse entra no CHÃO da cascata
+// (_migracaoAtividadesNoBasicoV1/desbloquearModuloNoChaoDaCascata), então toda empresa ganha, em
+// qualquer plano — inclusive quem está no plano mais baixo, não só quem já estava no topo.
+test('migrar resgata "atividades" pro plano Básico e pra toda empresa, mesmo quem está no plano mais baixo', () => {
+  const jaMigrada = db.migrar(dadosAntigos());
+  // volta no tempo: tira "atividades" de todo plano, igual uma instalação migrada antes desse
+  // módulo existir (as flags de migração de plano continuam true — elas não rodam de novo sozinhas).
+  for (const v of jaMigrada.versoes) {
+    v.modulos_proprios = (v.modulos_proprios || []).filter((m) => m !== 'atividades');
+    v.modulos = (v.modulos || []).filter((m) => m !== 'atividades');
+  }
+  const basico = jaMigrada.versoes.find((v) => v.nome === 'Básico');
+  const empresa = jaMigrada.empresas.find((e) => e.id === 1);
+  empresa.versao_id = basico.id; // a empresa está no plano mais baixo, não no "Completo"
+  empresa.modulos_ativos = [...basico.modulos]; // já sem "atividades"
+  delete jaMigrada._migracaoAtividadesDesbloqueioEmpresasV1;
+  delete jaMigrada._migracaoAtividadesNoBasicoV1; // só essa migração (nova) ainda não rodou
+
+  const depois = db.migrar(jaMigrada);
+  const basicoDepois = depois.versoes.find((v) => v.nome === 'Básico');
+  assert.ok(basicoDepois.modulos_proprios.includes('atividades'));
+  assert.ok(basicoDepois.modulos.includes('atividades'));
+  // sobe sozinho pro topo da cascata também (cumulativo por ordem)
+  const completoDepois = depois.versoes.find((v) => v.nome === 'Completo');
+  assert.ok(completoDepois.modulos.includes('atividades'));
+  const empresaDepois = depois.empresas.find((e) => e.id === 1);
+  assert.ok(empresaDepois.modulos_ativos.includes('atividades'));
+});
+
+test('migrar do resgate de "atividades" no Básico é idempotente: rodar de novo não muda nada', () => {
+  const uma = db.migrar(dadosAntigos());
+  const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
+  assert.deepEqual(duas.versoes, uma.versoes);
   assert.deepEqual(duas.empresas[0].modulos_ativos.sort(), uma.empresas[0].modulos_ativos.sort());
 });

@@ -99,7 +99,10 @@ test('meu plano: lista com preço, troca aplica módulos/cotas, validações, pa
     assert.equal(trocar.status, 200);
     const { empresa } = await trocar.json();
     assert.equal(empresa.versao_id, 2);
-    assert.deepEqual(empresa.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados', 'smp_preventivas'].sort());
+    // "atividades" entra aqui por herança do plano "Básico" (ordem 1, mais baixa desta
+    // instalação) — pedido do usuário, empresa JBPA: "coloque no plano básico" (ver
+    // desbloquearModuloNoChaoDaCascata em db.js), cumulativo pra todo plano de ordem maior.
+    assert.deepEqual(empresa.modulos_ativos.sort(), ['atividades', 'biblioteca', 'comercial', 'os_chamados', 'smp_preventivas'].sort());
     assert.equal(empresa.limite_tecnicos, null);
 
     // o módulo novo (comercial) já está ativo de verdade — confirma via rota real do módulo

@@ -29,7 +29,11 @@ function dados() {
     _seq: { usuarios: 5, clientes: 3, equipamentos: 1, agenda: 1, visitas: 1, atividades_diarias: 1 },
     empresas: [
       { id: 1, nome: 'JBPA', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#000', cor_secundaria: '#000', versao_id: 1, modulos_ativos: ['os_chamados', 'atividades'], terminologia: {} },
-      { id: 2, nome: 'Empresa Sem Módulo', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#111', cor_secundaria: '#111', versao_id: 1, modulos_ativos: ['os_chamados'], terminologia: {} },
+      // sem versao_id (plano nenhum — módulos geridos direto pelo Super Admin): o módulo
+      // "atividades" entrou no CHÃO da cascata de planos (pedido do usuário, "coloque no plano
+      // básico"), então qualquer empresa com um plano reconhecido acaba herdando ele sozinha — pra
+      // provar o bloqueio de módulo de verdade, esta empresa não aponta pra plano nenhum.
+      { id: 2, nome: 'Empresa Sem Módulo', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#111', cor_secundaria: '#111', versao_id: null, modulos_ativos: ['os_chamados'], terminologia: {} },
     ],
     versoes: [{ id: 1, nome: 'Manutenção', modulos: ['os_chamados'] }],
   };

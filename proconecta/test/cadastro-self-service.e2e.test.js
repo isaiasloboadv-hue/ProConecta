@@ -75,9 +75,9 @@ test('cadastro self-service: valida campos, cria empresa em teste + administrado
     assert.equal(usuario.papel, 'administrador');
     assert.equal(usuario.empresa.nome, 'Empresa Nova');
     // pedido do usuário: "nosso sistema deve ser do mais simples ao completo" — quem se cadastra
-    // sozinho (ainda não é cliente) começa no plano de menor ordem da cascata ("Autônomo":
-    // comercial+relatório), não direto em "Manutenção" (O.S. completo).
-    assert.deepEqual(usuario.modulos_ativos.sort(), ['comercial', 'relatorios'].sort());
+    // sozinho (ainda não é cliente) começa no plano de menor ordem da cascata ("Autônomo"/"Básico":
+    // comercial+relatório+registro de atividades), não direto em "Manutenção" (O.S. completo).
+    assert.deepEqual(usuario.modulos_ativos.sort(), ['atividades', 'comercial', 'relatorios'].sort());
 
     // o token devolvido já funciona de verdade
     const me = await fetch(`${base}/api/clientes`, { headers: { Authorization: `Bearer ${token}` } });
