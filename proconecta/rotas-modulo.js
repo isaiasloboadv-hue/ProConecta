@@ -56,6 +56,12 @@ const PREFIXO_MODULO = [
   ['/api/setores', 'filiais'],
   ['/api/filiais', 'filiais'],
   ['/api/areas', 'filiais'],
+  // Fase 2 — Operação: vistoria e apoio entre setores. /api/agenda/filial e as sub-rotas de O.S.
+  // de filial (etapa, sla-criticidade, concluir-filial, validar-filial, reabrir-filial,
+  // designar-tecnico) já caem em "os_chamados" pelo prefixo /api/agenda acima — verificação extra
+  // do módulo "filiais" é feita dentro de cada rota (ver server.js).
+  ['/api/vistorias', 'filiais'],
+  ['/api/apoios', 'filiais'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à

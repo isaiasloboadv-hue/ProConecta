@@ -82,3 +82,11 @@ test('rotas de setores/filiais/áreas pertencem a filiais', () => {
   assert.equal(moduloDaRota(/^\/api\/filiais\/(\d+)$/), 'filiais');
   assert.equal(moduloDaRota(/^\/api\/areas$/), 'filiais');
 });
+
+// Fase 2 — Operação: vistoria e apoio entre setores também pertencem a "filiais".
+test('rotas de vistorias/apoios pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/vistorias$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/vistorias\/(\d+)\/itens$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/apoios$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/apoios\/(\d+)\/aceitar$/), 'filiais');
+});

@@ -703,6 +703,7 @@ function sincronizarApp() {
 const MENUS_LABEL_POR_PAPEL = {
   suporte: {
     'agenda': 'Agenda',
+    'minha-loja': 'Minha loja',
     'fila-atendimento': 'Chat',
     'relatorio-manutencao': 'Relatório',
     'links-externos': 'Links',
@@ -742,14 +743,17 @@ const MENUS_LABEL_POR_PAPEL = {
   pos_venda: { 'fila-pos-venda': 'Pós-venda', 'chat-interno': 'Mensagens' },
   estoque: { 'fila-estoque': 'Estoque', 'chat-interno': 'Mensagens' },
   // versão Restaurantes/rede multiunidade (Fase 1 — Base)
-  gerente_loja: { 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
-  coordenador_tecnico: { 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
-  consultor_mercado: { 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  gerente_loja: { 'minha-loja': 'Minha loja', 'equipamentos': 'Equipamentos da loja', 'chat-interno': 'Mensagens' },
+  coordenador_tecnico: { 'painel-setor': 'Painel do Setor', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
+  consultor_mercado: { 'painel-setor': 'Painel do Setor', 'equipamentos': 'Equipamentos do setor', 'chat-interno': 'Mensagens' },
 };
 
 const NAV = {
   suporte: [
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
+    // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
+    // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
+    { key: 'minha-loja', modulo: 'filiais', label: 'Minha loja', page: 'minha-loja-tecnico' },
     { key: 'fila-atendimento', modulo: 'os_chamados', label: 'Chat', page: 'fila-atendimento' },
     // um único item no menu — Manual/Automático/Ensaio de Ciclagem viraram botões dentro da
     // própria tela de Relatório (ver renderRelatorioManutencao), não mais um submenu lateral.
@@ -949,17 +953,18 @@ const NAV = {
       { key: 'orcamentos', label: 'Orçamentos', page: 'orcamentos-lista' },
     ]},
   ],
-  // versão Restaurantes/rede multiunidade (Fase 1 — Base, pedido do usuário) — telas operacionais
-  // completas (Minha loja/Painel do setor/aprovação de compra etc.) são Fases 2-4; por enquanto,
-  // os 3 papéis novos já entram e veem os equipamentos do próprio escopo (ver GET /api/equipamentos
-  // e escopo.js, que já filtra por filial/setor automaticamente).
+  // versão Restaurantes/rede multiunidade — Fase 2 (Operação): vistoria, O.S. com SLA e apoio
+  // entre setores (ver escopo.js, que filtra tudo por filial/setor automaticamente).
   gerente_loja: [
+    { key: 'minha-loja', modulo: 'filiais', label: 'Minha loja', page: 'minha-loja-gerente' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos da loja', page: 'equipamentos' },
   ],
   coordenador_tecnico: [
+    { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
   ],
   consultor_mercado: [
+    { key: 'painel-setor', modulo: 'filiais', label: 'Painel do Setor', page: 'painel-setor' },
     { key: 'equipamentos', modulo: 'filiais', label: 'Equipamentos do setor', page: 'equipamentos' },
   ],
 };
@@ -991,6 +996,8 @@ const ICONE_MENU = {
   'agendamentos-outlook': '📅',
   'fmea-relatorios': '📊',
   'estrutura-filiais': '🏬',
+  'minha-loja': '🧾',
+  'painel-setor': '🗺️',
 };
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1122,6 +1129,9 @@ async function ir(pagina) {
     if (pagina === 'equipamentos-atrelar') return renderEquipamentosAtrelar();
     if (pagina === 'equipamentos-atrelar-filial') return renderEquipamentosAtrelarFilial();
     if (pagina === 'estrutura-filiais') return renderEstruturaFiliais();
+    if (pagina === 'minha-loja-tecnico') return renderMinhaLojaTecnico();
+    if (pagina === 'minha-loja-gerente') return renderMinhaLojaGerente();
+    if (pagina === 'painel-setor') return renderPainelSetor();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -17808,6 +17818,469 @@ async function excluirArea(id, filialId) {
     await api(`/api/areas/${id}`, { method: 'DELETE' });
     mostrarToast('Área excluída.');
     abrirAreasFilial(filialId);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 2 (OPERAÇÃO) ----------
+const SLA_CRITICIDADE_LABEL = { critico: 'Crítico', alto: 'Alto', medio: 'Médio', baixo: 'Baixo' };
+const SLA_CRITICIDADE_TAG = { critico: 'tag-red', alto: 'tag-amber', medio: 'tag-blue', baixo: 'tag-green' };
+const ETAPA_OS_FILIAL_LABEL = {
+  aberta: 'Aberta', programada: 'Programada', em_execucao: 'Em execução',
+  aguardando_peca: 'Aguardando peça', aguardando_autorizacao: 'Aguardando autorização', aguardando_terceiro: 'Aguardando terceiro',
+  concluida: 'Concluída', validada: 'Validada', reaberta: 'Reaberta',
+};
+const ETAPAS_PAUSAM_SLA_FRONT = ['aguardando_peca', 'aguardando_autorizacao', 'aguardando_terceiro'];
+function tagSlaCriticidade(a) {
+  if (!a.sla_criticidade) return '';
+  return `<span class="tag ${SLA_CRITICIDADE_TAG[a.sla_criticidade]}">${SLA_CRITICIDADE_LABEL[a.sla_criticidade]}</span>`;
+}
+// "vence em Xh"/"atrasada Xh" calculado no front a partir de sla_prazo_em (ver server.js) — nunca
+// corre pra O.S. já concluída/validada, nem enquanto pausada (ver ETAPAS_PAUSAM_SLA_FRONT).
+function textoPrazoSla(a) {
+  if (['concluida', 'validada'].includes(a.etapa)) return '—';
+  if (ETAPAS_PAUSAM_SLA_FRONT.includes(a.etapa)) return 'Pausado';
+  if (!a.sla_prazo_em) return a.sla_criticidade === 'baixo' ? 'Próxima preventiva' : '—';
+  const diffMs = new Date(a.sla_prazo_em).getTime() - Date.now();
+  const horas = Math.abs(diffMs) / 3600000;
+  const texto = horas < 1 ? `${Math.round(Math.abs(diffMs) / 60000)} min` : `${horas.toFixed(1)}h`;
+  return diffMs >= 0 ? `Vence em ${texto}` : `Atrasada ${texto}`;
+}
+
+// ---- Minha loja (técnico) ----
+async function renderMinhaLojaTecnico() {
+  const { agenda } = await api('/api/agenda');
+  const minhasOs = agenda.filter((a) => a.filial_id !== null);
+  minhasOs.sort((a, b) => {
+    const pa = a.sla_prazo_em ? new Date(a.sla_prazo_em).getTime() : Infinity;
+    const pb = b.sla_prazo_em ? new Date(b.sla_prazo_em).getTime() : Infinity;
+    return pa - pb;
+  });
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Minha loja</h1><p>${minhasOs.length} O.S. da rede atribuída(s) a você</p></div>
+    <div class="panel"><button class="btn btn-primary btn-sm" onclick="iniciarVistoriaComSeletor()">+ Nova vistoria</button></div>
+    <div id="form-vistoria"></div>
+    <div class="panel"><table>
+      <tr><th>O.S.</th><th>Loja</th><th>Área</th><th>Problema</th><th>SLA</th><th>Prazo</th><th>Etapa</th><th></th></tr>
+      ${minhasOs.length ? minhasOs.map((a) => `
+        <tr>
+          <td data-label="O.S.">${esc(a.numero_os)}</td>
+          <td data-label="Loja">${esc(a.filial_nome || '—')}</td>
+          <td data-label="Área">${esc(a.area_nome || '—')}</td>
+          <td data-label="Problema">${esc(a.problema || '—')}</td>
+          <td data-label="SLA">${tagSlaCriticidade(a)}</td>
+          <td data-label="Prazo">${esc(textoPrazoSla(a))}</td>
+          <td data-label="Etapa">${esc(ETAPA_OS_FILIAL_LABEL[a.etapa] || a.etapa)}</td>
+          <td class="td-acoes">${botoesAcaoOsTecnico(a)}</td>
+        </tr>`).join('') : `<tr><td colspan="8" class="empty">Nenhuma O.S. de loja no momento.</td></tr>`}
+    </table></div>
+    <div id="form-concluir-os"></div>`;
+}
+function botoesAcaoOsTecnico(a) {
+  if (['aberta', 'programada', 'reaberta'].includes(a.etapa)) {
+    return `<button class="btn-outline-sm" onclick="avancarEtapaOs(${a.id}, 'em_execucao')">Iniciar execução</button>`;
+  }
+  if (a.etapa === 'em_execucao') {
+    return `
+      <button class="btn-outline-sm" onclick="avancarEtapaOs(${a.id}, 'aguardando_peca')">Aguard. peça</button>
+      <button class="btn-outline-sm" onclick="avancarEtapaOs(${a.id}, 'aguardando_autorizacao')">Aguard. autorização</button>
+      <button class="btn-outline-sm" onclick="avancarEtapaOs(${a.id}, 'aguardando_terceiro')">Aguard. terceiro</button>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormConcluirOs(${a.id})">Concluir</button>`;
+  }
+  if (ETAPAS_PAUSAM_SLA_FRONT.includes(a.etapa)) {
+    return `<button class="btn-outline-sm" onclick="avancarEtapaOs(${a.id}, 'em_execucao')">Retomar execução</button>`;
+  }
+  if (a.etapa === 'concluida') return `<span class="tag tag-amber">Aguardando validação</span>`;
+  if (a.etapa === 'validada') return `<span class="tag tag-green">Validada</span>`;
+  return '';
+}
+function atualizarTelaOsFilialAtual() {
+  if (paginaAtual === 'minha-loja-tecnico') renderMinhaLojaTecnico();
+  else if (paginaAtual === 'minha-loja-gerente') renderMinhaLojaGerente();
+  else if (paginaAtual === 'painel-setor') renderPainelSetor();
+}
+async function avancarEtapaOs(id, etapa) {
+  try {
+    await api(`/api/agenda/${id}/etapa`, { method: 'PUT', body: { etapa } });
+    mostrarToast('Atualizado.');
+    atualizarTelaOsFilialAtual();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+function mostrarFormConcluirOs(id) {
+  concluirOsFotos = [];
+  document.getElementById('form-concluir-os').innerHTML = `
+    <div class="panel"><div class="panel-head">Concluir O.S.</div>
+      <div class="form-grid"><div class="full"><label>Descrição do serviço realizado*</label><textarea id="co-descricao" rows="3"></textarea></div></div>
+      <div style="margin-bottom:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('co-foto-input').click()">+ Foto do "depois"</button>
+        <input type="file" id="co-foto-input" accept="image/*" multiple style="display:none" onchange="adicionarFotosConcluirOs(event)">
+        <div id="co-fotos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="confirmarConcluirOs(${id})">Enviar conclusão</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-concluir-os').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+  document.getElementById('form-concluir-os').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+let concluirOsFotos = [];
+function adicionarFotosConcluirOs(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    concluirOsFotos.push(...dataUrls);
+    document.getElementById('co-fotos-preview').innerHTML = concluirOsFotos.map((f) => `<img src="${f}" style="width:60px; height:60px; object-fit:cover; border-radius:6px;">`).join('');
+  });
+}
+async function confirmarConcluirOs(id) {
+  const descricao = document.getElementById('co-descricao').value.trim();
+  if (!descricao) return alert('Descreva o serviço realizado.');
+  if (!concluirOsFotos.length) return alert('Envie ao menos uma foto do "depois".');
+  try {
+    await api(`/api/agenda/${id}/concluir-filial`, { method: 'POST', body: { descricao, fotos: concluirOsFotos } });
+    concluirOsFotos = [];
+    document.getElementById('form-concluir-os').innerHTML = '';
+    mostrarToast('O.S. concluída — aguardando validação.');
+    atualizarTelaOsFilialAtual();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- Vistoria guiada por área (reaproveitada por técnico/gerente/coordenador) ----
+async function iniciarVistoriaComSeletor() {
+  const { filiais } = await api('/api/filiais');
+  if (!filiais.length) return alert('Nenhuma filial no seu escopo.');
+  document.getElementById('form-vistoria').innerHTML = `
+    <div class="panel"><div class="panel-head">Nova vistoria</div>
+      <div class="form-grid"><div><label>Loja</label><select id="vt-filial">${filiais.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div></div>
+      <button class="btn btn-primary btn-sm" onclick="iniciarVistoria(Number(document.getElementById('vt-filial').value))">Começar vistoria</button>
+    </div>`;
+  document.getElementById('form-vistoria').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function iniciarVistoria(filialId) {
+  try {
+    const { vistoria } = await api('/api/vistorias', { method: 'POST', body: { filial_id: filialId } });
+    renderVistoriaEmAndamento(vistoria.id);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+window._vistoriaAtual = null;
+let vistoriaItemFotos = [];
+async function renderVistoriaEmAndamento(vistoriaId) {
+  const { vistoria, itens } = await api(`/api/vistorias/${vistoriaId}`);
+  const [{ areas }, { equipamentos }] = await Promise.all([api(`/api/areas?filial_id=${vistoria.filial_id}`), api('/api/equipamentos')]);
+  window._vistoriaAtual = { vistoria, areas, equipamentos: equipamentos.filter((e) => e.filial_id === vistoria.filial_id) };
+  vistoriaItemFotos = [];
+  document.getElementById('form-vistoria').innerHTML = `
+    <div class="panel"><div class="panel-head">Vistoria em andamento</div>
+      <div class="form-grid">
+        <div><label>Área</label><select id="vi-area" onchange="atualizarEquipamentosVistoriaPorArea()">${areas.map((a) => `<option value="${a.id}">${esc(a.nome)}</option>`).join('')}</select></div>
+        <div><label>Equipamento (opcional)</label><select id="vi-equipamento"></select></div>
+        <div><label>Criticidade sugerida</label><select id="vi-sla">
+          <option value="critico">Crítico</option><option value="alto">Alto</option>
+          <option value="medio" selected>Médio</option><option value="baixo">Baixo</option>
+        </select></div>
+        <div class="full"><label>Descrição da pendência*</label><textarea id="vi-descricao" rows="2"></textarea></div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('vi-foto-input').click()">+ Foto</button>
+        <input type="file" id="vi-foto-input" accept="image/*" multiple style="display:none" onchange="adicionarFotosVistoriaItem(event)">
+        <div id="vi-fotos-preview" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="adicionarPendenciaVistoria(${vistoria.id})">+ Adicionar pendência</button>
+      <div id="vi-itens-lista" style="margin-top:14px;"></div>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button class="btn btn-primary btn-sm" onclick="concluirVistoria(${vistoria.id})">Concluir vistoria</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-vistoria').innerHTML=''">Cancelar</button>
+      </div>
+    </div>`;
+  atualizarEquipamentosVistoriaPorArea();
+  renderItensVistoria(itens);
+  document.getElementById('form-vistoria').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function atualizarEquipamentosVistoriaPorArea() {
+  const areaId = Number(document.getElementById('vi-area').value);
+  const equipSel = document.getElementById('vi-equipamento');
+  const lista = (window._vistoriaAtual.equipamentos || []).filter((e) => e.area_id === areaId);
+  equipSel.innerHTML = `<option value="">Nenhum / geral da área</option>` + lista.map((e) => `<option value="${e.id}">${esc(e.tipo)} ${esc(e.modelo)}</option>`).join('');
+}
+function adicionarFotosVistoriaItem(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    vistoriaItemFotos.push(...dataUrls);
+    document.getElementById('vi-fotos-preview').innerHTML = vistoriaItemFotos.map((f) => `<img src="${f}" style="width:50px; height:50px; object-fit:cover; border-radius:6px;">`).join('');
+  });
+}
+async function adicionarPendenciaVistoria(vistoriaId) {
+  const descricao = document.getElementById('vi-descricao').value.trim();
+  if (!descricao) return alert('Descreva a pendência.');
+  const body = {
+    area_id: Number(document.getElementById('vi-area').value),
+    equipamento_id: document.getElementById('vi-equipamento').value || null,
+    descricao, sla_sugerido: document.getElementById('vi-sla').value, fotos: vistoriaItemFotos,
+  };
+  try {
+    const { aviso_duplicidade } = await api(`/api/vistorias/${vistoriaId}/itens`, { method: 'POST', body });
+    vistoriaItemFotos = [];
+    document.getElementById('vi-descricao').value = '';
+    document.getElementById('vi-fotos-preview').innerHTML = '';
+    if (aviso_duplicidade) mostrarToast(`Atenção: já existe a O.S. ${aviso_duplicidade.numero_os} aberta pra este equipamento.`);
+    else mostrarToast('Pendência lançada.');
+    const { itens } = await api(`/api/vistorias/${vistoriaId}`);
+    renderItensVistoria(itens);
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+function renderItensVistoria(itens) {
+  document.getElementById('vi-itens-lista').innerHTML = itens.length ? `
+    <div class="panel"><div class="panel-head">Pendências lançadas (${itens.length})</div>
+      ${itens.map((i) => `<div style="padding:6px 0; border-bottom:1px solid var(--line);">${esc(i.descricao)} ${tagSlaCriticidade({ sla_criticidade: i.sla_sugerido })}</div>`).join('')}
+    </div>` : '';
+}
+async function concluirVistoria(vistoriaId) {
+  if (!(await mostrarConfirmacao('Concluir a vistoria? Cada pendência lançada vai virar uma O.S. pro técnico da loja.'))) return;
+  try {
+    const { criadas } = await api(`/api/vistorias/${vistoriaId}/concluir`, { method: 'POST', body: {} });
+    document.getElementById('form-vistoria').innerHTML = '';
+    mostrarToast(`Vistoria concluída — ${criadas.length} O.S. gerada(s).`);
+    atualizarTelaOsFilialAtual();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- Minha loja (gerente) ----
+async function renderMinhaLojaGerente() {
+  const { agenda } = await api('/api/agenda');
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Minha loja</h1><p>${agenda.length} O.S.</p></div>
+      <button class="btn btn-primary btn-sm" onclick="mostrarFormAbrirOsFilial()">+ Abrir O.S.</button>
+    </div>
+    <div id="form-abrir-os"></div>
+    <div class="panel"><button class="btn-outline-sm" onclick="iniciarVistoriaComSeletor()">Nova vistoria</button></div>
+    <div id="form-vistoria"></div>
+    <div class="panel"><table>
+      <tr><th>O.S.</th><th>Área</th><th>Problema</th><th>SLA</th><th>Prazo</th><th>Etapa</th><th></th></tr>
+      ${agenda.length ? agenda.map((a) => `
+        <tr>
+          <td data-label="O.S.">${esc(a.numero_os)}</td>
+          <td data-label="Área">${esc(a.area_nome || '—')}</td>
+          <td data-label="Problema">${esc(a.problema || '—')}</td>
+          <td data-label="SLA">${tagSlaCriticidade(a)}</td>
+          <td data-label="Prazo">${esc(textoPrazoSla(a))}</td>
+          <td data-label="Etapa">${esc(ETAPA_OS_FILIAL_LABEL[a.etapa] || a.etapa)}</td>
+          <td class="td-acoes">${a.etapa === 'concluida' ? `
+            <button class="btn btn-primary btn-sm" onclick="validarOsFilial(${a.id})">Validar</button>
+            <button class="btn-outline-sm" onclick="mostrarFormReabrirOs(${a.id})">Reabrir</button>
+          ` : ''}</td>
+        </tr>`).join('') : `<tr><td colspan="7" class="empty">Nenhuma O.S. ainda.</td></tr>`}
+    </table></div>
+    <div id="form-reabrir-os"></div>`;
+}
+async function mostrarFormAbrirOsFilial() {
+  const { filiais } = await api('/api/filiais');
+  if (!filiais.length) return alert('Nenhuma filial no seu escopo.');
+  const filial = filiais[0];
+  const [{ areas }, { equipamentos }] = await Promise.all([api(`/api/areas?filial_id=${filial.id}`), api('/api/equipamentos')]);
+  const equipFilial = equipamentos.filter((e) => e.filial_id === filial.id);
+  document.getElementById('form-abrir-os').innerHTML = `
+    <div class="panel"><div class="panel-head">Abrir O.S. — ${esc(filial.nome)}</div>
+      <div class="form-grid">
+        <div><label>Área</label><select id="ao-area"><option value="">Nenhuma</option>${areas.map((a) => `<option value="${a.id}">${esc(a.nome)}</option>`).join('')}</select></div>
+        <div><label>Equipamento</label><select id="ao-equipamento"><option value="">Nenhum</option>${equipFilial.map((e) => `<option value="${e.id}">${esc(e.tipo)} ${esc(e.modelo)}</option>`).join('')}</select></div>
+        <div><label>Criticidade</label><select id="ao-sla"><option value="critico">Crítico</option><option value="alto">Alto</option><option value="medio" selected>Médio</option><option value="baixo">Baixo</option></select></div>
+        <div class="full"><label>Problema*</label><textarea id="ao-problema" rows="2"></textarea></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="salvarAbrirOsFilial(${filial.id})">Abrir O.S.</button>
+    </div>`;
+  document.getElementById('form-abrir-os').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function salvarAbrirOsFilial(filialId) {
+  const problema = document.getElementById('ao-problema').value.trim();
+  if (!problema) return alert('Descreva o problema.');
+  const body = {
+    filial_id: filialId, area_id: document.getElementById('ao-area').value || null,
+    equipamento_id: document.getElementById('ao-equipamento').value || null,
+    problema, sla_criticidade: document.getElementById('ao-sla').value,
+  };
+  try {
+    const { aviso_duplicidade } = await api('/api/agenda/filial', { method: 'POST', body });
+    mostrarToast(aviso_duplicidade ? `Atenção: já existe a O.S. ${aviso_duplicidade.numero_os} aberta pra este equipamento.` : 'O.S. aberta.');
+    document.getElementById('form-abrir-os').innerHTML = '';
+    atualizarTelaOsFilialAtual();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function validarOsFilial(id) {
+  try {
+    await api(`/api/agenda/${id}/validar-filial`, { method: 'POST', body: {} });
+    mostrarToast('O.S. validada.');
+    atualizarTelaOsFilialAtual();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+function mostrarFormReabrirOs(id) {
+  document.getElementById('form-reabrir-os').innerHTML = `
+    <div class="panel"><div class="panel-head">Reabrir O.S.</div>
+      <div class="form-grid"><div class="full"><label>Motivo*</label><textarea id="ro-motivo" rows="2"></textarea></div></div>
+      <button class="btn btn-primary btn-sm" onclick="confirmarReabrirOs(${id})">Reabrir</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-reabrir-os').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-reabrir-os').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarReabrirOs(id) {
+  const motivo = document.getElementById('ro-motivo').value.trim();
+  if (!motivo) return alert('Informe o motivo.');
+  try {
+    await api(`/api/agenda/${id}/reabrir-filial`, { method: 'POST', body: { motivo } });
+    document.getElementById('form-reabrir-os').innerHTML = '';
+    mostrarToast('O.S. reaberta.');
+    atualizarTelaOsFilialAtual();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---- Painel do Setor (coordenador técnico / consultor de mercado) ----
+async function renderPainelSetor() {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const [{ agenda }, { filiais }, descobertasResp, apoiosResp] = await Promise.all([
+    api('/api/agenda'), api('/api/filiais'), api(`/api/filiais/descobertas?data=${hoje}`),
+    USER.papel === 'coordenador_tecnico' ? api('/api/apoios') : Promise.resolve({ apoios: [] }),
+  ]);
+  const descobertas = descobertasResp.descobertas || [];
+  const agora = Date.now();
+  const vencendo = agenda.filter((a) => a.sla_prazo_em && !['concluida', 'validada'].includes(a.etapa) && new Date(a.sla_prazo_em).getTime() < agora + 6 * 3600000);
+  const pedidosPendentes = (apoiosResp.apoios || []).filter((a) => a.status === 'pedido' && a.setor_destino_id === (filiais[0] ? filiais[0].setor_id : null));
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>Painel do Setor</h1><p>${filiais.length} loja(s) · ${agenda.length} O.S.</p></div>
+    ${descobertas.length ? `
+    <div class="panel" style="background:var(--red-bg);"><div class="panel-head">Lojas descobertas hoje</div>
+      ${descobertas.map((d) => `<div style="padding:6px 0;">${esc(d.filial.nome)} — técnico de folga/férias. ${d.os_abertas.length} O.S. crítica/alta em aberto.</div>`).join('')}
+    </div>` : ''}
+    ${pedidosPendentes.length ? `
+    <div class="panel"><div class="panel-head">Pedidos de apoio pendentes</div>
+      ${pedidosPendentes.map((p) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:8px;">
+          <span>O.S. #${p.agenda_id} — ${esc(p.motivo || 'sem motivo informado')}</span>
+          <span>
+            <button class="btn btn-primary btn-sm" onclick="mostrarFormAceitarApoio(${p.id})">Aceitar</button>
+            <button class="btn-outline-sm" onclick="recusarApoio(${p.id})">Recusar</button>
+          </span>
+        </div>`).join('')}
+    </div>` : ''}
+    <div id="form-apoio-aceitar"></div>
+    <div class="panel"><div class="panel-head">SLA vencendo/atrasado (próximas 6h)</div>
+      ${vencendo.length ? vencendo.map((a) => `
+        <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; gap:6px;">
+          <span>${esc(a.numero_os)} — ${esc(a.filial_nome || '')} — ${esc(a.problema || '')}</span>
+          <span>${tagSlaCriticidade(a)} ${esc(textoPrazoSla(a))}</span>
+        </div>`).join('') : '<p class="empty">Nada vencido/vencendo nas próximas 6h.</p>'}
+    </div>
+    <div class="panel"><div class="panel-head">O.S. por loja</div><table>
+      <tr><th>O.S.</th><th>Loja</th><th>SLA</th><th>Etapa</th><th></th></tr>
+      ${agenda.length ? agenda.map((a) => `
+        <tr><td data-label="O.S.">${esc(a.numero_os)}</td><td data-label="Loja">${esc(a.filial_nome || '—')}</td>
+        <td data-label="SLA">${tagSlaCriticidade(a)}</td><td data-label="Etapa">${esc(ETAPA_OS_FILIAL_LABEL[a.etapa] || a.etapa)}</td>
+        <td class="td-acoes">${USER.papel === 'coordenador_tecnico' ? `
+          <button class="btn-outline-sm" onclick="mostrarFormCriticidade(${a.id}, '${a.sla_criticidade || 'medio'}')">Criticidade</button>
+          <button class="btn-outline-sm" onclick="mostrarFormPedirApoio(${a.id})">Pedir apoio</button>
+          <button class="btn-outline-sm" onclick="mostrarFormRedesignar(${a.id})">Redesignar</button>
+        ` : ''}</td></tr>`).join('') : `<tr><td colspan="5" class="empty">Nenhuma O.S.</td></tr>`}
+    </table></div>
+    <div id="form-criticidade"></div>
+    <div id="form-pedir-apoio"></div>
+    <div id="form-redesignar"></div>
+    <div class="panel"><button class="btn-outline-sm" onclick="iniciarVistoriaComSeletor()">Nova vistoria</button></div>
+    <div id="form-vistoria"></div>`;
+}
+function mostrarFormCriticidade(id, atual) {
+  document.getElementById('form-criticidade').innerHTML = `
+    <div class="panel"><div class="panel-head">Alterar criticidade do SLA</div>
+      <div class="form-grid"><div><label>Criticidade</label><select id="cr-sla">
+        ${['critico', 'alto', 'medio', 'baixo'].map((c) => `<option value="${c}" ${atual === c ? 'selected' : ''}>${SLA_CRITICIDADE_LABEL[c]}</option>`).join('')}
+      </select></div></div>
+      <button class="btn btn-primary btn-sm" onclick="confirmarCriticidade(${id})">Salvar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-criticidade').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-criticidade').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarCriticidade(id) {
+  const sla_criticidade = document.getElementById('cr-sla').value;
+  try {
+    await api(`/api/agenda/${id}/sla-criticidade`, { method: 'PUT', body: { sla_criticidade } });
+    document.getElementById('form-criticidade').innerHTML = '';
+    mostrarToast('Criticidade atualizada.');
+    renderPainelSetor();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function mostrarFormPedirApoio(agendaId) {
+  const { setores } = await api('/api/setores?todos=1');
+  document.getElementById('form-pedir-apoio').innerHTML = `
+    <div class="panel"><div class="panel-head">Pedir apoio de outro setor</div>
+      <div class="form-grid">
+        <div><label>Setor</label><select id="pa-setor">${setores.map((s) => `<option value="${s.id}">${esc(s.nome)}</option>`).join('')}</select></div>
+        <div class="full"><label>Motivo</label><input id="pa-motivo" placeholder="ex.: técnico fixo de folga hoje"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="confirmarPedirApoio(${agendaId})">Pedir apoio</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-pedir-apoio').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-pedir-apoio').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarPedirApoio(agendaId) {
+  const body = { agenda_id: agendaId, setor_destino_id: Number(document.getElementById('pa-setor').value), motivo: document.getElementById('pa-motivo').value };
+  try {
+    await api('/api/apoios', { method: 'POST', body });
+    document.getElementById('form-pedir-apoio').innerHTML = '';
+    mostrarToast('Apoio solicitado — aguardando o coordenador do outro setor aceitar.');
+    renderPainelSetor();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function mostrarFormAceitarApoio(apoioId) {
+  const { setores } = await api('/api/setores');
+  const setorProprio = setores[0];
+  const { tecnicos } = setorProprio ? await api(`/api/setores/${setorProprio.id}/tecnicos`) : { tecnicos: [] };
+  document.getElementById('form-apoio-aceitar').innerHTML = `
+    <div class="panel"><div class="panel-head">Aceitar apoio</div>
+      <div class="form-grid"><div><label>Técnico do seu setor</label><select id="aa-tecnico">
+        ${tecnicos.length ? tecnicos.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('') : '<option value="">Nenhum técnico disponível</option>'}
+      </select></div></div>
+      <button class="btn btn-primary btn-sm" onclick="confirmarAceitarApoio(${apoioId})">Designar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-apoio-aceitar').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-apoio-aceitar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarAceitarApoio(apoioId) {
+  const tecnicoId = document.getElementById('aa-tecnico').value;
+  if (!tecnicoId) return alert('Escolha um técnico.');
+  try {
+    await api(`/api/apoios/${apoioId}/aceitar`, { method: 'PUT', body: { tecnico_id: Number(tecnicoId) } });
+    document.getElementById('form-apoio-aceitar').innerHTML = '';
+    mostrarToast('Apoio aceito e técnico designado.');
+    renderPainelSetor();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function recusarApoio(apoioId) {
+  if (!(await mostrarConfirmacao('Recusar este pedido de apoio?'))) return;
+  try {
+    await api(`/api/apoios/${apoioId}/recusar`, { method: 'PUT', body: {} });
+    mostrarToast('Apoio recusado.');
+    renderPainelSetor();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function mostrarFormRedesignar(agendaId) {
+  const { setores } = await api('/api/setores');
+  const setorProprio = setores[0];
+  const { tecnicos } = setorProprio ? await api(`/api/setores/${setorProprio.id}/tecnicos`) : { tecnicos: [] };
+  document.getElementById('form-redesignar').innerHTML = `
+    <div class="panel"><div class="panel-head">Redesignar técnico</div>
+      <div class="form-grid"><div><label>Técnico do setor</label><select id="rd-tecnico">
+        ${tecnicos.length ? tecnicos.map((t) => `<option value="${t.id}">${esc(t.nome)}</option>`).join('') : '<option value="">Nenhum técnico disponível</option>'}
+      </select></div></div>
+      <button class="btn btn-primary btn-sm" onclick="confirmarRedesignar(${agendaId})">Redesignar</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('form-redesignar').innerHTML=''">Cancelar</button>
+    </div>`;
+  document.getElementById('form-redesignar').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function confirmarRedesignar(agendaId) {
+  const tecnicoId = document.getElementById('rd-tecnico').value;
+  if (!tecnicoId) return alert('Escolha um técnico.');
+  try {
+    await api(`/api/agenda/${agendaId}/designar-tecnico`, { method: 'PUT', body: { tecnico_id: Number(tecnicoId) } });
+    document.getElementById('form-redesignar').innerHTML = '';
+    mostrarToast('Técnico redesignado.');
+    renderPainelSetor();
   } catch (e) { alert('Erro: ' + e.message); }
 }
 

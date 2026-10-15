@@ -71,18 +71,16 @@ function exigirPapel(user, papeis) {
 // Quem tem acesso_total considera tudo liberado — só restringe de verdade quando acesso_total ===
 // false, e aí só os menus marcados aqui aparecem pra essa pessoa.
 const MENUS_POR_PAPEL = {
-  suporte: ['agenda', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
+  suporte: ['agenda', 'minha-loja', 'fila-atendimento', 'relatorio-manutencao', 'calendario-tecnico', 'biblioteca', 'fila-reparo', 'chat-interno'],
   administrador: ['agenda', 'painel-atendimentos', 'solicitacao-atendimento', 'aprovacoes-visitas', 'biblioteca', 'clientes', 'equipamentos', 'usuarios', 'chat-interno'],
   cliente: ['biblioteca', 'equipamentos', 'chamados'],
   producao: ['biblioteca', 'clientes', 'equipamentos', 'chat-interno'],
   pos_venda: ['fila-pos-venda', 'chat-interno'],
   estoque: ['fila-estoque', 'chat-interno'],
-  // versão Restaurantes/rede multiunidade (Fase 1 — Base) — telas operacionais completas (Minha
-  // loja/Painel do setor) chegam nas Fases 2-4; por enquanto só "Equipamentos" (já escopado por
-  // filial/setor, ver escopo.js) e chat interno.
-  gerente_loja: ['equipamentos', 'chat-interno'],
-  coordenador_tecnico: ['equipamentos', 'chat-interno'],
-  consultor_mercado: ['equipamentos', 'chat-interno'],
+  // versão Restaurantes/rede multiunidade — Fase 2 (Operação): Minha loja/Painel do Setor.
+  gerente_loja: ['minha-loja', 'equipamentos', 'chat-interno'],
+  coordenador_tecnico: ['painel-setor', 'equipamentos', 'chat-interno'],
+  consultor_mercado: ['painel-setor', 'equipamentos', 'chat-interno'],
 };
 // todo tipo de acesso interno (todo mundo menos cliente) pode usar o chat interno — é comunicação
 // entre a própria equipe, cliente não faz parte.
@@ -486,6 +484,12 @@ function agendaComDetalhes(data, item) {
     // assumido direto pelo técnico (ver POST /api/chamados/:id/assumir) tem o próprio técnico aqui.
     // null em O.S. antiga, de antes desse campo existir.
     criado_por_nome: item.criado_por ? ((data.usuarios.find((u) => u.id === item.criado_por && u.empresa_id === item.empresa_id) || {}).nome || null) : null,
+    // versão Restaurantes/rede multiunidade (Fase 2 — Operação): nomes pra exibição direta nas
+    // telas, sem o front precisar cruzar com o cache de filiais/áreas toda vez.
+    ...(item.filial_id != null ? {
+      filial_nome: (data.filiais.find((f) => f.id === item.filial_id && f.empresa_id === item.empresa_id) || {}).nome || null,
+      area_nome: item.area_id ? ((data.areas.find((a) => a.id === item.area_id && a.empresa_id === item.empresa_id) || {}).nome || null) : null,
+    } : {}),
   };
 }
 
@@ -1380,6 +1384,19 @@ rota('PUT', /^\/api\/empresa$/, async (req, res) => {
     if (!Number.isInteger(limite) || limite < 0) return enviarJSON(res, 400, { erro: 'Limite de diárias por mês inválido.' });
     empresa.limite_viagens_bonus_mes = limite;
   }
+  // versão Restaurantes/rede multiunidade (Fase 2 — Operação): prazo de SLA (em horas) por
+  // criticidade — "baixo" não tem prazo fixo de propósito (ver SLA_PRAZOS_HORAS_PADRAO), então só
+  // valida critico/alto/medio quando vierem no corpo.
+  if (body.sla_prazos_horas !== undefined) {
+    const prazos = body.sla_prazos_horas || {};
+    const novoPrazos = {};
+    for (const chave of ['critico', 'alto', 'medio']) {
+      const valor = Number(prazos[chave]);
+      if (!Number.isFinite(valor) || valor <= 0) return enviarJSON(res, 400, { erro: `Prazo de SLA "${chave}" inválido.` });
+      novoPrazos[chave] = valor;
+    }
+    empresa.sla_prazos_horas = novoPrazos;
+  }
   db.save(data);
   enviarJSON(res, 200, { empresa: { ...empresa, logo_url: await hidratarFotosProfundo(empresa.logo_url) } });
 });
@@ -1603,6 +1620,11 @@ rota('GET', /^\/api\/agenda$/, async (req, res) => {
     lista = lista.filter((a) => a.tecnico_id === user.id);
   } else if (user.papel === 'cliente') {
     lista = lista.filter((a) => a.cliente_id === user.cliente_id);
+  } else if (['gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(user.papel)) {
+    // versão Restaurantes/rede multiunidade: só O.S. das filiais do próprio escopo (ver
+    // escopo.js) — sem isso, esses papéis veriam a agenda inteira da empresa.
+    const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+    lista = lista.filter((a) => a.filial_id !== null && filiaisIds.has(a.filial_id));
   }
   // administrador e supervisor veem tudo
   lista = lista.map((a) => agendaComDetalhes(data, a)).sort((x, y) => x.data_hora_inicio.localeCompare(y.data_hora_inicio));
@@ -4489,13 +4511,18 @@ const PAPEIS_VEEM_ESTRUTURA_FILIAIS = ['administrador', 'supervisor', 'coordenad
 rota('GET', /^\/api\/setores$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   if (!exigirPapel(user, PAPEIS_VEEM_ESTRUTURA_FILIAIS)) return enviarJSON(res, 403, { erro: 'Sem acesso a setores.' });
+  const { query } = url.parse(req.url, true);
   const data = db.load();
   let setores = tenant.listar(data, 'setores', user.empresa_id);
-  // coordenador/consultor só veem o próprio setor; os demais papéis desta lista veem todos
-  // (gerente_loja/suporte precisam ver o nome do setor da própria filial/loja base).
-  if (user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
+  // coordenador/consultor só veem o próprio setor por padrão; os demais papéis desta lista veem
+  // todos (gerente_loja/suporte precisam ver o nome do setor da própria filial/loja base).
+  // ?todos=1 é a exceção: o coordenador precisa ver os OUTROS setores pra poder pedir apoio a
+  // eles (seção 7 do pedido do usuário) — só nome/id, o suficiente pra escolher o destino.
+  if ((user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') && query.todos !== '1') {
     const completo = usuarioCompleto(data, user);
     setores = setores.filter((s) => s.id === completo.setor_id);
+  } else if (query.todos === '1') {
+    setores = setores.map((s) => ({ id: s.id, nome: s.nome }));
   }
   enviarJSON(res, 200, { setores });
 });
@@ -4566,6 +4593,26 @@ rota('DELETE', /^\/api\/setores\/(\d+)$/, async (req, res, m) => {
   data.setores = data.setores.filter((s) => s.id !== id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/setores/:id/tecnicos — versão Restaurantes/rede multiunidade (Fase 2 — Operação):
+// técnicos (papel suporte) de qualquer filial deste setor, pra montar o seletor de "aceitar
+// apoio"/"redesignar técnico" sem depender de GET /api/usuarios (que coordenador_tecnico não
+// acessa — é restrito a administrador/supervisor).
+rota('GET', /^\/api\/setores\/(\d+)\/tecnicos$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const data = db.load();
+  const setor = tenant.buscar(data, 'setores', Number(m[1]), user.empresa_id);
+  if (!setor) return enviarJSON(res, 404, { erro: 'Setor não encontrado.' });
+  if (user.papel === 'coordenador_tecnico' && usuarioCompleto(data, user).setor_id !== setor.id) {
+    return enviarJSON(res, 403, { erro: 'Este setor não é o seu.' });
+  }
+  const filiaisIds = new Set(tenant.listar(data, 'filiais', user.empresa_id).filter((f) => f.setor_id === setor.id).map((f) => f.id));
+  const tecnicos = tenant.listar(data, 'usuarios', user.empresa_id)
+    .filter((u) => u.papel === 'suporte' && filiaisIds.has(u.filial_id))
+    .map((u) => ({ id: u.id, nome: u.nome, filial_id: u.filial_id }));
+  enviarJSON(res, 200, { tecnicos });
 });
 
 // GET /api/filiais — cada papel vê só o que seu escopo permite (ver escopo.js)
@@ -5182,6 +5229,513 @@ rota('POST', /^\/api\/equipamentos\/(\d+)\/atrelar-filial$/, async (req, res, m)
   });
   db.save(data);
   enviarJSON(res, 201, { equipamento: item });
+});
+
+// ---------- VERSÃO RESTAURANTES/REDE MULTIUNIDADE — FASE 2 (OPERAÇÃO) ----------
+// Vistoria guiada por área, O.S. com SLA configurável (prazo + pausa) e apoio técnico entre
+// setores. Tudo abaixo só se aplica a O.S. com filial_id (criadas pelas rotas novas desta seção)
+// — o fluxo de O.S. de cliente externo (POST/PUT /api/agenda já existentes) continua intocado.
+
+const PAPEIS_OPERACAO_FILIAL = ['gerente_loja', 'coordenador_tecnico', 'consultor_mercado', 'suporte', 'administrador'];
+const SLA_CRITICIDADES = ['critico', 'alto', 'medio', 'baixo'];
+// prazos padrão em horas por criticidade (editável por empresa em PUT /api/empresa) — "Baixo" não
+// tem prazo fixo (pedido do usuário: "Baixo — próxima preventiva"), fica null de propósito.
+const SLA_PRAZOS_HORAS_PADRAO = { critico: 24, alto: 72, medio: 168 };
+// etapas que PAUSAM a contagem do SLA (pedido do usuário, seção 7) — o prazo "estica" pelo tempo
+// que a O.S. passou numa dessas três, em vez de continuar correndo sem ninguém poder agir.
+const ETAPAS_PAUSAM_SLA = ['aguardando_peca', 'aguardando_autorizacao', 'aguardando_terceiro'];
+// etapas que PUT /api/agenda/:id/etapa aceita direto — concluída/validada/reaberta têm rota
+// própria (concluir-filial/validar-filial/reabrir-filial) porque exigem foto/descrição/motivo.
+const ETAPAS_VIA_PUT = ['aberta', 'programada', 'em_execucao', ...ETAPAS_PAUSAM_SLA];
+
+function calcularPrazoSla(empresa, criticidade, desdeIso) {
+  if (criticidade === 'baixo') return null;
+  const prazos = (empresa && empresa.sla_prazos_horas) || SLA_PRAZOS_HORAS_PADRAO;
+  const horas = prazos[criticidade];
+  if (!horas) return null;
+  return new Date(new Date(desdeIso).getTime() + horas * 3600000).toISOString();
+}
+
+// aplica a pausa/retomada do SLA ao trocar de etapa (ver ETAPAS_PAUSAM_SLA acima) e registra no
+// histórico — chamada por toda rota que muda `etapa`, nunca por atribuição direta do campo.
+function aplicarMudancaEtapaFilial(item, novaEtapa, userId) {
+  const etapaAnterior = item.etapa;
+  const estavaPausado = ETAPAS_PAUSAM_SLA.includes(etapaAnterior);
+  const vaiPausar = ETAPAS_PAUSAM_SLA.includes(novaEtapa);
+  const agora = new Date().toISOString();
+  if (!estavaPausado && vaiPausar) {
+    item.sla_pausas.push({ motivo: novaEtapa, pausado_em: agora, retomado_em: null });
+  } else if (estavaPausado && !vaiPausar) {
+    const pausaAberta = [...item.sla_pausas].reverse().find((p) => !p.retomado_em);
+    if (pausaAberta) {
+      pausaAberta.retomado_em = agora;
+      if (item.sla_prazo_em) {
+        const duracaoMs = new Date(agora).getTime() - new Date(pausaAberta.pausado_em).getTime();
+        item.sla_prazo_em = new Date(new Date(item.sla_prazo_em).getTime() + duracaoMs).toISOString();
+      }
+    }
+  }
+  item.etapa = novaEtapa;
+  item.etapa_historico.push({ de: etapaAnterior, para: novaEtapa, por: userId, em: agora });
+}
+
+// uma filial está no escopo de acesso do usuário? (reaproveita escopo.js — grupo/tecnico veem
+// todas, setor/filial são filtrados)
+function filialAcessivel(data, user, filial) {
+  return escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).some((f) => f.id === filial.id);
+}
+
+// o técnico (papel suporte) não tem setor_id próprio (ver validarReferenciasEstruturaFiliais —
+// só filial_id, opcional, é a loja base dele) — o setor dele é o da própria filial. Usado pra
+// decidir se um técnico "pertence" ao setor de destino de um apoio/redesignação.
+function setorDoTecnico(data, empresaId, tecnico) {
+  if (!tecnico || !tecnico.filial_id) return null;
+  const filial = tenant.buscar(data, 'filiais', tecnico.filial_id, empresaId);
+  return filial ? filial.setor_id : null;
+}
+
+// já existe O.S. (de filial) aberta pra este equipamento? — aviso de duplicidade (seção 6 do
+// pedido do usuário), nunca bloqueia, só avisa.
+function osFilialAbertaParaEquipamento(data, empresaId, equipamentoId) {
+  if (!equipamentoId) return null;
+  return tenant.listar(data, 'agenda', empresaId).find((a) => (
+    a.equipamento_id === equipamentoId && a.filial_id !== null && !['concluida', 'validada'].includes(a.etapa)
+  ));
+}
+
+// cria a O.S. (agenda) de uma filial — usado tanto pela criação direta (POST /api/agenda/filial)
+// quanto pela conclusão de vistoria (POST /api/vistorias/:id/concluir). Espelha os campos
+// "sempre presentes" da O.S. de cliente externo (ver POST /api/agenda) com valores neutros, pra
+// não deixar nenhum campo undefined que o resto do código (agendaComDetalhes, PDFs, dashboards)
+// não espera — e adiciona os campos próprios da versão Restaurantes no final.
+function criarOsFilial(data, user, { filial, area_id, equipamento_id, problema, sla_criticidade, origem_vistoria_id }) {
+  const empresaAtual = data.empresas.find((e) => e.id === user.empresa_id);
+  const agora = new Date().toISOString();
+  const criticidade = SLA_CRITICIDADES.includes(sla_criticidade) ? sla_criticidade : 'medio';
+  const item = tenant.criar(data, 'agenda', user.empresa_id, {
+    numero_os: null, criado_por: user.id,
+    tecnico_id: filial.tecnico_id || null, cliente_id: null, equipamento_id: equipamento_id || null,
+    cliente_nome_manual: '', equipamento_manual: '',
+    data_hora_inicio: agora, data_hora_fim: agora,
+    tipo: 'corretiva', categoria: categoriaDoTipo('corretiva'),
+    problema: problema || '',
+    contato: '', telefone: '', email: '', setor_cliente: '',
+    endereco: '', numero: '', bairro: '', cep: '', cidade: '', estado: '',
+    garantia: '', garantia_obs: '',
+    sla_nivel: null, sla_pontuacao: null, sla_horas_atendimento: null, sla_dias_manutencao: null, sla_dias_visita_tecnica: null,
+    status: 'pendente', valor_servico: null, retrabalho: false, criado_em: agora, lida_tecnico: false,
+    deslocamento_iniciado_em: null, chegada_confirmada_em: null, confirmado_cliente_em: null, feedback_cliente_em: null,
+    orcamento_aprovado_em: null, orcamento_reprovado_em: null,
+    retorno_pendente_tecnico: false, retorno_confirmado_cliente_em: null, retorno_deslocamento_iniciado_em: null, retorno_chegada_confirmada_em: null,
+    viagem_volta_iniciada_em: null, viagem_volta_chegada_em: null, viagem_volta_destino_agenda_id: null,
+    bonus_viagem: false, viagem_dia_inicio: '', viagem_dia_fim_previsto: '', justificativa_limite_viagens: '', fora_de_ordem_viagem: false,
+    escala_conflito_tipo: null, justificativa_escala_conflito: '',
+    // campos próprios da versão Restaurantes/rede multiunidade (Fase 2 — Operação)
+    filial_id: filial.id, area_id: area_id || null, origem_vistoria_id: origem_vistoria_id || null,
+    etapa: 'aberta', etapa_historico: [{ de: null, para: 'aberta', por: user.id, em: agora }],
+    sla_criticidade: criticidade, sla_prazo_em: calcularPrazoSla(empresaAtual, criticidade, agora),
+    sla_pausas: [], sla_historico: [{ de: null, para: criticidade, por: user.id, em: agora }],
+    apoio_id: null,
+    concluido_em: null, concluido_por: null, descricao_conclusao: '', fotos_conclusao: [],
+    validado_em: null, validado_por: null, motivo_reabertura: null,
+  });
+  item.numero_os = `OS-${String(item.id).padStart(6, '0')}`;
+  return item;
+}
+
+// POST /api/agenda/filial — abre uma O.S. direto (sem passar por vistoria), pra qualquer papel da
+// operação (técnico em qualquer loja, gerente/coordenador/consultor no próprio escopo).
+rota('POST', /^\/api\/agenda\/filial$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão pra abrir O.S. de filial.' });
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await lerCorpo(req);
+  if (!body.filial_id || !body.problema || !String(body.problema).trim()) {
+    return enviarJSON(res, 400, { erro: 'Filial e descrição do problema são obrigatórios.' });
+  }
+  const filial = tenant.buscar(data, 'filiais', Number(body.filial_id), user.empresa_id);
+  if (!filial) return enviarJSON(res, 404, { erro: 'Filial não encontrada.' });
+  if (!filialAcessivel(data, user, filial)) return enviarJSON(res, 403, { erro: 'Você não tem acesso a esta filial.' });
+  let area = null;
+  if (body.area_id) {
+    area = tenant.buscar(data, 'areas', Number(body.area_id), user.empresa_id);
+    if (!area || area.filial_id !== filial.id) return enviarJSON(res, 400, { erro: 'Área inválida para esta filial.' });
+  }
+  let equipamento = null;
+  if (body.equipamento_id) {
+    equipamento = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
+    if (!equipamento || equipamento.filial_id !== filial.id) return enviarJSON(res, 400, { erro: 'Equipamento inválido para esta filial.' });
+  }
+  const duplicidade = osFilialAbertaParaEquipamento(data, user.empresa_id, equipamento ? equipamento.id : null);
+  const item = criarOsFilial(data, user, {
+    filial, area_id: area ? area.id : null, equipamento_id: equipamento ? equipamento.id : null,
+    problema: body.problema.trim(), sla_criticidade: body.sla_criticidade,
+  });
+  db.save(data);
+  if (item.tecnico_id) {
+    enviarPush(data, item.tecnico_id, { titulo: 'Nova O.S. na sua loja', corpo: `${filial.nome} — ${item.problema}`, url: '/' }).catch(() => {});
+  }
+  enviarJSON(res, 201, { agenda: agendaComDetalhes(data, item), aviso_duplicidade: duplicidade ? { agenda_id: duplicidade.id, numero_os: duplicidade.numero_os } : null });
+});
+
+// PUT /api/agenda/:id/etapa { etapa } — avança/retrocede o fluxo (ver ETAPAS_VIA_PUT); concluir,
+// validar e reabrir têm rota própria (exigem foto/descrição/motivo).
+rota('PUT', /^\/api\/agenda\/(\d+)\/etapa$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  const completo = usuarioCompleto(data, user);
+  const filial = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  const podeAgir = user.papel === 'administrador'
+    || (user.papel === 'suporte' && item.tecnico_id === user.id)
+    || (user.papel === 'gerente_loja' && completo.filial_id === item.filial_id)
+    || (user.papel === 'coordenador_tecnico' && filial && completo.setor_id === filial.setor_id);
+  if (!podeAgir) return enviarJSON(res, 403, { erro: 'Você não pode alterar esta O.S.' });
+  const body = await lerCorpo(req);
+  if (!ETAPAS_VIA_PUT.includes(body.etapa)) return enviarJSON(res, 400, { erro: 'Etapa inválida.' });
+  aplicarMudancaEtapaFilial(item, body.etapa, user.id);
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// PUT /api/agenda/:id/sla-criticidade { sla_criticidade } — quem abriu sugere o nível; só o
+// coordenador técnico do setor (ou administrador) pode alterar depois, com registro (pedido do
+// usuário, seção 7).
+rota('PUT', /^\/api\/agenda\/(\d+)\/sla-criticidade$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o coordenador técnico do setor altera a criticidade do SLA.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  const filial = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  if (user.papel === 'coordenador_tecnico' && (!filial || usuarioCompleto(data, user).setor_id !== filial.setor_id)) {
+    return enviarJSON(res, 403, { erro: 'Esta O.S. não é do seu setor.' });
+  }
+  const body = await lerCorpo(req);
+  if (!SLA_CRITICIDADES.includes(body.sla_criticidade)) return enviarJSON(res, 400, { erro: 'Criticidade inválida.' });
+  const agora = new Date().toISOString();
+  const empresaAtual = data.empresas.find((e) => e.id === user.empresa_id);
+  item.sla_historico.push({ de: item.sla_criticidade, para: body.sla_criticidade, por: user.id, em: agora });
+  item.sla_criticidade = body.sla_criticidade;
+  item.sla_prazo_em = calcularPrazoSla(empresaAtual, body.sla_criticidade, agora);
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/concluir-filial { descricao, fotos } — técnico conclui (exige foto "depois"
+// + descrição, pedido do usuário seção 7).
+rota('POST', /^\/api\/agenda\/(\d+)\/concluir-filial$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['suporte', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o técnico responsável conclui esta O.S.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  if (user.papel === 'suporte' && item.tecnico_id !== user.id) return enviarJSON(res, 403, { erro: 'Esta O.S. não é sua.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!body.descricao || !String(body.descricao).trim()) return enviarJSON(res, 400, { erro: 'Descreva o serviço realizado.' });
+  if (!Array.isArray(body.fotos) || !body.fotos.length) return enviarJSON(res, 400, { erro: 'Envie ao menos uma foto do "depois".' });
+  aplicarMudancaEtapaFilial(item, 'concluida', user.id);
+  item.descricao_conclusao = body.descricao.trim();
+  item.fotos_conclusao = body.fotos;
+  item.concluido_em = new Date().toISOString();
+  item.concluido_por = user.id;
+  db.save(data);
+  const filial = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  if (filial && filial.gerente_id) {
+    enviarPush(data, filial.gerente_id, { titulo: 'O.S. concluída — validar', corpo: `${item.numero_os} em ${filial.nome}.`, url: '/' }).catch(() => {});
+  }
+  enviarJSON(res, 200, { agenda: { ...agendaComDetalhes(data, item), fotos_conclusao: await hidratarFotosProfundo(item.fotos_conclusao) } });
+});
+
+// POST /api/agenda/:id/validar-filial — gerente da loja (ou quem abriu) valida a conclusão.
+rota('POST', /^\/api\/agenda\/(\d+)\/validar-filial$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  const filial = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  const completo = usuarioCompleto(data, user);
+  const podeValidar = user.papel === 'administrador' || item.criado_por === user.id
+    || (user.papel === 'gerente_loja' && completo.filial_id === item.filial_id)
+    || (user.papel === 'coordenador_tecnico' && filial && completo.setor_id === filial.setor_id);
+  if (!podeValidar) return enviarJSON(res, 403, { erro: 'Você não pode validar esta O.S.' });
+  if (item.etapa !== 'concluida') return enviarJSON(res, 400, { erro: 'Esta O.S. ainda não foi concluída pelo técnico.' });
+  aplicarMudancaEtapaFilial(item, 'validada', user.id);
+  item.validado_em = new Date().toISOString();
+  item.validado_por = user.id;
+  db.save(data);
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// POST /api/agenda/:id/reabrir-filial { motivo } — gerente/coordenador/quem abriu recusa a
+// conclusão e devolve pro técnico.
+rota('POST', /^\/api\/agenda\/(\d+)\/reabrir-filial$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  const filial = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  const completo = usuarioCompleto(data, user);
+  const podeReabrir = user.papel === 'administrador' || item.criado_por === user.id
+    || (user.papel === 'gerente_loja' && completo.filial_id === item.filial_id)
+    || (user.papel === 'coordenador_tecnico' && filial && completo.setor_id === filial.setor_id);
+  if (!podeReabrir) return enviarJSON(res, 403, { erro: 'Você não pode reabrir esta O.S.' });
+  if (item.etapa !== 'concluida') return enviarJSON(res, 400, { erro: 'Só dá pra reabrir uma O.S. que já foi concluída pelo técnico.' });
+  const body = await lerCorpo(req);
+  if (!body.motivo || !String(body.motivo).trim()) return enviarJSON(res, 400, { erro: 'Informe o motivo da reabertura.' });
+  aplicarMudancaEtapaFilial(item, 'reaberta', user.id);
+  item.motivo_reabertura = body.motivo.trim();
+  db.save(data);
+  if (item.tecnico_id) enviarPush(data, item.tecnico_id, { titulo: 'O.S. reaberta', corpo: `${item.numero_os}: ${item.motivo_reabertura}`, url: '/' }).catch(() => {});
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// GET /api/filiais/descobertas?data=AAAA-MM-DD — lojas do escopo do usuário cujo técnico fixo
+// está de folga/férias nesse dia, com as O.S. críticas/altas em aberto nelas (pedido do usuário,
+// seção 4: "o sistema mostra lojas descobertas em cada dia").
+rota('GET', /^\/api\/filiais\/descobertas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'consultor_mercado', 'administrador', 'supervisor'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const diaISO = query.data || hojeBrasiliaISO();
+  const data = db.load();
+  const filiais = escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user));
+  const descobertas = filiais
+    .filter((f) => f.tecnico_id && diaTemFolgaTecnico(data, user.empresa_id, f.tecnico_id, diaISO))
+    .map((f) => ({
+      filial: f,
+      os_abertas: tenant.listar(data, 'agenda', user.empresa_id).filter((a) => (
+        a.filial_id === f.id && !['concluida', 'validada'].includes(a.etapa) && ['critico', 'alto'].includes(a.sla_criticidade)
+      )).map((a) => agendaComDetalhes(data, a)),
+    }));
+  enviarJSON(res, 200, { descobertas });
+});
+
+// ---------- apoio técnico entre setores (pedido do usuário, seção 7) ----------
+// POST /api/apoios { agenda_id, setor_destino_id, motivo } — coordenador do setor de origem pede
+// apoio de técnico de outro setor pra uma O.S. específica.
+rota('POST', /^\/api\/apoios$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o coordenador técnico pede apoio entre setores.' });
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await lerCorpo(req);
+  const item = tenant.buscar(data, 'agenda', Number(body.agenda_id), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  const filialOrigem = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  if (!filialOrigem) return enviarJSON(res, 404, { erro: 'Filial da O.S. não encontrada.' });
+  const completo = usuarioCompleto(data, user);
+  if (user.papel === 'coordenador_tecnico' && completo.setor_id !== filialOrigem.setor_id) {
+    return enviarJSON(res, 403, { erro: 'Esta O.S. não é do seu setor.' });
+  }
+  const setorDestino = tenant.buscar(data, 'setores', Number(body.setor_destino_id), user.empresa_id);
+  if (!setorDestino) return enviarJSON(res, 404, { erro: 'Setor de destino não encontrado.' });
+  if (setorDestino.id === filialOrigem.setor_id) return enviarJSON(res, 400, { erro: 'Escolha um setor diferente do da própria O.S.' });
+  const apoio = tenant.criar(data, 'apoios', user.empresa_id, {
+    agenda_id: item.id, setor_origem_id: filialOrigem.setor_id, setor_destino_id: setorDestino.id,
+    tecnico_designado_id: null, status: 'pedido', motivo: body.motivo || '',
+    criado_por: user.id, criado_em: new Date().toISOString(), decidido_em: null,
+  });
+  item.apoio_id = apoio.id;
+  db.save(data);
+  if (setorDestino.coordenador_id) {
+    enviarPush(data, setorDestino.coordenador_id, { titulo: 'Pedido de apoio entre setores', corpo: `${item.numero_os} — ${filialOrigem.nome} precisa de apoio.`, url: '/' }).catch(() => {});
+  }
+  enviarJSON(res, 201, { apoio });
+});
+
+// GET /api/apoios?agenda_id= — lista pedidos de apoio (do setor do coordenador, como origem ou
+// destino; administrador vê todos).
+rota('GET', /^\/api\/apoios$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'apoios', user.empresa_id);
+  if (query.agenda_id) lista = lista.filter((a) => a.agenda_id === Number(query.agenda_id));
+  if (user.papel === 'coordenador_tecnico') {
+    const setorId = usuarioCompleto(data, user).setor_id;
+    lista = lista.filter((a) => a.setor_origem_id === setorId || a.setor_destino_id === setorId);
+  }
+  enviarJSON(res, 200, { apoios: lista });
+});
+
+// PUT /api/apoios/:id/aceitar { tecnico_id } — coordenador do setor de DESTINO aceita e designa
+// um técnico do próprio setor.
+rota('PUT', /^\/api\/apoios\/(\d+)\/aceitar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o coordenador técnico do setor de destino aceita o apoio.' });
+  const data = db.load();
+  const apoio = tenant.buscar(data, 'apoios', Number(m[1]), user.empresa_id);
+  if (!apoio) return enviarJSON(res, 404, { erro: 'Pedido de apoio não encontrado.' });
+  if (apoio.status !== 'pedido') return enviarJSON(res, 400, { erro: 'Este pedido já foi decidido.' });
+  if (user.papel === 'coordenador_tecnico' && usuarioCompleto(data, user).setor_id !== apoio.setor_destino_id) {
+    return enviarJSON(res, 403, { erro: 'Só o coordenador do setor de destino decide este pedido.' });
+  }
+  const body = await lerCorpo(req);
+  const tecnico = tenant.buscar(data, 'usuarios', Number(body.tecnico_id), user.empresa_id);
+  if (!tecnico || tecnico.papel !== 'suporte' || setorDoTecnico(data, user.empresa_id, tecnico) !== apoio.setor_destino_id) {
+    return enviarJSON(res, 400, { erro: 'Escolha um técnico do seu próprio setor.' });
+  }
+  const item = tenant.buscar(data, 'agenda', apoio.agenda_id, user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'O.S. da O.S. de apoio não encontrada.' });
+  apoio.status = 'aceito';
+  apoio.tecnico_designado_id = tecnico.id;
+  apoio.decidido_em = new Date().toISOString();
+  item.tecnico_id = tecnico.id;
+  db.save(data);
+  enviarPush(data, tecnico.id, { titulo: 'Você foi designado em apoio a outra loja', corpo: item.numero_os, url: '/' }).catch(() => {});
+  enviarJSON(res, 200, { apoio, agenda: agendaComDetalhes(data, item) });
+});
+
+// PUT /api/apoios/:id/recusar
+rota('PUT', /^\/api\/apoios\/(\d+)\/recusar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o coordenador técnico do setor de destino decide este pedido.' });
+  const data = db.load();
+  const apoio = tenant.buscar(data, 'apoios', Number(m[1]), user.empresa_id);
+  if (!apoio) return enviarJSON(res, 404, { erro: 'Pedido de apoio não encontrado.' });
+  if (apoio.status !== 'pedido') return enviarJSON(res, 400, { erro: 'Este pedido já foi decidido.' });
+  if (user.papel === 'coordenador_tecnico' && usuarioCompleto(data, user).setor_id !== apoio.setor_destino_id) {
+    return enviarJSON(res, 403, { erro: 'Só o coordenador do setor de destino decide este pedido.' });
+  }
+  apoio.status = 'recusado';
+  apoio.decidido_em = new Date().toISOString();
+  const item = tenant.buscar(data, 'agenda', apoio.agenda_id, user.empresa_id);
+  if (item) item.apoio_id = null;
+  db.save(data);
+  enviarJSON(res, 200, { apoio });
+});
+
+// PUT /api/agenda/:id/designar-tecnico { tecnico_id } — coordenador redesigna, sem apoio externo,
+// outro técnico do PRÓPRIO setor pra uma O.S. (ex.: técnico fixo de folga, mas tem outro disponível).
+rota('PUT', /^\/api\/agenda\/(\d+)\/designar-tecnico$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['coordenador_tecnico', 'administrador'])) return enviarJSON(res, 403, { erro: 'Só o coordenador técnico do setor redesigna o técnico.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'agenda', Number(m[1]), user.empresa_id);
+  if (!item || item.filial_id === null) return enviarJSON(res, 404, { erro: 'O.S. de filial não encontrada.' });
+  const filial = tenant.buscar(data, 'filiais', item.filial_id, user.empresa_id);
+  if (user.papel === 'coordenador_tecnico' && (!filial || usuarioCompleto(data, user).setor_id !== filial.setor_id)) {
+    return enviarJSON(res, 403, { erro: 'Esta O.S. não é do seu setor.' });
+  }
+  const body = await lerCorpo(req);
+  const tecnico = tenant.buscar(data, 'usuarios', Number(body.tecnico_id), user.empresa_id);
+  if (!tecnico || tecnico.papel !== 'suporte' || (filial && setorDoTecnico(data, user.empresa_id, tecnico) !== filial.setor_id)) {
+    return enviarJSON(res, 400, { erro: 'Escolha um técnico do mesmo setor da loja.' });
+  }
+  item.tecnico_id = tecnico.id;
+  db.save(data);
+  enviarPush(data, tecnico.id, { titulo: 'Você foi designado nesta O.S.', corpo: item.numero_os, url: '/' }).catch(() => {});
+  enviarJSON(res, 200, { agenda: agendaComDetalhes(data, item) });
+});
+
+// ---------- vistoria guiada por área (pedido do usuário, seção 6) ----------
+// POST /api/vistorias { filial_id } — abre uma vistoria (cabeçalho); os itens entram depois.
+rota('POST', /^\/api\/vistorias$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão pra fazer vistoria.' });
+  const data = db.load();
+  if (!db.moduloAtivo(data, user.empresa_id, 'filiais')) return enviarJSON(res, 400, { erro: 'Módulo "Redes e Filiais" não está ativo pra sua empresa.' });
+  const body = await lerCorpo(req);
+  const filial = tenant.buscar(data, 'filiais', Number(body.filial_id), user.empresa_id);
+  if (!filial) return enviarJSON(res, 404, { erro: 'Filial não encontrada.' });
+  if (!filialAcessivel(data, user, filial)) return enviarJSON(res, 403, { erro: 'Você não tem acesso a esta filial.' });
+  const vistoria = tenant.criar(data, 'vistorias', user.empresa_id, {
+    filial_id: filial.id, autor_id: user.id, criado_em: new Date().toISOString(), status: 'em_andamento',
+  });
+  db.save(data);
+  enviarJSON(res, 201, { vistoria });
+});
+
+// GET /api/vistorias?filial_id= — lista (escopo igual ao de filiais)
+rota('GET', /^\/api\/vistorias$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso a vistorias.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  const filiaisIds = new Set(escopo.filiaisVisiveis(data, user.empresa_id, usuarioCompleto(data, user)).map((f) => f.id));
+  let lista = tenant.listar(data, 'vistorias', user.empresa_id).filter((v) => filiaisIds.has(v.filial_id));
+  if (query.filial_id) lista = lista.filter((v) => v.filial_id === Number(query.filial_id));
+  enviarJSON(res, 200, { vistorias: lista });
+});
+
+// GET /api/vistorias/:id — com os itens já lançados
+rota('GET', /^\/api\/vistorias\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem acesso a vistorias.' });
+  const data = db.load();
+  const vistoria = tenant.buscar(data, 'vistorias', Number(m[1]), user.empresa_id);
+  if (!vistoria) return enviarJSON(res, 404, { erro: 'Vistoria não encontrada.' });
+  const filial = tenant.buscar(data, 'filiais', vistoria.filial_id, user.empresa_id);
+  if (!filial || !filialAcessivel(data, user, filial)) return enviarJSON(res, 404, { erro: 'Vistoria não encontrada.' });
+  const itens = tenant.listar(data, 'vistoria_itens', user.empresa_id).filter((i) => i.vistoria_id === vistoria.id);
+  const itensComFotos = await Promise.all(itens.map(async (i) => ({ ...i, fotos: await hidratarFotosProfundo(i.fotos) })));
+  enviarJSON(res, 200, { vistoria, itens: itensComFotos });
+});
+
+// POST /api/vistorias/:id/itens { area_id, equipamento_id?, descricao, fotos?, sla_sugerido } —
+// cada pendência encontrada numa área, com aviso (não bloqueio) se já existe O.S. aberta pro
+// mesmo equipamento.
+rota('POST', /^\/api\/vistorias\/(\d+)\/itens$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const vistoria = tenant.buscar(data, 'vistorias', Number(m[1]), user.empresa_id);
+  if (!vistoria) return enviarJSON(res, 404, { erro: 'Vistoria não encontrada.' });
+  if (vistoria.status !== 'em_andamento') return enviarJSON(res, 400, { erro: 'Esta vistoria já foi concluída.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const area = tenant.buscar(data, 'areas', Number(body.area_id), user.empresa_id);
+  if (!area || area.filial_id !== vistoria.filial_id) return enviarJSON(res, 400, { erro: 'Área inválida para esta filial.' });
+  if (!body.descricao || !String(body.descricao).trim()) return enviarJSON(res, 400, { erro: 'Descreva a pendência encontrada.' });
+  let equipamento = null;
+  if (body.equipamento_id) {
+    equipamento = tenant.buscar(data, 'equipamentos', Number(body.equipamento_id), user.empresa_id);
+    if (!equipamento || equipamento.filial_id !== vistoria.filial_id) return enviarJSON(res, 400, { erro: 'Equipamento inválido para esta filial.' });
+  }
+  const duplicidade = osFilialAbertaParaEquipamento(data, user.empresa_id, equipamento ? equipamento.id : null);
+  const item = tenant.criar(data, 'vistoria_itens', user.empresa_id, {
+    vistoria_id: vistoria.id, area_id: area.id, equipamento_id: equipamento ? equipamento.id : null,
+    descricao: body.descricao.trim(), fotos: Array.isArray(body.fotos) ? body.fotos : [],
+    sla_sugerido: SLA_CRITICIDADES.includes(body.sla_sugerido) ? body.sla_sugerido : 'medio',
+    agenda_id: null,
+  });
+  db.save(data);
+  enviarJSON(res, 201, { item: { ...item, fotos: await hidratarFotosProfundo(item.fotos) }, aviso_duplicidade: duplicidade ? { agenda_id: duplicidade.id, numero_os: duplicidade.numero_os } : null });
+});
+
+// POST /api/vistorias/:id/concluir — cada pendência sem O.S. ainda virar uma O.S. individual pro
+// técnico da loja (pedido do usuário, seção 6).
+rota('POST', /^\/api\/vistorias\/(\d+)\/concluir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, PAPEIS_OPERACAO_FILIAL)) return enviarJSON(res, 403, { erro: 'Sem permissão.' });
+  const data = db.load();
+  const vistoria = tenant.buscar(data, 'vistorias', Number(m[1]), user.empresa_id);
+  if (!vistoria) return enviarJSON(res, 404, { erro: 'Vistoria não encontrada.' });
+  if (vistoria.status !== 'em_andamento') return enviarJSON(res, 400, { erro: 'Esta vistoria já foi concluída.' });
+  const filial = tenant.buscar(data, 'filiais', vistoria.filial_id, user.empresa_id);
+  if (!filial) return enviarJSON(res, 404, { erro: 'Filial não encontrada.' });
+  const itens = tenant.listar(data, 'vistoria_itens', user.empresa_id).filter((i) => i.vistoria_id === vistoria.id);
+  const criadas = [];
+  for (const item of itens) {
+    if (item.agenda_id) continue;
+    const os = criarOsFilial(data, user, {
+      filial, area_id: item.area_id, equipamento_id: item.equipamento_id,
+      problema: item.descricao, sla_criticidade: item.sla_sugerido, origem_vistoria_id: vistoria.id,
+    });
+    item.agenda_id = os.id;
+    criadas.push(os);
+  }
+  vistoria.status = 'concluida';
+  vistoria.concluido_em = new Date().toISOString();
+  db.save(data);
+  for (const os of criadas) {
+    if (os.tecnico_id) enviarPush(data, os.tecnico_id, { titulo: 'Nova O.S. — vistoria', corpo: `${filial.nome}: ${os.problema}`, url: '/' }).catch(() => {});
+  }
+  enviarJSON(res, 200, { vistoria, criadas: criadas.map((os) => agendaComDetalhes(data, os)) });
 });
 
 // GET /api/equipamentos/:id/historico
