@@ -78,7 +78,9 @@ const PREFIXO_MODULO = [
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à
 // parte), /api/me, /api/clientes, /api/usuarios, /api/notificacoes, /api/push, /api/chat-interno,
-// /api/admin — sempre disponível pra qualquer empresa, qualquer que seja o módulo contratado.
+// /api/admin, /api/rascunhos (sincronização de rascunho de relatório/laudo entre aparelhos — só
+// um espelho auxiliar do localStorage das telas de relatorios/os_chamados, que já são gated por
+// elas mesmas) — sempre disponível pra qualquer empresa, qualquer que seja o módulo contratado.
 
 // bate só no prefixo inteiro (o próximo caractere tem que ser fim da string ou "/") — startsWith
 // puro combinava por engano "/api/agendamento" com o prefixo "/api/agenda" (é prefixo de string,

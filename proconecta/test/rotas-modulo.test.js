@@ -16,6 +16,10 @@ test('rotas de núcleo exigem login mas não módulo específico', () => {
   assert.equal(moduloDaRota(/^\/api\/usuarios\/(\d+)$/), 'nucleo');
   assert.equal(moduloDaRota(/^\/api\/notificacoes$/), 'nucleo');
   assert.equal(moduloDaRota(/^\/api\/chat-interno\/contatos$/), 'nucleo');
+  // sincronização de rascunho entre aparelhos — só um espelho do localStorage das telas de
+  // relatorios/os_chamados, que já são gated por elas mesmas (ver comentário em rotas-modulo.js).
+  assert.equal(moduloDaRota(/^\/api\/rascunhos$/), 'nucleo');
+  assert.equal(moduloDaRota(/^\/api\/rascunhos\/([^/]+)$/), 'nucleo');
 });
 
 test('rotas de agenda/visitas/chamados pertencem a os_chamados (núcleo do O.S.)', () => {

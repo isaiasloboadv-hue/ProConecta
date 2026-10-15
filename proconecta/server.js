@@ -6778,6 +6778,75 @@ rota('POST', /^\/api\/mensagens-canal$/, async (req, res) => {
   enviarJSON(res, 201, { mensagem: { ...msg, foto: await hidratarFotosProfundo(msg.foto) } });
 });
 
+// ---------- sincronização de rascunho de relatório/laudo entre aparelhos (núcleo — ver
+// comentário em rotas-modulo.js) ----------
+// pedido do usuário: rascunho (Relatório manual, relatório de O.S., laudo técnico) era salvo só
+// no localStorage do aparelho — começar no celular e continuar no PC era impossível. Isto é só um
+// espelho server-side por usuário+chave (a MESMA chave que o localStorage já usa — ver
+// chaveRascunho*/chaveRascunhoManual em app.js); o localStorage continua sendo a fonte instantânea
+// (zero espera, funciona offline), o servidor só entra pra puxar/empurrar entre aparelhos (ver
+// sincronizarRascunhoServidor em app.js). Pessoal: nunca aparece pra outro usuário, mesmo da
+// mesma empresa (filtra por usuario_id, não só empresa_id como o resto do sistema) — por isso não
+// usa tenant.listar/buscar puro, que só sabe filtrar por empresa.
+//
+// De propósito, NUNCA passa pelo extrairFotosProfundo (que salva cada data: URI como arquivo
+// próprio, ver db.salvarFoto): o autosalvamento dispara a cada pausa de digitação E a cada
+// clique/mudança em QUALQUER campo do formulário (ver ligarAutoSalvarRascunho em app.js), então
+// uma foto já anexada seria "salva de novo" a cada ciclo desses — um arquivo novo e órfão por
+// ciclo, sem nunca ser limpo, pra uma foto que não mudou. O cliente já tira as fotos do draft
+// antes de mandar pra cá (ver semFotosProfundo em app.js); o limite de tamanho abaixo é só uma
+// rede de segurança contra isso falhar algum dia, não o mecanismo principal.
+function rascunhoDoUsuario(data, user, chave) {
+  return data.rascunhos.find((r) => r.empresa_id === user.empresa_id && r.usuario_id === user.id && r.chave === chave) || null;
+}
+const TAMANHO_MAX_RASCUNHO_BYTES = 200 * 1024; // texto de formulário nunca chega perto disso — só pega quem esqueceu de tirar foto
+rota('GET', /^\/api\/rascunhos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const meus = data.rascunhos
+    .filter((r) => r.empresa_id === user.empresa_id && r.usuario_id === user.id)
+    .map((r) => ({ chave: r.chave, draft: r.draft, atualizado_em: r.atualizado_em }));
+  enviarJSON(res, 200, { rascunhos: meus });
+});
+// GET /api/rascunhos/:chave — um rascunho específico (chave = a mesma usada no localStorage)
+rota('GET', /^\/api\/rascunhos\/([^/]+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const data = db.load();
+  const r = rascunhoDoUsuario(data, user, decodeURIComponent(m[1]));
+  enviarJSON(res, 200, { rascunho: r ? { chave: r.chave, draft: r.draft, atualizado_em: r.atualizado_em } : null });
+});
+// PUT /api/rascunhos { chave, draft } — cria ou substitui (upsert por usuario_id+chave)
+rota('PUT', /^\/api\/rascunhos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const body = await lerCorpo(req);
+  const chave = String(body.chave || '').trim();
+  if (!chave) return enviarJSON(res, 400, { erro: 'Informe a chave do rascunho.' });
+  if (Buffer.byteLength(JSON.stringify(body.draft || {})) > TAMANHO_MAX_RASCUNHO_BYTES) {
+    return enviarJSON(res, 400, { erro: 'Rascunho grande demais pra sincronizar — provavelmente tem foto anexada (fotos não sincronizam entre aparelhos).' });
+  }
+  const data = db.load();
+  const agora = new Date().toISOString();
+  let r = data.rascunhos.find((x) => x.empresa_id === user.empresa_id && x.usuario_id === user.id && x.chave === chave);
+  if (r) { r.draft = body.draft; r.atualizado_em = agora; }
+  else { r = tenant.criar(data, 'rascunhos', user.empresa_id, { usuario_id: user.id, chave, draft: body.draft, atualizado_em: agora }); }
+  db.save(data);
+  enviarJSON(res, 200, { rascunho: { chave: r.chave, draft: r.draft, atualizado_em: r.atualizado_em } });
+});
+// DELETE /api/rascunhos/:chave — chamado junto com o localStorage.removeItem (envio concluído ou
+// "Descartar rascunho" explícito), pra não deixar o espelho do servidor sobrando.
+rota('DELETE', /^\/api\/rascunhos\/([^/]+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!user) return enviarJSON(res, 401, { erro: 'Não autenticado.' });
+  const chave = decodeURIComponent(m[1]);
+  const data = db.load();
+  data.rascunhos = data.rascunhos.filter((r) => !(r.empresa_id === user.empresa_id && r.usuario_id === user.id && r.chave === chave));
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // GET /api/equipamentos/:id/historico
 rota('GET', /^\/api\/equipamentos\/(\d+)\/historico$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);

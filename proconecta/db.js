@@ -312,6 +312,10 @@ function seed() {
     // chat interno 1-pra-1 já existente (mensagens_internas), que fica intocado.
     avisos: [],
     mensagens_canal: [],
+    // rascunho de relatório/laudo técnico espelhado do localStorage, um por usuário+chave — dá
+    // pra recuperar o mesmo rascunho de qualquer aparelho logado com o mesmo usuário (ver
+    // sincronizarRascunhoServidor em app.js).
+    rascunhos: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -321,7 +325,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -1061,6 +1065,15 @@ function migrar(data) {
   if (!Array.isArray(data.mensagens_canal)) data.mensagens_canal = [];
   if (!data._seq.avisos) data._seq.avisos = 1;
   if (!data._seq.mensagens_canal) data._seq.mensagens_canal = 1;
+  // pedido do usuário: rascunho de relatório/laudo técnico salvo só no localStorage do aparelho
+  // não aparecia em outro dispositivo (ex.: começou no celular, quis continuar no PC) — este
+  // "espelho" no servidor, um por usuário+chave (a mesma chave que já identifica o rascunho no
+  // localStorage, ver chaveRascunho*/chaveRascunhoManual em app.js), deixa qualquer rascunho
+  // recuperável de qualquer aparelho logado com o mesmo usuário. O localStorage continua sendo a
+  // fonte instantânea (zero espera, funciona offline); o servidor só entra pra sincronizar entre
+  // aparelhos (ver sincronizarRascunhoServidor em app.js).
+  if (!Array.isArray(data.rascunhos)) data.rascunhos = [];
+  if (!data._seq.rascunhos) data._seq.rascunhos = 1;
   if (!data._migracaoFiliaisV1) {
     for (const e of data.equipamentos) {
       if (e.filial_id === undefined) e.filial_id = null;

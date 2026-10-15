@@ -452,7 +452,7 @@ async function sincronizarFilaOffline() {
     try {
       const resp = await api('/api/visitas', { method: 'POST', body: item.body });
       await filaOfflineRemover(item.id);
-      if (item.chaveRascunho) localStorage.removeItem(item.chaveRascunho);
+      if (item.chaveRascunho) { localStorage.removeItem(item.chaveRascunho); apagarRascunhoServidor(item.chaveRascunho); }
       if (item.pdfTermoAceite && resp.visita) {
         try {
           const pdfDataUri = gerarPdfRelatorio(item.pdfTermoAceite.dados, item.pdfTermoAceite.agendaItem);
@@ -4188,6 +4188,7 @@ function relatorioPadrao(item) {
 async function renderRelatorioCorretiva(item) {
   relatorioAgendaAtual = item;
   let salvoEm = null;
+  await sincronizarRascunhoServidor(chaveRascunho(item.id)); // puxa rascunho mais recente de outro aparelho, se houver
   try {
     const bruto = localStorage.getItem(chaveRascunho(item.id));
     if (bruto) {
@@ -4409,16 +4410,21 @@ function atualizarRascunho(semLerCampos) {
     d.assinatura_tecnico_nome = document.getElementById('rc-assinatura-tecnico-nome').value;
     d.relevante_biblioteca = document.getElementById('rc-relevante-biblioteca').checked;
   }
+  const chave = chaveRascunho(relatorioDraft.agenda_id);
   try {
-    localStorage.setItem(chaveRascunho(relatorioDraft.agenda_id), JSON.stringify({ draft: relatorioDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
+    const agoraDate = new Date();
+    const agora = agoraDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    localStorage.setItem(chave, JSON.stringify({ draft: relatorioDraft, em: agora, salvoEmISO: agoraDate.toISOString() }));
     const status = document.getElementById('rc-rascunho-status');
-    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${agora}`;
   } catch (e) {}
+  enviarRascunhoServidor(chave, relatorioDraft);
 }
 
 async function limparRelatorio(agendaId) {
   if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
   localStorage.removeItem(chaveRascunho(agendaId));
+  await apagarRascunhoServidor(chaveRascunho(agendaId));
   renderRelatorioCorretiva(relatorioAgendaAtual);
 }
 
@@ -4553,6 +4559,7 @@ async function concluirRelatorio() {
   // A partir daqui a visita já foi salva e enviada para aprovação — isso não pode mais falhar
   // pro técnico. PDF e envio por e-mail são best-effort: se falharem, avisa mas não trava.
   localStorage.removeItem(chaveRascunho(d.agenda_id));
+  apagarRascunhoServidor(chaveRascunho(d.agenda_id));
   let avisoExtra = '';
   try {
     const pdfDataUri = gerarPdfRelatorio(d, relatorioAgendaAtual);
@@ -4739,6 +4746,7 @@ function periodoReparo(d) {
 async function renderLaudoTecnico(item) {
   laudoAgendaAtual = item;
   let salvoEm = null;
+  await sincronizarRascunhoServidor(chaveRascunhoLaudo(item.id, item.retorno_pendente_tecnico)); // puxa rascunho mais recente de outro aparelho, se houver
   try {
     const bruto = localStorage.getItem(chaveRascunhoLaudo(item.id, item.retorno_pendente_tecnico));
     if (bruto) {
@@ -5063,16 +5071,22 @@ function atualizarRascunhoLaudo(semLerCampos) {
     d.necessidade_retorno = document.getElementById('lt-necessidade-retorno').checked;
   }
   document.getElementById('lt-periodo').value = periodoReparo(laudoDraft);
+  const chave = chaveRascunhoLaudo(laudoDraft.agenda_id, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico);
   try {
-    localStorage.setItem(chaveRascunhoLaudo(laudoDraft.agenda_id, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico), JSON.stringify({ draft: laudoDraft, em: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }));
+    const agoraDate = new Date();
+    const agora = agoraDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    localStorage.setItem(chave, JSON.stringify({ draft: laudoDraft, em: agora, salvoEmISO: agoraDate.toISOString() }));
     const status = document.getElementById('lt-rascunho-status');
-    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${agora}`;
   } catch (e) {}
+  enviarRascunhoServidor(chave, laudoDraft);
 }
 
 async function limparLaudo(agendaId) {
   if (!(await mostrarConfirmacao('Limpar todo o formulário e apagar o rascunho salvo?'))) return;
-  localStorage.removeItem(chaveRascunhoLaudo(agendaId, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico));
+  const chave = chaveRascunhoLaudo(agendaId, laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico);
+  localStorage.removeItem(chave);
+  await apagarRascunhoServidor(chave);
   renderLaudoTecnico(laudoAgendaAtual);
 }
 
@@ -5094,7 +5108,7 @@ async function concluirLaudoTecnico() {
     alert('Erro ao concluir: ' + e.message);
     return;
   }
-  if (r.enviado) localStorage.removeItem(chaveRascunho);
+  if (r.enviado) { localStorage.removeItem(chaveRascunho); apagarRascunhoServidor(chaveRascunho); }
   const eraRetorno = laudoAgendaAtual && laudoAgendaAtual.retorno_pendente_tecnico;
   const eraReparo = laudoAgendaAtual && laudoAgendaAtual.tipo === 'atendimento' && ['em_diagnostico_reparo', 'executando_reparo'].includes(laudoAgendaAtual.fase_atendimento);
   mostrarModalSucesso(r.enfileirado ? MSG_ENFILEIRADO : eraReparo ? 'Relatório enviado.' : (eraRetorno ? 'Relatório de retorno enviado — o administrador foi avisado.' : 'Laudo finalizado e enviado para aprovação do administrador. O PDF ficará disponível assim que ele for aprovado.'));
@@ -8049,6 +8063,76 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// ---------- sincronização de rascunho entre aparelhos (servidor) ----------
+// pedido do usuário: rascunho ficava só no localStorage do aparelho — começar um relatório no
+// celular e continuar no PC era impossível (o PC nunca tinha visto aquele rascunho). O
+// localStorage continua sendo a fonte instantânea de tudo (zero espera, funciona offline); o
+// servidor (GET/PUT/DELETE /api/rascunhos, ver server.js) só entra pra PUXAR um rascunho mais
+// recente salvo em outro aparelho (mescla pela data — nunca sobrescreve um rascunho local mais
+// novo) e EMPURRAR o que foi salvo aqui, pra quem abrir de outro aparelho depois recuperar
+// também. Qualquer falha (offline, servidor fora do ar) é silenciosa — nunca trava o formulário,
+// que sempre continua funcionando só com o localStorage, igual sempre funcionou.
+// nunca manda foto/assinatura (campo com uma data: URI) pro servidor no rascunho — o
+// autosalvamento dispara a cada pausa de digitação E a cada clique/mudança em QUALQUER campo do
+// formulário (ver ligarAutoSalvarRascunho acima), então uma foto já anexada seria reenviada (e
+// o servidor salvaria de novo como arquivo novo, órfão, nunca limpo) a cada ciclo desses, mesmo
+// sem ter mudado. Fotos continuam só no localStorage deste aparelho; só o texto sincroniza entre
+// aparelhos — ver TAMANHO_MAX_RASCUNHO_BYTES em server.js, a rede de segurança caso isso falhe.
+function semFotosProfundo(valor) {
+  if (typeof valor === 'string') return valor.startsWith('data:') ? null : valor;
+  if (Array.isArray(valor)) return valor.map(semFotosProfundo);
+  if (valor && typeof valor === 'object') return Object.fromEntries(Object.entries(valor).map(([k, v]) => [k, semFotosProfundo(v)]));
+  return valor;
+}
+// o rascunho que volta do servidor nunca tem foto (ver semFotosProfundo acima) — mesclar ele por
+// cima do rascunho local SEM isso devolveria as fotos já tiradas aqui pra null, mesmo reabrindo o
+// MESMO formulário no MESMO aparelho (ex.: sair e voltar). Esta função percorre as duas árvores
+// em paralelo e, onde o servidor não tem nada (null) mas o aparelho já tinha uma foto, preserva a
+// foto local; todo o resto (texto, data, seleção) vem do servidor quando ele é mais recente.
+function mesclarDraftPreservandoFotos(remoto, local) {
+  if (remoto === null) return (typeof local === 'string' && local.startsWith('data:')) ? local : remoto;
+  if (Array.isArray(remoto)) return remoto.map((v, i) => mesclarDraftPreservandoFotos(v, Array.isArray(local) ? local[i] : undefined));
+  if (remoto && typeof remoto === 'object') {
+    return Object.fromEntries(Object.entries(remoto).map(([k, v]) => [k, mesclarDraftPreservandoFotos(v, local && typeof local === 'object' ? local[k] : undefined)]));
+  }
+  return remoto;
+}
+function mesclarRascunhoRemotoNoLocal(remoto) {
+  const localBruto = localStorage.getItem(remoto.chave);
+  const local = localBruto ? JSON.parse(localBruto) : null;
+  if (local && new Date(local.salvoEmISO || 0) >= new Date(remoto.atualizado_em)) return; // local já é igual ou mais novo
+  localStorage.setItem(remoto.chave, JSON.stringify({
+    draft: mesclarDraftPreservandoFotos(remoto.draft, local ? local.draft : undefined),
+    em: new Date(remoto.atualizado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    salvoEmISO: remoto.atualizado_em,
+  }));
+}
+async function sincronizarRascunhoServidor(chave) {
+  try {
+    const resp = await api(`/api/rascunhos/${encodeURIComponent(chave)}`);
+    if (resp && resp.rascunho) mesclarRascunhoRemotoNoLocal(resp.rascunho);
+  } catch (e) { /* offline/servidor fora do ar — segue só com o local */ }
+}
+// mesma ideia da função acima, só que pra TODOS os rascunhos do usuário de uma vez — usada na
+// listagem do Relatório (ver renderRelatorioManutencao), que precisa saber de rascunhos
+// pendentes feitos em qualquer aparelho antes de montar a lista de "Continuar"/"Descartar".
+async function sincronizarTodosRascunhosServidor() {
+  try {
+    const { rascunhos } = await api('/api/rascunhos');
+    rascunhos.forEach(mesclarRascunhoRemotoNoLocal);
+  } catch (e) { /* offline/servidor fora do ar — segue só com os locais */ }
+}
+function enviarRascunhoServidor(chave, draft) {
+  return api('/api/rascunhos', { method: 'PUT', body: { chave, draft: semFotosProfundo(draft) } }).catch(() => {});
+}
+// devolve a promise (quem só quer "disparar e esquecer" ignora; quem vai re-sincronizar com o
+// servidor logo em seguida — ex.: descartarRascunhoPendente, limparRelatorio/limparLaudo — espera
+// essa promise primeiro, senão a sincronização seguinte pode ainda achar o rascunho antigo no
+// servidor e ressuscitar ele no localStorage).
+function apagarRascunhoServidor(chave) {
+  return api(`/api/rascunhos/${encodeURIComponent(chave)}`, { method: 'DELETE' }).catch(() => {});
+}
+
 // ---------- rascunho automático dos relatórios (Relatório > Manual) ----------
 // evita perder o preenchimento se a página recarregar sem querer (queda de conexão, app fechado
 // no celular etc.) — mesmo mecanismo que já existia só pro Laudo Técnico/Termo de Aceite da O.S.
@@ -8096,17 +8180,21 @@ function carregarRascunhoManual(tipo, idExistente) {
 // salva o draft inteiro (já lido do DOM por quem chama) e atualiza a mensagenzinha de status —
 // statusElId é opcional, o rascunho ainda salva mesmo se o elemento de status não existir no form.
 function salvarRascunhoManual(tipo, draft, idExistente, statusElId) {
+  const chave = chaveRascunhoManual(tipo, idExistente);
   try {
     const agoraDate = new Date();
     const agora = agoraDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    localStorage.setItem(chaveRascunhoManual(tipo, idExistente), JSON.stringify({ draft, em: agora, salvoEmISO: agoraDate.toISOString() }));
+    localStorage.setItem(chave, JSON.stringify({ draft, em: agora, salvoEmISO: agoraDate.toISOString() }));
     const status = statusElId && document.getElementById(statusElId);
     if (status) status.textContent = `Rascunho salvo automaticamente neste dispositivo às ${agora}`;
   } catch (e) {}
+  enviarRascunhoServidor(chave, draft);
 }
 function limparRascunhoManual(tipo, idExistente) {
   if (window._pararAutoSalvarRascunhoPendente) window._pararAutoSalvarRascunhoPendente();
-  localStorage.removeItem(chaveRascunhoManual(tipo, idExistente));
+  const chave = chaveRascunhoManual(tipo, idExistente);
+  localStorage.removeItem(chave);
+  return apagarRascunhoServidor(chave); // ver comentário em apagarRascunhoServidor
 }
 // diz se o rascunho tem algum preenchimento de verdade — abrir um formulário novo (sem digitar
 // nada) já dispara o autosalvamento (o clique no botão "Manual" borbulha até o listener
@@ -8135,7 +8223,7 @@ function rascunhosNovosPendentes() {
 }
 async function descartarRascunhoPendente(tipo) {
   if (!(await mostrarConfirmacao('Descartar este rascunho? O preenchimento salvo neste dispositivo será apagado.'))) return;
-  limparRascunhoManual(tipo, null);
+  await limparRascunhoManual(tipo, null);
   renderRelatorioManutencao();
 }
 // HTML do aviso "rascunho recuperado" (mostrado quando o form abre já com dados de um rascunho
@@ -8364,7 +8452,13 @@ async function renderRelatorioManutencao() {
   const vePodeTodos = USER.papel === 'administrador' || USER.papel === 'supervisor';
   const podeAlternarTodos = USER.papel === 'comercial';
   const mostrarTodos = vePodeTodos || (podeAlternarTodos && relatorioManutModoTodos);
-  const { relatorios } = await api('/api/relatorios-manutencao/meus' + (mostrarTodos ? '?todas=1' : ''));
+  const [{ relatorios }] = await Promise.all([
+    api('/api/relatorios-manutencao/meus' + (mostrarTodos ? '?todas=1' : '')),
+    // puxa rascunhos salvos em outro aparelho pro localStorage daqui (ver comentário na função)
+    // antes de montar a lista, pra "Rascunho" aparecer mesmo quem começou num celular e abriu o
+    // PC agora — rascunhosNovosPendentes() (chamada por desenharRelatorioManutencao) só lê local.
+    sincronizarTodosRascunhosServidor(),
+  ]);
   window._relatoriosManutCache = relatorios;
   window._relatoriosManutFiltro = { tipo: '', tecnico: '', empresa: '', os: '', periodo: '', busca: '' };
   desenharRelatorioManutencao();
