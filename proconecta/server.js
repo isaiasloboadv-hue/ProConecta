@@ -3717,31 +3717,43 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       // comportamento — só para de travar a resposta por causa dele.
       let precisaSalvarAlertas = configCriada;
       const emailsAdmins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador' && u.email).map((u) => u.email);
+      // Fase C (análise de concorrentes): "alertas automáticos também por WhatsApp" — reaproveita
+      // a mesma integração com a API do WhatsApp Business já usada no atendimento (whatsapp.js),
+      // só que sem depender do webhook/IA ligados (ver envioAtivo lá). Igual ao e-mail: se a
+      // empresa não tiver configurado WHATSAPP_TOKEN/WHATSAPP_PHONE_ID, simplesmente não envia —
+      // nunca quebra o sininho por causa disso. IMPORTANTE: mensagem avulsa (tipo "text") só é
+      // entregue de verdade dentro de uma janela de conversa ativa de 24h com o número comercial;
+      // fora disso a Meta exige um template pré-aprovado — por enquanto é "melhor esforço", igual
+      // ao e-mail sem provedor configurado (nunca falha o sininho por isso).
+      const telefonesAdmins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador' && u.celular).map((u) => u.celular);
       const nomeEmpresaAlerta = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
-      const dispararAlertaPmoc = (assunto, corpoHtml) => {
+      const dispararAlertaPmoc = (assunto, corpoHtml, textoWhatsApp) => {
         if (emailsAdmins.length) email.enviarAlerta({ emails: emailsAdmins, assunto, corpoHtml, nomeEmpresa: nomeEmpresaAlerta }).catch((e) => console.error('[pmoc] falha ao enviar alerta por e-mail:', e.message));
+        if (whatsapp.envioAtivo() && telefonesAdmins.length) {
+          for (const tel of telefonesAdmins) whatsapp.enviarMensagemWhatsApp(tel, textoWhatsApp).catch((e) => console.error('[pmoc] falha ao enviar alerta por WhatsApp:', e.message));
+        }
       };
       for (const a of visitasAtrasadas) {
         if (a.alerta_atraso_email_enviado_em) continue;
-        dispararAlertaPmoc('PMOC: preventiva atrasada', `<p>A preventiva PMOC de <b>${a.cliente_nome}</b> marcada para ${a.data.split('-').reverse().join('/')} ainda não foi concluída.</p>`);
+        dispararAlertaPmoc('PMOC: preventiva atrasada', `<p>A preventiva PMOC de <b>${a.cliente_nome}</b> marcada para ${a.data.split('-').reverse().join('/')} ainda não foi concluída.</p>`, `⚠️ PMOC: a preventiva de ${a.cliente_nome} marcada para ${a.data.split('-').reverse().join('/')} ainda não foi concluída.`);
         a.alerta_atraso_email_enviado_em = new Date().toISOString();
         precisaSalvarAlertas = true;
       }
       for (const { plano, nomeLocal, dataFim } of planosVencendo) {
         if (plano.alerta_vencimento_email_enviado_em) continue;
-        dispararAlertaPmoc('PMOC: plano perto do vencimento', `<p>O plano PMOC de <b>${nomeLocal}</b> vence em ${dataFim.split('-').reverse().join('/')}.</p>`);
+        dispararAlertaPmoc('PMOC: plano perto do vencimento', `<p>O plano PMOC de <b>${nomeLocal}</b> vence em ${dataFim.split('-').reverse().join('/')}.</p>`, `📅 PMOC: o plano de ${nomeLocal} vence em ${dataFim.split('-').reverse().join('/')}.`);
         plano.alerta_vencimento_email_enviado_em = new Date().toISOString();
         precisaSalvarAlertas = true;
       }
       for (const { plano, nomeLocal, artAusente } of planosArtProblema) {
         if (plano.alerta_art_email_enviado_em) continue;
-        dispararAlertaPmoc('PMOC: ART/TRT pendente', `<p>A ART/TRT do plano PMOC de <b>${nomeLocal}</b> está ${artAusente ? 'ausente' : 'vencida'}.</p>`);
+        dispararAlertaPmoc('PMOC: ART/TRT pendente', `<p>A ART/TRT do plano PMOC de <b>${nomeLocal}</b> está ${artAusente ? 'ausente' : 'vencida'}.</p>`, `📋 PMOC: a ART/TRT de ${nomeLocal} está ${artAusente ? 'ausente' : 'vencida'}.`);
         plano.alerta_art_email_enviado_em = new Date().toISOString();
         precisaSalvarAlertas = true;
       }
       for (const { local, ultima } of locaisQualidadeArDesatualizada) {
         if (local.alerta_qualidade_ar_email_enviado_em) continue;
-        dispararAlertaPmoc('PMOC: qualidade do ar desatualizada', `<p>O local <b>${local.nome}</b> está sem análise de qualidade do ar recente${ultima ? ` (última em ${ultima.data.split('-').reverse().join('/')})` : ''}.</p>`);
+        dispararAlertaPmoc('PMOC: qualidade do ar desatualizada', `<p>O local <b>${local.nome}</b> está sem análise de qualidade do ar recente${ultima ? ` (última em ${ultima.data.split('-').reverse().join('/')})` : ''}.</p>`, `🌬️ PMOC: o local ${local.nome} está sem análise de qualidade do ar recente.`);
         local.alerta_qualidade_ar_email_enviado_em = new Date().toISOString();
         precisaSalvarAlertas = true;
       }

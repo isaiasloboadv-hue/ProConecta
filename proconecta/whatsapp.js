@@ -17,6 +17,13 @@ function ativo() {
   return !!(WHATSAPP_TOKEN && WHATSAPP_PHONE_ID && WHATSAPP_VERIFY_TOKEN && ia.ativa());
 }
 
+// pedido do usuário (análise de concorrentes, Fase C): alertas automáticos do pacote PMOC por
+// WhatsApp — um envio avulso de notificação não tem relação com o chat/IA do atendimento, então
+// só precisa das credenciais da API (token + telefone), não do webhook nem da IA ligada.
+function envioAtivo() {
+  return !!(WHATSAPP_TOKEN && WHATSAPP_PHONE_ID);
+}
+
 function normalizarTelefone(t) {
   return String(t || '').replace(/\D/g, '');
 }
@@ -169,4 +176,4 @@ async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
   }
 }
 
-module.exports = { registrarRotasWhatsApp, ativo, enviarMensagemWhatsApp };
+module.exports = { registrarRotasWhatsApp, ativo, envioAtivo, enviarMensagemWhatsApp };
