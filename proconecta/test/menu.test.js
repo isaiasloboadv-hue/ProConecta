@@ -186,10 +186,10 @@ test('administrador e suporte só veem "Agenda" (Refrigeração) quando a empres
   assert.ok(chaves.includes('agenda'));
 });
 
-// pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): grupo com
-// children (mesmo padrão de Biblioteca/Comercial) — gate fica só no node pai, os filhos
-// (ex.: "gerador-etiquetas") não têm `perfil`/`modulo` próprio, igual os outros grupos com filhos.
-test('"Ferramentas" (grupo com children) só aparece quando a empresa é do perfil refrigeração', () => {
+// pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): um hub único com
+// vários widgets dentro (ver FERRAMENTAS_REF_WIDGETS/renderFerramentasRefrigeracao em app.js), não
+// mais um grupo com children no sidebar — "Ferramentas" é uma página própria (page: 'ferramentas-hub').
+test('"Ferramentas" (hub de widgets) só aparece quando a empresa é do perfil refrigeração', () => {
   const ctx = carregarLogicaDeMenu();
   ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['os_chamados'] };
   ctx.window._empresa = { perfil: 'autonomo' };
@@ -197,5 +197,5 @@ test('"Ferramentas" (grupo com children) só aparece quando a empresa é do perf
   ctx.window._empresa = { perfil: 'refrigeracao' };
   const ferramentas = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'ferramentas');
   assert.ok(ferramentas);
-  assert.ok(ferramentas.children.some((c) => c.page === 'etiquetas-gerador'));
+  assert.equal(ferramentas.page, 'ferramentas-hub');
 });

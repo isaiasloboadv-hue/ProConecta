@@ -799,12 +799,12 @@ const NAV = {
     // assinatura do técnico é opcional/posterior ("Assinar agora" no detalhe) e o Enviar fica
     // disponível já em Rascunho (ver orcamentoRefAssinavel/renderOrcamentoRefrigeracaoDetalhe).
     { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
-    // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — primeira
-    // ferramenta: Gerador de Etiquetas (ver renderGeradorEtiquetas), também acessível a partir do
-    // menu "⋮" de uma O.S. já criada (ver abrirMenuOpcoesOsRef), que pré-preenche os dados.
-    { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
-      { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
-    ]},
+    // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — menu único com
+    // vários widgets de utilitário (ver renderFerramentasRefrigeracao/FERRAMENTAS_REF_WIDGETS),
+    // não mais um grupo com children no sidebar: cada ferramenta nova (mandada aos poucos, um
+    // print por vez) só entra nessa lista. A primeira é o Gerador de Etiquetas, também acessível a
+    // partir do menu "⋮" de uma O.S. já criada (ver abrirMenuOpcoesOsRef), que pré-preenche os dados.
+    { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', page: 'ferramentas-hub' },
     // pedido do usuário (referência: app concorrente iClima): quarto atalho do perfil Refrigeração
     // — Agenda, com configuração de disponibilidade própria por técnico (dias/horário/pausa/
     // duração/máx. por dia/datas bloqueadas) e agendamento manual dentro da grade gerada por ela
@@ -878,9 +878,7 @@ const NAV = {
     { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
     { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
     { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
-    { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
-      { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
-    ]},
+    { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', page: 'ferramentas-hub' },
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda-refrigeracao-lista' },
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
@@ -3824,11 +3822,40 @@ async function carregarWidgetsHomeRefrigeracao() {
   } catch (e) { alvo.innerHTML = `<div class="empty" style="grid-column:1/-1;">${esc(e.message)}</div>`; }
 }
 
+// ===== Ferramentas (hub de widgets) — perfil "Refrigeração e Climatização" =====
+// pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): um menu único, com
+// vários widgets/utilitários dentro — não mais um grupo com children no sidebar (ver NAV acima).
+// Cada entrada aqui é um cartão na tela; o usuário manda um print por vez das ferramentas que
+// faltam, então essa lista só cresce — nunca reaproveitar isso pra outra coisa. Um widget pode
+// virar um submenu (vários cartões levando a páginas diferentes dentro da mesma ferramenta) sem
+// mudar esse hub: FERRAMENTAS_REF_WIDGETS só precisa da página de entrada daquela ferramenta.
+const FERRAMENTAS_REF_WIDGETS = [
+  { icone: '🏷️', label: 'Gerador de Etiquetas', descricao: 'Etiqueta pra colar no equipamento, com QR Code opcional', page: 'etiquetas-gerador' },
+];
+async function renderFerramentasRefrigeracao() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head"><h1>Ferramentas</h1><p>Utilitários do dia a dia do técnico</p></div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      ${FERRAMENTAS_REF_WIDGETS.map((w) => ferramentaRefWidgetHtml(w)).join('')}
+    </div>`;
+}
+function ferramentaRefWidgetHtml(w) {
+  return `<div class="panel" style="cursor:pointer; padding:18px 14px;" onclick="ir('${w.page}')">
+    <div style="font-size:26px;">${w.icone}</div>
+    <div style="margin-top:8px; font-weight:700; font-size:14px;">${esc(w.label)}</div>
+    <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">${esc(w.descricao)}</div>
+  </div>`;
+}
+
 // ===== Gerador de Etiquetas (Ferramentas, perfil "Refrigeração e Climatização") =====
 // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — etiqueta pra colar
 // no equipamento depois do serviço (técnico, equipamento, data, QR Code opcional abrindo o
 // WhatsApp do técnico). Também é o que preenche o "Gerar etiqueta" do menu "⋮" de uma O.S. (ver
-// abrirGeradorEtiquetasDaOs), deixado de fora quando esse menu foi criado por falta de spec.
+// abrirGeradorEtiquetasDaOs). Agora é acessada a partir do hub de Ferramentas (ver
+// renderFerramentasRefrigeracao acima), não mais direto pelo sidebar — por isso o "← Ferramentas"
+// no cabeçalho (ver renderGeradorEtiquetas).
 const OS_REF_ETIQUETA_TAMANHOS = [
   { chave: 'grande', label: 'Grande — 90 × 55 mm', larguraMm: 90, alturaMm: 55 },
   { chave: 'media', label: 'Média — 70 × 40 mm', larguraMm: 70, alturaMm: 40 },
@@ -3880,7 +3907,10 @@ async function renderGeradorEtiquetas() {
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
   const aba = window._osRefEtiquetaAba || 'unica';
   main.innerHTML = `
-    <div class="page-head"><h1>Gerador de Etiquetas</h1><p>Etiquetas pra colar no equipamento depois do serviço, com QR Code opcional.</p></div>
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div><h1>Gerador de Etiquetas</h1><p>Etiquetas pra colar no equipamento depois do serviço, com QR Code opcional.</p></div>
+      <button class="btn-outline-sm" onclick="ir('ferramentas-hub')">← Ferramentas</button>
+    </div>
     <div style="display:flex; max-width:560px; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-bottom:16px;">
       <button class="btn-${aba === 'unica' ? 'primary' : 'ghost'} btn-sm" style="flex:1; border-radius:0;" onclick="trocarAbaEtiqueta('unica')">Etiqueta única</button>
       <button class="btn-${aba === 'lote' ? 'primary' : 'ghost'} btn-sm" style="flex:1; border-radius:0;" onclick="trocarAbaEtiqueta('lote')">Lote por cliente</button>
@@ -4393,6 +4423,7 @@ async function ir(pagina) {
     if (pagina === 'orcamentos-refrigeracao-nova') return renderOrcamentoRefrigeracaoNova();
     if (pagina === 'orcamentos-refrigeracao-detalhe') return renderOrcamentoRefrigeracaoDetalhe();
     if (pagina === 'agenda-refrigeracao-lista') return renderAgendaRefrigeracaoLista();
+    if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
