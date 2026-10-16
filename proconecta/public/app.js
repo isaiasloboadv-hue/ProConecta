@@ -20012,9 +20012,9 @@ function desenharAtividadesDiarias() {
         <div class="field"><label>De</label><input id="ad-filtro-inicio" type="date" value="${esc(atividadeDiariaFiltro.periodo_inicio)}" onchange="aplicarFiltroAtividadeDiaria()"></div>
         <div class="field"><label>Até</label><input id="ad-filtro-fim" type="date" value="${esc(atividadeDiariaFiltro.periodo_fim)}" onchange="aplicarFiltroAtividadeDiaria()"></div>
         <button class="btn-outline-sm" onclick="limparFiltroAtividadeDiaria()">Limpar filtro</button>
-        ${clienteSelecionado ? `<button class="btn btn-primary btn-sm" onclick="exportarPdfAtividadesDiarias()">📄 Exportar PDF pro cliente</button>` : ''}
+        ${clienteSelecionado ? `<button class="btn btn-primary btn-sm" onclick="abrirMenuEnviarAtividadesDiarias()">📤 Gerar relatório</button>` : ''}
       </div>
-      ${!clienteSelecionado ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:8px;">Escolha um cliente no filtro acima pra poder exportar o PDF — o relatório é sempre de um cliente por vez.</p>` : ''}
+      ${!clienteSelecionado ? `<p style="color:var(--ink-soft); font-size:12.5px; margin-top:8px;">Escolha um cliente no filtro acima (e, se quiser, o período) pra gerar o relatório — ele é sempre de um cliente por vez.</p>` : ''}
     </div>
     <div id="form-atividade-diaria"></div>
     <div class="panel"><table>
@@ -20101,17 +20101,34 @@ async function excluirAtividadeDiaria(id) {
   } catch (e) { alert('Erro: ' + e.message); }
 }
 
+// pedido do usuário: "gerar relatório e/ou enviar direto com opção de enviar por e-mail ou
+// WhatsApp" — mesmo menu de ação (abrirModalOsRefAcao/osRefBotaoAcao, genéricos apesar do nome,
+// já usados em O.S./Orçamento/Calculadora Blindada do perfil Refrigeração) oferecendo baixar,
+// e-mail (mailto: pro cliente, mesmo padrão de encaminharRelatorioManutencaoPreventiva) ou
+// WhatsApp (Web Share API com o PDF anexado quando o navegador suporta, senão baixa + abre o
+// wa.me com o número do cliente, mesmo padrão de encaminharRelatorioManutencaoWhatsapp).
+function abrirMenuEnviarAtividadesDiarias() {
+  const clientes = window._clientesAtividadeCache || [];
+  const cliente = clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id));
+  if (!cliente) return mostrarToast('Escolha um cliente no filtro pra gerar o relatório.');
+  const atividades = window._atividadesDiariasCache || [];
+  if (!atividades.length) return mostrarToast('Nenhuma atividade registrada nesse período pra gerar o relatório.');
+  const corpo =
+    `<p style="color:var(--ink-soft); font-size:13px; margin:-6px 0 14px;">Registro de Atividades — ${esc(cliente.nome_empresa)}</p>` +
+    osRefBotaoAcao('📄 Baixar PDF', 'Salva no aparelho', `fecharModalOsRefAcao(); baixarPdfAtividadesDiarias();`) +
+    osRefBotaoAcao('📧 Enviar por e-mail', cliente.email ? `Abre o e-mail já endereçado a ${cliente.email}` : 'Cliente sem e-mail cadastrado', `fecharModalOsRefAcao(); enviarPdfAtividadesDiariasEmail();`) +
+    osRefBotaoAcao('💬 Enviar por WhatsApp', 'Anexa o PDF direto na conversa, quando o aparelho suporta', `fecharModalOsRefAcao(); enviarPdfAtividadesDiariasWhatsapp();`);
+  abrirModalOsRefAcao('<h3>Gerar relatório</h3>', corpo);
+}
+function nomeArquivoAtividadesDiarias(cliente) {
+  return `atividades-${cliente.nome_empresa.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}`;
+}
 // PDF pro cliente — mesmo padrão jsPDF/PDF_COR/carregarLogoVariantes de todo o resto do sistema
 // (ver exportarDespesasJustificadasPdf pra tabela com paginação, gerarPdfProposta pro bloco
 // "PARA" com dados do cliente). Sempre de UM cliente por vez (o filtro de cliente já trava isso).
-async function exportarPdfAtividadesDiarias() {
-  if (typeof window.jspdf === 'undefined') return alert('A biblioteca de exportação de PDF não carregou (sem conexão com o CDN). Tente novamente mais tarde.');
-  const clientes = window._clientesAtividadeCache || [];
-  const cliente = clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id));
-  if (!cliente) return mostrarToast('Escolha um cliente no filtro pra exportar o PDF.');
-  const atividades = window._atividadesDiariasCache || [];
-  if (!atividades.length) return mostrarToast('Nenhuma atividade registrada nesse período pra exportar.');
-
+// Só monta o documento — quem chama decide se baixa, manda por e-mail ou por WhatsApp.
+async function montarDocAtividadesDiariasPdf(cliente, atividades, filtro) {
+  if (typeof window.jspdf === 'undefined') { alert('A biblioteca de exportação de PDF não carregou (sem conexão com o CDN). Tente novamente mais tarde.'); return null; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   doc.setProperties({ title: `Atividades — ${cliente.nome_empresa}` });
@@ -20140,8 +20157,8 @@ async function exportarPdfAtividadesDiarias() {
     .forEach((linha) => { doc.text(limparPdf(linha), margem, y); y += 13; });
   y += 8;
 
-  const periodoTexto = atividadeDiariaFiltro.periodo_inicio || atividadeDiariaFiltro.periodo_fim
-    ? `Período: ${atividadeDiariaFiltro.periodo_inicio ? atividadeDiariaFiltro.periodo_inicio.split('-').reverse().join('/') : '—'} até ${atividadeDiariaFiltro.periodo_fim ? atividadeDiariaFiltro.periodo_fim.split('-').reverse().join('/') : '—'}`
+  const periodoTexto = filtro.periodo_inicio || filtro.periodo_fim
+    ? `Período: ${filtro.periodo_inicio ? filtro.periodo_inicio.split('-').reverse().join('/') : '—'} até ${filtro.periodo_fim ? filtro.periodo_fim.split('-').reverse().join('/') : '—'}`
     : 'Período: todas as atividades registradas';
   doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
   doc.text(periodoTexto, margem, y); y += 20;
@@ -20200,7 +20217,52 @@ async function exportarPdfAtividadesDiarias() {
   const contatos = [empresaWhatsapp() && `WhatsApp: ${empresaWhatsapp()}`, empresaTelefone() && `Telefone: ${empresaTelefone()}`, empresaEmails().length && `E-mail: ${empresaEmails()[0]}`].filter(Boolean);
   if (contatos.length) doc.text(contatos.join('   ·   '), pageW / 2, pageH - 32, { align: 'center' });
 
-  doc.save(`atividades-${cliente.nome_empresa.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().toISOString().slice(0, 10)}.pdf`);
+  return doc;
+}
+async function baixarPdfAtividadesDiarias() {
+  const clientes = window._clientesAtividadeCache || [];
+  const cliente = clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id));
+  if (!cliente) return;
+  const doc = await montarDocAtividadesDiariasPdf(cliente, window._atividadesDiariasCache || [], atividadeDiariaFiltro);
+  if (doc) doc.save(nomeArquivoAtividadesDiarias(cliente) + '.pdf');
+}
+// mesmo padrão de encaminharRelatorioManutencaoPreventiva: mailto: não consegue carregar anexo,
+// então baixa o PDF primeiro e abre o e-mail já endereçado, avisando pra anexar.
+async function enviarPdfAtividadesDiariasEmail() {
+  const clientes = window._clientesAtividadeCache || [];
+  const cliente = clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id));
+  if (!cliente) return;
+  if (!cliente.email) return alert('Este cliente não tem e-mail cadastrado — edite o cadastro dele em Clientes antes de enviar.');
+  const doc = await montarDocAtividadesDiariasPdf(cliente, window._atividadesDiariasCache || [], atividadeDiariaFiltro);
+  if (!doc) return;
+  doc.save(nomeArquivoAtividadesDiarias(cliente) + '.pdf');
+  const assunto = encodeURIComponent(`Registro de Atividades — ${cliente.nome_empresa}`);
+  const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o registro de atividades referente ao período informado.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
+  window.open(`mailto:${cliente.email}?subject=${assunto}&body=${corpo}`, '_blank');
+  mostrarToast('PDF baixado — anexe-o no e-mail que foi aberto.');
+}
+// mesmo padrão de encaminharRelatorioManutencaoWhatsapp: Web Share API com o PDF anexado quando o
+// navegador suporta, senão baixa + abre o wa.me já com o número do cliente (se cadastrado).
+async function enviarPdfAtividadesDiariasWhatsapp() {
+  const clientes = window._clientesAtividadeCache || [];
+  const cliente = clientes.find((c) => String(c.id) === String(atividadeDiariaFiltro.cliente_id));
+  if (!cliente) return;
+  const doc = await montarDocAtividadesDiariasPdf(cliente, window._atividadesDiariasCache || [], atividadeDiariaFiltro);
+  if (!doc) return;
+  const blob = doc.output('blob');
+  const nomeArquivo = nomeArquivoAtividadesDiarias(cliente) + '.pdf';
+  const texto = `Segue o registro de atividades de ${cliente.nome_empresa}.`;
+  const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+  if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+    try { await navigator.share({ files: [arquivo], text: texto }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+  document.body.appendChild(link); link.click(); link.remove();
+  const telefone = (cliente.telefone || '').replace(/\D/g, '');
+  const numero = telefone ? (telefone.length <= 11 ? '55' + telefone : telefone) : '';
+  window.open(`https://wa.me/${numero}?text=${encodeURIComponent(texto + ' Anexe o PDF que acabou de baixar.')}`, '_blank');
 }
 
 // ---------- COMERCIAL: LEADS/CONTATOS (CRM nativo, passo 1) ----------
