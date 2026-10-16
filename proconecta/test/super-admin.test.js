@@ -79,7 +79,7 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(listaInicial.empresas[0].nome, 'PRO Marking');
 
     const modulos = await (await fetch(`${base}/api/plataforma/modulos`, { headers: authSuper })).json();
-    assert.ok(modulos.modulos.some((m) => m.chave === 'crm'));
+    assert.ok(modulos.modulos.some((m) => m.chave === 'comercial'));
 
     // cria empresa nova com a versão Manutenção
     const criarResp = await fetch(`${base}/api/plataforma/empresas`, {
@@ -89,16 +89,19 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(criarResp.status, 201);
     const { empresa: nova } = await criarResp.json();
     assert.equal(nova.id, 2);
-    assert.deepEqual(nova.modulos_ativos.sort(), ['biblioteca', 'os_chamados', 'smp_preventivas'].sort());
+    // "Manutenção" agora é ordem 2 na cascata (ver db.js: migração dos planos padrão) — herda
+    // comercial+relatorios+atividades do plano "Autônomo"/"Básico" (ordem 1) além do que ela
+    // mesma acrescenta.
+    assert.deepEqual(nova.modulos_ativos.sort(), ['atividades', 'biblioteca', 'comercial', 'os_chamados', 'relatorios', 'smp_preventivas'].sort());
 
-    // liga crm e desliga smp_preventivas (módulo avulso, independente da versão original)
+    // liga comercial e desliga smp_preventivas (módulo avulso, independente da versão original)
     const modulosResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/modulos`, {
       method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modulos: ['os_chamados', 'biblioteca', 'crm'] }),
+      body: JSON.stringify({ modulos: ['os_chamados', 'biblioteca', 'comercial'] }),
     });
     assert.equal(modulosResp.status, 200);
-    const { empresa: comCrm } = await modulosResp.json();
-    assert.deepEqual(comCrm.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+    const { empresa: comComercial } = await modulosResp.json();
+    assert.deepEqual(comComercial.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados'].sort());
 
     // módulo inexistente é rejeitado
     const modInvalido = await fetch(`${base}/api/plataforma/empresas/${nova.id}/modulos`, {
@@ -116,11 +119,11 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     const { empresa: comTerm } = await termResp.json();
     assert.equal(comTerm.terminologia.equipamento, 'Paciente');
 
-    // um usuário da empresa nova já enxerga o módulo crm ativo na checagem de módulo (dispatcher)
-    // — prova que ativar pelo painel realmente libera a rota, não só grava no banco
+    // um usuário da empresa nova já enxerga o módulo comercial ativo na checagem de módulo
+    // (dispatcher) — prova que ativar pelo painel realmente libera a rota, não só grava no banco
     const listaFinal = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
     const empresaFinal = listaFinal.empresas.find((e) => e.id === nova.id);
-    assert.ok(empresaFinal.modulos_ativos.includes('crm'));
+    assert.ok(empresaFinal.modulos_ativos.includes('comercial'));
     assert.ok(!empresaFinal.modulos_ativos.includes('smp_preventivas'));
 
     // empresa recém-criada nasce sem administrador nenhum — ninguém consegue logar nela ainda
@@ -152,7 +155,7 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(loginNovoAdmin.status, 200);
     const loginBody = await loginNovoAdmin.json();
     assert.equal(loginBody.usuario.papel, 'administrador');
-    assert.deepEqual(loginBody.usuario.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+    assert.deepEqual(loginBody.usuario.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados'].sort());
 
     // login também identifica de qual empresa é a sessão — é o que o front usa pra mostrar o
     // nome da empresa no cabeçalho (sem isso, quem loga não tem como saber em qual empresa está)
@@ -196,7 +199,7 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     assert.equal(empresaEditada.nome, 'Clínica Teste Renomeada');
     assert.equal(empresaEditada.site, 'clinica.com.br');
     // módulos/versão não foram afetados pela edição de dados básicos
-    assert.deepEqual(empresaEditada.modulos_ativos.sort(), ['biblioteca', 'crm', 'os_chamados'].sort());
+    assert.deepEqual(empresaEditada.modulos_ativos.sort(), ['biblioteca', 'comercial', 'os_chamados'].sort());
 
     // nome vazio é rejeitado
     const editarEmpresaVazio = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
@@ -302,6 +305,117 @@ test('painel da plataforma: só super_admin acessa, cria empresa, liga/desliga m
     const listaFinalSemEmpresa = await (await fetch(`${base}/api/plataforma/empresas`, { headers: authSuper })).json();
     assert.equal(listaFinalSemEmpresa.empresas.length, 1);
     assert.equal(listaFinalSemEmpresa.empresas[0].id, 1);
+  } finally {
+    servidor.kill();
+    fs.rmSync(dbTemp, { force: true });
+  }
+});
+
+// Etapa 8: cadastro de empresa com perfil/segmento aplica o preset (terminologia/tipos ativos),
+// fica editável depois sem reaplicar o preset, e a PRO Marking (empresa 1, nunca passa por esse
+// fluxo) continua sem nenhuma restrição.
+test('perfil/segmento: aplica preset na criação, não reaplica na edição, PRO Marking intacta', async () => {
+  const dbTemp = path.join(os.tmpdir(), `proconecta-teste-perfil-${Date.now()}.json`);
+  fs.writeFileSync(dbTemp, JSON.stringify(dadosComSuperAdmin()));
+  const porta = 39000 + Math.floor(Math.random() * 5000);
+
+  const servidor = spawn(process.execPath, ['server.js'], {
+    cwd: path.join(__dirname, '..'),
+    env: { ...process.env, DB_PATH_ARQUIVO: dbTemp, PORT: String(porta), ADMIN_EMAIL: '', ADMIN_SENHA: '', SUPERADMIN_EMAIL: '', SUPERADMIN_SENHA: '' },
+    stdio: 'ignore',
+  });
+
+  try {
+    await aguardarServidorSubir(porta);
+    const base = `http://localhost:${porta}`;
+
+    const loginSuper = await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'super@teste-super.com', senha: 'super1234' }),
+    });
+    const { token: tokenSuper } = await loginSuper.json();
+    const authSuper = { Authorization: `Bearer ${tokenSuper}` };
+
+    // catálogo de perfis acessível pelo super admin
+    const perfisResp = await (await fetch(`${base}/api/plataforma/perfis`, { headers: authSuper })).json();
+    assert.ok(perfisResp.perfis.some((p) => p.chave === 'autonomo'));
+    assert.ok(perfisResp.tipos_os.includes('corretiva'));
+
+    // cria empresa com perfil/segmento que já tem preset de verdade (autonomo:montagem_painel_eletrico)
+    const criarResp = await fetch(`${base}/api/plataforma/empresas`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Painéis Elétricos Teste', perfil: 'autonomo', segmento: 'montagem_painel_eletrico' }),
+    });
+    assert.equal(criarResp.status, 201);
+    const { empresa: nova } = await criarResp.json();
+    assert.equal(nova.perfil, 'autonomo');
+    assert.equal(nova.segmento, 'montagem_painel_eletrico');
+    assert.equal(nova.terminologia.equipamento, 'Painel');
+    assert.deepEqual(nova.tipos_os_ativos.sort(), ['corretiva', 'preventiva'].sort());
+    assert.equal(nova.escala_ativa, false);
+
+    // usuário dessa empresa já recebe os tipos ativos/escala_ativa no login
+    const criarAdminResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/administrador`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Admin Painéis', email: 'admin@paineis-teste.com', senha: 'paineis1234' }),
+    });
+    assert.equal(criarAdminResp.status, 201);
+    const loginNovo = await (await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@paineis-teste.com', senha: 'paineis1234' }),
+    })).json();
+    assert.deepEqual(loginNovo.usuario.tipos_os_ativos.sort(), ['corretiva', 'preventiva'].sort());
+    assert.equal(loginNovo.usuario.escala_ativa, false);
+
+    // segmento que não pertence ao perfil escolhido cai em "generico" (sem restrição)
+    const criarGenericoResp = await fetch(`${base}/api/plataforma/empresas`, {
+      method: 'POST', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Empresa Segmento Inválido', perfil: 'autonomo', segmento: 'nao-existe' }),
+    });
+    const { empresa: generica } = await criarGenericoResp.json();
+    assert.equal(generica.segmento, 'generico');
+    assert.equal(generica.tipos_os_ativos, null);
+
+    // editar perfil/segmento depois NÃO reaplica o preset — tipos_os_ativos continua como estava
+    const editarPerfilResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome: 'Painéis Elétricos Teste', perfil: 'autonomo', segmento: 'instalacao_eletrica' }),
+    });
+    const { empresa: editada } = await editarPerfilResp.json();
+    assert.equal(editada.segmento, 'instalacao_eletrica');
+    assert.deepEqual(editada.tipos_os_ativos.sort(), ['corretiva', 'preventiva'].sort()); // continua o preset antigo, não o de instalacao_eletrica
+
+    // edita manualmente a lista de tipos de O.S./relatório ativos (checklist do painel)
+    const tiposOsResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/tipos-os`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipos: ['corretiva'] }),
+    });
+    assert.equal(tiposOsResp.status, 200);
+    const { empresa: comTiposOs } = await tiposOsResp.json();
+    assert.deepEqual(comTiposOs.tipos_os_ativos, ['corretiva']);
+
+    const tipoOsInvalido = await fetch(`${base}/api/plataforma/empresas/${nova.id}/tipos-os`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipos: ['nao_existe'] }),
+    });
+    assert.equal(tipoOsInvalido.status, 400);
+
+    const tiposRelatorioResp = await fetch(`${base}/api/plataforma/empresas/${nova.id}/tipos-relatorio`, {
+      method: 'PUT', headers: { ...authSuper, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipos: ['completo', 'corretiva'] }),
+    });
+    assert.equal(tiposRelatorioResp.status, 200);
+    const { empresa: comTiposRelatorio } = await tiposRelatorioResp.json();
+    assert.deepEqual(comTiposRelatorio.tipos_relatorio_ativos.sort(), ['completo', 'corretiva'].sort());
+
+    // PRO Marking (empresa 1) nunca passou por esse fluxo — continua sem restrição nenhuma
+    const loginAdminOriginal = await (await fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@teste-super.com', senha: 'senha1234' }),
+    })).json();
+    assert.equal(loginAdminOriginal.usuario.tipos_os_ativos.length, 5);
+    assert.equal(loginAdminOriginal.usuario.tipos_relatorio_ativos.length, 10);
+    assert.equal(loginAdminOriginal.usuario.escala_ativa, true);
   } finally {
     servidor.kill();
     fs.rmSync(dbTemp, { force: true });

@@ -33,25 +33,278 @@ function gerarTokenConvite() {
 // módulos estão ligados (empresa.modulos_ativos, ver moduloAtivo abaixo) — isso sim é dado.
 // "núcleo" não entra aqui: é sempre ativo pra toda empresa, não passa por essa checagem.
 const MODULOS_DISPONIVEIS = [
+  // pedido do usuário: "nosso sistema deve ser do mais simples ao completo... um gerador de
+  // orçamento é a base, depois o menu relatório" — Relatório (+ Equipamentos/Assistente IA que o
+  // alimentam) sai de dentro de "os_chamados" e vira módulo próprio, pra poder ficar junto do
+  // "comercial" (gerador de orçamento) no plano de entrada, sem exigir O.S. completo.
+  { chave: 'relatorios', nome: 'Relatórios' },
   { chave: 'os_chamados', nome: 'O.S. e Chamados' },
   { chave: 'smp_preventivas', nome: 'Procedimentos e Preventivas' },
   { chave: 'biblioteca', nome: 'Biblioteca' },
   { chave: 'prestacao_contas', nome: 'Prestação de Contas' },
-  { chave: 'crm', nome: 'CRM' },
+  // pedido do usuário: "o menu CRM é praticamente o que meu sistema já faz... vamos implementar
+  // os menus do que falta" — o item "CRM" (esqueleto "Em breve" da Etapa 8) foi removido; este
+  // módulo renomeado é quem vai liberar as telas de verdade (Leads, Funil, Propostas) que chegam
+  // nos próximos passos, reaproveitando todo o pipeline de ativação já validado.
+  { chave: 'comercial', nome: 'Comercial' },
+  // "quando a equipe aumenta, precisa de controle de escala de folgas, controle de gastos,
+  // dashboards" — Equipe, Solicitações/RH, Escala de Folgas, KPIs/Dashboards e FMEA saem de
+  // dentro de "os_chamados" e vão para este módulo de estágio avançado (time maior/operação em
+  // escala), também antes só coberto pelo pacote único de O.S.
+  { chave: 'equipe_avancado', nome: 'Equipe e Escala' },
   { chave: 'agendamento', nome: 'Agendamento Online' },
   { chave: 'financeiro', nome: 'Financeiro' },
   { chave: 'assistente_ia', nome: 'Assistente IA' },
+  // pedido do usuário: versão "Restaurantes" — franqueado com muitas lojas divididas em setores,
+  // cada loja com técnico/gerente próprio e cada setor com coordenador técnico/consultor de
+  // mercado. Reaproveitável por qualquer empresa com essa mesma estrutura (não é exclusivo de
+  // restaurante) — liga a hierarquia setores/filiais/áreas e os papéis gerente_loja/
+  // coordenador_tecnico/consultor_mercado (ver PAPEIS_ESTRUTURA_FILIAIS em server.js).
+  { chave: 'filiais', nome: 'Redes e Filiais' },
+  // pedido do usuário (empresa JBPA): cliente com contrato mensal — a empresa registra TUDO que é
+  // feito pra esse cliente (data, descrição do serviço, valor), pra depois emitir um PDF mostrando
+  // o que foi entregue no período e comparando com o valor do contrato ("ver que valeu a pena").
+  // Reaproveitável por qualquer empresa com contrato recorrente, não é exclusivo da JBPA.
+  { chave: 'atividades', nome: 'Registro de Atividades' },
+  // pedido do usuário: pacote "Climatização / PMOC" — exclusivo de empresas com
+  // `perfil: 'refrigeracao'` (ver PERFIS_DISPONIVEIS acima e exigirPerfilRefrigeracao em
+  // server.js): cadastro de locais/ambientes/aparelhos do cliente final e, nas próximas fases,
+  // plano PMOC com preventivas automáticas (Lei 13.589/2018). É módulo (ativável por empresa,
+  // "flag/versão", ver moduloAtivo abaixo) ALÉM do gate de perfil — nem toda empresa de
+  // Refrigeração contrata o pacote PMOC, mas só empresa de Refrigeração pode contratá-lo (o NAV
+  // combina `perfil` + `modulo` no mesmo item — ver navDoUsuario em app.js).
+  // `foraDaCascataPadrao`: nunca entra sozinho em "Completo"/plano de topo nem é candidato das
+  // heurísticas de resgate de módulo esquecido (ver desbloquearModuloNosPlanosCompletos em
+  // migrar() — compara "o plano já libera TODO o resto do catálogo" pra achar o plano de topo;
+  // sem essa flag, "pmoc" entraria nessa comparação e QUEBRARIA a detecção de plano de topo pra
+  // outros módulos, já que nenhum plano da cascata padrão tem "pmoc" de propósito — ver comentário
+  // acima). Continua ativável normalmente por empresa (Super Admin > Cadastros > Módulos ativos).
+  { chave: 'pmoc', nome: 'Climatização / PMOC', foraDaCascataPadrao: true },
 ];
 const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
+// subconjunto de CHAVES_MODULOS elegível pra fazer parte da cascata de planos padrão (Básico →
+// Completo) — exclui módulos perfil-exclusivos como "pmoc" (ver `foraDaCascataPadrao` acima).
+const CHAVES_MODULOS_CASCATA_PADRAO = MODULOS_DISPONIVEIS.filter((m) => !m.foraDaCascataPadrao).map((m) => m.chave);
+
+// Pacote "Climatização / PMOC" (Lei 13.589/2018), Fase 2 — Plano e preventivas. Periodicidade de
+// cada item do checklist, em meses (usado pra calcular em que mês cada item "vence" de novo a
+// partir da data de início do plano — ver geração automática de visitas em server.js).
+const PMOC_PERIODICIDADES = [
+  { chave: 'mensal', nome: 'Mensal', meses: 1 },
+  { chave: 'bimestral', nome: 'Bimestral', meses: 2 },
+  { chave: 'trimestral', nome: 'Trimestral', meses: 3 },
+  { chave: 'semestral', nome: 'Semestral', meses: 6 },
+  { chave: 'anual', nome: 'Anual', meses: 12 },
+];
+const CHAVES_PMOC_PERIODICIDADES = PMOC_PERIODICIDADES.map((p) => p.chave);
+// pedido do usuário (item 1.6): "modelo padrão editável pela empresa" — itens sugeridos, usados
+// pra popular o Modelo de Checklist da empresa na primeira vez que ela acessa (ver
+// GET /api/pmoc/modelo-checklist em server.js). `tipos_aparelho: []` = aplica a qualquer tipo de
+// aparelho (nenhuma das sugestões da Lei restringe por tipo).
+const PMOC_CHECKLIST_PADRAO = [
+  { descricao: 'Limpeza ou troca dos filtros de ar', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Limpeza da bandeja de condensado', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Verificação e desobstrução do dreno', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Verificação de ruídos e vibrações anormais', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Limpeza externa do gabinete', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Verificação do controle remoto e do display', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Limpeza da serpentina da evaporadora', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Verificação do isolamento térmico das tubulações', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Medição de temperatura de insuflamento e de retorno', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Verificação da fixação e dos suportes', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Limpeza da condensadora e da serpentina externa', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Medição de tensão e corrente do compressor', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Verificação de pressão do fluido refrigerante e de vazamentos', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Reaperto das conexões elétricas', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Limpeza completa (higienização) do conjunto', periodicidade: 'anual', tipos_aparelho: [] },
+  { descricao: 'Verificação geral do estado do equipamento e recomendação de troca, se for o caso', periodicidade: 'anual', tipos_aparelho: [] },
+];
+
+// Perfil/Segmento (Etapa 8): escolhido uma vez no cadastro da empresa, só serve de atalho pra
+// pré-preencher terminologia/tipos ativos — nunca trava nada, tudo editável depois pelo Super
+// Admin. "Genérico" sempre disponível em qualquer perfil, pra quando nada específico encaixa.
+const PERFIS_DISPONIVEIS = [
+  {
+    chave: 'prestadora_manutencao',
+    nome: 'Prestadora de manutenção',
+    segmentos: [
+      { chave: 'refrigeracao_climatizacao', nome: 'Refrigeração/Climatização' },
+      { chave: 'elevadores', nome: 'Elevadores' },
+      { chave: 'geradores_nobreak', nome: 'Geradores/No-break' },
+      { chave: 'automacao_cftv_seguranca', nome: 'Automação/CFTV/Segurança' },
+      { chave: 'hidraulica_bombas', nome: 'Hidráulica/Bombas' },
+      { chave: 'marcacao_gravacao', nome: 'Marcação/Gravação' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  {
+    chave: 'industria_equipe_propria',
+    nome: 'Indústria com equipe técnica própria',
+    segmentos: [
+      { chave: 'eletrica_industrial', nome: 'Elétrica industrial' },
+      { chave: 'mecanica_industrial', nome: 'Mecânica industrial' },
+      { chave: 'refrigeracao_climatizacao', nome: 'Refrigeração/Climatização' },
+      { chave: 'hidraulica', nome: 'Hidráulica' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  {
+    chave: 'autonomo',
+    nome: 'Autônomo / prestador de serviço avulso',
+    segmentos: [
+      { chave: 'montagem_painel_eletrico', nome: 'Montagem de painel elétrico' },
+      { chave: 'instalacao_eletrica', nome: 'Instalação elétrica' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  // pedido do usuário: franqueado com muitas lojas (ex. rede de restaurantes), cada uma com
+  // técnico/gerente fixo, agrupadas em setores com coordenador técnico/consultor de mercado —
+  // perfil reutilizável por qualquer rede multiunidade, não só alimentação.
+  {
+    chave: 'rede_multiunidade',
+    nome: 'Rede com múltiplas unidades (franquia)',
+    segmentos: [
+      { chave: 'franquia_alimentacao', nome: 'Franquia de alimentação' },
+      { chave: 'generico', nome: 'Genérico' },
+    ],
+  },
+  // pedido do usuário: em vez de um perfil genérico com "Refrigeração/Climatização" enterrado
+  // como um segmento entre vários outros (ver "prestadora_manutencao"/"industria_equipe_propria"
+  // acima), uma empresa que já é especificamente desse ramo escolhe um perfil específico só pra
+  // ela — "o ideal é criar um perfil específico pra cada tipo de serviço, pra não ficar muito
+  // genérico". Primeiro de uma futura série (um por tipo de serviço); os perfis genéricos acima
+  // continuam intocados por enquanto — ver app.js: perfil com um único segmento pula a pergunta
+  // de segmento no cadastro (não pede um segundo clique à toa). Sem preset de terminologia/tipos
+  // ainda (cai no "sem restrição" — ver presetPerfilSegmento); entra quando for pedido.
+  {
+    chave: 'refrigeracao',
+    nome: 'Refrigeração e Climatização',
+    segmentos: [
+      { chave: 'generico', nome: 'Refrigeração e Climatização' },
+    ],
+  },
+];
+const CHAVES_PERFIS = PERFIS_DISPONIVEIS.map((p) => p.chave);
+
+// listas completas de hoje (ver app.js: select "na-tipo" e tiposRelatorioManual()) — usadas como
+// catálogo de validação e como "sem restrição" quando a empresa não tem preset/edição própria.
+const TIPOS_OS_DISPONIVEIS = ['corretiva', 'preventiva', 'treinamento_online', 'treinamento_presencial', 'demonstracao_tecnica'];
+const TIPOS_RELATORIO_DISPONIVEIS = ['completo', 'preventiva', 'preventiva2', 'corretiva', 'relatorio_tecnico', 'aceite_entrega', 'entrega_teste', 'promotor', 'devolutivo', 'levantamento_tecnico'];
+
+// presets por "perfil:segmento" — só os que já têm conteúdo real aqui; qualquer combinação não
+// listada (inclusive todo "Genérico") cai no preset "sem restrição" em presetPerfilSegmento, que
+// reproduz exatamente o comportamento de hoje (nenhum tipo/terminologia reduzido por omissão).
+const PRESETS_PERFIL_SEGMENTO = {
+  'autonomo:montagem_painel_eletrico': {
+    terminologia: { equipamento: 'Painel' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'corretiva', 'relatorio_tecnico'],
+    escala_ativa: false,
+  },
+  'autonomo:instalacao_eletrica': {
+    terminologia: {},
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+    escala_ativa: false,
+  },
+  // pedido do usuário: "pesquisar modelos tipos de relatório que é compatível com cada
+  // atividade de empresas" — presets por segmento real de manutenção técnica. Padrão: toda
+  // "prestadora_manutencao" (atende cliente externo) ganha aceite_entrega (formaliza a entrega
+  // do serviço pro cliente); toda "industria_equipe_propria" (manutenção interna, sem cliente
+  // externo) fica só com os 4 tipos universais, sem aceite_entrega (não tem a quem "entregar").
+  // "promotor"/"entrega_teste"/"devolutivo" (fluxo de demonstração/venda de equipamento) e
+  // "preventiva2" (modelo de referência específico da PRO Marking) ficam de fora de todos —
+  // são do negócio de marcação/gravação, não de manutenção em geral.
+  'prestadora_manutencao:refrigeracao_climatizacao': {
+    terminologia: { equipamento: 'Unidade' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+  },
+  'prestadora_manutencao:elevadores': {
+    terminologia: { equipamento: 'Elevador' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega', 'levantamento_tecnico'],
+  },
+  'prestadora_manutencao:geradores_nobreak': {
+    terminologia: { equipamento: 'Gerador' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+  },
+  'prestadora_manutencao:automacao_cftv_seguranca': {
+    terminologia: { equipamento: 'Sistema' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega', 'levantamento_tecnico'],
+  },
+  'prestadora_manutencao:hidraulica_bombas': {
+    terminologia: { equipamento: 'Bomba' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico', 'aceite_entrega'],
+  },
+  'industria_equipe_propria:eletrica_industrial': {
+    terminologia: { equipamento: 'Quadro Elétrico' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+  'industria_equipe_propria:mecanica_industrial': {
+    terminologia: { equipamento: 'Máquina' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+  'industria_equipe_propria:refrigeracao_climatizacao': {
+    terminologia: { equipamento: 'Unidade' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+  'industria_equipe_propria:hidraulica': {
+    terminologia: { equipamento: 'Bomba' },
+    tipos_os_ativos: ['corretiva', 'preventiva'],
+    tipos_relatorio_ativos: ['completo', 'preventiva', 'corretiva', 'relatorio_tecnico'],
+  },
+};
+function presetPerfilSegmento(perfil, segmento) {
+  const preset = PRESETS_PERFIL_SEGMENTO[`${perfil}:${segmento}`];
+  return {
+    terminologia: (preset && preset.terminologia) || {},
+    tipos_os_ativos: (preset && preset.tipos_os_ativos) || null,
+    tipos_relatorio_ativos: (preset && preset.tipos_relatorio_ativos) || null,
+    escala_ativa: preset && preset.escala_ativa !== undefined ? preset.escala_ativa : true,
+  };
+}
 
 // módulos padrão da versão "Manutenção" — o pacote que toda empresa migrada do sistema antigo
 // (só a PRO Marking, por enquanto) já usa hoje.
 const MODULOS_VERSAO_MANUTENCAO = ['os_chamados', 'smp_preventivas', 'biblioteca'];
 
+// token do QR Code do equipamento (Fase 1 — versão Restaurantes) — string aleatória opaca, nunca
+// o id sequencial (evitaria que alguém adivinhasse/enumerasse etiquetas de outro equipamento).
+function gerarQrToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
 function moduloAtivo(data, empresaId, chave) {
   if (!CHAVES_MODULOS.includes(chave)) return false;
   const empresa = data.empresas.find((e) => e.id === empresaId);
   return !!empresa && Array.isArray(empresa.modulos_ativos) && empresa.modulos_ativos.includes(chave);
+}
+
+// categorias de plano (pedido do usuário: "ajude a criar categorias de plano. Ao selecionar já é
+// selecionado automático o que é liberado até o plano em que todas as funções é liberada") — cada
+// versão tem uma "ordem" (1 = mais básica) e só guarda em modulos_proprios os módulos que ELA
+// introduz; o campo modulos (consumido por toda a troca-de-plano/PUT /api/meu-plano, que já
+// existia antes dessa feature) é sempre recalculado aqui como a UNIÃO cumulativa de
+// modulos_proprios dela com o de toda versão de ordem menor — então uma versão de ordem mais alta
+// automaticamente carrega tudo que já foi liberado nas versões abaixo dela, até a versão de maior
+// ordem acumular todos os módulos do catálogo. Chamar depois de qualquer criação/edição/exclusão
+// de versão, porque mexer numa versão de ordem baixa também muda o acumulado das de ordem mais
+// alta.
+function recalcularModulosVersoes(data) {
+  const ordenadas = [...data.versoes].sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  let acumulado = [];
+  for (const v of ordenadas) {
+    const proprios = Array.isArray(v.modulos_proprios) ? v.modulos_proprios : [];
+    acumulado = [...new Set([...acumulado, ...proprios])];
+    v.modulos = [...acumulado];
+  }
 }
 
 // banco novo começa vazio — o primeiro acesso vem do bootstrap de admin master
@@ -75,6 +328,25 @@ function seed() {
     feriados: [],
     escala_folgas: [],
     prestacoes_contas: [],
+    // despesas avulsas que o técnico justifica em campo (comprovante lido por IA ou preenchido na
+    // mão) — pedido do usuário: "crie no menu técnico um menu justificar despesa". Mais simples que
+    // prestacao_contas (sem categoria, um item por lançamento) e com campo de estabelecimento, que
+    // prestacao_contas não tem. Vai pra aprovação do financeiro, mesmo padrão de status.
+    despesas_justificadas: [],
+    // leads/contatos (CRM nativo, passo 1) — prospect que ainda não é cliente oficial; ganha
+    // convertido_cliente_id quando alguém usa o botão "Converter em cliente" (vira um registro de
+    // verdade em `clientes`, igual sincronizarClienteDoRelatorio já faz a partir de um relatório).
+    leads: [],
+    // oportunidades (CRM nativo, passo 2) — funil comercial por estágio. Nasce manual (origem
+    // 'manual') ou automática a partir de um Devolutivo que marcou
+    // identificou_oportunidade_adicional (origem 'devolutivo', ver POST /api/relatorios-manutencao).
+    // valor_estimado é texto livre (igual valor_agregado do Devolutivo já é hoje: "Descreva como
+    // isso pode virar uma venda de maior valor" — nunca foi um número), não dá pra fingir que é.
+    oportunidades: [],
+    // propostas/orçamentos (CRM nativo, passo 3) — itens de linha de verdade (quantidade x valor
+    // unitário, diferente do valor_estimado em texto livre da Oportunidade), abertas a partir da
+    // tela da Oportunidade.
+    propostas: [],
     // FMEA (RCM/SAP PM, Fase 1 passo 1): catálogo cadastrável pelo administrador, em cascata —
     // Componente (preso a um modelo do catálogo de equipamentos) → Modo de falha (com
     // severidade/ocorrência/detecção, 1-10, pra calcular RPN) → Causa → Efeito. Ainda não é usado
@@ -83,13 +355,116 @@ function seed() {
     fmea_modos_falha: [],
     fmea_causas: [],
     fmea_efeitos: [],
+    // versão "Restaurantes"/rede multiunidade (Fase 1 — Base): hierarquia setores → filiais →
+    // áreas, abaixo da empresa (ver módulo "filiais" acima). Vazia até o módulo ser contratado e
+    // alguém cadastrar a estrutura — não afeta nenhuma empresa que não usa esse módulo.
+    setores: [],
+    filiais: [],
+    areas: [],
+    // versão Restaurantes/rede multiunidade (Fase 2 — Operação): vistoria guiada por área (gera
+    // uma O.S. por pendência) e pedido de apoio técnico entre setores (ver server.js).
+    vistorias: [],
+    vistoria_itens: [],
+    apoios: [],
+    // versão Restaurantes/rede multiunidade (Fase 3 — Peças): catálogo compartilhado entre
+    // filiais (empresa_id, não filial_id) e solicitação de peça com cadeia de autorização.
+    pecas_catalogo: [],
+    solicitacoes_peca: [],
+    // versão Restaurantes/rede multiunidade (Fase 4 — Compras): compra em atacado (consolidando
+    // solicitações de várias lojas pelo mesmo código), estoque central/por loja e transferência
+    // (central->loja ou entre filiais) — ver server.js.
+    pedidos_compra: [],
+    pedido_itens: [],
+    estoque_central: [],
+    estoque_loja: [],
+    transferencias: [],
+    // versão Restaurantes/rede multiunidade (Fase 5 — Gestão e comunicação): mural de avisos
+    // (setor_id null = geral) e chat por canal (geral/setor/filial) — separado de propósito do
+    // chat interno 1-pra-1 já existente (mensagens_internas), que fica intocado.
+    avisos: [],
+    mensagens_canal: [],
+    // rascunho de relatório/laudo técnico espelhado do localStorage, um por usuário+chave — dá
+    // pra recuperar o mesmo rascunho de qualquer aparelho logado com o mesmo usuário (ver
+    // sincronizarRascunhoServidor em app.js).
+    rascunhos: [],
+    // registro de atividades diárias (pedido do usuário, empresa JBPA) — cliente com contrato
+    // mensal, data + descrição do serviço + valor, pra gerar um PDF comparando o entregue com o
+    // valor do contrato.
+    atividades_diarias: [],
+    // pedido do usuário: Ordens de Serviço do perfil "Refrigeração e Climatização" (ver
+    // PERFIS_DISPONIVEIS acima) — menu novo, construído do zero, com seu próprio cadastro de
+    // clientes (os_refrigeracao_clientes) separado da coleção `clientes` genérica do sistema, já
+    // que os outros menus desse perfil (Orçamentos, Agenda, Clientes, PMOC, Financeiro) ainda vão
+    // ser construídos um a um e podem evoluir pra um modelo próprio diferente do núcleo.
+    os_refrigeracao_clientes: [],
+    os_refrigeracao: [],
+    // Orçamentos do mesmo perfil (atalho #3, ver os 6 atalhos do menu iClima) — reaproveita o
+    // cadastro de clientes de os_refrigeracao_clientes (mesma base), mas é coleção própria porque
+    // o fluxo é diferente: assinatura do técnico é opcional/posterior ("Assinar agora" na tela de
+    // detalhe, não obrigatória na criação) e o status vira Aprovado quando o CLIENTE assina pelo
+    // link público, não quando o técnico cria.
+    os_refrigeracao_orcamentos: [],
+    // Agenda do mesmo perfil (atalho #4) — uma config de disponibilidade POR TÉCNICO (dias de
+    // atendimento, horário, pausa, duração do atendimento, máx por dia, datas bloqueadas — ver
+    // POST/PUT /api/os-refrigeracao-agenda/config em server.js) e os agendamentos propriamente
+    // ditos, feitos manualmente pelo técnico/administrador dentro dos horários livres gerados a
+    // partir dessa config (ver gerarSlotsAgendaRefrigeracao). Diferente da O.S./Orçamento, não tem
+    // cadastro de cliente vinculado — o agendamento guarda nome/telefone/endereço direto (mesmo
+    // padrão do "Novo Agendamento Manual" do app de referência iClima).
+    os_refrigeracao_agenda_config: [],
+    os_refrigeracao_agendamentos: [],
+    // Pacote "Climatização / PMOC" (módulo `pmoc`, ver MODULOS_DISPONIVEIS acima) — Fase 1
+    // (Cadastro): local do cliente final (estabelecimento, 1 cliente pode ter vários — ver Lei
+    // 13.589/2018), ambientes de cada local, aparelhos de climatização de cada ambiente, e o
+    // responsável técnico (CREA/CFT) cadastrado pela empresa de Refrigeração. Pendurado em
+    // os_refrigeracao_clientes (não na coleção `clientes` núcleo), mesma base de cliente já usada
+    // por O.S./Orçamento/Agenda desse perfil.
+    os_refrigeracao_pmoc_locais: [],
+    os_refrigeracao_pmoc_ambientes: [],
+    os_refrigeracao_pmoc_aparelhos: [],
+    os_refrigeracao_pmoc_responsaveis_tecnicos: [],
+    // Fase 2 (Plano e preventivas): Modelo de Checklist (lista editável por empresa — nasce vazia
+    // e é populada com PMOC_CHECKLIST_PADRAO na primeira vez que a empresa acessa, ver
+    // GET /api/pmoc/modelo-checklist) e Plano PMOC (1 por local — status rascunho/ativo/vencido,
+    // com os itens de manutenção que esse local específico usa, que podem divergir do modelo da
+    // empresa depois de criado). As visitas de preventiva GERADAS a partir do plano não ganham
+    // coleção própria — entram em os_refrigeracao_agendamentos (a Agenda já construída no atalho
+    // #4), com tecnico_id null e status 'pendente_designacao' até o administrador designar um
+    // técnico (ver geração automática em server.js) — "entram na agenda geral sem técnico
+    // definido" (pedido do usuário), reaproveitando a mesma grade/cota por técnico que já existe.
+    os_refrigeracao_pmoc_modelo_checklist: [],
+    os_refrigeracao_pmoc_planos: [],
+    // Fase 4 (Documento PMOC e portal) — registro de análise da qualidade do ar POR LOCAL (item
+    // 1.6 do pedido do usuário): data, laboratório, laudo em PDF anexado, temperatura/umidade/CO2,
+    // observações. Pedido do usuário: "não codificar regras legais fixas" — não compara contra
+    // nenhum valor de referência fixo no código (RE nº 9/2003 da Anvisa), só registra.
+    os_refrigeracao_pmoc_qualidade_ar: [],
+    // Fase 5 (QR, alertas e painel) — config do pacote por empresa, hoje só o limiar (em meses)
+    // pra alertar qualidade do ar desatualizada (item 7 do pedido, "configurável"); 1 linha por
+    // empresa, criada sob demanda (ver garantirConfigPmoc em server.js, mesmo padrão lazy-seed do
+    // Modelo de Checklist).
+    os_refrigeracao_pmoc_config: [],
+    // Fase A (análise de concorrentes/conformidade legal) — controle de carga/recolhimento de
+    // gás refrigerante por aparelho: o Brasil aderiu ao Protocolo de Montreal (Decreto 99.280/1990)
+    // e o IBAMA exige cadastro no CTF e o recolhimento correto dos gases (liberar na atmosfera é
+    // crime ambiental, Lei 9.605/1998) — este registro é a base pra uma eventual prestação de
+    // contas e também serve de controle de estoque pra própria empresa de climatização.
+    os_refrigeracao_pmoc_gas_registros: [],
+    // Fase B (análise de concorrentes) — módulo financeiro: "o negócio de PMOC é tipicamente por
+    // contrato mensal" (iClima anuncia "controle financeiro"). Cada fatura nasce do valor_mensal/
+    // dia_vencimento configurados no Plano PMOC (ver gerarFaturasPmocPlano em server.js, mesmo
+    // padrão lazy/idempotente de gerarVisitasPmocPlano — 3 meses rolantes).
+    os_refrigeracao_pmoc_faturas: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
-    versoes: [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }],
+    // preco_mensal (SaaS, passo 3): só exibição por enquanto — sem gateway de pagamento nenhum
+    // integrado ainda (ver PUT /api/empresa/plano em server.js), igual plano_valor_mensal da
+    // empresa já era antes disso.
+    versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, os_refrigeracao_pmoc_locais: 1, os_refrigeracao_pmoc_ambientes: 1, os_refrigeracao_pmoc_aparelhos: 1, os_refrigeracao_pmoc_responsaveis_tecnicos: 1, os_refrigeracao_pmoc_modelo_checklist: 1, os_refrigeracao_pmoc_planos: 1, os_refrigeracao_pmoc_qualidade_ar: 1, os_refrigeracao_pmoc_config: 1, os_refrigeracao_pmoc_gas_registros: 1, os_refrigeracao_pmoc_faturas: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -127,6 +502,13 @@ function sincronizarEmpresaPadrao(data) {
   // logo própria (Etapa 5/passo 1) — guardada como referência de foto (ver extrairFotosProfundo),
   // null até a empresa subir uma; sem logo própria o front usa a logo padrão do sistema.
   if (empresa.logo_url === undefined) empresa.logo_url = null;
+  // pedido do usuário: "Devolva o logo da Promarking no relatório da empresa Promarking" — a
+  // empresa 1 É a PRO Marking de verdade (ver objeto literal acima). O rebranding da plataforma
+  // pra Nexor Connect trocou a logo PADRÃO do sistema (public/logo.png), mas a logo PRÓPRIA da PRO
+  // Marking (este campo) tinha ficado null, então os relatórios dela passaram a cair na logo nova
+  // da plataforma por engano. Só preenche se ainda estiver vazio — nunca sobrescreve um upload que
+  // o admin já tenha feito em "Minha Empresa" — roda em todo boot, idempotente.
+  if (empresa.id === 1 && !empresa.logo_url) empresa.logo_url = '/img/logo-pro-marking.png';
   // valores padrão que antes eram constante fixa no código (Etapa 5/passo 4) — toda empresa já
   // nasce com o mesmo valor de hoje, só editável a partir de agora pelo administrador/Super Admin.
   if (empresa.valor_bonus_viagem === undefined) empresa.valor_bonus_viagem = 200;
@@ -144,6 +526,19 @@ function sincronizarEmpresaPadrao(data) {
   // plano e cobrança (Etapa 7/passo 2) — só exibição, sem integração de pagamento nesta etapa.
   if (empresa.plano_valor_mensal === undefined) empresa.plano_valor_mensal = null;
   if (empresa.plano_dia_vencimento === undefined) empresa.plano_dia_vencimento = null;
+  // criado_em (SaaS, passo 1) — não existia antes do cadastro self-service; necessário pra medir
+  // o trial (passo 2). Quem já existia ganha a data de hoje no backfill — não afeta ninguém porque
+  // só habilita a contagem de trial daqui pra frente, e só empresa com status 'teste' é afetada
+  // pela validade (empresa 'ativa'/'suspensa' nunca checa isso).
+  if (empresa.criado_em === undefined) empresa.criado_em = new Date().toISOString();
+  // Perfil/Segmento (Etapa 8): null = sem perfil escolhido (comportamento de hoje, preservado pra
+  // quem já existia); tipos_os/relatorio_ativos null = "todos" (ver tiposOsAtivos/tiposRelatorioAtivos
+  // em server.js, nunca lê o campo bruto direto); escala_ativa true = Escala de Folga visível, igual hoje.
+  if (empresa.perfil === undefined) empresa.perfil = null;
+  if (empresa.segmento === undefined) empresa.segmento = null;
+  if (!Array.isArray(empresa.tipos_os_ativos)) empresa.tipos_os_ativos = null;
+  if (!Array.isArray(empresa.tipos_relatorio_ativos)) empresa.tipos_relatorio_ativos = null;
+  if (empresa.escala_ativa === undefined) empresa.escala_ativa = true;
   if (process.env.EMPRESA_NOME) empresa.nome = process.env.EMPRESA_NOME;
   if (process.env.EMPRESA_SITE) empresa.site = process.env.EMPRESA_SITE;
   if (process.env.EMPRESA_WHATSAPP) empresa.whatsapp = process.env.EMPRESA_WHATSAPP;
@@ -241,10 +636,54 @@ function migrar(data) {
   if (!data._seq.feriados) data._seq.feriados = 1;
   if (!data.escala_folgas) data.escala_folgas = [];
   if (!data._seq.escala_folgas) data._seq.escala_folgas = 1;
+  // justificativa de atividade não programada: pedido do usuário — num dia sem O.S./atendimento
+  // e sem folga marcada, o técnico diz o que fez (uma ou mais atividades com início/fim), pra dar
+  // ao administrador um relatório diário de ocupação por técnico (muito ou pouco serviço).
+  if (!data.atividades_nao_programadas) data.atividades_nao_programadas = [];
+  if (!data._seq.atividades_nao_programadas) data._seq.atividades_nao_programadas = 1;
   // prestação de contas (Etapa 6/passo 2 do plano white label) — despesas de viagem/campo que o
   // técnico lança pra aprovação do financeiro/administrador, além do bônus fixo por diária.
   if (!data.prestacoes_contas) data.prestacoes_contas = [];
   if (!data._seq.prestacoes_contas) data._seq.prestacoes_contas = 1;
+  // despesa justificada (pedido do usuário: "crie no menu técnico um menu justificar despesa") —
+  // comprovante único por lançamento, com leitura automática por IA ou preenchimento manual.
+  if (!data.despesas_justificadas) data.despesas_justificadas = [];
+  if (!data._seq.despesas_justificadas) data._seq.despesas_justificadas = 1;
+  // pedido do usuário: "coloque opção de colocar mais de um recibo no mesmo justificativa" — o
+  // campo vira array (fotos) em vez de string única (foto). Lançamentos antigos tinham no máximo
+  // uma foto só; migra pra um array de 1 item (ou vazio) e mantém idempotente daqui pra frente.
+  data.despesas_justificadas.forEach((d) => {
+    if (!Array.isArray(d.fotos)) d.fotos = d.foto ? [d.foto] : [];
+    delete d.foto;
+  });
+  // pedido do usuário: "o que for alimentação, coloque separado como subtotal... igual fatura de
+  // cartão de crédito" — cada lançamento ganha uma categoria ('alimentacao' ou 'outros') pra
+  // agrupar o subtotal na lista/PDF. Lançamentos antigos não tinham esse campo; como boa parte já
+  // registrava "alimentação" na própria descrição/estabelecimento (hábito que motivou o pedido),
+  // migra com esse mesmo texto como pista — o resto cai em 'outros', e dá pra corrigir editando.
+  data.despesas_justificadas.forEach((d) => {
+    if (d.categoria !== 'alimentacao' && d.categoria !== 'outros') {
+      const pista = `${d.estabelecimento || ''} ${d.descricao || ''}`.toLowerCase();
+      d.categoria = pista.includes('aliment') ? 'alimentacao' : 'outros';
+    }
+  });
+  // leads/contatos (CRM nativo, passo 1) — menu "Comercial" novo, substitui o esqueleto "CRM".
+  if (!data.leads) data.leads = [];
+  if (!data._seq.leads) data._seq.leads = 1;
+  // oportunidades (CRM nativo, passo 2) — funil comercial por estágio.
+  if (!data.oportunidades) data.oportunidades = [];
+  if (!data._seq.oportunidades) data._seq.oportunidades = 1;
+  // propostas/orçamentos (CRM nativo, passo 3).
+  if (!data.propostas) data.propostas = [];
+  if (!data._seq.propostas) data._seq.propostas = 1;
+  // criado_em entrou depois em oportunidades/propostas, pro Histórico Unificado (passo 4) poder
+  // ordenar por data — quem já existia sem o campo ganha a data da migração (não tem como saber a
+  // data real de criação retroativamente).
+  for (const o of data.oportunidades) { if (!o.criado_em) o.criado_em = new Date().toISOString(); }
+  for (const p of data.propostas) { if (!p.criado_em) p.criado_em = new Date().toISOString(); }
+  // pedido do usuário: "gerador de orçamento profissional" — condições (pagamento/entrega/
+  // garantia) entraram depois no PDF; quem já tinha orçamento sem o campo ganha string vazia.
+  for (const p of data.propostas) { if (p.observacoes === undefined) p.observacoes = ''; }
   // FMEA (RCM/SAP PM, Fase 1 passo 1) — catálogo em cascata, cadastrado pelo administrador,
   // ainda sem nenhuma O.S./laudo usando (fundação de dados só).
   if (!data.fmea_componentes) data.fmea_componentes = [];
@@ -257,12 +696,187 @@ function migrar(data) {
   if (!data._seq.fmea_efeitos) data._seq.fmea_efeitos = 1;
   // multiempresa: bancos anteriores ao conceito de "versão" (pacote de módulos) ganham a versão
   // Manutenção, que é o que o sistema sempre ofereceu até agora.
-  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', modulos: MODULOS_VERSAO_MANUTENCAO }];
+  if (!data.versoes) data.versoes = [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }];
   if (!data._seq.versoes) data._seq.versoes = 2;
+  // preco_mensal (SaaS, passo 3) — não existia antes; só exibição, sem gateway de pagamento.
+  for (const v of data.versoes) { if (v.preco_mensal === undefined) v.preco_mensal = null; }
+  // categorias de plano em cascata (pedido do usuário) — versão sem "ordem" ainda é a única que
+  // existia antes dessa feature (nunca houve mais de uma na prática); ganha ordem 1 e
+  // modulos_proprios = o próprio modulos que ela já tinha, pra não perder nada no recálculo
+  // abaixo.
+  let precisaRecalcularVersoes = false;
+  data.versoes.forEach((v, indice) => {
+    if (v.ordem === undefined) { v.ordem = indice + 1; precisaRecalcularVersoes = true; }
+    if (!Array.isArray(v.modulos_proprios)) { v.modulos_proprios = Array.isArray(v.modulos) ? [...v.modulos] : []; precisaRecalcularVersoes = true; }
+  });
+  if (precisaRecalcularVersoes) recalcularModulosVersoes(data);
+  // pedido do usuário: "crie automático planos com as suas funções inclusas... crie o nome dos
+  // planos também" — até aqui só existia a versão "Manutenção" (os 3 módulos que o sistema sempre
+  // ofereceu), sem nenhum plano de nível maior. Cria duas categorias a mais, UMA VEZ só (flag
+  // abaixo), acima dela na cascata: "Profissional" (ordem 2) acrescenta o lado comercial/agenda,
+  // "Completo" (ordem 3) acrescenta financeiro e o Assistente IA — fechando com os 8 módulos do
+  // catálogo inteiro liberados. Continua tudo editável depois (nome, ordem, módulos, preço) na
+  // tela Planos do Super Admin; a flag só evita recriar se o Super Admin apagar ou renomear.
+  if (!data._migracaoPlanosPadraoV1) {
+    const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
+    data.versoes.push(
+      { id: nextId(data, 'versoes'), nome: 'Profissional', ordem: maiorOrdemAtual + 1, modulos_proprios: ['comercial', 'prestacao_contas', 'agendamento'], modulos: [], preco_mensal: null },
+      { id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 2, modulos_proprios: ['financeiro', 'assistente_ia', 'filiais'], modulos: [], preco_mensal: null },
+    );
+    recalcularModulosVersoes(data);
+    data._migracaoPlanosPadraoV1 = true;
+  }
+  // pedido do usuário: "nosso sistema deve ser do mais simples ao completo: orçamento é a base,
+  // depois relatório... o plano básico precisa ser criar orçamento e relatório, intermediário
+  // inclui o.s. etc" — a V1 acima não tinha esse chão (começava já em "Manutenção", que exige
+  // O.S. completo). V2 corrige em cima do que já existir (seja V1 recém-criada ou já rodada em
+  // produção antes deste pedido): cria/realinha "Autônomo" (ordem 1: comercial+relatórios, sem
+  // O.S.), empurra "Manutenção" pra ordem 2 (ela acrescenta o O.S. completo) e funde o que o
+  // "Profissional" acrescentava (prestação de contas, agendamento) dentro do "Completo" (ordem 3,
+  // junto do novo módulo de equipe/escala) — "Profissional" deixa de existir como categoria
+  // própria, porque sua combinação não corresponde a nenhum estágio da jornada descrita. Roda
+  // uma vez só (flag); segue tudo editável depois pelo Super Admin.
+  if (!data._migracaoPlanosPadraoV2) {
+    // pedido do usuário (empresa JBPA): "coloque [Registro de Atividades] no plano básico" — entra
+    // já no chão da cascata (ordem 1), junto do orçamento/relatório, pra TODO plano acima dele
+    // herdar automaticamente (recalcularModulosVersoes é cumulativo por ordem).
+    let autonomo = data.versoes.find((v) => v.nome === 'Autônomo');
+    if (!autonomo) {
+      autonomo = { id: nextId(data, 'versoes'), nome: 'Autônomo', ordem: 1, modulos_proprios: ['comercial', 'relatorios', 'atividades'], modulos: [], preco_mensal: null };
+      data.versoes.push(autonomo);
+    } else {
+      autonomo.ordem = 1;
+      autonomo.modulos_proprios = ['comercial', 'relatorios', 'atividades'];
+    }
+    const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
+    if (manutencao) manutencao.ordem = 2;
+    const completo = data.versoes.find((v) => v.nome === 'Completo');
+    if (completo) {
+      completo.ordem = 3;
+      completo.modulos_proprios = [...new Set([...(Array.isArray(completo.modulos_proprios) ? completo.modulos_proprios : []), 'equipe_avancado', 'prestacao_contas', 'agendamento'])];
+    }
+    const profissional = data.versoes.find((v) => v.nome === 'Profissional');
+    if (profissional) {
+      if (completo) {
+        for (const e of data.empresas) { if (e.versao_id === profissional.id) e.versao_id = completo.id; }
+      }
+      data.versoes = data.versoes.filter((v) => v.id !== profissional.id);
+    }
+    recalcularModulosVersoes(data);
+    data._migracaoPlanosPadraoV2 = true;
+  }
+  // pedido do usuário: "não é plano autônomo é plano básico. Intermediário. Profissional e
+  // completo" — renomeia os 3 planos da V2 pros 4 nomes corretos, dividindo o antigo "Completo"
+  // (que acumulava equipe/escala JUNTO com financeiro/prestação de contas/agendamento) em dois
+  // estágios: "Profissional" (ordem 3, só acrescenta equipe/escala — "quando a equipe aumenta")
+  // e um "Completo" novo (ordem 4, acrescenta o resto — financeiro, prestação de contas,
+  // agendamento, assistente IA), fechando com o catálogo inteiro liberado nele. Acha os planos
+  // pelos nomes que a V2 já deixou (funciona tanto numa migração nova quanto numa já rodada em
+  // produção antes deste pedido); se o Super Admin já tiver apagado/renomeado algum, só pula.
+  if (!data._migracaoPlanosPadraoV3) {
+    const autonomo = data.versoes.find((v) => v.nome === 'Autônomo');
+    if (autonomo) autonomo.nome = 'Básico';
+    const manutencao = data.versoes.find((v) => v.nome === 'Manutenção');
+    if (manutencao) manutencao.nome = 'Intermediário';
+    const completoAntigo = data.versoes.find((v) => v.nome === 'Completo');
+    if (completoAntigo) {
+      completoAntigo.nome = 'Profissional';
+      const proprios = Array.isArray(completoAntigo.modulos_proprios) ? completoAntigo.modulos_proprios : [];
+      const restante = proprios.filter((m) => m !== 'equipe_avancado');
+      completoAntigo.modulos_proprios = proprios.filter((m) => m === 'equipe_avancado');
+      const maiorOrdemAtual = data.versoes.reduce((max, v) => Math.max(max, v.ordem || 0), 0);
+      data.versoes.push({
+        id: nextId(data, 'versoes'), nome: 'Completo', ordem: maiorOrdemAtual + 1,
+        modulos_proprios: restante.length ? restante : ['prestacao_contas', 'financeiro', 'assistente_ia', 'agendamento', 'filiais'],
+        modulos: [], preco_mensal: null,
+      });
+    }
+    recalcularModulosVersoes(data);
+    data._migracaoPlanosPadraoV3 = true;
+  }
   // empresa 1 (a dona da instalação) é sempre carimbada direto, nunca via nextId — o contador só
   // precisa existir a partir da 2ª empresa, que o painel da plataforma cria.
   if (!data._seq.empresas) data._seq.empresas = 2;
   sincronizarEmpresaPadrao(data);
+  // divisão do módulo "os_chamados" em 3 (pedido do usuário, ver MODULOS_DISPONIVEIS acima): quem
+  // já tinha "os_chamados" ativo hoje (toda empresa migrada até aqui) precisa continuar com
+  // acesso a tudo que já usava — Relatório/Equipamentos/Assistente IA (agora "relatorios") e
+  // Equipe/Escala/RH/KPIs/FMEA (agora "equipe_avancado") estavam dentro dele. Backfill uma vez
+  // só; dali em diante os 3 módulos passam a ser controlados de forma independente pelo Super
+  // Admin/plano de cada empresa. Roda DEPOIS de sincronizarEmpresaPadrao (acima), que é quem dá a
+  // empresa 1 o modulos_ativos inicial — senão, no primeiro boot, essa empresa ainda não teria
+  // "os_chamados" no momento desta checagem e ficaria de fora do backfill.
+  if (!data._migracaoSplitOsChamadosV1) {
+    for (const e of data.empresas) {
+      if (Array.isArray(e.modulos_ativos) && e.modulos_ativos.includes('os_chamados')) {
+        e.modulos_ativos = [...new Set([...e.modulos_ativos, 'relatorios', 'equipe_avancado'])];
+      }
+    }
+    data._migracaoSplitOsChamadosV1 = true;
+  }
+  // bug real pós-deploy (versão Restaurantes/rede multiunidade): qualquer instalação que já tinha
+  // rodado as migrações de plano acima ANTES de um módulo novo existir no código fica com a flag
+  // (_migracaoPlanosPadraoV1/V2/V3) já marcada true pra sempre — os blocos acima nunca rodam de
+  // novo, então nenhum plano dessa instalação ganha o módulo em modulos_proprios sozinho. E mesmo
+  // que o Super Admin edite o plano depois (Painel da Plataforma > Planos) pra adicionar o módulo,
+  // isso só atualiza versao.modulos — quem já tinha ESCOLHIDO aquele plano fica com
+  // empresa.modulos_ativos congelado no retrato antigo (só PUT /api/meu-plano, a própria empresa
+  // "trocando de plano" de novo, recalcula a partir de versao.modulos). Resultado: empresa continua
+  // marcada no mesmo plano de sempre, mas nunca ganha o menu novo. Os dois helpers abaixo resolvem
+  // isso achando o plano certo (nunca pelo nome, que o Super Admin pode ter mudado, e que um
+  // fixture de teste qualquer pode coincidir de ter) e, uma vez só, dando o módulo de volta a ele
+  // e a toda empresa que já estava num plano afetado — sem precisar reconfigurar nada manualmente.
+  //
+  // variante 1: módulo que entrou só no topo da cascata (plano "libera tudo") — acha o(s) plano(s)
+  // que já liberam TODO o resto do catálogo, a marca inequívoca de "era o plano completo, só
+  // faltou um módulo que não existia ainda".
+  function desbloquearModuloNosPlanosCompletos(chaveModulo) {
+    const outrosModulos = CHAVES_MODULOS_CASCATA_PADRAO.filter((chave) => chave !== chaveModulo);
+    for (const versao of data.versoes) {
+      const jaLiberaTudoMenosEsse = Array.isArray(versao.modulos) && outrosModulos.every((chave) => versao.modulos.includes(chave));
+      if (!jaLiberaTudoMenosEsse) continue;
+      const proprios = Array.isArray(versao.modulos_proprios) ? versao.modulos_proprios : [];
+      if (!proprios.includes(chaveModulo)) versao.modulos_proprios = [...proprios, chaveModulo];
+    }
+    recalcularModulosVersoes(data);
+    propagarModuloParaEmpresas(chaveModulo);
+  }
+  // variante 2: módulo que entrou no CHÃO da cascata (plano de ordem mais baixa) — sobe sozinho
+  // pra todo plano acima dele (recalcularModulosVersoes é cumulativo por ordem), então basta dar
+  // o módulo ao plano de ordem mais baixa pra TODA empresa, em qualquer plano, ganhar.
+  function desbloquearModuloNoChaoDaCascata(chaveModulo) {
+    const maisBaixo = data.versoes.reduce((menor, v) => (!menor || (v.ordem || 0) < (menor.ordem || 0)) ? v : menor, null);
+    if (maisBaixo) {
+      const proprios = Array.isArray(maisBaixo.modulos_proprios) ? maisBaixo.modulos_proprios : [];
+      if (!proprios.includes(chaveModulo)) maisBaixo.modulos_proprios = [...proprios, chaveModulo];
+    }
+    recalcularModulosVersoes(data);
+    propagarModuloParaEmpresas(chaveModulo);
+  }
+  function propagarModuloParaEmpresas(chaveModulo) {
+    for (const empresa of data.empresas) {
+      const versao = data.versoes.find((v) => v.id === empresa.versao_id);
+      if (versao && Array.isArray(versao.modulos) && versao.modulos.includes(chaveModulo)
+        && Array.isArray(empresa.modulos_ativos) && !empresa.modulos_ativos.includes(chaveModulo)) {
+        empresa.modulos_ativos = [...empresa.modulos_ativos, chaveModulo];
+      }
+    }
+  }
+  if (!data._migracaoFiliaisDesbloqueioEmpresasV1) {
+    desbloquearModuloNosPlanosCompletos('filiais');
+    data._migracaoFiliaisDesbloqueioEmpresasV1 = true;
+  }
+  if (!data._migracaoAtividadesDesbloqueioEmpresasV1) {
+    desbloquearModuloNosPlanosCompletos('atividades');
+    data._migracaoAtividadesDesbloqueioEmpresasV1 = true;
+  }
+  // pedido do usuário (empresa JBPA): "coloque [Registro de Atividades] no plano básico" — desce
+  // a entrada do módulo pro chão da cascata, que sobe automaticamente pra todo plano acima
+  // (inclusive onde a variante 1 acima já tinha colocado, sem conflito — idempotente).
+  if (!data._migracaoAtividadesNoBasicoV1) {
+    desbloquearModuloNoChaoDaCascata('atividades');
+    data._migracaoAtividadesNoBasicoV1 = true;
+  }
   // bancos anteriores ao empresa_id (preparação pra multi-tenant) ganham empresa_id 1 — hoje só
   // existe essa empresa mesmo, então todo registro já criado pertence a ela.
   for (const lista of [data.usuarios, data.clientes, data.equipamentos, data.agenda, data.visitas, data.registros, data.chamados, data.relatorios_manutencao, data.solicitacoes_rh, data.mensagens_internas, data.feriados, data.escala_folgas]) {
@@ -384,6 +998,14 @@ function migrar(data) {
       a.orcamento_aprovado_em = (temPecas && jaAprovado) ? (a.feedback_cliente_em || a.criado_em || new Date().toISOString()) : null;
     }
     if (a.orcamento_reprovado_em === undefined) a.orcamento_reprovado_em = null;
+    if (a.concluida_em === undefined) {
+      // O.S. que já estavam com status "concluida" antes desse campo existir — usa o envio do
+      // relatório (visita) como estimativa de quando isso aconteceu, pra entrar no corte de 24h
+      // do lembrete de "Iniciar retorno" (ver verificarLembretesRecorrentes em server.js) em vez
+      // de ficar sem referência nenhuma e notificar pra sempre.
+      const visitaDoItem = data.visitas.find((v) => v.agenda_id === a.id);
+      a.concluida_em = a.status === 'concluida' ? (visitaDoItem ? (visitaDoItem.atualizado_em || visitaDoItem.criado_em) : a.criado_em) || new Date().toISOString() : null;
+    }
     // fluxo de pós-venda/reparo (só usado em O.S. tipo "atendimento", nascidas de um chamado do
     // chat) — ver server.js, seção "pós-venda / setor reparo"
     if (a.fase_atendimento === undefined) a.fase_atendimento = null;
@@ -545,6 +1167,27 @@ function migrar(data) {
   // ficha cadastral (menu Equipe > Cadastros): foto de perfil opcional — sem ela, o front mostra
   // uma silhueta padrão, então aqui só garante que o campo exista (string vazia) em vez de undefined.
   data.usuarios.forEach((u) => { if (u.foto_perfil === undefined) u.foto_perfil = ''; });
+  // menu Agendamentos (pedido do usuário: "como conectar minha agenda do outlook, quero criar um
+  // menu agendamentos, e puxar tudo que tem na agenda do outlook") — cada técnico/administrador
+  // conecta a própria conta Microsoft (OAuth2, ver outlook.js); só guarda o refresh_token (nunca o
+  // access_token, de vida curta) e o e-mail conectado, pra mostrar "conectado como fulano@...".
+  data.usuarios.forEach((u) => {
+    if (u.outlook_conectado === undefined) u.outlook_conectado = false;
+    if (u.outlook_email === undefined) u.outlook_email = null;
+    if (u.outlook_refresh_token === undefined) u.outlook_refresh_token = null;
+  });
+  // pedido do usuário: "a conta do e-mail já é logada no notebook, não tenho a senha... fiz um
+  // e-mail em cópia... pode usar o e-mail em cópia" — alternativa ao login Microsoft acima pra
+  // quem não tem a senha da própria conta: conecta (usuário+senha comuns, via IMAP) numa caixa
+  // diferente que já recebe cópia dos convites (ver agenda-email.js). A senha de app fica
+  // cifrada (auth.cifrar), nunca em texto puro no banco.
+  data.usuarios.forEach((u) => {
+    if (u.agenda_email_conectado === undefined) u.agenda_email_conectado = false;
+    if (u.agenda_email_endereco === undefined) u.agenda_email_endereco = null;
+    if (u.agenda_email_senha_cifrada === undefined) u.agenda_email_senha_cifrada = null;
+    if (u.agenda_email_host === undefined) u.agenda_email_host = null;
+    if (u.agenda_email_porta === undefined) u.agenda_email_porta = null;
+  });
   // ficha cadastral ampliada: certificados (arquivo + validade), integrações com empresas-cliente
   // (acesso/credencial pra atuar nelas, com validade) e competências (nível de conhecimento num
   // tipo de equipamento) — cada uma é uma coleção própria, um registro por item, presa ao técnico
@@ -555,6 +1198,148 @@ function migrar(data) {
   if (!data._seq.integracoes_colaborador) data._seq.integracoes_colaborador = 1;
   if (!data.competencias_colaborador) data.competencias_colaborador = [];
   if (!data._seq.competencias_colaborador) data._seq.competencias_colaborador = 1;
+  // versão "Restaurantes"/rede multiunidade (Fase 1 — Base, pedido do usuário) — hierarquia nova
+  // setores/filiais/áreas (ver seed()) e campos novos em equipamentos/usuários pra ela. Tudo
+  // opcional/null por padrão: nenhuma empresa que não usa o módulo "filiais" é afetada.
+  if (!Array.isArray(data.setores)) data.setores = [];
+  if (!Array.isArray(data.filiais)) data.filiais = [];
+  if (!Array.isArray(data.areas)) data.areas = [];
+  if (!data._seq.setores) data._seq.setores = 1;
+  if (!data._seq.filiais) data._seq.filiais = 1;
+  if (!data._seq.areas) data._seq.areas = 1;
+  // Fase 2 — Operação: vistoria e apoio entre setores (mesma ideia aditiva da Fase 1 acima).
+  if (!Array.isArray(data.vistorias)) data.vistorias = [];
+  if (!Array.isArray(data.vistoria_itens)) data.vistoria_itens = [];
+  if (!Array.isArray(data.apoios)) data.apoios = [];
+  if (!data._seq.vistorias) data._seq.vistorias = 1;
+  if (!data._seq.vistoria_itens) data._seq.vistoria_itens = 1;
+  if (!data._seq.apoios) data._seq.apoios = 1;
+  // Fase 3 — Peças: catálogo compartilhado + solicitação de peça com cadeia de autorização.
+  if (!Array.isArray(data.pecas_catalogo)) data.pecas_catalogo = [];
+  if (!Array.isArray(data.solicitacoes_peca)) data.solicitacoes_peca = [];
+  if (!data._seq.pecas_catalogo) data._seq.pecas_catalogo = 1;
+  if (!data._seq.solicitacoes_peca) data._seq.solicitacoes_peca = 1;
+  // Fase 4 — Compras: pedido em atacado, estoque central/por loja e transferências.
+  if (!Array.isArray(data.pedidos_compra)) data.pedidos_compra = [];
+  if (!Array.isArray(data.pedido_itens)) data.pedido_itens = [];
+  if (!Array.isArray(data.estoque_central)) data.estoque_central = [];
+  if (!Array.isArray(data.estoque_loja)) data.estoque_loja = [];
+  if (!Array.isArray(data.transferencias)) data.transferencias = [];
+  if (!data._seq.pedidos_compra) data._seq.pedidos_compra = 1;
+  if (!data._seq.pedido_itens) data._seq.pedido_itens = 1;
+  if (!data._seq.estoque_central) data._seq.estoque_central = 1;
+  if (!data._seq.estoque_loja) data._seq.estoque_loja = 1;
+  if (!data._seq.transferencias) data._seq.transferencias = 1;
+  // Fase 5 — Gestão e comunicação: mural de avisos e chat por canal.
+  if (!Array.isArray(data.avisos)) data.avisos = [];
+  if (!Array.isArray(data.mensagens_canal)) data.mensagens_canal = [];
+  if (!data._seq.avisos) data._seq.avisos = 1;
+  if (!data._seq.mensagens_canal) data._seq.mensagens_canal = 1;
+  // pedido do usuário: rascunho de relatório/laudo técnico salvo só no localStorage do aparelho
+  // não aparecia em outro dispositivo (ex.: começou no celular, quis continuar no PC) — este
+  // "espelho" no servidor, um por usuário+chave (a mesma chave que já identifica o rascunho no
+  // localStorage, ver chaveRascunho*/chaveRascunhoManual em app.js), deixa qualquer rascunho
+  // recuperável de qualquer aparelho logado com o mesmo usuário. O localStorage continua sendo a
+  // fonte instantânea (zero espera, funciona offline); o servidor só entra pra sincronizar entre
+  // aparelhos (ver sincronizarRascunhoServidor em app.js).
+  if (!Array.isArray(data.rascunhos)) data.rascunhos = [];
+  if (!data._seq.rascunhos) data._seq.rascunhos = 1;
+  // pedido do usuário (empresa JBPA): registro de atividades diárias pra cliente com contrato
+  // mensal — data + descrição do serviço + valor, pra depois gerar um PDF mostrando o que foi
+  // entregue no período (ver POST/GET /api/atividades-diarias em server.js).
+  if (!Array.isArray(data.atividades_diarias)) data.atividades_diarias = [];
+  if (!data._seq.atividades_diarias) data._seq.atividades_diarias = 1;
+  // pedido do usuário: Ordens de Serviço do perfil "Refrigeração e Climatização" — menu do zero,
+  // com cadastro de clientes próprio (ver comentário acima em os_refrigeracao_clientes).
+  if (!Array.isArray(data.os_refrigeracao_clientes)) data.os_refrigeracao_clientes = [];
+  if (!data._seq.os_refrigeracao_clientes) data._seq.os_refrigeracao_clientes = 1;
+  if (!Array.isArray(data.os_refrigeracao)) data.os_refrigeracao = [];
+  if (!data._seq.os_refrigeracao) data._seq.os_refrigeracao = 1;
+  // pedido do usuário: status da O.S. (Concluída/Pendente/Cancelada, ver menu "⋮" no detalhe —
+  // PUT /api/os-refrigeracao/:id/status em server.js) — toda O.S. já nascia "Concluída" até aqui
+  // (implícito, sem campo), então o backfill é só pra não deixar undefined numa O.S. criada antes
+  // deste campo existir.
+  for (const o of data.os_refrigeracao) { if (o.status === undefined) o.status = 'concluida'; }
+  // Orçamentos do mesmo perfil (atalho #3) — reaproveita os_refrigeracao_clientes, coleção
+  // própria porque o status nasce "rascunho" (nunca "concluida" como a O.S.) e só vira "aprovado"
+  // quando o CLIENTE assina pelo link público (ver PUT status e rota pública em server.js).
+  if (!Array.isArray(data.os_refrigeracao_orcamentos)) data.os_refrigeracao_orcamentos = [];
+  if (!data._seq.os_refrigeracao_orcamentos) data._seq.os_refrigeracao_orcamentos = 1;
+  for (const o of data.os_refrigeracao_orcamentos) { if (o.status === undefined) o.status = 'rascunho'; }
+  // Agenda do mesmo perfil (atalho #4) — config de disponibilidade por técnico + agendamentos.
+  if (!Array.isArray(data.os_refrigeracao_agenda_config)) data.os_refrigeracao_agenda_config = [];
+  if (!data._seq.os_refrigeracao_agenda_config) data._seq.os_refrigeracao_agenda_config = 1;
+  if (!Array.isArray(data.os_refrigeracao_agendamentos)) data.os_refrigeracao_agendamentos = [];
+  if (!data._seq.os_refrigeracao_agendamentos) data._seq.os_refrigeracao_agendamentos = 1;
+  for (const a of data.os_refrigeracao_agendamentos) { if (a.status === undefined) a.status = 'agendado'; }
+  // Pacote "Climatização / PMOC" (módulo `pmoc`, ver comentário acima em MODULOS_DISPONIVEIS) —
+  // Fase 1 (Cadastro): local → ambiente → aparelho, mais o responsável técnico.
+  if (!Array.isArray(data.os_refrigeracao_pmoc_locais)) data.os_refrigeracao_pmoc_locais = [];
+  if (!data._seq.os_refrigeracao_pmoc_locais) data._seq.os_refrigeracao_pmoc_locais = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_ambientes)) data.os_refrigeracao_pmoc_ambientes = [];
+  if (!data._seq.os_refrigeracao_pmoc_ambientes) data._seq.os_refrigeracao_pmoc_ambientes = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_aparelhos)) data.os_refrigeracao_pmoc_aparelhos = [];
+  if (!data._seq.os_refrigeracao_pmoc_aparelhos) data._seq.os_refrigeracao_pmoc_aparelhos = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_responsaveis_tecnicos)) data.os_refrigeracao_pmoc_responsaveis_tecnicos = [];
+  if (!data._seq.os_refrigeracao_pmoc_responsaveis_tecnicos) data._seq.os_refrigeracao_pmoc_responsaveis_tecnicos = 1;
+  // Fase 2 (Plano e preventivas) — Modelo de Checklist (por empresa) e Plano PMOC (por local).
+  // Fase 4 (Documento PMOC e portal) — portal do cliente final: paralelo ao `cliente_id` núcleo,
+  // um usuário papel "cliente" pode apontar pra um registro de os_refrigeracao_clientes (perfil
+  // Refrigeração) em vez de `clientes` — ver POST /api/login e rotas /api/pmoc/portal/* em server.js.
+  for (const u of data.usuarios) { if (u.os_refrigeracao_cliente_id === undefined) u.os_refrigeracao_cliente_id = null; }
+  if (!Array.isArray(data.os_refrigeracao_pmoc_modelo_checklist)) data.os_refrigeracao_pmoc_modelo_checklist = [];
+  if (!data._seq.os_refrigeracao_pmoc_modelo_checklist) data._seq.os_refrigeracao_pmoc_modelo_checklist = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_planos)) data.os_refrigeracao_pmoc_planos = [];
+  if (!data._seq.os_refrigeracao_pmoc_planos) data._seq.os_refrigeracao_pmoc_planos = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_qualidade_ar)) data.os_refrigeracao_pmoc_qualidade_ar = [];
+  if (!data._seq.os_refrigeracao_pmoc_qualidade_ar) data._seq.os_refrigeracao_pmoc_qualidade_ar = 1;
+  // Fase 5 (QR, alertas e painel). Campos novos de alerta (dedup de e-mail, validade da ART/TRT)
+  // ficam ausentes em registros antigos de propósito — tratados como "nunca avisado"/"sem
+  // validade definida" em qualquer leitura (`|| null`), então não precisam de backfill aqui.
+  if (!Array.isArray(data.os_refrigeracao_pmoc_config)) data.os_refrigeracao_pmoc_config = [];
+  if (!data._seq.os_refrigeracao_pmoc_config) data._seq.os_refrigeracao_pmoc_config = 1;
+  // Fase A — controle de gás refrigerante (Protocolo de Montreal/IBAMA, ver seed() acima).
+  if (!Array.isArray(data.os_refrigeracao_pmoc_gas_registros)) data.os_refrigeracao_pmoc_gas_registros = [];
+  if (!data._seq.os_refrigeracao_pmoc_gas_registros) data._seq.os_refrigeracao_pmoc_gas_registros = 1;
+  // Fase B — faturamento (contrato recorrente do Plano PMOC, ver seed() acima).
+  if (!Array.isArray(data.os_refrigeracao_pmoc_faturas)) data.os_refrigeracao_pmoc_faturas = [];
+  if (!data._seq.os_refrigeracao_pmoc_faturas) data._seq.os_refrigeracao_pmoc_faturas = 1;
+  // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
+  // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
+  for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }
+  // pedido do usuário (referência: app concorrente iClima) — onboarding do administrador do
+  // perfil "Refrigeração e Climatização" (especialidades, anos de experiência, foto de perfil,
+  // termos de uso — ver POST /api/me/onboarding-refrigeracao em server.js). `termos_aceitos_em`
+  // null/ausente = onboarding pendente (ver onboardingRefrigeracaoPendente em app.js, roda de novo
+  // a cada login até ser preenchido). PRECISA ser com flag (só roda uma vez) — um backfill sem
+  // flag rodaria de novo em TODO load() futuro, inclusive pra usuário novo criado depois (cujo
+  // termos_aceitos_em nasce ausente de propósito, pra ficar pendente) — marcaria ele como "já
+  // concluído" sozinho antes de ele nunca ter visto o assistente. Com flag, só quem já existia no
+  // momento desta migração (nunca deve ver o assistente aparecer do nada) é marcado como concluído.
+  if (!data._migracaoOnboardingRefrigeracaoV1) {
+    for (const u of data.usuarios) {
+      if (u.especialidades === undefined) u.especialidades = [];
+      if (u.anos_experiencia === undefined) u.anos_experiencia = null;
+      if (u.termos_aceitos_em === undefined) u.termos_aceitos_em = u.criado_em || new Date().toISOString();
+    }
+    data._migracaoOnboardingRefrigeracaoV1 = true;
+  }
+  if (!data._migracaoFiliaisV1) {
+    for (const e of data.equipamentos) {
+      if (e.filial_id === undefined) e.filial_id = null;
+      if (e.area_id === undefined) e.area_id = null;
+      if (e.qr_token === undefined) e.qr_token = null;
+      if (e.codigo_interno === undefined) e.codigo_interno = null;
+      if (e.status_operacional === undefined) e.status_operacional = 'operando';
+      if (e.garantia_ate === undefined) e.garantia_ate = null;
+      if (e.fornecedor_assistencia === undefined) e.fornecedor_assistencia = null;
+    }
+    for (const u of data.usuarios) {
+      if (u.filial_id === undefined) u.filial_id = null;
+      if (u.setor_id === undefined) u.setor_id = null;
+    }
+    data._migracaoFiliaisV1 = true;
+  }
   protegerAdminMaster(data);
   return data;
 }
@@ -577,9 +1362,20 @@ function carregarDoArquivo() {
   // senão a próxima leitura parte do arquivo original de novo e desfaz uma escolha real feita
   // depois (ver _migracaoContratoNaoInformadoV1 em migrar()).
   const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
+  const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
+  const tinhaFlagPlanosPadraoV2 = !!bruto._migracaoPlanosPadraoV2;
+  const tinhaFlagPlanosPadraoV3 = !!bruto._migracaoPlanosPadraoV3;
+  const tinhaFlagSplitOsChamados = !!bruto._migracaoSplitOsChamadosV1;
   const data = migrar(bruto);
   const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-  if (criouAlguem || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)) salvarNoArquivo(data);
+  if (
+    criouAlguem
+    || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)
+    || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)
+    || (!tinhaFlagPlanosPadraoV2 && data._migracaoPlanosPadraoV2)
+    || (!tinhaFlagPlanosPadraoV3 && data._migracaoPlanosPadraoV3)
+    || (!tinhaFlagSplitOsChamados && data._migracaoSplitOsChamadosV1)
+  ) salvarNoArquivo(data);
   return data;
 }
 
@@ -676,9 +1472,26 @@ async function inicializarPostgres() {
     await p.query('INSERT INTO app_state (id, data) VALUES (1, $1)', [JSON.stringify(data)]);
     cache = data;
   } else {
-    const data = migrar(r.rows[0].data);
+    const bruto = r.rows[0].data;
+    // modo Postgres cacheia em memória depois desse boot (variável `cache` abaixo), então uma
+    // migração que só roda UMA VEZ (flag) só fica de pé se for persistida já aqui — senão o
+    // próximo restart do processo lê o registro antigo de novo do Postgres e repete a migração
+    // (no caso dos planos automáticos abaixo, duplicando os planos a cada reinício).
+    const tinhaFlagContrato = !!bruto._migracaoContratoNaoInformadoV1;
+    const tinhaFlagPlanosPadrao = !!bruto._migracaoPlanosPadraoV1;
+    const tinhaFlagPlanosPadraoV2 = !!bruto._migracaoPlanosPadraoV2;
+    const tinhaFlagPlanosPadraoV3 = !!bruto._migracaoPlanosPadraoV3;
+    const tinhaFlagSplitOsChamados = !!bruto._migracaoSplitOsChamadosV1;
+    const data = migrar(bruto);
     const criouAlguem = bootstrapAdminMaster(data) | bootstrapSuperAdmin(data);
-    if (criouAlguem) {
+    if (
+      criouAlguem
+      || (!tinhaFlagContrato && data._migracaoContratoNaoInformadoV1)
+      || (!tinhaFlagPlanosPadrao && data._migracaoPlanosPadraoV1)
+      || (!tinhaFlagPlanosPadraoV2 && data._migracaoPlanosPadraoV2)
+      || (!tinhaFlagPlanosPadraoV3 && data._migracaoPlanosPadraoV3)
+      || (!tinhaFlagSplitOsChamados && data._migracaoSplitOsChamadosV1)
+    ) {
       await p.query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)]);
     }
     cache = data;
@@ -990,6 +1803,9 @@ module.exports = {
   supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga, empresaIdDaFoto,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
-  MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar,
+  MODULOS_DISPONIVEIS, CHAVES_MODULOS, CHAVES_MODULOS_CASCATA_PADRAO, moduloAtivo, migrar, recalcularModulosVersoes,
+  PMOC_PERIODICIDADES, CHAVES_PMOC_PERIODICIDADES, PMOC_CHECKLIST_PADRAO,
+  PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento, PRESETS_PERFIL_SEGMENTO,
+  gerarQrToken,
   obterPool, COLECOES_EM_TABELA,
 };

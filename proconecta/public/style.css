@@ -31,7 +31,14 @@
   --pink:#B23A6B;
 }
 *{box-sizing:border-box;}
-body{margin:0;font-family:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--blue-pale-2);color:var(--ink);}
+/* pedido do usuário: "estou abrindo pelo app, mas o canto direito tem espaço em branco" — em
+   alguns WebViews (apps que embrulham o site, PWA instalado etc.) o viewport de layout relatado
+   pode ficar levemente maior que a área realmente visível, deixando uma sobra horizontal em
+   branco na ponta direita em vez de a página esticar de borda a borda. html/body travados em
+   100% da largura visível + sem scroll horizontal eliminam essa sobra, sem mudar nada do layout
+   em uso normal (nenhuma tela do sistema depende de rolagem lateral da página).*/
+html{width:100%;overflow-x:hidden;}
+body{width:100%;overflow-x:hidden;margin:0;font-family:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--blue-pale-2);color:var(--ink);}
 ::selection{background:var(--blue-bright);color:#fff;}
 .hidden{display:none !important;}
 
@@ -43,11 +50,12 @@ header{
   display:flex;
   align-items:center;
   justify-content:space-between;
+  width:100%;
   height:68px;
   position:sticky;top:0;z-index:50;
   box-shadow:0 2px 14px rgba(7,26,51,0.25);
 }
-.brand{display:flex;align-items:center;gap:12px;}
+.brand{display:flex;align-items:center;gap:10px;}
 .brand-mark{flex-shrink:0;display:flex;}
 .brand-mark.chip{background:#fff;border-radius:11px;padding:5px;box-shadow:0 2px 8px rgba(0,0,0,.18);}
 .wordmark{font-family:'Montserrat',sans-serif;font-weight:800;line-height:1;text-transform:uppercase;}
@@ -57,7 +65,22 @@ header{
 .wordmark.inline{display:flex;align-items:baseline;gap:6px;}
 .wordmark.inline .pro{color:var(--blue-bright);font-size:17px;letter-spacing:.8px;}
 .wordmark.inline .conecta{color:#fff;font-size:17px;letter-spacing:.8px;}
-.empresa-tag{margin-left:4px;padding:4px 11px;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
+/* pedido do usuário: "diminua o logo para que fique o logo N o nome Nexor e Conect um em
+   cima do outro igual a teus de login" — no cabeçalho do sistema (fundo navy), o ícone fica
+   EM CIMA e o wordmark empilhado embaixo (mesmo formato vertical do login), só que numa
+   escala bem menor pra caber na faixa de 68px do cabeçalho sem cortar o resto (tarja da
+   empresa, ícones à direita); a cor do "Connect" vira branca aqui (no login é navy, porque
+   lá o fundo é branco). */
+.brand-lockup{display:flex;flex-direction:column;align-items:center;gap:1px;}
+.brand-lockup .brand-mark.chip{padding:3px;}
+.brand-lockup .wordmark.stacked{gap:0;align-items:center;}
+.brand-lockup .wordmark.stacked .pro,.brand-lockup .wordmark.stacked .conecta{font-size:8px;letter-spacing:.2px;line-height:1.05;}
+.brand-lockup .wordmark.stacked .conecta{color:#fff;}
+/* pedido do usuário: "o nome PRO Marking está desalinhado" — a tarja, sendo só uma linha de
+   texto (~17px de altura), ficava bem mais fina que os botões vizinhos do cabeçalho (36px); mesmo
+   centralizada, a diferença de altura lia como "fora do alinhamento" da fileira. Trava a altura
+   igual aos botões e centraliza o texto com flex (mais confiável que depender de line-height). */
+.empresa-tag{margin-left:4px;padding:0 11px;height:34px;display:inline-flex;align-items:center;border-radius:20px;background:rgba(255,255,255,.14);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;}
 .empresa-tag:empty{display:none;}
 
 .header-right{display:flex;align-items:center;gap:14px;}
@@ -66,8 +89,9 @@ header{
 .user-meta{display:flex;flex-direction:column;line-height:1.25;}
 .user-meta .u-name{font-size:13.5px;font-weight:700;color:#fff;}
 .user-meta .u-role{font-size:11px;color:#9FB6D6;text-transform:uppercase;letter-spacing:.5px;font-weight:600;}
-.btn-logout{background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:8px;padding:8px 13px;font-family:inherit;font-weight:600;font-size:12.5px;cursor:pointer;}
+.btn-logout{background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:8px;padding:8px 13px;font-family:inherit;font-weight:600;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:6px;flex-shrink:0;}
 .btn-logout:hover{background:rgba(255,255,255,0.2);}
+.btn-logout svg{flex-shrink:0;}
 
 /* ---------- AUTH (LOGIN / PRIMEIRO ACESSO) ---------- */
 /* a foto é paisagem (16:9ish); em tela de celular (bem mais alta que larga), "cover" esticado
@@ -244,7 +268,13 @@ main{flex:1;padding:30px 36px 60px;max-width:1600px;}
 .escala-feriado-item:last-child{border-bottom:none;}
 
 label{display:block;font-size:12.5px;font-weight:700;color:var(--ink-soft);margin:0 0 6px;text-transform:uppercase;letter-spacing:.4px;}
-input[type=text],input[type=search],input[type=password],input:not([type]),textarea,select{
+/* pedido do usuário: "descrição remover e valor unitário está cortando, está fora do quadrado" —
+   type=number/date/email/time/month nunca tinham entrado nessa lista, então ficavam com o
+   tamanho/borda nativos do navegador em vez do width:100% padrão. Na maioria das telas passa
+   despercebido, mas em type=number no Chrome do Android as setas de incremento nativas (que não
+   contam nessa largura) empurram o campo pra fora do card em layouts apertados — exatamente os
+   campos Qtd./Valor unit. do orçamento. */
+input[type=text],input[type=search],input[type=password],input[type=number],input[type=date],input[type=email],input[type=time],input[type=month],input:not([type]),textarea,select{
   width:100%;border:1.5px solid var(--line);border-radius:9px;padding:10px 12px;font-family:inherit;font-size:14.5px;color:var(--ink);
   background:var(--blue-pale-2);transition:.15s;
 }
@@ -255,6 +285,14 @@ textarea{resize:vertical;min-height:64px;}
 .row3{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:16px;}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
 .form-grid .full{grid-column:1/-1;}
+
+/* pedido do usuário: "está tudo desalinhado" — a linha de item do orçamento (Descrição/Qtd./Valor
+   unit./Remover) usava flex sem quebra, então em tela estreita os campos de Qtd./Valor unit.
+   saíam cortados pra fora da tela em vez de empilhar. 4 colunas lado a lado no desktop; no
+   mobile (ver média abaixo) a Descrição passa a ocupar a linha inteira sozinha e Qtd./Valor
+   unit. dividem a linha de baixo — só nessa largura, não no desktop (por isso não reaproveita
+   .form-grid .full, que vale nas duas larguras).  */
+.proposta-item-row{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:flex-end;margin-bottom:8px;}
 
 .steps-list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;}
 .step-item{background:var(--blue-pale);border-radius:10px;padding:10px 12px;flex-direction:column;align-items:stretch;}
@@ -524,14 +562,37 @@ tr:last-child td{border-bottom:none;}
   .nav-backdrop.show{display:block;}
   main{padding:18px 12px 50px;max-width:100%;}
   .row2,.row3,.form-grid{grid-template-columns:1fr;}
-  header{padding:0 14px;}
+  .proposta-item-row{grid-template-columns:1fr 1fr;}
+  .proposta-item-row .proposta-item-desc{grid-column:1/-1;}
+  .proposta-item-row button{grid-column:1/-1;}
+  header{padding:0 10px;}
+  .header-right{gap:6px;}
   .user-meta{display:none;}
   .btn-presenca{padding:0;width:36px;justify-content:center;}
   .btn-presenca .presenca-label{display:none;}
+  /* pedido do usuário: "o botão Sair foi cortado" — em telas estreitas, sobretudo pro papel
+     suporte (que tem um botão a mais, o de ficar online/offline), o cabeçalho inteiro não cabe
+     com "Sair" por extenso; vira ícone só, do mesmo tamanho dos outros botões do cabeçalho
+     (sincronizar, sino), o que já libera espaço suficiente pra nada ser cortado. */
+  .btn-logout{width:36px;height:36px;padding:0;justify-content:center;}
+  .btn-logout-label{display:none;}
   .filtros-row{flex-direction:column;align-items:stretch;}
 }
 @media(max-width:520px){
-  .brand .wordmark.inline{display:none;}
+  /* pedido do usuário: "se possível diminuir o tamanho para que fique alinhado" — o logo em
+     cima do wordmark empilhado já é bem compacto (ver .brand-lockup acima), então aqui só
+     aperta mais um pouco a tarja da empresa, que é o elemento que ainda pode estourar a
+     largura em telas bem estreitas. */
+  .brand{gap:8px;}
+  .empresa-tag{font-size:10px;padding:0 8px;height:28px;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+}
+@media(max-width:360px){
+  /* pedido do usuário: "o botão Sair foi cortado" — em telas bem estreitas (sobretudo papel
+     suporte, com o botão extra de ficar online/offline) ainda sobra pouco espaço mesmo depois
+     dos ajustes de 860/520px acima; esconde o wordmark "Nexor Connect" (fica só o ícone) e a
+     tarja da empresa, que são decorativos, pra garantir que nenhum botão de ação do cabeçalho
+     seja cortado. */
+  .brand-lockup .wordmark{display:none;}
   .empresa-tag{display:none;}
 }
 
@@ -623,15 +684,15 @@ tr:last-child td{border-bottom:none;}
 .kpis-tiles{display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap;}
 .kpis-tile{flex:1;min-width:150px;color:#fff;padding:14px 16px;border-radius:14px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:opacity .15s;}
 .kpis-tile:hover{opacity:.9;}
-.kpis-tile-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;opacity:.9;}
+.kpis-tile-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;opacity:.9;display:flex;align-items:center;justify-content:space-between;gap:6px;}
 .kpis-tile-valor{font-size:22px;font-weight:800;}
 .kpis-tile-valor-ring{display:flex;align-items:center;gap:8px;font-size:22px;font-weight:800;}
 
-.kpis-cal-dots{display:flex;gap:3px;margin-top:4px;flex-wrap:wrap;}
-.kpis-cal-dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex-shrink:0;}
-.kpis-cal-legenda{display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--ink-soft);flex-wrap:wrap;}
-.kpis-cal-legenda span{display:flex;align-items:center;gap:5px;}
-.kpis-cal-legenda .kpis-cal-dot{width:7px;height:7px;}
+/* pedido do usuário: "em cada indicador colocar um símbolo bem pequeno de dúvida, só passar o
+   cursor em cima ele mostra o que significa" — bolinha com "?" que usa o tooltip nativo (atributo
+   title) no hover; sem texto normal (text-transform/letter-spacing) do rótulo ao redor. */
+.kpi-help{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;min-width:14px;border-radius:50%;background:rgba(15,23,42,.14);color:var(--ink-soft);font-size:10px;font-weight:700;font-style:normal;text-transform:none;letter-spacing:normal;cursor:help;flex-shrink:0;line-height:1;}
+.kpis-tile-label .kpi-help{background:rgba(255,255,255,.35);color:#fff;}
 
 /* Cadastros (renderCadastros/abrirFichaCadastral) — grid de fichas com foto (ou silhueta padrão
    quando não tem), nome, e-mail e telefone; clica num card pra abrir e editar a ficha completa */
@@ -671,4 +732,19 @@ tr:last-child td{border-bottom:none;}
 }
 .chat-admin-lista{display:flex;flex-direction:column;gap:8px;margin-top:10px;}
 .chat-admin-linha{border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.15s;background:#fff;}
+
+/* pedido do usuário: "opção de imprimir esse relatório" (Justificar Despesa) — só mostra
+   #despesas-print-area quando a pessoa manda imprimir (ver imprimirDespesasJustificadas em
+   app.js); o resto da tela (menu lateral, cabeçalho, filtro, botões) some do papel. Primeiro
+   padrão de impressão do sistema — não havia nenhum antes disso. */
+.so-impressao{display:none;}
+@media print{
+  body *{visibility:hidden;}
+  #despesas-print-area, #despesas-print-area *{visibility:visible;}
+  #despesas-print-area{position:absolute;top:0;left:0;width:100%;}
+  .so-impressao{display:block;}
+  /* pedido do usuário: o botão de ver comprovante (🧾) não faz sentido no papel — some do
+     relatório impresso, igual qualquer outro controle interativo da tela. */
+  .sem-impressao{display:none;}
+}
 .chat-admin-linha:hover{border-color:var(--blue);box-shadow:0 4px 14px rgba(20,103,214,.1);}

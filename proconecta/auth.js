@@ -43,4 +43,28 @@ function verificarToken(token) {
   return payload;
 }
 
-module.exports = { gerarToken, verificarToken };
+// cifrar/decifrar — AES-256-GCM com chave derivada do mesmo PROCONECTA_SECRET, pra guardar no
+// banco um segredo que precisa voltar em texto puro depois (ex.: a senha de app do e-mail de
+// cópia em agenda-email.js — diferente de senha de usuário, que só precisa ser CONFERIDA
+// (hashSenha/conferirSenha em db.js), essa aqui precisa ser USADA de novo pra logar num IMAP).
+const CHAVE_CIFRA = crypto.createHash('sha256').update(SEGREDO).digest();
+
+function cifrar(texto) {
+  const iv = crypto.randomBytes(12);
+  const cifra = crypto.createCipheriv('aes-256-gcm', CHAVE_CIFRA, iv);
+  const corpo = Buffer.concat([cifra.update(String(texto), 'utf8'), cifra.final()]);
+  const tag = cifra.getAuthTag();
+  return Buffer.concat([iv, tag, corpo]).toString('base64');
+}
+
+function decifrar(textoCifrado) {
+  const buf = Buffer.from(textoCifrado, 'base64');
+  const iv = buf.subarray(0, 12);
+  const tag = buf.subarray(12, 28);
+  const corpo = buf.subarray(28);
+  const decifra = crypto.createDecipheriv('aes-256-gcm', CHAVE_CIFRA, iv);
+  decifra.setAuthTag(tag);
+  return Buffer.concat([decifra.update(corpo), decifra.final()]).toString('utf8');
+}
+
+module.exports = { gerarToken, verificarToken, cifrar, decifrar };

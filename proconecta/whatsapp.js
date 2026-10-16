@@ -17,6 +17,13 @@ function ativo() {
   return !!(WHATSAPP_TOKEN && WHATSAPP_PHONE_ID && WHATSAPP_VERIFY_TOKEN && ia.ativa());
 }
 
+// pedido do usuário (análise de concorrentes, Fase C): alertas automáticos do pacote PMOC por
+// WhatsApp — um envio avulso de notificação não tem relação com o chat/IA do atendimento, então
+// só precisa das credenciais da API (token + telefone), não do webhook nem da IA ligada.
+function envioAtivo() {
+  return !!(WHATSAPP_TOKEN && WHATSAPP_PHONE_ID);
+}
+
 function normalizarTelefone(t) {
   return String(t || '').replace(/\D/g, '');
 }
@@ -55,6 +62,13 @@ function encontrarOuCriarChamado(data, nextId, telefone, textoPrimeiraMensagem) 
   const cliente = encontrarClientePorTelefone(data, telefone);
   chamado = {
     id: nextId(data, 'chamados'),
+    // pedido do usuário (varredura de vazamento PRO Marking): o WhatsApp hoje usa um único
+    // WHATSAPP_TOKEN/WHATSAPP_PHONE_ID global (ver topo do arquivo) — ainda não existe número de
+    // WhatsApp por empresa, então todo chamado que chega por aqui é mesmo da empresa que tem essa
+    // integração configurada (PRO Marking). Fixar isso explicitamente, em vez de deixar
+    // empresa_id undefined, evita qualquer dado de outra empresa aparecer aqui por acaso e deixa
+    // claro, se um dia existir WhatsApp por empresa, que este é o lugar a trocar.
+    empresa_id: 1,
     cliente_id: cliente ? cliente.id : null,
     telefone_whatsapp: telefone,
     origem: 'whatsapp',
@@ -162,4 +176,4 @@ async function processarMensagemRecebida(db, telefone, texto, enviarPush) {
   }
 }
 
-module.exports = { registrarRotasWhatsApp, ativo, enviarMensagemWhatsApp };
+module.exports = { registrarRotasWhatsApp, ativo, envioAtivo, enviarMensagemWhatsApp };

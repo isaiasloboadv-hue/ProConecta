@@ -16,21 +16,39 @@ test('rotas de núcleo exigem login mas não módulo específico', () => {
   assert.equal(moduloDaRota(/^\/api\/usuarios\/(\d+)$/), 'nucleo');
   assert.equal(moduloDaRota(/^\/api\/notificacoes$/), 'nucleo');
   assert.equal(moduloDaRota(/^\/api\/chat-interno\/contatos$/), 'nucleo');
+  // sincronização de rascunho entre aparelhos — só um espelho do localStorage das telas de
+  // relatorios/os_chamados, que já são gated por elas mesmas (ver comentário em rotas-modulo.js).
+  assert.equal(moduloDaRota(/^\/api\/rascunhos$/), 'nucleo');
+  assert.equal(moduloDaRota(/^\/api\/rascunhos\/([^/]+)$/), 'nucleo');
 });
 
-test('rotas de agenda/visitas/chamados/equipamentos pertencem a os_chamados', () => {
+test('rotas de agenda/visitas/chamados pertencem a os_chamados (núcleo do O.S.)', () => {
   assert.equal(moduloDaRota(/^\/api\/agenda$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/agenda\/(\d+)\/finalizar$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/visitas\/(\d+)\/aprovar$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/chamados\/(\d+)\/assumir$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/equipamentos\/buscar-por-serie$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/solicitacoes-rh$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/tecnicos\/viagens$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/tecnico\/online$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/relatorios-manutencao\/(\d+)$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/fmea\/componentes$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/fmea\/modos-falha\/(\d+)$/), 'os_chamados');
-  assert.equal(moduloDaRota(/^\/api\/kpis$/), 'os_chamados');
+});
+
+// pedido do usuário: plano básico = orçamento + relatório, sem exigir O.S. completo — Relatório,
+// Equipamentos e Assistente IA saíram de "os_chamados" e viraram o módulo "relatorios".
+test('rotas de relatório/equipamentos/IA pertencem a relatorios', () => {
+  assert.equal(moduloDaRota(/^\/api\/equipamentos\/buscar-por-serie$/), 'relatorios');
+  assert.equal(moduloDaRota(/^\/api\/relatorios-manutencao\/(\d+)$/), 'relatorios');
+  assert.equal(moduloDaRota(/^\/api\/ia\/assistente-relatorio$/), 'relatorios');
+});
+
+// pedido do usuário: "quando a equipe aumenta, precisa de escala de folgas, dashboards etc" —
+// Solicitações/RH, Técnicos, Feriados, Escala de Folgas, KPIs e FMEA saíram de "os_chamados" e
+// viraram o módulo "equipe_avancado".
+test('rotas de equipe/escala/kpis/fmea pertencem a equipe_avancado', () => {
+  assert.equal(moduloDaRota(/^\/api\/solicitacoes-rh$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/tecnicos\/viagens$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/tecnico\/online$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/feriados$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/escala-folgas$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/fmea\/componentes$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/fmea\/modos-falha\/(\d+)$/), 'equipe_avancado');
+  assert.equal(moduloDaRota(/^\/api\/kpis$/), 'equipe_avancado');
 });
 
 test('rotas de registros pertencem a biblioteca', () => {
@@ -43,8 +61,7 @@ test('rota nova sem prefixo conhecido cai em núcleo por padrão', () => {
   assert.equal(moduloDaRota(/^\/api\/algo-que-nao-existe$/), 'nucleo');
 });
 
-test('rotas dos módulos novos (crm, agendamento, financeiro, prestação de contas)', () => {
-  assert.equal(moduloDaRota(/^\/api\/crm\/status$/), 'crm');
+test('rotas dos módulos novos (agendamento, financeiro, prestação de contas)', () => {
   assert.equal(moduloDaRota(/^\/api\/agendamento\/status$/), 'agendamento');
   assert.equal(moduloDaRota(/^\/api\/financeiro\/status$/), 'financeiro');
   assert.equal(moduloDaRota(/^\/api\/prestacao-contas\/status$/), 'prestacao_contas');
@@ -59,4 +76,53 @@ test('agenda e agendamento não se confundem (prefixo de string não é prefixo 
   assert.equal(moduloDaRota(/^\/api\/agenda\/(\d+)$/), 'os_chamados');
   assert.equal(moduloDaRota(/^\/api\/agendamento\/status$/), 'agendamento');
   assert.notEqual(moduloDaRota(/^\/api\/agendamento\/status$/), 'os_chamados');
+});
+
+// versão Restaurantes/rede multiunidade (Fase 1 — Base): setores/filiais/áreas pertencem ao
+// módulo "filiais" — sem ele, a empresa não tem a hierarquia (ver MODULOS_DISPONIVEIS em db.js).
+test('rotas de setores/filiais/áreas pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/setores$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/filiais$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/filiais\/(\d+)$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/areas$/), 'filiais');
+});
+
+// Fase 2 — Operação: vistoria e apoio entre setores também pertencem a "filiais".
+test('rotas de vistorias/apoios pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/vistorias$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/vistorias\/(\d+)\/itens$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/apoios$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/apoios\/(\d+)\/aceitar$/), 'filiais');
+});
+
+// Fase 3 — Peças: catálogo e solicitação de peça também pertencem a "filiais".
+test('rotas de catálogo de peças/solicitações pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/pecas-catalogo$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/solicitacoes-peca$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/solicitacoes-peca\/(\d+)\/ciente$/), 'filiais');
+});
+
+// Fase 4 — Compras: pedido de compra, estoque e transferências também pertencem a "filiais".
+test('rotas de pedidos de compra/estoque/transferências pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/pedidos-compra$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/pedidos-compra\/sugestoes$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/estoque-central$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/estoque-loja$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/transferencias$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/transferencias\/(\d+)\/aceitar$/), 'filiais');
+});
+
+// Fase 5 — Gestão e comunicação: dashboard, mural de avisos e chat por canal também pertencem a "filiais".
+test('rotas de dashboards/avisos/mensagens-canal pertencem a filiais', () => {
+  assert.equal(moduloDaRota(/^\/api\/dashboards\/filiais$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/avisos$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/avisos\/(\d+)$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/mensagens-canal$/), 'filiais');
+  assert.equal(moduloDaRota(/^\/api\/mensagens-canal\/canais$/), 'filiais');
+});
+
+// pedido do usuário (empresa JBPA): registro de atividades diárias pertence ao módulo "atividades".
+test('rotas de atividades diárias pertencem a atividades', () => {
+  assert.equal(moduloDaRota(/^\/api\/atividades-diarias$/), 'atividades');
+  assert.equal(moduloDaRota(/^\/api\/atividades-diarias\/(\d+)$/), 'atividades');
 });

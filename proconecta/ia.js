@@ -12,8 +12,12 @@ function ativa() {
   return !!ANTHROPIC_API_KEY;
 }
 
-function buscarBiblioteca(data, { termo, equipamento } = {}) {
-  let lista = data.registros.filter((r) => r.status === 'aprovado');
+// pedido do usuário (varredura de vazamento PRO Marking): sem empresaId aqui, a IA buscava na
+// biblioteca de TODAS as empresas — qualquer cliente no chat/WhatsApp de outra empresa recebia
+// defeitos/soluções da PRO Marking (e de qualquer outra empresa) misturados nos resultados. Cada
+// empresa só pode ver a própria biblioteca aprovada, igual toda rota de /api/registros já faz.
+function buscarBiblioteca(data, { termo, equipamento } = {}, empresaId) {
+  let lista = data.registros.filter((r) => r.status === 'aprovado' && r.empresa_id === empresaId);
   if (equipamento) {
     const eq = String(equipamento).toLowerCase();
     lista = lista.filter((r) => (r.equipamento_tipo || '').toLowerCase().includes(eq) || (r.equipamento_modelo || '').toLowerCase().includes(eq));
@@ -213,6 +217,55 @@ async function lerEtiqueta(fotoDataUrl) {
   };
 }
 
+// pedido do usuário: "ao tirar a foto [de uma despesa] o sistema lê automaticamente extraindo data,
+// estabelecimento, valor da compra e descrição do item comprado" — mesmo mecanismo de visão de
+// lerEtiqueta acima, só que lendo um comprovante/nota fiscal/recibo em vez de uma placa de
+// equipamento. Usado por "Justificar Despesa" (POST /api/despesas-justificadas/ler-recibo).
+async function lerRecibo(fotoDataUrl) {
+  const m = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(String(fotoDataUrl || ''));
+  if (!m) throw new Error('Foto inválida.');
+  const [, mediaType, base64] = m;
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 512,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: 'Essa é uma foto de um comprovante, nota fiscal ou recibo de uma despesa paga por um técnico em campo (ex.: alimentação, combustível, estacionamento, material). Leia com atenção e devolva SOMENTE um JSON (sem texto antes ou depois, sem markdown), no formato exato: {"data":"AAAA-MM-DD","estabelecimento":"","valor":0,"descricao":"","categoria":"alimentacao|outros"}. "data" é a data da compra (se o ano não aparecer impresso, use o ano atual); "estabelecimento" é o nome do local/empresa que emitiu o comprovante; "valor" é o valor TOTAL pago, como número puro (sem "R$", vírgula vira ponto decimal); "descricao" é um resumo curto (uma linha) do que foi comprado ou do serviço pago; "categoria" é "alimentacao" se for refeição/restaurante/lanche/mercado de comida, ou "outros" pra qualquer outra coisa (combustível, estacionamento, hospedagem, passagem, material etc.). Se não conseguir ler algum campo com confiança, devolva ele vazio ("" pros textos, 0 pro valor, "outros" pra categoria) — nunca invente um dado.' },
+        ],
+      }],
+    }),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.text().catch(() => '');
+    throw new Error(`Erro na API da Anthropic: ${resp.status} ${corpo}`);
+  }
+  const dados = await resp.json();
+  const texto = (dados.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  let extraido;
+  try {
+    const limpo = texto.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+    extraido = JSON.parse(limpo);
+  } catch (e) {
+    throw new Error('Não consegui ler esse comprovante — tente tirar a foto de novo, mais perto e com boa luz, ou preencha manualmente.');
+  }
+  return {
+    data: /^\d{4}-\d{2}-\d{2}$/.test(extraido.data) ? extraido.data : '',
+    estabelecimento: String(extraido.estabelecimento || '').trim().slice(0, 200),
+    valor: Number(extraido.valor) > 0 ? Number(extraido.valor) : 0,
+    descricao: String(extraido.descricao || '').trim().slice(0, 300),
+    categoria: extraido.categoria === 'alimentacao' ? 'alimentacao' : 'outros',
+  };
+}
+
 const MAX_RODADAS_FERRAMENTA = 5;
 const MAX_MENSAGENS_HISTORICO = 20;
 
@@ -221,7 +274,11 @@ const MAX_MENSAGENS_HISTORICO = 20;
 // direto no chamado, acrescenta a resposta da IA em chamado.mensagens e devolve esse texto —
 // quem chamou decide o que fazer com ele (mostrar no chat, mandar por WhatsApp, etc.).
 async function processarTurno(data, chamado) {
-  const nomeEmpresa = (data.empresas.find((e) => e.id === 1) || {}).nome || 'nossa empresa';
+  // pedido do usuário (varredura de vazamento PRO Marking): isso estava fixo em "empresa id 1" —
+  // qualquer chamado de qualquer outra empresa fazia a IA se apresentar como "assistente de
+  // suporte técnico da PRO Marking". Cada chamado já nasce com o empresa_id de quem criou
+  // (tenant.criar em server.js), então usa esse, nunca o id 1 fixo.
+  const nomeEmpresa = (data.empresas.find((e) => e.id === chamado.empresa_id) || {}).nome || 'nossa empresa';
   const historico = chamado.mensagens
     .filter((m) => m.autor === 'cliente' || m.autor === 'ia')
     .slice(-MAX_MENSAGENS_HISTORICO)
@@ -241,7 +298,7 @@ async function processarTurno(data, chamado) {
       const resultados = blocosFerramenta.map((bloco) => {
         let resultado;
         if (bloco.name === 'buscar_biblioteca') {
-          resultado = buscarBiblioteca(data, bloco.input);
+          resultado = buscarBiblioteca(data, bloco.input, chamado.empresa_id);
         } else if (bloco.name === 'listar_equipamentos_cliente') {
           resultado = chamado.cliente_id ? listarEquipamentosCliente(data, chamado.cliente_id) : { erro: 'Cliente não identificado no cadastro.' };
         } else if (bloco.name === 'escalar_tecnico') {
@@ -298,4 +355,71 @@ async function processarTurno(data, chamado) {
   return textoFinal;
 }
 
-module.exports = { ativa, processarTurno, lerEtiqueta, calcularSla, PERGUNTAS_SLA };
+// ---------- Assistente IA no preenchimento de relatório ----------
+// pedido do usuário: "o técnico pode apertar o botão assistente IA... descreve toda a atividade e
+// a IA faz edições e correções usando termos altamente técnicos... abre um chat com a IA, igual
+// nas IAs convencionais... ao apresentar o texto relatório a IA pergunta se deseja seguir com a
+// sugestão. O técnico dando ok a IA já preenche os campos do relatório." Sem persistência no
+// servidor — cada chamada recebe o histórico inteiro da conversa (o front guarda, igual
+// processarTurno recebe de chamado.mensagens) e devolve a resposta da vez. A IA só chama a
+// ferramenta de preenchimento depois que o técnico confirmar explicitamente a sugestão que ela
+// apresentou no texto — nunca preenche sem essa confirmação.
+function montarFerramentaPreencherRelatorio(campos) {
+  return {
+    name: 'preencher_campos_relatorio',
+    description: 'Preenche os campos do relatório com o texto técnico final — só depois que o técnico confirmar explicitamente, na conversa, que quer seguir com a versão apresentada.',
+    input_schema: {
+      type: 'object',
+      properties: Object.fromEntries(campos.map((c) => [c.chave, { type: 'string', description: c.rotulo }])),
+    },
+  };
+}
+
+function montarSystemPromptAssistenteRelatorio(tipo, campos) {
+  const listaCampos = campos.map((c) => `- ${c.chave}: ${c.rotulo}`).join('\n');
+  return `Você ajuda um técnico de campo a escrever a parte técnica de um relatório de manutenção (tipo: ${tipo}), a partir da descrição informal que ele fizer da atividade que realizou.
+
+Converse em português, de forma direta e natural, como um chat comum. Quando o técnico descrever o que fez, reescreva o conteúdo em linguagem técnica precisa de manutenção industrial (nomenclatura correta de peças, defeitos, ações e medições) e distribua entre estes campos do relatório:
+${listaCampos}
+
+Depois de organizar, APRESENTE o texto de cada campo preenchido na sua própria mensagem de chat (nunca use a ferramenta nesse momento) e pergunte se o técnico quer seguir com essa sugestão ou corrigir/completar algo.
+
+Só chame a ferramenta preencher_campos_relatorio depois que o técnico confirmar explicitamente (ex.: "sim", "pode", "tá bom", "confirma", "segue assim") que quer seguir com a última versão que você apresentou. Se ele pedir ajuste ou der mais detalhes, incorpore, apresente a versão corrigida de novo na sua mensagem e pergunte de novo — nunca chame a ferramenta sem essa confirmação explícita da versão específica que está valendo.
+
+NUNCA faça perguntas de esclarecimento antes de apresentar o relatório — o técnico não quer ser interrogado, quer ver o relatório pronto. Mesmo que a descrição seja curta ou informal, use seu conhecimento técnico de manutenção industrial pra desenvolver cada campo de forma completa e forte na própria primeira resposta: explique o porquê técnico de cada verificação/ação (ex.: por que limpeza de lente, reaperto de parafusos e contatos elétricos importam pra manter a performance e evitar falhas), usando nomenclatura e justificativas técnicas plausíveis do tipo de equipamento, mesmo preenchendo lacunas que o técnico não detalhou. Só não invente número/medição/data específica que ele não tenha informado — nesse caso descreva em termos qualitativos (ex.: "aumento expressivo da potência de saída") em vez de inventar um valor exato. Depois de apresentar essa primeira versão já completa, pergunte se o técnico quer seguir com ela ou ajustar algo — a pergunta é sempre sobre a sugestão já pronta, nunca um pedido de mais dados antes de montá-la.`;
+}
+
+async function assistenteRelatorio({ tipo, mensagens, campos, confirmar }) {
+  const corpo = {
+    model: ANTHROPIC_MODEL,
+    max_tokens: 1500,
+    system: montarSystemPromptAssistenteRelatorio(tipo, campos),
+    tools: [montarFerramentaPreencherRelatorio(campos)],
+    messages: mensagens.map((m) => ({ role: m.role, content: m.texto })),
+  };
+  // botão "Aceitar e preencher relatório" do front: não depende da IA interpretar a confirmação
+  // em texto livre — força a chamada da ferramenta agora, com a última versão já apresentada no
+  // histórico da conversa.
+  if (confirmar) corpo.tool_choice = { type: 'tool', name: 'preencher_campos_relatorio' };
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(corpo),
+  });
+  if (!resp.ok) {
+    const corpo = await resp.text().catch(() => '');
+    throw new Error(`Erro na API da Anthropic: ${resp.status} ${corpo}`);
+  }
+  const dados = await resp.json();
+  const texto = (dados.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+  const blocoFerramenta = (dados.content || []).find((b) => b.type === 'tool_use' && b.name === 'preencher_campos_relatorio');
+  const preenchimento = blocoFerramenta ? blocoFerramenta.input : null;
+  if (!texto && !preenchimento) throw new Error('A IA não respondeu nada — tente de novo.');
+  return { texto: texto || 'Preenchi o relatório com a sugestão combinada.', preenchimento };
+}
+
+module.exports = { ativa, processarTurno, buscarBiblioteca, lerEtiqueta, lerRecibo, calcularSla, PERGUNTAS_SLA, assistenteRelatorio };

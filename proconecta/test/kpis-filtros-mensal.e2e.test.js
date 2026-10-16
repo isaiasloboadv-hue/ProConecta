@@ -182,3 +182,65 @@ test('GET /api/kpis/mensal agrupa corretivas/preventivas/MTTR por mês certo', a
     fs.rmSync(dbTemp, { force: true });
   }
 });
+
+// Pedido do usuário: "No mttr o gráfico colocar valores parcial atualizado durante o mês" — um
+// reparo corretivo ainda em andamento (Laudo Técnico com data_entrada preenchida, sem
+// data_conclusao ainda) no mês CORRENTE entra no MTTR mensal como valor parcial (agora -
+// entrada), em vez de deixar o mês sem ponto algum até o 1º reparo fechar. O mesmo cenário num mês
+// já fechado (passado) continua do jeito antigo: sem conclusão, não conta — senão o histórico
+// "andaria" pra sempre. O indicador MTTR principal (GET /api/kpis, sem recorte de mês) também
+// continua do jeito antigo, só concluído conta — o parcial é só pro gráfico mensal.
+test('GET /api/kpis/mensal: reparo em andamento no mês corrente entra como MTTR parcial; no mês passado, não conta', async () => {
+  const senha = hashSenha('senha1234');
+  const agora = new Date();
+  const chaveAtual = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`;
+  const mesAnterior = new Date(agora.getFullYear(), agora.getMonth() - 1, 10, 12, 0, 0);
+  const chaveAnterior = `${mesAnterior.getFullYear()}-${String(mesAnterior.getMonth() + 1).padStart(2, '0')}`;
+  const entradaAtualHorasAtras = 3; // reparo do mês corrente, aberto há 3h, ainda sem conclusão
+  const entradaAtual = new Date(Date.now() - entradaAtualHorasAtras * 36e5);
+
+  const seed = {
+    usuarios: [{ id: 1, nome: 'Admin', email: 'admin@x.com', papel: 'administrador', status: 'ativo', empresa_id: 1, ...senha }],
+    clientes: [{ id: 1, empresa_id: 1, nome_empresa: 'Cliente X', contato: '', telefone: '', email: '' }],
+    equipamentos: [{ id: 10, empresa_id: 1, cliente_id: 1, catalogo_id: null, tipo: 'Gravadora', modelo: 'X200', numero_serie: 'SN-A', data_fabricacao: '' }],
+    agenda: [
+      { id: 1, empresa_id: 1, tipo: 'corretiva', equipamento_id: 10, cliente_id: 1, tecnico_id: 1, criado_em: entradaAtual.toISOString(), finalizada: false, finalizado_em: null },
+      { id: 2, empresa_id: 1, tipo: 'corretiva', equipamento_id: 10, cliente_id: 1, tecnico_id: 1, criado_em: mesAnterior.toISOString(), finalizada: false, finalizado_em: null },
+    ],
+    visitas: [
+      { id: 1, empresa_id: 1, agenda_id: 1, rodada: 1, laudo: { data_entrada: entradaAtual.toISOString(), data_conclusao: null } },
+      { id: 2, empresa_id: 1, agenda_id: 2, rodada: 1, laudo: { data_entrada: mesAnterior.toISOString(), data_conclusao: null } },
+    ],
+    fmea_componentes: [], fmea_modos_falha: [], fmea_causas: [], fmea_efeitos: [],
+    _seq: { usuarios: 2, clientes: 2, equipamentos: 11, agenda: 3, visitas: 3 },
+    empresas: [{ id: 1, nome: 'Empresa Teste', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#000', cor_secundaria: '#000', versao_id: 1, modulos_ativos: ['os_chamados'], terminologia: {} }],
+    versoes: [{ id: 1, nome: 'Manutenção', modulos: ['os_chamados'] }],
+  };
+
+  const { base, auth, servidor, dbTemp } = await subirServidorComLogin(seed);
+  try {
+    const { meses } = await (await fetch(`${base}/api/kpis/mensal`, { headers: auth })).json();
+    const doMesAtual = meses.find((m) => m.mes === chaveAtual);
+    const doMesAnterior = meses.find((m) => m.mes === chaveAnterior);
+    assert.ok(doMesAtual, `mês atual (${chaveAtual}) deveria estar na série`);
+    assert.ok(doMesAnterior, `mês anterior (${chaveAnterior}) deveria estar na série`);
+
+    // mês corrente: entra como parcial, valor ~3h (tolerância pro tempo de execução do teste)
+    assert.equal(doMesAtual.parcial, true);
+    assert.ok(doMesAtual.mttr_horas !== null, 'MTTR do mês corrente não deveria ficar nulo com reparo em andamento');
+    assert.ok(Math.abs(doMesAtual.mttr_horas - entradaAtualHorasAtras) < 0.2, `esperava ~${entradaAtualHorasAtras}h, veio ${doMesAtual.mttr_horas}h`);
+
+    // mês passado: reparo em andamento sem conclusão não conta — comportamento de antes, intacto
+    assert.equal(doMesAnterior.parcial, false);
+    assert.equal(doMesAnterior.mttr_horas, null);
+
+    // o indicador principal (sem recorte mensal) continua só com reparo concluído — nenhum dos 2
+    // reparos desse cenário tem conclusão, então o MTTR geral fica nulo mesmo (parcial é só do
+    // gráfico mensal, não vaza pro indicador de topo).
+    const { kpis } = await (await fetch(`${base}/api/kpis`, { headers: auth })).json();
+    assert.equal(kpis.mttr_horas, null);
+  } finally {
+    servidor.kill();
+    fs.rmSync(dbTemp, { force: true });
+  }
+});

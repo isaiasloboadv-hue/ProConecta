@@ -184,9 +184,13 @@ async function enviarConvite({ nome, email, link, nomeEmpresa }) {
   return { ...resultado, link };
 }
 
-async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa }) {
+// linkPesquisa (opcional, pedido do usuário — análise de concorrentes: "pesquisa de satisfação
+// automática pós-visita"): quando informado, acrescenta um convite curto pra pesquisa no mesmo
+// e-mail do relatório, em vez de precisar de um envio separado — chamadores que não passarem
+// esse parâmetro continuam com o e-mail exatamente igual a antes.
+async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa, linkPesquisa }) {
   const assunto = 'Relatório técnico — Nexor Connect';
-  const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>`;
+  const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>${linkPesquisa ? `<p>Como foi a visita? <a href="${linkPesquisa}">Avalie em poucos segundos</a>.</p>` : ''}`;
   const resultado = await enviar({
     to: emails, assunto, corpoHtml, nomeEmpresa,
     attachments: [{ filename: nomeArquivo, content: Buffer.from(pdfBase64, 'base64') }],
@@ -195,4 +199,15 @@ async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa }) 
   return { ...resultado, destinatarios: emails };
 }
 
-module.exports = { enviarConvite, enviarRelatorio };
+// pedido do usuário (pacote "Climatização / PMOC", Fase 5, item 7): "alerta: sininho + e-mail" —
+// genérico porque os 4 tipos de alerta (preventiva atrasada, plano perto do vencimento, ART/TRT
+// vencida/ausente, qualidade do ar desatualizada) só diferem no texto, nunca no envio em si.
+async function enviarAlerta({ emails, assunto, corpoHtml, nomeEmpresa }) {
+  const resultado = await enviar({
+    to: emails, assunto, corpoHtml, nomeEmpresa,
+    logSimulado: () => console.log(`[email] Alerta "${assunto}" seria enviado para: ${emails.join(', ')}\n`),
+  });
+  return { ...resultado, destinatarios: emails };
+}
+
+module.exports = { enviarConvite, enviarRelatorio, enviarAlerta };
