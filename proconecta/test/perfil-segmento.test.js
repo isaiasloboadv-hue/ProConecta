@@ -55,6 +55,22 @@ test('prestadora_manutencao:elevadores tem aceite_entrega e levantamento_tecnico
   assert.ok(preset.tipos_relatorio_ativos.includes('levantamento_tecnico'));
 });
 
+// pedido do usuário: "o ideal é criar um perfil específico pra cada tipo de serviço, pra não
+// ficar muito genérico" — primeiro perfil desse tipo, sem a estrutura de vários segmentos dos
+// perfis genéricos (ver PERFIS_DISPONIVEIS em db.js e perfilTemMaisDeUmSegmento em app.js, que
+// pula a pergunta de segmento no cadastro quando o perfil só tem um).
+test('perfil "refrigeracao" (específico, sem segmentação) existe e tem um único segmento', () => {
+  const perfil = db.PERFIS_DISPONIVEIS.find((p) => p.chave === 'refrigeracao');
+  assert.ok(perfil, 'perfil "refrigeracao" não está no catálogo');
+  assert.equal(perfil.nome, 'Refrigeração e Climatização');
+  assert.equal(perfil.segmentos.length, 1);
+  assert.equal(perfil.segmentos[0].chave, 'generico');
+  // sem preset configurado ainda — cai em "sem restrição", igual qualquer combinação não detalhada
+  const preset = db.presetPerfilSegmento('refrigeracao', 'generico');
+  assert.deepEqual(preset.terminologia, {});
+  assert.equal(preset.tipos_os_ativos, null);
+});
+
 test('industria_equipe_propria (manutenção interna, sem cliente externo) nunca tem aceite_entrega nem tipos de venda/demonstração', () => {
   for (const [chave, preset] of Object.entries(db.PRESETS_PERFIL_SEGMENTO)) {
     if (!chave.startsWith('industria_equipe_propria:')) continue;

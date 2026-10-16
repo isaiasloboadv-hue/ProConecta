@@ -1316,7 +1316,7 @@ async function renderPlataformaNovaEmpresa() {
           <option value="">Nenhum (sem atalho de configuração)</option>
           ${perfis.map((p) => `<option value="${esc(p.chave)}">${esc(p.nome)}</option>`).join('')}
         </select></div>
-        <div><label>Segmento</label><select id="pe-segmento"><option value="">—</option></select></div>
+        <div id="pe-segmento-wrap" style="display:none;"><label>Segmento</label><select id="pe-segmento"><option value="">—</option></select></div>
       </div>
       <p style="margin-top:-8px; color:var(--gray-500, #666);">Perfil/Segmento só pré-preenchem terminologia e quais tipos de O.S./relatório aparecem pra essa empresa — tudo editável depois, a qualquer momento, na tela da empresa.</p>
       <h2>Primeiro administrador (opcional agora, dá pra criar depois)</h2>
@@ -1608,7 +1608,7 @@ function conteudoEmpresaPlataforma(e) {
           <option value="">Nenhum</option>
           ${_plataformaPerfisCache.map((p) => `<option value="${esc(p.chave)}" ${p.chave === e.perfil ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}
         </select></div>
-        <div><label>Segmento</label><select id="pe-segmento-${e.id}">${e.perfil ? opcoesSegmentoPlataforma(e.perfil, e.segmento) : '<option value="">—</option>'}</select></div>
+        <div id="pe-segmento-wrap-${e.id}" style="${e.perfil && perfilTemMaisDeUmSegmento(e.perfil) ? '' : 'display:none;'}"><label>Segmento</label><select id="pe-segmento-${e.id}">${e.perfil ? opcoesSegmentoPlataforma(e.perfil, e.segmento) : '<option value="">—</option>'}</select></div>
       </div>
       <button class="btn btn-outline-sm" onclick="salvarPerfilEmpresaPlataforma(${e.id})">Salvar perfil/segmento</button>
       <h2>Administradores</h2>
@@ -1677,9 +1677,19 @@ function opcoesSegmentoPlataforma(perfilChave, segmentoAtual) {
   const segmentos = [...perfil.segmentos].sort((a, b) => (a.chave === 'generico' ? 1 : b.chave === 'generico' ? -1 : 0));
   return segmentos.map((s) => `<option value="${esc(s.chave)}" ${s.chave === segmentoAtual ? 'selected' : ''}>${esc(s.nome)}</option>`).join('');
 }
+// perfil com um único segmento (ex.: "Refrigeração e Climatização") já é específico o bastante —
+// pedido do usuário: "o ideal é criar um perfil específico pra cada tipo de serviço, pra não ficar
+// muito genérico". Não faz sentido perguntar o segmento à parte nesse caso (um segundo clique
+// escolhendo a única opção que já ia ser escolhida sozinha); o <select> continua existindo e com
+// o valor certo (só o <option> único), só o campo fica escondido.
+function perfilTemMaisDeUmSegmento(perfilChave) {
+  const perfil = _plataformaPerfisCache.find((p) => p.chave === perfilChave);
+  return !!perfil && perfil.segmentos.length > 1;
+}
 function atualizarSegmentoNovaEmpresa() {
   const perfilChave = document.getElementById('pe-perfil').value;
   document.getElementById('pe-segmento').innerHTML = perfilChave ? opcoesSegmentoPlataforma(perfilChave, null) : '<option value="">—</option>';
+  document.getElementById('pe-segmento-wrap').style.display = perfilTemMaisDeUmSegmento(perfilChave) ? '' : 'none';
 }
 
 async function criarEmpresaPlataforma() {
@@ -1853,6 +1863,7 @@ async function excluirAdministradorPlataforma(adminId) {
 function atualizarSegmentoPlataforma(empresaId) {
   const perfilChave = document.getElementById(`pe-perfil-${empresaId}`).value;
   document.getElementById(`pe-segmento-${empresaId}`).innerHTML = perfilChave ? opcoesSegmentoPlataforma(perfilChave, null) : '<option value="">—</option>';
+  document.getElementById(`pe-segmento-wrap-${empresaId}`).style.display = perfilTemMaisDeUmSegmento(perfilChave) ? '' : 'none';
 }
 
 async function salvarPerfilEmpresaPlataforma(empresaId) {

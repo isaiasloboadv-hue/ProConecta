@@ -117,6 +117,21 @@ const PERFIS_DISPONIVEIS = [
       { chave: 'generico', nome: 'Genérico' },
     ],
   },
+  // pedido do usuário: em vez de um perfil genérico com "Refrigeração/Climatização" enterrado
+  // como um segmento entre vários outros (ver "prestadora_manutencao"/"industria_equipe_propria"
+  // acima), uma empresa que já é especificamente desse ramo escolhe um perfil específico só pra
+  // ela — "o ideal é criar um perfil específico pra cada tipo de serviço, pra não ficar muito
+  // genérico". Primeiro de uma futura série (um por tipo de serviço); os perfis genéricos acima
+  // continuam intocados por enquanto — ver app.js: perfil com um único segmento pula a pergunta
+  // de segmento no cadastro (não pede um segundo clique à toa). Sem preset de terminologia/tipos
+  // ainda (cai no "sem restrição" — ver presetPerfilSegmento); entra quando for pedido.
+  {
+    chave: 'refrigeracao',
+    nome: 'Refrigeração e Climatização',
+    segmentos: [
+      { chave: 'generico', nome: 'Refrigeração e Climatização' },
+    ],
+  },
 ];
 const CHAVES_PERFIS = PERFIS_DISPONIVEIS.map((p) => p.chave);
 
