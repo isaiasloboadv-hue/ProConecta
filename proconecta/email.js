@@ -184,9 +184,13 @@ async function enviarConvite({ nome, email, link, nomeEmpresa }) {
   return { ...resultado, link };
 }
 
-async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa }) {
+// linkPesquisa (opcional, pedido do usuário — análise de concorrentes: "pesquisa de satisfação
+// automática pós-visita"): quando informado, acrescenta um convite curto pra pesquisa no mesmo
+// e-mail do relatório, em vez de precisar de um envio separado — chamadores que não passarem
+// esse parâmetro continuam com o e-mail exatamente igual a antes.
+async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa, linkPesquisa }) {
   const assunto = 'Relatório técnico — Nexor Connect';
-  const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>`;
+  const corpoHtml = `<p>Segue em anexo o relatório técnico do atendimento realizado.</p>${linkPesquisa ? `<p>Como foi a visita? <a href="${linkPesquisa}">Avalie em poucos segundos</a>.</p>` : ''}`;
   const resultado = await enviar({
     to: emails, assunto, corpoHtml, nomeEmpresa,
     attachments: [{ filename: nomeArquivo, content: Buffer.from(pdfBase64, 'base64') }],

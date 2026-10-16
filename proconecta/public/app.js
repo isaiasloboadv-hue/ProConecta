@@ -962,6 +962,9 @@ const NAV = {
       // pedido do usuário (análise de concorrentes/conformidade legal — Protocolo de Montreal/
       // IBAMA): consolidado anual de gás refrigerante carregado/recolhido, visão gerencial.
       { key: 'pmoc-relatorio-gas', label: 'Relatório de Gás', page: 'pmoc-relatorio-gas' },
+      // pedido do usuário (análise de concorrentes — Fase B): "controle financeiro" do contrato
+      // recorrente, visão gerencial só do administrador.
+      { key: 'pmoc-faturamento', label: 'Faturamento', page: 'pmoc-faturamento' },
       { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
     ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
@@ -4760,6 +4763,7 @@ function pmocSecaoPlanoHtml(plano, visitas) {
       ${osRefLinha('Itens de manutenção', String(plano.itens.length))}
       ${plano.art_trt_numero ? osRefLinha('ART/TRT', esc(plano.art_trt_numero)) : ''}
       ${plano.art_trt_validade ? osRefLinha('ART/TRT válida até', fmtDataIsoAgendaRef(plano.art_trt_validade)) : ''}
+      ${plano.valor_mensal ? osRefLinha('Contrato mensal', `${fmtMoeda(plano.valor_mensal)} — vence todo dia ${plano.dia_vencimento}`) : ''}
     </div>
     <h3 style="margin-top:14px;">Visitas geradas</h3>
     <div class="panel">${visitasHtml}</div>`;
@@ -4808,6 +4812,12 @@ async function abrirModalPmocPlano(planoExistente) {
         <input id="pmoc-plano-art-trt-arquivo" type="file" accept="application/pdf,image/*" onchange="carregarAnexoArtTrtPmoc(this)">
         <div id="pmoc-plano-art-trt-preview" style="margin-top:4px; font-size:12px; color:var(--ink-soft);">${planoExistente && planoExistente.art_trt_anexo ? 'Já tem um anexo — escolha outro arquivo pra substituir.' : ''}</div>
       </div>
+      <!-- pedido do usuário (análise de concorrentes — Fase B): "o negócio de PMOC é tipicamente
+      por contrato mensal" — campos opcionais; sem valor_mensal, o plano nunca gera fatura. -->
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Valor mensal do contrato (opcional)</label><input id="pmoc-plano-valor-mensal" type="number" min="0" step="0.01" value="${esc((planoExistente && planoExistente.valor_mensal) || '')}" placeholder="Ex: 450.00"></div>
+        <div class="field" style="flex:1;"><label>Dia de vencimento</label><input id="pmoc-plano-dia-vencimento" type="number" min="1" max="31" value="${esc((planoExistente && planoExistente.dia_vencimento) || '')}" placeholder="Ex: 10"></div>
+      </div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
         <h3 style="margin:0;">Itens de manutenção</h3>
         <button type="button" class="btn-outline-sm" onclick="abrirModalPmocItemChecklist('plano')">+ Item</button>
@@ -4851,6 +4861,8 @@ async function salvarPmocPlano() {
     vigencia_meses: document.getElementById('pmoc-plano-vigencia').value,
     art_trt_numero: document.getElementById('pmoc-plano-art-trt-numero').value,
     art_trt_validade: document.getElementById('pmoc-plano-art-trt-validade').value || null,
+    valor_mensal: document.getElementById('pmoc-plano-valor-mensal').value || null,
+    dia_vencimento: document.getElementById('pmoc-plano-dia-vencimento').value || null,
     itens,
   };
   if (window._pmocPlanoArtTrtAnexo) body.art_trt_anexo = window._pmocPlanoArtTrtAnexo;
@@ -5687,6 +5699,60 @@ async function baixarRelatorioGasPmoc() {
   doc.save(`relatorio-gas-pmoc-${relatorio.ano}.pdf`);
 }
 
+// ===== Fase B (análise de concorrentes) — Faturamento (contrato recorrente do Plano PMOC) =====
+const PMOC_STATUS_FATURA_LABEL = { pendente: 'Pendente', atrasada: 'Atrasada', paga: 'Paga' };
+const PMOC_STATUS_FATURA_COR = { pendente: 'var(--ink-soft)', atrasada: 'var(--red)', paga: 'var(--green)' };
+async function renderPmocFaturamento() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head"><h1>Faturamento</h1></div>
+    <div class="filtros-row">
+      <select id="pmoc-fat-status">
+        <option value="">Todas</option>
+        <option value="pendente">Pendentes</option>
+        <option value="atrasada">Atrasadas</option>
+        <option value="paga">Pagas</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="carregarPmocFaturamento()">Filtrar</button>
+    </div>
+    <div id="pmoc-fat-resultado" style="margin-top:12px;"><div class="empty">Carregando...</div></div>`;
+  carregarPmocFaturamento();
+}
+async function carregarPmocFaturamento() {
+  const status = document.getElementById('pmoc-fat-status').value;
+  const alvo = document.getElementById('pmoc-fat-resultado');
+  alvo.innerHTML = '<div class="empty">Carregando...</div>';
+  try {
+    const qs = `?hoje=${hojeIsoAgendaRef()}${status ? '&status=' + status : ''}`;
+    const { faturas } = await api('/api/pmoc/faturas' + qs);
+    window._pmocFaturasAtual = faturas;
+    const totalAReceber = faturas.filter((f) => f.status !== 'paga').reduce((s, f) => s + f.valor, 0);
+    alvo.innerHTML = `
+      <div class="panel" style="display:flex; gap:24px;">
+        ${pmocStatBox('A receber (filtro atual)', fmtMoeda(totalAReceber))}
+        ${pmocStatBox('Faturas', faturas.length)}
+      </div>
+      ${faturas.length ? faturas.map((f) => `
+        <div class="panel" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div>
+            <strong>${esc(f.cliente_nome)}</strong> — ${esc(f.local_nome)}
+            <span class="tag" style="background:none; border:1px solid ${PMOC_STATUS_FATURA_COR[f.status]}; color:${PMOC_STATUS_FATURA_COR[f.status]};">${PMOC_STATUS_FATURA_LABEL[f.status]}</span>
+            <div style="font-size:12.5px; color:var(--ink-soft);">Referência ${pmocMesLabel(Number(f.mes.slice(5, 7)))}/${f.mes.slice(0, 4)} — vence ${fmtDataIsoAgendaRef(f.vencimento)} — ${fmtMoeda(f.valor)}</div>
+          </div>
+          ${f.status === 'paga'
+            ? `<button class="btn-outline-sm" onclick="marcarFaturaPmoc(${f.id}, 'marcar-pendente')">Desfazer pagamento</button>`
+            : `<button class="btn btn-primary btn-sm" onclick="marcarFaturaPmoc(${f.id}, 'marcar-paga')">Marcar como paga</button>`}
+        </div>`).join('') : '<div class="empty">Nenhuma fatura encontrada.</div>'}`;
+  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function marcarFaturaPmoc(id, acao) {
+  try {
+    await api(`/api/pmoc/faturas/${id}/${acao}`, { method: 'PUT' });
+    await carregarPmocFaturamento();
+  } catch (e) { alert(e.message); }
+}
+
 // ===== Pacote "Climatização / PMOC" — Fase 5: Painel/dashboard (item 8 do pedido) =====
 async function renderPmocPainel() {
   const main = document.getElementById('main');
@@ -5703,6 +5769,8 @@ async function renderPmocPainel() {
       ${pmocStatBox('% no prazo este mês', painel.percentual_no_prazo.mes_atual == null ? '—' : painel.percentual_no_prazo.mes_atual + '%')}
       ${pmocStatBox('Não conformidades abertas', painel.nao_conformidades_abertas)}
       ${pmocStatBox('Preventivas atrasadas', painel.atrasadas_por_cliente.reduce((s, c) => s + c.qtd, 0))}
+      ${pmocStatBox('A receber este mês', fmtMoeda(painel.faturamento.a_receber_mes_atual))}
+      ${pmocStatBox('Faturas atrasadas', `${painel.faturamento.qtd_atrasadas} (${fmtMoeda(painel.faturamento.atrasado)})`)}
     </div>
     <div class="panel">
       <h3>% de preventivas no prazo — últimos 6 meses</h3>
@@ -7529,6 +7597,7 @@ async function ir(pagina) {
     if (pagina === 'pmoc-relatorio-mensal') return renderPmocRelatorioMensal();
     if (pagina === 'pmoc-painel') return renderPmocPainel();
     if (pagina === 'pmoc-relatorio-gas') return renderPmocRelatorioGas();
+    if (pagina === 'pmoc-faturamento') return renderPmocFaturamento();
     if (pagina === 'pmoc-portal-locais') return renderPmocPortalLocais();
     if (pagina === 'pmoc-portal-local-detalhe') return renderPmocPortalLocalDetalhe();
     if (pagina === 'pmoc-portal-visitas') return renderPmocPortalVisitas();

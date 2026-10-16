@@ -29,7 +29,9 @@
 // mínima com a data da última manutenção e o nome da empresa". Só esse prefixo específico
 // (/api/pmoc/qr/...) é público — o resto de /api/pmoc continua exigindo login + módulo 'pmoc'
 // normalmente (ver PREFIXO_MODULO abaixo e moduloDaRota).
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr'];
+// /api/pmoc/pesquisa — pesquisa de satisfação pós-visita (Fase B, análise de concorrentes):
+// pública igual ao /api/pmoc/qr, pra abrir sem exigir login de quem recebeu o e-mail.
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr', '/api/pmoc/pesquisa'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],

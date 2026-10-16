@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexor Connect — Pesquisa de Satisfação</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  body{background:var(--bg, #F4F6FA);}
+  .pq-wrap{max-width:480px;margin:0 auto;padding:28px 16px 60px;}
+  .pq-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+  .pq-brand img{height:34px;width:auto;display:block;}
+  .pq-brand .wordmark{font-family:Montserrat,sans-serif;font-weight:800;font-size:19px;color:var(--navy);}
+  .pq-brand .wordmark .conecta{color:var(--blue);}
+  .pq-center{text-align:center;padding:40px 10px;color:var(--ink-soft);font-size:13.5px;}
+  .pq-estrelas{display:flex; justify-content:center; gap:8px; margin:18px 0;}
+  .pq-estrela{font-size:34px; cursor:pointer; color:var(--line); line-height:1; transition:color .15s;}
+  .pq-estrela.ativa{color:#F5A623;}
+  .pq-nota-label{text-align:center; font-size:13px; color:var(--ink-soft); min-height:18px;}
+</style>
+</head>
+<body>
+<div class="pq-wrap">
+  <div class="pq-brand">
+    <img src="/logo.png" alt="Nexor Connect">
+    <div class="wordmark">Nexor<span class="conecta">Connect</span></div>
+  </div>
+  <div id="conteudo"><div class="pq-center">Carregando...</div></div>
+</div>
+
+<script>
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmtDataHora(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso + 'T12:00:00');
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
+function paramToken() { return new URLSearchParams(window.location.search).get('token') || ''; }
+const TOKEN = paramToken();
+const NOTA_LABEL = { 1: 'Muito insatisfeito', 2: 'Insatisfeito', 3: 'Neutro', 4: 'Satisfeito', 5: 'Muito satisfeito' };
+let pesquisa = null;
+let notaEscolhida = 0;
+
+async function carregar() {
+  const conteudo = document.getElementById('conteudo');
+  if (!TOKEN) { conteudo.innerHTML = '<div class="auth-error">Link inválido: token não informado.</div>'; return; }
+  try {
+    const res = await fetch('/api/pmoc/pesquisa/' + TOKEN);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Link inválido.');
+    pesquisa = data;
+    if (pesquisa.respondida) renderObrigado(); else renderFormulario();
+  } catch (e) {
+    conteudo.innerHTML = `<div class="auth-error">${esc(e.message)}</div>`;
+  }
+}
+
+function renderFormulario() {
+  document.getElementById('conteudo').innerHTML = `
+    <div class="panel">
+      <h2>Como foi a visita?</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft);">${esc(pesquisa.empresa_nome)} — ${esc(pesquisa.cliente_nome)} — ${fmtDataHora(pesquisa.data)}</p>
+      <div class="pq-estrelas" id="pq-estrelas">
+        ${[1, 2, 3, 4, 5].map((n) => `<span class="pq-estrela" data-nota="${n}" onclick="escolherNota(${n})">★</span>`).join('')}
+      </div>
+      <div class="pq-nota-label" id="pq-nota-label"></div>
+      <div class="field" style="margin-top:14px;"><label>Comentário (opcional)</label><textarea id="pq-comentario" style="min-height:70px;"></textarea></div>
+      <div id="pq-erro" class="auth-error hidden" style="margin-top:10px;"></div>
+      <button class="btn btn-primary btn-sm" style="margin-top:10px; width:100%;" onclick="enviarPesquisa()">Enviar avaliação</button>
+    </div>`;
+}
+function escolherNota(n) {
+  notaEscolhida = n;
+  document.querySelectorAll('.pq-estrela').forEach((el) => el.classList.toggle('ativa', Number(el.dataset.nota) <= n));
+  document.getElementById('pq-nota-label').textContent = NOTA_LABEL[n];
+}
+async function enviarPesquisa() {
+  const erroEl = document.getElementById('pq-erro');
+  erroEl.classList.add('hidden');
+  if (!notaEscolhida) { erroEl.textContent = 'Escolha uma nota de 1 a 5 estrelas.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const res = await fetch('/api/pmoc/pesquisa/' + TOKEN, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nota: notaEscolhida, comentario: document.getElementById('pq-comentario').value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Não foi possível enviar.');
+    renderObrigado();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+function renderObrigado() {
+  document.getElementById('conteudo').innerHTML = `
+    <div class="panel">
+      <h2>Obrigado!</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Sua avaliação foi registrada.</p>
+    </div>`;
+}
+
+carregar();
+</script>
+</body>
+</html>

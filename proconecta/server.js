@@ -6017,11 +6017,52 @@ function gerarVisitasPmocPlano(data, plano, hojeIso) {
       observacoes: `Visita PMOC gerada automaticamente — ${pmocItens.length} item(ns) de manutenção em ${new Set(pmocItens.map((i) => i.aparelho_id)).size} aparelho(s).`,
       tecnico_id: null, tecnico_nome: '', autor_id: null, status: 'pendente_designacao', criado_em: new Date().toISOString(),
       pmoc_plano_id: plano.id, pmoc_local_id: local.id, pmoc_itens: pmocItens,
+      // Fase B (análise de concorrentes) — pesquisa de satisfação pública pós-visita (ver
+      // POST /api/pmoc/visitas/:id/enviar-relatorio e GET/POST /api/pmoc/pesquisa/:token).
+      token_pesquisa: db.gerarQrToken(), pesquisa_satisfacao: null,
     });
     criouAlgo = true;
   }
   return criouAlgo;
 }
+// ---- Fase B (análise de concorrentes) — faturamento do contrato recorrente do Plano PMOC ----
+// mesmo espírito de gerarVisitasPmocPlano: lazy, idempotente, 3 meses rolantes, sem precisar de
+// cron de verdade. Só gera fatura se o plano tiver valor_mensal configurado (planos sem cobrança
+// recorrente — ex.: contrato avulso cobrado por fora — simplesmente nunca geram fatura nenhuma).
+function diaVencimentoNoMesPmoc(diaVencimento, ano, mes) {
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  return Math.min(diaVencimento, diasNoMes);
+}
+function gerarFaturasPmocPlano(data, plano, hojeIso) {
+  if (!plano.valor_mensal || !plano.dia_vencimento) return false;
+  const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === plano.local_id && l.empresa_id === plano.empresa_id);
+  if (!local) return false;
+  const [anoHoje, mesHoje] = hojeIso.split('-').map(Number);
+  const [anoInicio, mesInicio] = plano.data_inicio.split('-').map(Number);
+  let criouAlgo = false;
+  for (let offset = 0; offset < 3; offset++) {
+    const cursor = new Date(anoHoje, mesHoje - 1 + offset, 1);
+    const ano = cursor.getFullYear(), mes = cursor.getMonth() + 1;
+    if (diferencaMesesPmoc(anoInicio, mesInicio, ano, mes) < 0) continue; // plano ainda não começou nesse mês
+    const mesChave = `${ano}-${String(mes).padStart(2, '0')}`;
+    const jaExiste = data.os_refrigeracao_pmoc_faturas.some((f) => f.plano_id === plano.id && f.empresa_id === plano.empresa_id && f.mes === mesChave);
+    if (jaExiste) continue;
+    const dia = diaVencimentoNoMesPmoc(plano.dia_vencimento, ano, mes);
+    tenant.criar(data, 'os_refrigeracao_pmoc_faturas', plano.empresa_id, {
+      plano_id: plano.id, local_id: local.id, cliente_id: local.cliente_id, mes: mesChave,
+      valor: plano.valor_mensal, vencimento: `${mesChave}-${String(dia).padStart(2, '0')}`,
+      status: 'pendente', pago_em: null, criado_em: new Date().toISOString(),
+    });
+    criouAlgo = true;
+  }
+  return criouAlgo;
+}
+// lazy-check igual atualizarStatusVencidoPlanoPmoc: fatura "pendente" cuja data de vencimento já
+// passou vira "atrasada" na primeira consulta depois disso — nunca mexe numa fatura já "paga".
+function atualizarStatusAtrasadaFaturaPmoc(fatura, hojeIso) {
+  if (fatura.status === 'pendente' && hojeIso > fatura.vencimento) fatura.status = 'atrasada';
+}
+
 // "Se o plano for alterado, recalcular apenas as O.S. futuras ainda não iniciadas" — apaga as
 // visitas geradas por este plano que ainda não começaram (pendente de técnico, ou já agendada mas
 // numa data futura) e gera de novo a partir dos itens/datas atualizados; nunca mexe numa visita já
@@ -6053,6 +6094,7 @@ rota('GET', /^\/api\/pmoc\/planos$/, async (req, res) => {
     atualizarStatusVencidoPlanoPmoc(plano, query.hoje);
     if (plano.status !== statusAntes) precisaSalvar = true;
     if (plano.status === 'ativo' && gerarVisitasPmocPlano(data, plano, query.hoje)) precisaSalvar = true;
+    if (plano.status === 'ativo' && gerarFaturasPmocPlano(data, plano, query.hoje)) precisaSalvar = true;
   }
   if (precisaSalvar) db.save(data);
   const comDetalhes = planos.map((p) => pmocPlanoComDetalhes(data, p)).sort((a, b) => (a.local_nome || '').localeCompare(b.local_nome || '', 'pt-BR'));
@@ -6088,6 +6130,10 @@ rota('POST', /^\/api\/pmoc\/planos$/, async (req, res) => {
     // Fase 5, item 7: "ART/TRT vencida ou ausente: alerta" — validade é opcional (nem toda ART
     // tem data definida), configurada por quem cadastra, nunca uma regra fixa no código.
     art_trt_validade: /^\d{4}-\d{2}-\d{2}$/.test(body.art_trt_validade || '') ? body.art_trt_validade : null,
+    // Fase B (análise de concorrentes): contrato recorrente — opcional (nem todo plano é cobrado
+    // por fora de uma O.S./Orçamento avulso). Sem valor_mensal, nunca gera fatura nenhuma.
+    valor_mensal: Number(body.valor_mensal) > 0 ? Number(body.valor_mensal) : null,
+    dia_vencimento: Number(body.dia_vencimento) >= 1 && Number(body.dia_vencimento) <= 31 ? Number(body.dia_vencimento) : null,
     status: 'rascunho', itens, criado_em: new Date().toISOString(),
   });
   db.save(data);
@@ -6109,7 +6155,8 @@ rota('GET', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
   const statusAntesDetalhe = plano.status;
   atualizarStatusVencidoPlanoPmoc(plano, query.hoje);
   const criouVisitaNova = plano.status === 'ativo' && gerarVisitasPmocPlano(data, plano, query.hoje);
-  if (plano.status !== statusAntesDetalhe || criouVisitaNova) db.save(data);
+  const criouFaturaNova = plano.status === 'ativo' && gerarFaturasPmocPlano(data, plano, query.hoje);
+  if (plano.status !== statusAntesDetalhe || criouVisitaNova || criouFaturaNova) db.save(data);
   const visitas = data.os_refrigeracao_agendamentos.filter((a) => a.pmoc_plano_id === plano.id && a.empresa_id === user.empresa_id).sort((a, b) => a.data.localeCompare(b.data));
   enviarJSON(res, 200, { plano: pmocPlanoComDetalhes(data, plano), visitas });
 });
@@ -6135,6 +6182,12 @@ rota('PUT', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
     art_trt_validade: body.art_trt_validade !== undefined
       ? (/^\d{4}-\d{2}-\d{2}$/.test(body.art_trt_validade || '') ? body.art_trt_validade : null)
       : (plano.art_trt_validade || null),
+    valor_mensal: body.valor_mensal !== undefined
+      ? (Number(body.valor_mensal) > 0 ? Number(body.valor_mensal) : null)
+      : (plano.valor_mensal || null),
+    dia_vencimento: body.dia_vencimento !== undefined
+      ? (Number(body.dia_vencimento) >= 1 && Number(body.dia_vencimento) <= 31 ? Number(body.dia_vencimento) : null)
+      : (plano.dia_vencimento || null),
     itens,
   });
   // os alertas de ART/TRT e de vencimento do plano (ver GET /api/notificacoes) só reavisam por
@@ -6163,8 +6216,68 @@ rota('PUT', /^\/api\/pmoc\/planos\/(\d+)\/ativar$/, async (req, res, m) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
   plano.status = 'ativo';
   gerarVisitasPmocPlano(data, plano, query.hoje);
+  gerarFaturasPmocPlano(data, plano, query.hoje);
   db.save(data);
   enviarJSON(res, 200, { plano: pmocPlanoComDetalhes(data, plano) });
+});
+
+// ---- Fase B (análise de concorrentes) — Faturamento (item 3 do roadmap: "o negócio de PMOC é
+// tipicamente por contrato mensal") — visão gerencial, só administrador, mesmo padrão do
+// Relatório Mensal/Painel PMOC. ----
+function pmocFaturaComDetalhes(data, fatura) {
+  const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === fatura.local_id && l.empresa_id === fatura.empresa_id);
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === fatura.cliente_id && c.empresa_id === fatura.empresa_id);
+  return { ...fatura, local_nome: local ? local.nome : '—', cliente_nome: cliente ? cliente.nome : '—' };
+}
+// GET /api/pmoc/faturas?hoje=AAAA-MM-DD — gera lazy (todo plano ativo com valor_mensal) e
+// atualiza o status "atrasada" antes de listar, mesmo raciocínio das visitas/planos.
+rota('GET', /^\/api\/pmoc\/faturas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Faturamento é exclusivo do administrador.' });
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
+  let precisaSalvar = false;
+  for (const plano of tenant.listar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id).filter((p) => p.status === 'ativo')) {
+    if (gerarFaturasPmocPlano(data, plano, query.hoje)) precisaSalvar = true;
+  }
+  for (const fatura of tenant.listar(data, 'os_refrigeracao_pmoc_faturas', user.empresa_id)) {
+    const statusAntes = fatura.status;
+    atualizarStatusAtrasadaFaturaPmoc(fatura, query.hoje);
+    if (fatura.status !== statusAntes) precisaSalvar = true;
+  }
+  if (precisaSalvar) db.save(data);
+  let faturas = tenant.listar(data, 'os_refrigeracao_pmoc_faturas', user.empresa_id);
+  if (query.status) faturas = faturas.filter((f) => f.status === query.status);
+  faturas = faturas.map((f) => pmocFaturaComDetalhes(data, f)).sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+  enviarJSON(res, 200, { faturas });
+});
+// PUT /api/pmoc/faturas/:id/marcar-paga
+rota('PUT', /^\/api\/pmoc\/faturas\/(\d+)\/marcar-paga$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Faturamento é exclusivo do administrador.' });
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const fatura = tenant.buscar(data, 'os_refrigeracao_pmoc_faturas', Number(m[1]), user.empresa_id);
+  if (!fatura) return enviarJSON(res, 404, { erro: 'Fatura não encontrada.' });
+  fatura.status = 'paga';
+  fatura.pago_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { fatura: pmocFaturaComDetalhes(data, fatura) });
+});
+// PUT /api/pmoc/faturas/:id/marcar-pendente — desfaz um "marcar paga" por engano.
+rota('PUT', /^\/api\/pmoc\/faturas\/(\d+)\/marcar-pendente$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Faturamento é exclusivo do administrador.' });
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const fatura = tenant.buscar(data, 'os_refrigeracao_pmoc_faturas', Number(m[1]), user.empresa_id);
+  if (!fatura) return enviarJSON(res, 404, { erro: 'Fatura não encontrada.' });
+  fatura.status = 'pendente';
+  fatura.pago_em = null;
+  db.save(data);
+  enviarJSON(res, 200, { fatura: pmocFaturaComDetalhes(data, fatura) });
 });
 
 // DELETE /api/pmoc/planos/:id — só em rascunho (ativo/vencido ficam como histórico).
@@ -6359,8 +6472,37 @@ rota('POST', /^\/api\/pmoc\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res,
   const body = await lerCorpo(req);
   if (!body.pdf_base64 || !Array.isArray(body.emails) || !body.emails.length) return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
   const empresa = data.empresas.find((e) => e.id === user.empresa_id);
-  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo: `visita-pmoc-${visita.id}.pdf`, nomeEmpresa: empresa ? empresa.nome : undefined });
+  // Fase B (análise de concorrentes) — pesquisa de satisfação automática: entra no mesmo e-mail
+  // do relatório, sem precisar de um disparo separado; só se a visita ainda não tiver token
+  // (visitas antigas, geradas antes dessa fase, simplesmente não ganham o convite retroativo).
+  const linkPesquisa = visita.token_pesquisa ? `${APP_URL}/pmoc-pesquisa.html?token=${visita.token_pesquisa}` : undefined;
+  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo: `visita-pmoc-${visita.id}.pdf`, nomeEmpresa: empresa ? empresa.nome : undefined, linkPesquisa });
   enviarJSON(res, 200, { envio: resultado });
+});
+// GET /api/pmoc/pesquisa/:token — PÚBLICA (ver PREFIXOS_PUBLICOS em rotas-modulo.js), sem login.
+// Devolve o mínimo pra montar a tela (empresa, cliente/local, data) e se já foi respondida.
+rota('GET', /^\/api\/pmoc\/pesquisa\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const visita = data.os_refrigeracao_agendamentos.find((a) => a.token_pesquisa === m[1]);
+  if (!visita) return enviarJSON(res, 404, { erro: 'Pesquisa não encontrada.' });
+  const empresa = data.empresas.find((e) => e.id === visita.empresa_id);
+  enviarJSON(res, 200, {
+    cliente_nome: visita.cliente_nome, data: visita.data, empresa_nome: empresa ? empresa.nome : '',
+    respondida: !!visita.pesquisa_satisfacao,
+  });
+});
+// POST /api/pmoc/pesquisa/:token { nota, comentario } — PÚBLICA, idempotente (só responde uma vez).
+rota('POST', /^\/api\/pmoc\/pesquisa\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const visita = data.os_refrigeracao_agendamentos.find((a) => a.token_pesquisa === m[1]);
+  if (!visita) return enviarJSON(res, 404, { erro: 'Pesquisa não encontrada.' });
+  if (visita.pesquisa_satisfacao) return enviarJSON(res, 400, { erro: 'Esta pesquisa já foi respondida.' });
+  const body = await lerCorpo(req);
+  const nota = Number(body.nota);
+  if (!(nota >= 1 && nota <= 5)) return enviarJSON(res, 400, { erro: 'Informe uma nota de 1 a 5.' });
+  visita.pesquisa_satisfacao = { nota, comentario: body.comentario || '', respondido_em: new Date().toISOString() };
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // ---------- Pacote "Climatização / PMOC" — Fase 4: Documento PMOC e portal do cliente ----------
@@ -6974,6 +7116,14 @@ rota('GET', /^\/api\/pmoc\/painel$/, async (req, res) => {
     clientesProblema.set(cliente.id, motivos);
   }
   if (precisaSalvarPainel) db.save(data); // só grava o arquivo inteiro quando algo de fato mudou.
+  // Fase B (análise de concorrentes): "controle financeiro" — a receber no mês atual (pendente +
+  // atrasada) e o total já atrasado, pra dar visibilidade sem precisar abrir a tela de Faturamento.
+  const faturasEmpresa = tenant.listar(data, 'os_refrigeracao_pmoc_faturas', user.empresa_id);
+  const faturamento = {
+    a_receber_mes_atual: faturasEmpresa.filter((f) => f.mes === mesAtual && f.status !== 'paga').reduce((s, f) => s + f.valor, 0),
+    atrasado: faturasEmpresa.filter((f) => f.status === 'atrasada').reduce((s, f) => s + f.valor, 0),
+    qtd_atrasadas: faturasEmpresa.filter((f) => f.status === 'atrasada').length,
+  };
   enviarJSON(res, 200, {
     percentual_no_prazo: percentualNoPrazo,
     atrasadas_por_tecnico: atrasadasPorTecnico,
@@ -6981,6 +7131,7 @@ rota('GET', /^\/api\/pmoc\/painel$/, async (req, res) => {
     nao_conformidades_abertas: naoConformidadesAbertas,
     aparelhos_mais_corretivas: aparelhosMaisCorretivas,
     clientes_problema: [...clientesProblema.values()],
+    faturamento,
   });
 });
 

@@ -270,6 +270,19 @@ test('"Relatório de Gás" só existe no menu do administrador', () => {
   assert.ok(!pmocSuporte.children.map((c) => c.page).includes('pmoc-relatorio-gas'));
 });
 
+// pedido do usuário: Fase B (análise de concorrentes) — Faturamento, mesma regra gerencial
+// (GET /api/pmoc/faturas exige papel administrador no server).
+test('"Faturamento" só existe no menu do administrador', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['pmoc'] };
+  const pmocAdmin = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(pmocAdmin.children.map((c) => c.page).includes('pmoc-faturamento'));
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['pmoc'] };
+  const pmocSuporte = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(!pmocSuporte.children.map((c) => c.page).includes('pmoc-faturamento'));
+});
+
 // pedido do usuário: Fase 4, item 5 — portal do cliente final do pacote PMOC. Igual ao item
 // "pmoc" do administrador/suporte, combina os dois gates (`perfil: 'refrigeracao'` + `modulo:
 // 'pmoc'`), só que no menu do papel "cliente" (ver GET /api/pmoc/portal/* em server.js).
