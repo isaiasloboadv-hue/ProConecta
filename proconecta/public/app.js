@@ -3912,7 +3912,7 @@ const CALC_BLINDADA_SERVICOS = [
   'Higienização de Dutos', 'Reparo em Comando Elétrico',
   'Outro (digite abaixo)',
 ];
-function calcBlindadaAjustesPadrao() { return { combustivel_litro: 6.15, consumo_km_l: 10 }; }
+function calcBlindadaAjustesPadrao() { return { combustivel_litro: 6.15, consumo_km_l: 10, pix_chave: '', cnpj_cpf: '' }; }
 function carregarAjustesCalcBlindada() {
   try {
     const salvo = JSON.parse(localStorage.getItem('pc_calc_blindada_ajustes') || 'null');
@@ -4051,26 +4051,43 @@ function calcBlindadaTotais(f, ajustes) {
   return { subtotalServicos, material, deslocamento, total: subtotalServicos + material + deslocamento };
 }
 function nomeServicoCalcBlindada(s) { return s.tipo === 'Outro (digite abaixo)' ? (s.outro || 'Serviço') : s.tipo; }
-function gerarMensagemCalcBlindada(f, totais) {
-  const linhas = [];
-  linhas.push(`*Orçamento — ${empresaNome()}*`);
-  if (f.cliente_nome) linhas.push(`Cliente: ${f.cliente_nome}`);
-  if (f.endereco) linhas.push(`Endereço: ${f.endereco}`);
-  linhas.push(`Data: ${fmtDataIsoAgendaRef(f.data)}${f.hora ? ' às ' + f.hora : ''}`);
-  linhas.push('');
-  linhas.push('*Serviços*');
-  f.servicos.filter((s) => s.tipo).forEach((s) => {
-    linhas.push(`${nomeServicoCalcBlindada(s)}${s.qtd > 1 ? ` (${s.qtd}x)` : ''} — ${fmtMoeda(s.valor * s.qtd)}`);
-  });
-  if (totais.material) linhas.push(`Material — ${fmtMoeda(totais.material)}`);
-  if (totais.deslocamento) linhas.push(`Deslocamento (${f.km_total} km) — ${fmtMoeda(totais.deslocamento)}`);
-  linhas.push('');
-  linhas.push(`*Total: ${fmtMoeda(totais.total)}*`);
-  if (f.garantia_dias) linhas.push(`Garantia: ${f.garantia_dias} dias`);
-  if (f.observacoes) { linhas.push(''); linhas.push(f.observacoes); }
-  linhas.push('');
-  linhas.push(`${f.tecnico || empresaNome()}`);
-  return linhas.join('\n');
+// pedido do usuário (prints do resultado do app de referência): 3 mensagens prontas diferentes,
+// não uma só — Proposta (orçamento detalhado), Sinal (cobrança de 30% pra agendar/comprar
+// material, com a chave PIX do técnico) e Conclusão (serviço pronto + saldo restante). A chave
+// PIX vem dos Ajustes (⚙️, ver abrirModalAjustesCalcBlindada) — sem ela configurada, a mensagem
+// de Sinal sai com "[SUA CHAVE]" mesmo, igual ao app de referência, com um aviso pra trocar.
+const CALC_BLINDADA_SINAL_PERCENTUAL = 0.3;
+function gerarMensagensCalcBlindada(f, totais, pixChave) {
+  const nomeCliente = f.cliente_nome || '';
+  const servicosLinhas = f.servicos.filter((s) => s.tipo).map((s) => `• ${s.qtd}x ${nomeServicoCalcBlindada(s)} - ${fmtMoeda(s.valor * s.qtd)}`);
+
+  const propostaLinhas = ['*ORÇAMENTO TÉCNICO - REFRIGERISTA BLINDADO*', '', `Olá ${nomeCliente}! Segue o orçamento:`, '', '*SERVIÇOS:*', ...servicosLinhas];
+  if (f.endereco || f.observacoes) {
+    propostaLinhas.push('', '*OBS:*');
+    if (f.endereco) propostaLinhas.push(`📍 *Local:* ${f.endereco}`);
+    if (f.observacoes) propostaLinhas.push(f.observacoes);
+  }
+  propostaLinhas.push('', `*INVESTIMENTO TOTAL:* ${fmtMoeda(totais.total)}`, '(Material + Mão de Obra incluso)', '', `*Garantia:* ${f.garantia_dias} dias`, `*Data Prevista:* ${fmtDataIsoAgendaRef(f.data)}`, '', 'Fico no aguardo.', f.tecnico || '');
+
+  const sinalValor = totais.total * CALC_BLINDADA_SINAL_PERCENTUAL;
+  const sinalLinhas = [
+    `Olá ${nomeCliente}! 👋`, '',
+    `Para agendarmos dia *${fmtDataIsoAgendaRef(f.data)}* e comprarmos material, precisamos de um sinal.`, '',
+    `*Sinal (${Math.round(CALC_BLINDADA_SINAL_PERCENTUAL * 100)}%): ${fmtMoeda(sinalValor)}*`, '',
+    `Chave PIX: ${pixChave || '[SUA CHAVE]'}`, '',
+    'Por favor, envie o comprovante. Obrigado!',
+  ];
+
+  const saldoRestante = totais.total - sinalValor;
+  const conclusaoLinhas = [
+    '*Serviço Concluído!* ✅', '',
+    `${nomeCliente}, equipamento pronto.`, '',
+    `*Saldo Restante:* ${fmtMoeda(saldoRestante)}`, '',
+    `Lembrando que você tem *${f.garantia_dias} dias* de garantia.`, '',
+    'Obrigado pela preferência!', f.tecnico || '',
+  ];
+
+  return { proposta: propostaLinhas.join('\n'), sinal: sinalLinhas.join('\n'), conclusao: conclusaoLinhas.join('\n') };
 }
 function calcularCalcBlindada() {
   sincronizarCamposBasicosCalcBlindada();
@@ -4080,29 +4097,322 @@ function calcularCalcBlindada() {
   if (!servicosValidos.length) { resultadoEl.innerHTML = '<div class="auth-error" style="margin-top:12px;">Adicione ao menos um serviço.</div>'; return; }
   const ajustes = carregarAjustesCalcBlindada();
   const totais = calcBlindadaTotais(f, ajustes);
-  const mensagem = gerarMensagemCalcBlindada(f, totais);
-  window._calcBlindadaResultado = { totais, mensagem };
-  resultadoEl.innerHTML = `
-    <div class="panel" style="margin-top:14px; background:var(--gray-50,#F4F6FA);">
-      <h3 style="margin-top:0;">Resumo</h3>
-      ${osRefLinha('Serviços', fmtMoeda(totais.subtotalServicos))}
-      ${totais.material ? osRefLinha('Material', fmtMoeda(totais.material)) : ''}
-      ${totais.deslocamento ? osRefLinha('Deslocamento', fmtMoeda(totais.deslocamento)) : ''}
-      <div style="display:flex; justify-content:space-between; font-weight:800; font-size:16px; border-top:1px solid var(--line); margin-top:6px; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(totais.total)}</span></div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
-        <button class="btn-outline-sm" onclick="copiarMensagemCalcBlindada()">📋 Copiar mensagem</button>
-        <a class="btn btn-primary btn-sm" href="https://wa.me/?text=${encodeURIComponent(mensagem)}" target="_blank" rel="noopener">Enviar pelo WhatsApp</a>
-      </div>
-    </div>`;
+  const mensagens = gerarMensagensCalcBlindada(f, totais, ajustes.pix_chave);
+  window._calcBlindadaAbaAberta = 'proposta';
+  window._calcBlindadaResultado = { totais, mensagens, pixConfigurada: !!ajustes.pix_chave };
   // salva no histórico local (não vai pro servidor — ver comentário no topo do arquivo)
   const historico = carregarHistoricoCalcBlindada();
-  historico.unshift({ id: Date.now(), criado_em: new Date().toISOString(), cliente_nome: f.cliente_nome || 'Sem nome', total: totais.total, mensagem });
+  historico.unshift({ id: Date.now(), criado_em: new Date().toISOString(), cliente_nome: f.cliente_nome || 'Sem nome', total: totais.total, mensagens });
   salvarHistoricoCalcBlindada(historico);
+  desenharResultadoCalcBlindada();
 }
-async function copiarMensagemCalcBlindada() {
+// pedido do usuário (print do resultado): "LUCRO LÍQUIDO" = subtotal dos serviços (mão de obra —
+// nessa ferramenta rápida, 100% do valor cobrado pelo serviço em si vira lucro, diferente de
+// material/logística, que são repasse de custo); "DESPESAS" = material + logística; "VALOR
+// SUGERIDO" = lucro líquido + despesas (bate com o total já calculado em calcBlindadaTotais).
+function desenharResultadoCalcBlindada() {
+  const resultadoEl = document.getElementById('cb-resultado');
+  if (!resultadoEl || !window._calcBlindadaResultado) return;
+  const { totais, mensagens, pixConfigurada } = window._calcBlindadaResultado;
+  const despesas = totais.material + totais.deslocamento;
+  resultadoEl.innerHTML = `
+    <div class="panel" style="margin-top:14px; background:var(--blue); color:#fff; text-align:center; padding:24px 16px;">
+      <div style="font-size:12px; letter-spacing:1px; opacity:.85;">VALOR SUGERIDO</div>
+      <div style="font-size:38px; font-weight:800; margin-top:4px;">${fmtMoeda(totais.total)}</div>
+      <div style="display:flex; gap:10px; margin-top:16px;">
+        <div style="flex:1; background:rgba(255,255,255,.15); border-radius:10px; padding:10px;">
+          <div style="font-size:11px; opacity:.85;">LUCRO LÍQUIDO</div>
+          <div style="font-size:17px; font-weight:700; margin-top:2px;">${fmtMoeda(totais.subtotalServicos)}</div>
+        </div>
+        <div style="flex:1; background:rgba(255,255,255,.15); border-radius:10px; padding:10px;">
+          <div style="font-size:11px; opacity:.85;">DESPESAS</div>
+          <div style="font-size:17px; font-weight:700; margin-top:2px;">${fmtMoeda(despesas)}</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px;">
+      ${calcBlindadaCardMini('🚚', 'LOGÍSTICA', fmtMoeda(totais.deslocamento))}
+      ${calcBlindadaCardMini('🔧', 'MÃO DE OBRA', fmtMoeda(totais.subtotalServicos))}
+      ${calcBlindadaCardMini('📦', 'MATERIAIS', fmtMoeda(totais.material))}
+    </div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="btn btn-primary btn-sm" style="flex:1;" onclick="abrirMenuEnviarCalcBlindada()">🔗 Enviar orçamento</button>
+      <button class="btn-outline-sm" style="flex:1;" onclick="novoCalculoCalcBlindada()">↺ Novo cálculo</button>
+    </div>
+    <h3 style="margin:20px 0 4px; text-transform:uppercase; font-size:13px; letter-spacing:.4px; color:var(--ink-soft); text-align:center;">Mensagens prontas</h3>
+    <div class="panel">${desenharAbasMensagensCalcBlindada(mensagens)}</div>
+    ${pixConfigurada ? '' : '<p style="font-size:12px; color:var(--ink-soft); text-align:center; margin-top:8px;">A mensagem de sinal tem <strong>[SUA CHAVE]</strong> no lugar do PIX — troque antes de enviar, ou configure sua chave em Ajustes (⚙️).</p>'}`;
+}
+function calcBlindadaCardMini(icone, titulo, valor) {
+  return `<div class="panel" style="text-align:center; padding:12px 6px;">
+    <div style="font-size:18px;">${icone}</div>
+    <div style="font-size:10px; color:var(--ink-soft); margin-top:4px; letter-spacing:.3px;">${titulo}</div>
+    <div style="font-weight:700; font-size:13px; margin-top:2px;">${valor}</div>
+  </div>`;
+}
+const CALC_BLINDADA_ABAS = [
+  { chave: 'proposta', numero: 1, titulo: 'Proposta' },
+  { chave: 'sinal', numero: 2, titulo: 'Sinal' },
+  { chave: 'conclusao', numero: 3, titulo: 'Conclusão' },
+];
+function desenharAbasMensagensCalcBlindada(mensagens) {
+  const aberta = window._calcBlindadaAbaAberta;
+  return CALC_BLINDADA_ABAS.map((a) => `
+    <div style="border-bottom:1px solid var(--line);">
+      <button type="button" style="width:100%; display:flex; align-items:center; gap:10px; padding:12px 4px; background:none; border:none; text-align:left; cursor:pointer; font:inherit; color:inherit;" onclick="alternarAbaMensagemCalcBlindada('${a.chave}')">
+        <span style="width:22px; height:22px; border-radius:50%; background:var(--blue-pale); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">${a.numero}</span>
+        <strong style="text-transform:uppercase; font-size:13px;">${a.titulo}</strong>
+      </button>
+      ${aberta === a.chave ? `
+        <div style="padding:0 4px 14px;">
+          <pre style="white-space:pre-wrap; font-family:inherit; background:var(--gray-50,#F4F6FA); border-radius:8px; padding:12px; font-size:13px; margin:0 0 10px;">${esc(mensagens[a.chave])}</pre>
+          <button class="btn btn-primary btn-sm" style="width:100%;" onclick="copiarTextoCalcBlindada('${a.chave}')">📋 Copiar texto</button>
+        </div>` : ''}
+    </div>`).join('');
+}
+function alternarAbaMensagemCalcBlindada(chave) {
+  window._calcBlindadaAbaAberta = window._calcBlindadaAbaAberta === chave ? null : chave;
+  desenharResultadoCalcBlindada();
+}
+async function copiarTextoCalcBlindada(chave) {
   if (!window._calcBlindadaResultado) return;
-  try { await navigator.clipboard.writeText(window._calcBlindadaResultado.mensagem); mostrarToast('Mensagem copiada.'); }
+  try { await navigator.clipboard.writeText(window._calcBlindadaResultado.mensagens[chave]); mostrarToast('Texto copiado.'); }
   catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o texto manualmente.'); }
+}
+// pedido do usuário (print do botão "Enviar orçamento"): abre o mesmo menu "Enviar documento"
+// (PDF/imagem/baixar) já usado em O.S. e Orçamento — reaproveita abrirModalOsRefAcao/
+// osRefBotaoAcao, que não são específicos de O.S. apesar do nome (ver uso em Orçamento/Agenda).
+function abrirMenuEnviarCalcBlindada() {
+  if (!window._calcBlindadaResultado) return;
+  const f = window._calcBlindadaForm;
+  const corpo =
+    `<p style="color:var(--ink-soft); font-size:13px; margin:-6px 0 14px;">Orçamento — ${esc(f.cliente_nome || 'Sem nome')}</p>` +
+    osRefBotaoAcao('📄 Enviar PDF', 'Anexa o arquivo na conversa, sem link junto', `fecharModalOsRefAcao(); enviarCalcBlindadaPdf();`) +
+    osRefBotaoAcao('🖼️ Enviar como imagem', 'O cliente vê o documento direto no WhatsApp', `fecharModalOsRefAcao(); enviarCalcBlindadaImagem();`) +
+    osRefBotaoAcao('⬇️ Baixar PDF', 'Salva no aparelho para enviar depois', `fecharModalOsRefAcao(); baixarCalcBlindadaPdf();`);
+  abrirModalOsRefAcao('<h3>Enviar documento</h3>', corpo);
+}
+function nomeArquivoCalcBlindada(f) {
+  return `Orcamento-${String(f.cliente_nome || 'cliente').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-')}`;
+}
+// mesma lógica de garantiaAteOsRef, mas com o "+T12:00:00" de somarDiasIsoAgendaRef — aqui a data
+// de origem é só "AAAA-MM-DD" (f.data, sem hora), e sem isso `new Date('AAAA-MM-DD')` é
+// meia-noite UTC, que em fuso negativo (Brasil) exibe o dia anterior.
+function garantiaAteCalcBlindada(dataIso, dias) {
+  const d = new Date(dataIso + 'T12:00:00');
+  if (isNaN(d.getTime())) return '—';
+  d.setDate(d.getDate() + (Number(dias) || 0));
+  return d.toLocaleDateString('pt-BR');
+}
+// PDF de 1 página (Dados do atendimento/Serviços/Resumo financeiro/Condições de pagamento/
+// Garantia) — mesma convenção visual dos outros PDFs do perfil (PDF_COR, logoClienteFlatHeader no
+// cabeçalho, desenharCreditoNexorConnect no rodapé, ver montarDocOrcamentoRefrigeracaoPdf).
+function montarDocCalcBlindadaPdf(f, totais, ajustes, logoCliente, logoNexor) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: 'Orçamento' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  const sinalValor = totais.total * CALC_BLINDADA_SINAL_PERCENTUAL;
+  const saldoRestante = totais.total - sinalValor;
+
+  function cabecalho() {
+    const y0 = margem;
+    if (logoCliente) doc.addImage(logoCliente, 'PNG', margem, y0 - 8, 90, 32);
+    else { doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 8); }
+    if (ajustes.cnpj_cpf) {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('CNPJ/CPF: ' + limparPdf(ajustes.cnpj_cpf), margem, y0 + (logoCliente ? 38 : 22));
+    }
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Orçamento', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(fmtDataOsRef(new Date().toISOString()), pageW - margem, y0 + 14, { align: 'right' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function rodape() {
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página 1/1`, pageW / 2, pageH - 20, { align: 'center' });
+    desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 70);
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem, y);
+    return y + 16;
+  }
+  function campo(x, y, label, valor) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), x, y);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+
+  let y = cabecalho();
+  y = secaoTitulo(y, 'DADOS DO ATENDIMENTO');
+  const boxY = y - 2, boxAltura = 86;
+  doc.setFillColor(...PDF_COR.bluePale); doc.roundedRect(margem, boxY, largura, boxAltura, 6, 6, 'F');
+  let yCampo = boxY + 18;
+  campo(margem + 14, yCampo, 'Cliente', f.cliente_nome); campo(margem + largura / 2, yCampo, 'Telefone', f.telefone); yCampo += 26;
+  campo(margem + 14, yCampo, 'Endereço', f.endereco); campo(margem + largura / 2, yCampo, 'Data Prevista', `${fmtDataIsoAgendaRef(f.data)}${f.hora ? ' às ' + f.hora : ''}`); yCampo += 26;
+  campo(margem + largura / 2, yCampo, 'Responsável', f.tecnico);
+  y = boxY + boxAltura + 24;
+
+  const servicosValidos = f.servicos.filter((s) => s.tipo);
+  if (servicosValidos.length) {
+    y = secaoTitulo(y, 'SERVIÇOS');
+    doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('DESCRIÇÃO', margem + 8, y + 12);
+    doc.text('QTD', margem + largura * 0.55, y + 12);
+    doc.text('VALOR UNIT.', margem + largura * 0.68, y + 12);
+    doc.text('SUBTOTAL', margem + largura * 0.86, y + 12);
+    y += 18;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); doc.setFontSize(8.5);
+    servicosValidos.forEach((s, i) => {
+      if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+      doc.text(limparPdf(nomeServicoCalcBlindada(s)), margem + 8, y + 11);
+      doc.text(String(s.qtd), margem + largura * 0.55, y + 11);
+      doc.text(fmtMoeda(s.valor), margem + largura * 0.68, y + 11);
+      doc.text(fmtMoeda(s.valor * s.qtd), margem + largura * 0.86, y + 11);
+      y += 16;
+    });
+    y += 16;
+  }
+
+  y = secaoTitulo(y, 'RESUMO FINANCEIRO');
+  [['Serviços', totais.subtotalServicos], ['Peças e materiais', totais.material], ['Deslocamento', totais.deslocamento]].forEach(([label, valor]) => {
+    doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label, margem, y);
+    doc.setTextColor(...PDF_COR.ink);
+    doc.text(fmtMoeda(valor), pageW - margem, y, { align: 'right' });
+    y += 16;
+  });
+  y += 6;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 28, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
+  doc.text('TOTAL', margem + 10, y + 19);
+  doc.text(fmtMoeda(totais.total), pageW - margem - 10, y + 19, { align: 'right' });
+  y += 46;
+
+  y = secaoTitulo(y, 'CONDIÇÕES DE PAGAMENTO');
+  doc.setFillColor(...PDF_COR.bluePale); doc.roundedRect(margem, y, largura, 32, 5, 5, 'F');
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+  doc.text(limparPdf(`Sinal de ${Math.round(CALC_BLINDADA_SINAL_PERCENTUAL * 100)}% (${fmtMoeda(sinalValor)}) na aprovação do orçamento. Saldo de ${fmtMoeda(saldoRestante)} na conclusão do serviço.`), margem + 10, y + 19, { maxWidth: largura - 20 });
+  y += 50;
+
+  if (f.garantia_dias) {
+    y = secaoTitulo(y, 'GARANTIA');
+    doc.setFillColor(...PDF_COR.greenBg); doc.roundedRect(margem, y, largura, 36, 5, 5, 'F');
+    doc.setFontSize(9.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.green);
+    doc.text(`Garantia válida até ${garantiaAteCalcBlindada(f.data, f.garantia_dias)}`, margem + 10, y + 15);
+    doc.setFontSize(8.5); doc.setFont(undefined, 'normal');
+    doc.text(`${f.garantia_dias} dias sobre os serviços prestados.`, margem + 10, y + 28);
+  }
+
+  rodape();
+  return doc;
+}
+async function prepararDadosPdfCalcBlindada() {
+  sincronizarCamposBasicosCalcBlindada();
+  const f = window._calcBlindadaForm;
+  const ajustes = carregarAjustesCalcBlindada();
+  const totais = calcBlindadaTotais(f, ajustes);
+  const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+  return { f, totais, ajustes, logoCliente, logoNexor };
+}
+async function baixarCalcBlindadaPdf() {
+  try {
+    const { f, totais, ajustes, logoCliente, logoNexor } = await prepararDadosPdfCalcBlindada();
+    montarDocCalcBlindadaPdf(f, totais, ajustes, logoCliente, logoNexor).save(nomeArquivoCalcBlindada(f) + '.pdf');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+}
+async function enviarCalcBlindadaPdf() {
+  try {
+    const { f, totais, ajustes, logoCliente, logoNexor } = await prepararDadosPdfCalcBlindada();
+    const blob = montarDocCalcBlindadaPdf(f, totais, ajustes, logoCliente, logoNexor).output('blob');
+    const nomeArquivo = nomeArquivoCalcBlindada(f) + '.pdf';
+    const texto = `Orçamento — ${f.cliente_nome || ''}.`;
+    const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe o PDF que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar o PDF: ' + e.message); }
+}
+// "Enviar como imagem" — mesma técnica de canvas já usada em O.S./Orçamento (gerarImagemOsRefrigeracao).
+function gerarImagemCalcBlindada(f, totais) {
+  const linhas = f.servicos.filter((s) => s.tipo).length;
+  const canvas = document.createElement('canvas');
+  const W = 720;
+  canvas.width = W; canvas.height = 420 + linhas * 24;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let y = 46;
+  ctx.fillStyle = '#0B2D4F'; ctx.font = 'bold 22px Arial, sans-serif';
+  ctx.fillText('Orçamento', 32, y);
+  ctx.font = '13px Arial, sans-serif'; ctx.fillStyle = '#667';
+  y += 24; ctx.fillText(fmtDataOsRef(new Date().toISOString()), 32, y);
+  y += 20;
+  ctx.strokeStyle = '#D9E1E8'; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(W - 32, y); ctx.stroke();
+  y += 34;
+  function linha(label, valor) {
+    ctx.font = '13px Arial, sans-serif'; ctx.fillStyle = '#667'; ctx.textAlign = 'left'; ctx.fillText(label, 32, y);
+    ctx.font = '14px Arial, sans-serif'; ctx.fillStyle = '#17293A'; ctx.textAlign = 'right'; ctx.fillText(valor, W - 32, y);
+    ctx.textAlign = 'left';
+    y += 24;
+  }
+  linha('Cliente', f.cliente_nome || '—');
+  linha('Endereço', f.endereco || '—');
+  linha('Data prevista', `${fmtDataIsoAgendaRef(f.data)}${f.hora ? ' às ' + f.hora : ''}`);
+  y += 10;
+  f.servicos.filter((s) => s.tipo).forEach((s) => linha(`${nomeServicoCalcBlindada(s)} (${s.qtd}x)`, fmtMoeda(s.valor * s.qtd)));
+  if (totais.material) linha('Peças e materiais', fmtMoeda(totais.material));
+  if (totais.deslocamento) linha('Deslocamento', fmtMoeda(totais.deslocamento));
+  y += 4;
+  ctx.fillStyle = '#0B2D4F'; ctx.fillRect(32, y - 20, W - 64, 36);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('TOTAL', 48, y + 4);
+  ctx.textAlign = 'right'; ctx.fillText(fmtMoeda(totais.total), W - 48, y + 4); ctx.textAlign = 'left';
+  y += 44;
+  if (f.garantia_dias) {
+    ctx.font = 'bold 13px Arial, sans-serif'; ctx.fillStyle = '#198754';
+    ctx.fillText(`Garantia válida até ${garantiaAteCalcBlindada(f.data, f.garantia_dias)}`, 32, y);
+  }
+  return canvas;
+}
+async function enviarCalcBlindadaImagem() {
+  try {
+    const { f, totais } = await prepararDadosPdfCalcBlindada();
+    const canvas = gerarImagemCalcBlindada(f, totais);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const nomeArquivo = nomeArquivoCalcBlindada(f) + '.png';
+    const texto = `Orçamento — ${f.cliente_nome || ''}.`;
+    const arquivo = new File([blob], nomeArquivo, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe a imagem que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar a imagem: ' + e.message); }
+}
+function novoCalculoCalcBlindada() {
+  window._calcBlindadaForm = calcBlindadaFormVazio();
+  window._calcBlindadaResultado = null;
+  window._calcBlindadaAbaAberta = null;
+  desenharCalculadoraBlindada();
 }
 
 // ---- ajustes de deslocamento (combustível/consumo), só neste aparelho ----
@@ -4119,10 +4429,12 @@ function abrirModalAjustesCalcBlindada() {
   modal.classList.add('show');
   modal.innerHTML = `
     <div class="modal-card" style="max-width:380px;">
-      <h3>Ajustes de deslocamento</h3>
-      <p style="font-size:12.5px; color:var(--ink-soft); margin-top:-6px;">Usado pra calcular o custo de deslocamento (km ÷ consumo × preço do combustível).</p>
+      <h3>Ajustes</h3>
+      <p style="font-size:12.5px; color:var(--ink-soft); margin-top:-6px;">Usado pra calcular o custo de deslocamento (km ÷ consumo × preço do combustível) e montar o PDF/mensagens do orçamento.</p>
       <div class="field"><label>Combustível (R$/litro)</label><input id="cb-aj-combustivel" type="number" step="0.01" value="${ajustes.combustivel_litro}"></div>
       <div class="field"><label>Consumo (km/litro)</label><input id="cb-aj-consumo" type="number" step="0.1" value="${ajustes.consumo_km_l}"></div>
+      <div class="field"><label>Chave PIX</label><input id="cb-aj-pix" value="${esc(ajustes.pix_chave || '')}" placeholder="Usada na mensagem de Sinal"></div>
+      <div class="field"><label>CNPJ/CPF</label><input id="cb-aj-cnpj" value="${esc(ajustes.cnpj_cpf || '')}" placeholder="Aparece no cabeçalho do PDF"></div>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button class="btn-outline-sm" onclick="fecharModalAjustesCalcBlindada()">Cancelar</button>
         <button class="btn btn-primary btn-sm" onclick="salvarModalAjustesCalcBlindada()">Salvar</button>
@@ -4137,9 +4449,24 @@ function salvarModalAjustesCalcBlindada() {
   const combustivel = Number(document.getElementById('cb-aj-combustivel').value);
   const consumo = Number(document.getElementById('cb-aj-consumo').value);
   if (!(combustivel > 0) || !(consumo > 0)) return alert('Informe valores maiores que zero.');
-  salvarAjustesCalcBlindada({ combustivel_litro: combustivel, consumo_km_l: consumo });
+  salvarAjustesCalcBlindada({
+    combustivel_litro: combustivel, consumo_km_l: consumo,
+    pix_chave: document.getElementById('cb-aj-pix').value.trim(),
+    cnpj_cpf: document.getElementById('cb-aj-cnpj').value.trim(),
+  });
   fecharModalAjustesCalcBlindada();
-  desenharCalculadoraBlindada();
+  if (window._calcBlindadaResultado) {
+    // regenera as mensagens com a chave PIX nova (ela entra na de Sinal) sem recalcular os
+    // totais nem duplicar a entrada no histórico — só o cálculo "de verdade" (botão Calcular
+    // agora) grava histórico.
+    const ajustesNovos = carregarAjustesCalcBlindada();
+    const f = window._calcBlindadaForm;
+    window._calcBlindadaResultado.mensagens = gerarMensagensCalcBlindada(f, window._calcBlindadaResultado.totais, ajustesNovos.pix_chave);
+    window._calcBlindadaResultado.pixConfigurada = !!ajustesNovos.pix_chave;
+    desenharResultadoCalcBlindada();
+  } else {
+    desenharCalculadoraBlindada();
+  }
 }
 
 // ---- histórico local (só neste aparelho — ver comentário no topo do arquivo) ----
