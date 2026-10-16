@@ -2079,16 +2079,17 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
   // .wordmark.stacked .pro/.conecta em style.css), só que com "Tecnologia" embaixo também, e
   // centralizado no espaço que sobra no fim da ÚLTIMA página ("no final da fila").
   function creditoNexorConnect(centroX, centroY) {
-    if (logoNexor) {
-      const tam = 44;
-      doc.addImage(logoNexor, 'PNG', centroX - tam / 2, centroY - tam - 14, tam, tam);
-    }
+    // proporção ícone:texto igual à da página de login (.brand-mark-img 64px de altura pra
+    // .wordmark.stacked 28px de fonte, ver index.html/style.css — ≈2,3:1); ícone grande demais
+    // (44pt) ficava desproporcional ao nome "Nexor" — 30pt mantém a mesma proporção do login.
+    const tam = 30;
+    if (logoNexor) doc.addImage(logoNexor, 'PNG', centroX - tam / 2, centroY - tam - 8, tam, tam);
     doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.setTextColor(...PDF_COR.blueBright);
-    doc.text('NEXOR', centroX, centroY + 8, { align: 'center' });
+    doc.text('NEXOR', centroX, centroY + 4, { align: 'center' });
     doc.setTextColor(...PDF_COR.navy);
-    doc.text('CONNECT', centroX, centroY + 23, { align: 'center' });
+    doc.text('CONNECT', centroX, centroY + 17, { align: 'center' });
     doc.setFont(undefined, 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-    doc.text('Tecnologia', centroX, centroY + 36, { align: 'center' });
+    doc.text('Tecnologia', centroX, centroY + 28, { align: 'center' });
   }
   function rodape(pagina, total, yConteudoFinal) {
     const yLinha = pageH - 40;
@@ -2099,7 +2100,7 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
       // centraliza no meio do espaço em branco que sobra entre o fim do conteúdo e essa linha —
       // com limites (nunca cola no conteúdo nem na linha) pra OS com pouco ou muito conteúdo.
       const topo = yConteudoFinal || margem;
-      const centroY = Math.min(yLinha - 56, Math.max(topo + 70, topo + (yLinha - topo) / 2));
+      const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
       creditoNexorConnect(pageW / 2, centroY);
     } else {
       doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
