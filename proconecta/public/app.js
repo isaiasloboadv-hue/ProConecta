@@ -3227,8 +3227,15 @@ async function carregarAgendaRefrigeracaoLista() {
     config = resp.config;
   } catch (e) { main.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   window._agendaRefConfig = config;
+  // pedido do usuário: a maioria das empresas que usam o sistema é autônoma (um único técnico —
+  // o próprio administrador) — nesse caso, repetir o nome dele em seletor/cards só polui a tela.
+  // O seletor de técnico e a anotação "· fulano" nos agendamentos (ver linhaAgendamentoAgendaRef)
+  // só aparecem quando a empresa tem mais de um técnico cadastrado; a identidade visual da tela
+  // já é a da EMPRESA (nome/marca no cabeçalho do app), não a de uma pessoa isolada.
+  const multiTecnico = (window._agendaRefTecnicosCache || []).length > 1;
+  window._agendaRefMultiTecnico = multiTecnico;
 
-  const seletorTecnico = USER.papel === 'administrador' ? `
+  const seletorTecnico = USER.papel === 'administrador' && multiTecnico ? `
     <div class="field" style="max-width:280px;">
       <label>Técnico</label>
       <select onchange="trocarTecnicoAgendaRef(this.value)">
@@ -3238,7 +3245,7 @@ async function carregarAgendaRefrigeracaoLista() {
 
   const cabecalho = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <h1>${USER.papel === 'administrador' ? 'Agenda geral' : 'Agenda'}</h1>
+      <h1>${USER.papel === 'administrador' && multiTecnico ? 'Agenda geral' : 'Agenda'}</h1>
       <div style="display:flex; gap:8px;">
         <button class="btn-outline-sm" onclick="abrirModalConfigAgendaRef()">⚙️ Config</button>
         <button class="btn btn-primary btn-sm" onclick="abrirModalNovoAgendamentoRef()">+ Novo</button>
@@ -3323,7 +3330,7 @@ function linhaAgendamentoAgendaRef(a) {
       <strong style="width:60px;">${esc(a.hora)}</strong>
       <div style="flex:1;">
         <div><strong>${esc(a.cliente_nome)}</strong> ${agendaRefStatusBadgeHtml(a.status)}</div>
-        <div style="font-size:12px; color:var(--ink-soft);">${esc(AGENDA_REF_TIPO_SERVICO_LABEL[a.tipo_servico] || 'Outro')}${USER.papel === 'administrador' && a.tecnico_nome ? ' · ' + esc(a.tecnico_nome) : ''}</div>
+        <div style="font-size:12px; color:var(--ink-soft);">${esc(AGENDA_REF_TIPO_SERVICO_LABEL[a.tipo_servico] || 'Outro')}${USER.papel === 'administrador' && window._agendaRefMultiTecnico && a.tecnico_nome ? ' · ' + esc(a.tecnico_nome) : ''}</div>
       </div>
       <div style="font-weight:700; white-space:nowrap;">${a.valor_servico ? fmtMoeda(a.valor_servico) : ''}</div>
     </div>
