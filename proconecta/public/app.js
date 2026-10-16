@@ -704,6 +704,7 @@ const MENUS_LABEL_POR_PAPEL = {
   suporte: {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
+    'ferramentas': 'Ferramentas',
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
     'solicitacoes-peca': 'Solicitações de Peça',
@@ -725,6 +726,7 @@ const MENUS_LABEL_POR_PAPEL = {
   administrador: {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
+    'ferramentas': 'Ferramentas',
     'agenda': 'Agenda geral',
     'chat-admin': 'Chat',
     'aprovacoes-visitas': 'Ordem de Serviço',
@@ -775,6 +777,12 @@ const NAV = {
     // núcleo), com fluxo em etapas, cadastro de cliente próprio e assinatura do cliente por link
     // público (ver /api/os-refrigeracao* em server.js).
     { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
+    // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — primeira
+    // ferramenta: Gerador de Etiquetas (ver renderGeradorEtiquetas), também acessível a partir do
+    // menu "⋮" de uma O.S. já criada (ver abrirMenuOpcoesOsRef), que pré-preenche os dados.
+    { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
+      { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
+    ]},
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
     // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
     // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
@@ -839,6 +847,9 @@ const NAV = {
     { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
     { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
     { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
+    { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
+      { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
+    ]},
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
@@ -1080,6 +1091,7 @@ const ICONE_MENU = {
   'atividades-diarias': '📋',
   'guia-diagnostico-rapido': '🧊',
   'os-refrigeracao': '🧾',
+  'ferramentas': '🧰',
 };
 
 // ===== Guia de Diagnóstico Rápido (perfil "Refrigeração e Climatização") =====
@@ -1992,6 +2004,7 @@ function abrirMenuOpcoesOsRef() {
   const corpo =
     osRefBotaoAcao('🕒 Pendente', null, `alterarStatusOsRef(${os.id}, 'pendente')`) +
     osRefBotaoAcao('✕ Cancelada', null, `alterarStatusOsRef(${os.id}, 'cancelada')`) +
+    osRefBotaoAcao('🏷️ Gerar etiqueta', null, `fecharModalOsRefAcao(); abrirGeradorEtiquetasDaOs(${os.id});`) +
     osRefBotaoAcao('🗑️ Excluir', null, `fecharModalOsRefAcao(); excluirOsRefrigeracao(${os.id});`, 'var(--red, #B3453A)');
   abrirModalOsRefAcao(`<h3>OS #${os.id}</h3>`, corpo);
 }
@@ -2238,6 +2251,241 @@ async function enviarOsRefImagem(id) {
   } catch (e) { alert('Erro ao preparar a imagem: ' + e.message); }
 }
 
+// ===== Gerador de Etiquetas (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — etiqueta pra colar
+// no equipamento depois do serviço (técnico, equipamento, data, QR Code opcional abrindo o
+// WhatsApp do técnico). Também é o que preenche o "Gerar etiqueta" do menu "⋮" de uma O.S. (ver
+// abrirGeradorEtiquetasDaOs), deixado de fora quando esse menu foi criado por falta de spec.
+const OS_REF_ETIQUETA_TAMANHOS = [
+  { chave: 'grande', label: 'Grande — 90 × 55 mm', larguraMm: 90, alturaMm: 55 },
+  { chave: 'media', label: 'Média — 70 × 40 mm', larguraMm: 70, alturaMm: 40 },
+  { chave: 'pequena', label: 'Pequena — 50 × 30 mm', larguraMm: 50, alturaMm: 30 },
+];
+const OS_REF_ETIQUETA_CORES = [
+  { chave: 'azul', rgb: [11, 45, 79] },
+  { chave: 'preto', rgb: [20, 20, 20] },
+  { chave: 'verde', rgb: [15, 61, 46] },
+  { chave: 'marrom', rgb: [74, 46, 26] },
+];
+const OS_REF_ETIQUETA_MARGEM_MM = 15;
+const OS_REF_ETIQUETA_GAP_MM = 4;
+// quantas etiquetas cabem numa folha A4 pro tamanho escolhido (15mm de margem + 4mm de respiro
+// entre etiquetas reproduz exatamente "8 por folha A4 (2×4)" da etiqueta Grande).
+function etiquetaGradeInfo(tamanho) {
+  const usavelW = 210 - OS_REF_ETIQUETA_MARGEM_MM * 2, usavelH = 297 - OS_REF_ETIQUETA_MARGEM_MM * 2;
+  const cols = Math.max(1, Math.floor((usavelW + OS_REF_ETIQUETA_GAP_MM) / (tamanho.larguraMm + OS_REF_ETIQUETA_GAP_MM)));
+  const rows = Math.max(1, Math.floor((usavelH + OS_REF_ETIQUETA_GAP_MM) / (tamanho.alturaMm + OS_REF_ETIQUETA_GAP_MM)));
+  return { cols, rows, porPagina: cols * rows };
+}
+function osRefEtiquetaFormVazio() {
+  return {
+    tecnico_nome: (USER && USER.nome) || '', telefone: (USER && USER.celular) || '',
+    equipamento: '', data_servico: new Date().toISOString().slice(0, 10), proxima_manutencao: '',
+    tamanho: 'grande', cor: 'azul', qr: false, quantidade: 8,
+  };
+}
+// lazy — osRefEtiquetaFormVazio() lê USER, que só existe depois do login; nunca inicializar isso
+// em carregamento de módulo (USER ainda é null nesse momento).
+function osRefEtiquetaFormAtual() {
+  if (!window._osRefEtiquetaForm) window._osRefEtiquetaForm = osRefEtiquetaFormVazio();
+  return window._osRefEtiquetaForm;
+}
+async function abrirGeradorEtiquetasDaOs(id) {
+  const { os } = await api('/api/os-refrigeracao/' + id);
+  const eq = os.equipamento || {};
+  window._osRefEtiquetaForm = {
+    ...osRefEtiquetaFormVazio(),
+    tecnico_nome: os.tecnico_nome || (USER && USER.nome) || '',
+    equipamento: [eq.tipo, eq.marca, eq.modelo, eq.btu ? eq.btu + ' BTU' : ''].filter(Boolean).join(' '),
+    data_servico: (os.criado_em || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+  };
+  ir('etiquetas-gerador');
+}
+
+async function renderGeradorEtiquetas() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  const aba = window._osRefEtiquetaAba || 'unica';
+  main.innerHTML = `
+    <div class="page-head"><h1>Gerador de Etiquetas</h1><p>Etiquetas pra colar no equipamento depois do serviço, com QR Code opcional.</p></div>
+    <div style="display:flex; max-width:560px; border:1px solid var(--line); border-radius:8px; overflow:hidden; margin-bottom:16px;">
+      <button class="btn-${aba === 'unica' ? 'primary' : 'ghost'} btn-sm" style="flex:1; border-radius:0;" onclick="trocarAbaEtiqueta('unica')">Etiqueta única</button>
+      <button class="btn-${aba === 'lote' ? 'primary' : 'ghost'} btn-sm" style="flex:1; border-radius:0;" onclick="trocarAbaEtiqueta('lote')">Lote por cliente</button>
+    </div>
+    <div id="etiquetas-conteudo"></div>`;
+  if (aba === 'lote') document.getElementById('etiquetas-conteudo').innerHTML = '<div class="empty">Em breve — gera uma etiqueta por equipamento de um cliente de uma vez.</div>';
+  else desenharEtiquetaUnica();
+}
+function trocarAbaEtiqueta(aba) {
+  window._osRefEtiquetaAba = aba;
+  renderGeradorEtiquetas();
+}
+
+function desenharEtiquetaUnica() {
+  const f = osRefEtiquetaFormAtual();
+  const tamanho = OS_REF_ETIQUETA_TAMANHOS.find((t) => t.chave === f.tamanho) || OS_REF_ETIQUETA_TAMANHOS[0];
+  const grade = etiquetaGradeInfo(tamanho);
+  document.getElementById('etiquetas-conteudo').innerHTML = `
+    <div class="panel" style="max-width:560px;">
+      <div class="field"><label>Nome do técnico</label><input id="et-tecnico" value="${esc(f.tecnico_nome)}" placeholder="Seu nome completo" oninput="atualizarEtiquetaForm()"></div>
+      <div class="field"><label>Telefone</label><input id="et-telefone" value="${esc(f.telefone)}" placeholder="(00) 00000-0000" oninput="atualizarEtiquetaForm()"></div>
+      <div class="field"><label>Equipamento</label><input id="et-equipamento" value="${esc(f.equipamento)}" oninput="atualizarEtiquetaForm()"></div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <div class="field" style="flex:1; min-width:140px;"><label>Data do serviço</label><input id="et-data" type="date" value="${esc(f.data_servico)}" oninput="atualizarEtiquetaForm()"></div>
+        <div class="field" style="flex:1; min-width:140px;"><label>Próx. manutenção</label><input id="et-proxima" type="date" value="${esc(f.proxima_manutencao)}" oninput="atualizarEtiquetaForm()"></div>
+      </div>
+    </div>
+    <div class="panel" style="max-width:560px;">
+      <h3>Personalização</h3>
+      <div class="field"><label>Tamanho da etiqueta</label>
+        <select id="et-tamanho" onchange="atualizarEtiquetaForm()">${OS_REF_ETIQUETA_TAMANHOS.map((t) => `<option value="${t.chave}" ${t.chave === f.tamanho ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select>
+      </div>
+      <p id="et-porfolha" style="font-size:12.5px; color:var(--ink-soft); margin-top:-8px;">${grade.porPagina} por folha A4 (${grade.cols}×${grade.rows})</p>
+      <label style="display:block; margin-top:10px;">Cor</label>
+      <div style="display:flex; gap:10px; margin:6px 0 10px;">
+        ${OS_REF_ETIQUETA_CORES.map((c) => `<div onclick="selecionarCorEtiqueta('${c.chave}')" title="${c.chave}" style="width:34px; height:34px; border-radius:50%; cursor:pointer; background:rgb(${c.rgb.join(',')}); border:3px solid ${c.chave === f.cor ? 'var(--blue)' : 'transparent'};"></div>`).join('')}
+      </div>
+      <label style="display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer;">
+        <span>Incluir QR Code</span>
+        <input type="checkbox" id="et-qr" ${f.qr ? 'checked' : ''} onchange="atualizarEtiquetaForm()" style="width:auto;">
+      </label>
+      ${f.qr ? `<div class="field" style="margin-top:10px;"><label>O que o QR Code abre</label><select id="et-qr-destino"><option value="whatsapp">WhatsApp do técnico</option></select></div>` : ''}
+      <div class="field" style="margin-top:10px;"><label>Quantidade</label><input id="et-quantidade" type="number" min="1" value="${f.quantidade}" oninput="atualizarEtiquetaForm()"></div>
+    </div>
+    <p style="text-align:center; font-size:13px; color:var(--ink-soft);" id="et-resumo">${f.quantidade} etiqueta(s) · ${tamanho.larguraMm}×${tamanho.alturaMm} mm</p>
+    <div id="et-preview" style="max-width:360px; margin:0 auto 20px;"></div>
+    <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+      <button class="btn btn-primary btn-sm" onclick="baixarEtiquetasPdf()">⬇️ Gerar PDF</button>
+      <button class="btn-outline-sm" onclick="enviarEtiquetasWhatsapp()">🔗 WhatsApp</button>
+    </div>`;
+  renderizarPreviewEtiqueta();
+}
+function atualizarEtiquetaForm() {
+  const f = osRefEtiquetaFormAtual();
+  f.tecnico_nome = document.getElementById('et-tecnico').value;
+  f.telefone = document.getElementById('et-telefone').value;
+  f.equipamento = document.getElementById('et-equipamento').value;
+  f.data_servico = document.getElementById('et-data').value;
+  f.proxima_manutencao = document.getElementById('et-proxima').value;
+  f.quantidade = Math.max(1, Number(document.getElementById('et-quantidade').value) || 1);
+  const tamanhoMudou = f.tamanho !== document.getElementById('et-tamanho').value;
+  const qrMudou = f.qr !== document.getElementById('et-qr').checked;
+  f.tamanho = document.getElementById('et-tamanho').value;
+  f.qr = document.getElementById('et-qr').checked;
+  // só essas duas mudanças pedem redesenhar o bloco inteiro ("por folha" e o campo de destino do
+  // QR aparecem/somem); o resto só atualiza texto/preview, sem perder o que o técnico já digitou.
+  if (tamanhoMudou || qrMudou) { desenharEtiquetaUnica(); return; }
+  const tamanho = OS_REF_ETIQUETA_TAMANHOS.find((t) => t.chave === f.tamanho);
+  const grade = etiquetaGradeInfo(tamanho);
+  document.getElementById('et-porfolha').textContent = `${grade.porPagina} por folha A4 (${grade.cols}×${grade.rows})`;
+  document.getElementById('et-resumo').textContent = `${f.quantidade} etiqueta(s) · ${tamanho.larguraMm}×${tamanho.alturaMm} mm`;
+  renderizarPreviewEtiqueta();
+}
+function selecionarCorEtiqueta(cor) {
+  osRefEtiquetaFormAtual().cor = cor;
+  desenharEtiquetaUnica();
+}
+function etiquetaQrConteudo(f) {
+  const numero = (f.telefone || '').replace(/\D/g, '');
+  const numeroCompleto = numero ? (numero.length <= 11 ? '55' + numero : numero) : '';
+  return `https://wa.me/${numeroCompleto}`;
+}
+function renderizarPreviewEtiqueta() {
+  const f = osRefEtiquetaFormAtual();
+  const cor = OS_REF_ETIQUETA_CORES.find((c) => c.chave === f.cor) || OS_REF_ETIQUETA_CORES[0];
+  const qrDataUrl = f.qr ? gerarQrDataUrl(etiquetaQrConteudo(f), 120) : null;
+  document.getElementById('et-preview').innerHTML = `
+    <div style="border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#fff;">
+      <div style="background:rgb(${cor.rgb.join(',')}); color:#fff; padding:10px 14px; font-weight:800; font-size:13px; letter-spacing:.5px; display:flex; justify-content:space-between; align-items:center;">
+        <span>${esc(empresaNome().toUpperCase())}</span>
+        ${f.telefone ? `<span style="font-weight:500; font-size:11px;">${esc(f.telefone)}</span>` : ''}
+      </div>
+      <div style="height:3px; background:var(--blue);"></div>
+      <div style="padding:14px; display:flex; gap:12px; align-items:center;">
+        <div style="flex:1;">
+          ${f.equipamento ? `<div style="font-size:9px; color:var(--ink-soft); letter-spacing:.5px;">EQUIP.</div><div style="font-weight:700; font-size:13px; margin-bottom:8px;">${esc(f.equipamento)}</div>` : ''}
+          ${f.tecnico_nome ? `<div style="font-size:9px; color:var(--ink-soft); letter-spacing:.5px;">TÉCNICO</div><div style="font-weight:700; font-size:13px; margin-bottom:8px;">${esc(f.tecnico_nome)}</div>` : ''}
+          <div style="font-size:9px; color:var(--ink-soft); letter-spacing:.5px;">SERVIÇO EM</div><div style="font-weight:700; font-size:13px;">${f.data_servico ? fmtDataOsRef(f.data_servico + 'T00:00:00') : '—'}</div>
+        </div>
+        ${qrDataUrl ? `<div style="text-align:center;"><img src="${qrDataUrl}" style="width:70px; height:70px;"><div style="font-size:8px; color:var(--ink-soft); margin-top:2px;">Agende aqui</div></div>` : ''}
+      </div>
+      <div style="padding:6px; text-align:center; font-size:9px; color:var(--ink-soft); border-top:1px solid var(--line);">${esc(empresaNome())} App</div>
+    </div>`;
+}
+
+// PDF com N etiquetas repetidas numa grade A4 — mesma técnica (unidade mm, jsPDF, QR via
+// gerarQrDataUrl) já usada em imprimirEtiquetasFilial, aplicada aqui a um card novo e específico.
+function montarDocEtiquetas(f) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  doc.setProperties({ title: 'Etiquetas' });
+  const tamanho = OS_REF_ETIQUETA_TAMANHOS.find((t) => t.chave === f.tamanho) || OS_REF_ETIQUETA_TAMANHOS[0];
+  const cor = OS_REF_ETIQUETA_CORES.find((c) => c.chave === f.cor) || OS_REF_ETIQUETA_CORES[0];
+  const grade = etiquetaGradeInfo(tamanho);
+  const qrDataUrl = f.qr ? gerarQrDataUrl(etiquetaQrConteudo(f), 300) : null;
+  const dataFmt = f.data_servico ? fmtDataOsRef(f.data_servico + 'T00:00:00') : '—';
+
+  function etiqueta(x, y) {
+    const w = tamanho.larguraMm, h = tamanho.alturaMm;
+    doc.setFillColor(...cor.rgb); doc.rect(x, y, w, 7, 'F');
+    doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(255, 255, 255);
+    doc.text(limparPdf(empresaNome()).toUpperCase(), x + 2, y + 5);
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.2); doc.rect(x, y, w, h, 'S');
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(0.4); doc.line(x, y + 7, x + w, y + 7);
+    const corpoW = Math.max(10, qrDataUrl ? w - 20 : w - 4);
+    let ty = y + 12;
+    function linha(label, valor) {
+      doc.setFontSize(5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(label, x + 2, ty);
+      doc.setFontSize(6.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(doc.splitTextToSize(limparPdf(valor), corpoW)[0] || '', x + 2, ty + 3.2);
+      ty += 7;
+    }
+    if (f.equipamento) linha('EQUIP.', f.equipamento);
+    if (f.tecnico_nome) linha('TÉCNICO', f.tecnico_nome);
+    linha('SERVIÇO EM', dataFmt);
+    if (qrDataUrl) {
+      const qrSize = Math.min(16, h - 11);
+      doc.addImage(qrDataUrl, 'PNG', x + w - qrSize - 2, y + 9, qrSize, qrSize);
+      doc.setFontSize(4); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Agende aqui', x + w - qrSize / 2 - 2, y + 9 + qrSize + 3, { align: 'center' });
+    }
+    doc.setFontSize(4.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(`${limparPdf(empresaNome())} App`, x + w / 2, y + h - 2, { align: 'center' });
+  }
+
+  for (let i = 0; i < f.quantidade; i++) {
+    const noPagina = i % grade.porPagina;
+    if (i > 0 && noPagina === 0) doc.addPage();
+    const col = noPagina % grade.cols, lin = Math.floor(noPagina / grade.cols);
+    etiqueta(OS_REF_ETIQUETA_MARGEM_MM + col * (tamanho.larguraMm + OS_REF_ETIQUETA_GAP_MM), OS_REF_ETIQUETA_MARGEM_MM + lin * (tamanho.alturaMm + OS_REF_ETIQUETA_GAP_MM));
+  }
+  return doc;
+}
+function baixarEtiquetasPdf() {
+  const f = osRefEtiquetaFormAtual();
+  if (!f.quantidade || f.quantidade < 1) return alert('Informe uma quantidade válida.');
+  montarDocEtiquetas(f).save(`etiquetas-${String(empresaNome()).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-')}.pdf`);
+}
+async function enviarEtiquetasWhatsapp() {
+  const f = osRefEtiquetaFormAtual();
+  if (!f.quantidade || f.quantidade < 1) return alert('Informe uma quantidade válida.');
+  try {
+    const blob = montarDocEtiquetas(f).output('blob');
+    const nomeArquivo = 'etiquetas.pdf';
+    const texto = 'Seguem as etiquetas geradas.';
+    const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe o PDF que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar o PDF: ' + e.message); }
+}
+
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
 // tem acesso_total, que aí só vê os itens de topo marcados em `menus` (ver MENUS_LABEL_POR_PAPEL /
 // checkboxes no cadastro). Vale pra qualquer tipo de acesso, não só suporte.
@@ -2397,6 +2645,7 @@ async function ir(pagina) {
     if (pagina === 'os-refrigeracao-lista') return renderOsRefrigeracaoLista();
     if (pagina === 'os-refrigeracao-nova') return renderOsRefrigeracaoNova();
     if (pagina === 'os-refrigeracao-detalhe') return renderOsRefrigeracaoDetalhe();
+    if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();

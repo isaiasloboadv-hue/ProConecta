@@ -136,3 +136,17 @@ test('administrador e suporte só veem "Ordens de Serviço" (Refrigeração) qua
   ctx.window._empresa = { perfil: 'autonomo' };
   assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('os-refrigeracao'));
 });
+
+// pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): grupo com
+// children (mesmo padrão de Biblioteca/Comercial) — gate fica só no node pai, os filhos
+// (ex.: "gerador-etiquetas") não têm `perfil`/`modulo` próprio, igual os outros grupos com filhos.
+test('"Ferramentas" (grupo com children) só aparece quando a empresa é do perfil refrigeração', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('ferramentas'));
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  const ferramentas = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'ferramentas');
+  assert.ok(ferramentas);
+  assert.ok(ferramentas.children.some((c) => c.page === 'etiquetas-gerador'));
+});
