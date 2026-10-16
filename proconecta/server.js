@@ -6396,8 +6396,23 @@ function aplicarItensExecucaoPmoc(itensAtuais, itensNovos) {
   });
 }
 
-// PUT /api/pmoc/visitas/:id/progresso { itens } — salva rascunho (resposta/observação/fotos), não
-// muda o status; o técnico pode ir e voltar nessa tela à vontade antes de concluir.
+// Fase C (análise de concorrentes) — geolocalização pontual do técnico "no momento da visita"
+// (decisão do usuário: nunca rastreamento contínuo). Só aceita um objeto {lat, lng, precisao}
+// com números válidos; qualquer coisa fora disso (permissão negada no navegador, GPS
+// indisponível, campo ausente) é ignorada em silêncio — a geolocalização é sempre opcional e
+// nunca pode bloquear o técnico de salvar progresso ou concluir a visita.
+function validarLocalizacaoPmoc(bruto) {
+  if (!bruto || typeof bruto !== 'object') return null;
+  const lat = Number(bruto.lat), lng = Number(bruto.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  const precisao = Number(bruto.precisao);
+  return { lat, lng, precisao: Number.isFinite(precisao) ? precisao : null, capturado_em: new Date().toISOString() };
+}
+
+// PUT /api/pmoc/visitas/:id/progresso { itens, localizacao? } — salva rascunho (resposta/
+// observação/fotos), não muda o status; o técnico pode ir e voltar nessa tela à vontade antes de
+// concluir. Na primeira chamada (chegada ao local) registra a localização, se o técnico permitiu
+// e o navegador conseguiu captar — chamadas seguintes não sobrescrevem (é "chegada", um só ponto).
 rota('PUT', /^\/api\/pmoc\/visitas\/(\d+)\/progresso$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   const data = db.load();
@@ -6409,11 +6424,15 @@ rota('PUT', /^\/api\/pmoc\/visitas\/(\d+)\/progresso$/, async (req, res, m) => {
   const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
   if (!Array.isArray(body.itens) || body.itens.length !== (visita.pmoc_itens || []).length) return enviarJSON(res, 400, { erro: 'Lista de itens inválida.' });
   visita.pmoc_itens = aplicarItensExecucaoPmoc(visita.pmoc_itens, body.itens);
+  if (!visita.localizacao_chegada) {
+    const localizacao = validarLocalizacaoPmoc(body.localizacao);
+    if (localizacao) visita.localizacao_chegada = localizacao;
+  }
   db.save(data);
   enviarJSON(res, 200, { ok: true });
 });
 
-// PUT /api/pmoc/visitas/:id/concluir { itens, assinatura_responsavel_img, assinatura_responsavel_nome }
+// PUT /api/pmoc/visitas/:id/concluir { itens, assinatura_responsavel_img, assinatura_responsavel_nome, localizacao? }
 rota('PUT', /^\/api\/pmoc\/visitas\/(\d+)\/concluir$/, async (req, res, m) => {
   const user = usuarioAutenticado(req);
   const data = db.load();
@@ -6432,6 +6451,8 @@ rota('PUT', /^\/api\/pmoc\/visitas\/(\d+)\/concluir$/, async (req, res, m) => {
   visita.assinatura_responsavel_nome = body.assinatura_responsavel_nome || '';
   visita.status = 'concluido';
   visita.concluido_em = new Date().toISOString();
+  const localizacaoConclusao = validarLocalizacaoPmoc(body.localizacao);
+  if (localizacaoConclusao) visita.localizacao_conclusao = localizacaoConclusao;
   db.save(data);
   enviarJSON(res, 200, { visita });
 });

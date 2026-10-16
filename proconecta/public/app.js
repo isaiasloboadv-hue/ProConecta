@@ -4976,6 +4976,27 @@ function abrirPmocVisitaExecucao(id) {
   window._pmocVisitaExecucaoId = id;
   ir('pmoc-visita-execucao');
 }
+
+// Fase C (análise de concorrentes) — geolocalização pontual do técnico "no momento da visita",
+// nunca rastreamento contínuo (decisão do usuário): um ponto capturado quando o técnico chega no
+// checklist (registrado no primeiro progresso salvo) e outro na conclusão, junto da assinatura do
+// responsável no local. Sempre opcional e best-effort — se o navegador não suporta, o técnico
+// recusou a permissão ou o GPS deu timeout, a função resolve null e nunca bloqueia a visita.
+function obterLocalizacaoPmocExec() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, precisao: pos.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+    );
+  });
+}
+function linkMapaPmocExec(loc, label) {
+  if (!loc) return '';
+  return ` · <a href="https://maps.google.com/?q=${loc.lat},${loc.lng}" target="_blank" rel="noopener">📍 ${esc(label)}</a>`;
+}
+
 async function renderPmocVisitaExecucao() {
   const main = document.getElementById('main');
   if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
@@ -4986,12 +5007,20 @@ async function renderPmocVisitaExecucao() {
   try { const r = await api('/api/pmoc/locais/' + visita.pmoc_local_id); local = r.local; } catch (e) { /* segue sem o local (só perde o pré-preenchimento do e-mail) */ }
   window._pmocVisitaExecLocal = local;
   const concluida = visita.status === 'concluido';
+  if (!concluida && !visita.localizacao_chegada) {
+    obterLocalizacaoPmocExec().then((localizacao) => {
+      if (!localizacao) return;
+      api(`/api/pmoc/visitas/${visita.id}/progresso`, { method: 'PUT', body: { itens: visita.pmoc_itens, localizacao } })
+        .then(() => { visita.localizacao_chegada = localizacao; })
+        .catch(() => {});
+    });
+  }
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
       <div><h1>Preventiva PMOC</h1><p>${esc(visita.cliente_nome)} — ${fmtDataIsoAgendaRef(visita.data)}</p></div>
       <button class="btn-outline-sm" onclick="ir('agenda-refrigeracao-lista')">← Voltar pra Agenda</button>
     </div>
-    ${concluida ? `<div class="panel" style="border:1.5px solid var(--green);">✅ Visita concluída${visita.assinatura_responsavel_nome ? ' — assinada por ' + esc(visita.assinatura_responsavel_nome) : ''}.</div>` : ''}
+    ${concluida ? `<div class="panel" style="border:1.5px solid var(--green);">✅ Visita concluída${visita.assinatura_responsavel_nome ? ' — assinada por ' + esc(visita.assinatura_responsavel_nome) : ''}.${linkMapaPmocExec(visita.localizacao_chegada, 'Local da chegada')}${linkMapaPmocExec(visita.localizacao_conclusao, 'Local da conclusão')}</div>` : ''}
     <div id="pmoc-exec-itens">${pmocExecItensHtml(visita.pmoc_itens)}</div>
     ${!concluida ? `
     <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;">
@@ -5128,8 +5157,10 @@ async function confirmarConcluirPmocExec() {
   if (!_pmocConcluirTemTraco) { erroEl.textContent = 'Colete a assinatura antes de confirmar.'; erroEl.classList.remove('hidden'); return; }
   const canvas = document.getElementById('pmoc-concluir-canvas');
   try {
+    const localizacao = await obterLocalizacaoPmocExec();
     const { visita } = await api(`/api/pmoc/visitas/${window._pmocVisitaExecAtual.id}/concluir`, { method: 'PUT', body: {
       itens: window._pmocVisitaExecAtual.pmoc_itens, assinatura_responsavel_img: canvas.toDataURL('image/png'), assinatura_responsavel_nome: nome,
+      ...(localizacao ? { localizacao } : {}),
     } });
     window._pmocVisitaExecAtual = visita;
     document.getElementById('modal-pmoc-concluir').classList.remove('show');
