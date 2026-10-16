@@ -959,6 +959,9 @@ const NAV = {
       // pedido do usuário (item 4.3): relatório mensal consolidado por cliente — visão gerencial,
       // só faz sentido pro administrador.
       { key: 'pmoc-relatorio-mensal', label: 'Relatório Mensal', page: 'pmoc-relatorio-mensal' },
+      // pedido do usuário (análise de concorrentes/conformidade legal — Protocolo de Montreal/
+      // IBAMA): consolidado anual de gás refrigerante carregado/recolhido, visão gerencial.
+      { key: 'pmoc-relatorio-gas', label: 'Relatório de Gás', page: 'pmoc-relatorio-gas' },
       { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
     ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
@@ -4124,7 +4127,7 @@ function pmocQualidadeArHtml(analises) {
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
         <div>
           <strong>${fmtDataIsoAgendaRef(a.data)}</strong>${a.laboratorio ? ` — ${esc(a.laboratorio)}` : ''}
-          <div style="font-size:12.5px; color:var(--ink-soft);">${[a.temperatura && `Temp.: ${esc(a.temperatura)}`, a.umidade && `Umidade: ${esc(a.umidade)}`, a.co2 && `CO₂: ${esc(a.co2)}`].filter(Boolean).join(' · ')}</div>
+          <div style="font-size:12.5px; color:var(--ink-soft);">${[a.temperatura && `Temp.: ${esc(a.temperatura)}`, a.umidade && `Umidade: ${esc(a.umidade)}`, a.co2 && `CO₂: ${esc(a.co2)}`, a.pm10 && `PM10: ${esc(a.pm10)}`, a.pm25 && `PM2,5: ${esc(a.pm25)}`, a.velocidade_ar && `Vel. ar: ${esc(a.velocidade_ar)}`].filter(Boolean).join(' · ')}</div>
           ${a.observacoes ? `<div style="font-size:12.5px; margin-top:4px;">${esc(a.observacoes)}</div>` : ''}
           ${a.laudo_pdf ? `<a href="${a.laudo_pdf}" download="laudo-qualidade-ar-${a.id}" style="font-size:12.5px;">📎 Baixar laudo anexado</a>` : ''}
         </div>
@@ -4156,7 +4159,15 @@ function abrirModalPmocQualidadeAr(analiseExistente) {
       <div style="display:flex; gap:10px;">
         <div class="field" style="flex:1;"><label>Temperatura</label><input id="pmoc-qa-temperatura" value="${esc(a.temperatura || '')}" placeholder="Ex: 23°C"></div>
         <div class="field" style="flex:1;"><label>Umidade</label><input id="pmoc-qa-umidade" value="${esc(a.umidade || '')}" placeholder="Ex: 55%"></div>
-        <div class="field" style="flex:1;"><label>CO₂</label><input id="pmoc-qa-co2" value="${esc(a.co2 || '')}" placeholder="Ex: 700ppm"></div>
+        <div class="field" style="flex:1;"><label>CO₂</label><input id="pmoc-qa-co2" value="${esc(a.co2 || '')}" placeholder="Ex: 700ppm acima do ar externo"></div>
+      </div>
+      <!-- pedido do usuário (análise de concorrentes/conformidade legal): a RE nº 9/2003 da ANVISA
+      foi revogada (RDC 886/2024) e substituída pela ABNT NBR 17037:2023, que também avalia
+      material particulado e velocidade do ar — por isso os 3 campos abaixo. -->
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>PM10</label><input id="pmoc-qa-pm10" value="${esc(a.pm10 || '')}" placeholder="Ex: 40µg/m³"></div>
+        <div class="field" style="flex:1;"><label>PM2,5</label><input id="pmoc-qa-pm25" value="${esc(a.pm25 || '')}" placeholder="Ex: 20µg/m³"></div>
+        <div class="field" style="flex:1;"><label>Velocidade do ar</label><input id="pmoc-qa-velocidade-ar" value="${esc(a.velocidade_ar || '')}" placeholder="Ex: 0,18m/s"></div>
       </div>
       <div class="field"><label>Observações</label><textarea id="pmoc-qa-observacoes" style="min-height:50px;">${esc(a.observacoes || '')}</textarea></div>
       <div class="field"><label>Laudo (PDF ou imagem)</label>
@@ -4190,6 +4201,9 @@ async function salvarPmocQualidadeAr() {
     temperatura: document.getElementById('pmoc-qa-temperatura').value,
     umidade: document.getElementById('pmoc-qa-umidade').value,
     co2: document.getElementById('pmoc-qa-co2').value,
+    pm10: document.getElementById('pmoc-qa-pm10').value,
+    pm25: document.getElementById('pmoc-qa-pm25').value,
+    velocidade_ar: document.getElementById('pmoc-qa-velocidade-ar').value,
     observacoes: document.getElementById('pmoc-qa-observacoes').value,
     laudo_pdf: window._pmocQualidadeArLaudo,
   };
@@ -4209,6 +4223,88 @@ async function excluirPmocQualidadeAr(id) {
     await renderPmocLocalDetalhe();
   } catch (e) { alert(e.message); }
 }
+
+// ---- controle de gás refrigerante por aparelho (análise de concorrentes/conformidade legal:
+// Protocolo de Montreal/IBAMA — ver comentário em server.js) ----
+const PMOC_TIPO_OPERACAO_GAS_LABEL = { carga: 'Carga', recolhimento: 'Recolhimento' };
+window._pmocGasAparelhoId = null;
+async function abrirModalGasPmoc(aparelhoId, aparelhoLabel) {
+  window._pmocGasAparelhoId = aparelhoId;
+  let modal = document.getElementById('modal-pmoc-gas');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-gas';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `<div class="modal-card" style="max-width:520px;"><div class="empty">Carregando...</div></div>`;
+  await recarregarModalGasPmoc(aparelhoLabel);
+}
+async function recarregarModalGasPmoc(aparelhoLabel) {
+  const modal = document.getElementById('modal-pmoc-gas');
+  const { registros } = await api('/api/pmoc/aparelhos/' + window._pmocGasAparelhoId + '/gas');
+  window._pmocGasRegistrosAtual = registros;
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:520px;">
+      <h3>🧊 Controle de gás refrigerante</h3>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">${esc(aparelhoLabel)}</p>
+      <div style="max-height:220px; overflow-y:auto; margin-bottom:10px;">
+        ${registros.length ? registros.map((g) => `
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:6px 0; border-bottom:1px solid var(--line);">
+            <div>
+              <strong>${PMOC_TIPO_OPERACAO_GAS_LABEL[g.tipo_operacao]}</strong> — ${esc(g.fluido)} — ${g.quantidade_kg}kg
+              <div style="font-size:12px; color:var(--ink-soft);">${fmtDataIsoAgendaRef(g.data)}${g.observacoes ? ' — ' + esc(g.observacoes) : ''}</div>
+            </div>
+            <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirGasRegistroPmoc(${g.id}, '${esc(aparelhoLabel)}')">🗑️</button>
+          </div>`).join('') : '<div class="empty">Nenhum registro ainda.</div>'}
+      </div>
+      <h4 style="margin-bottom:6px;">Novo registro</h4>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Operação</label><select id="pmoc-gas-tipo">
+          <option value="carga">Carga</option>
+          <option value="recolhimento">Recolhimento</option>
+        </select></div>
+        <div class="field" style="flex:1;"><label>Fluido</label><input id="pmoc-gas-fluido" placeholder="Ex: R-410A"></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Quantidade (kg)</label><input id="pmoc-gas-quantidade" type="number" min="0" step="0.01"></div>
+        <div class="field" style="flex:1;"><label>Data</label><input id="pmoc-gas-data" type="date" value="${esc(hojeIsoAgendaRef())}"></div>
+      </div>
+      <div class="field"><label>Observações</label><input id="pmoc-gas-observacoes"></div>
+      <div id="pmoc-gas-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-gas').classList.remove('show')">Fechar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarGasRegistroPmoc('${esc(aparelhoLabel)}')">Adicionar</button>
+      </div>
+    </div>`;
+}
+async function salvarGasRegistroPmoc(aparelhoLabel) {
+  const erroEl = document.getElementById('pmoc-gas-erro');
+  erroEl.classList.add('hidden');
+  const body = {
+    aparelho_id: window._pmocGasAparelhoId,
+    tipo_operacao: document.getElementById('pmoc-gas-tipo').value,
+    fluido: document.getElementById('pmoc-gas-fluido').value,
+    quantidade_kg: document.getElementById('pmoc-gas-quantidade').value,
+    data: document.getElementById('pmoc-gas-data').value,
+    observacoes: document.getElementById('pmoc-gas-observacoes').value,
+  };
+  try {
+    await api('/api/pmoc/gas-registros', { method: 'POST', body });
+    await recarregarModalGasPmoc(aparelhoLabel);
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function excluirGasRegistroPmoc(id, aparelhoLabel) {
+  const ok = await mostrarConfirmacao('Excluir este registro de gás? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/pmoc/gas-registros/' + id, { method: 'DELETE' });
+    await recarregarModalGasPmoc(aparelhoLabel);
+  } catch (e) { alert(e.message); }
+}
+
 function pmocAmbientesHtml(ambientes) {
   if (!ambientes.length) return '<div class="empty">Nenhum ambiente cadastrado ainda.</div>';
   return ambientes.map((a) => `
@@ -4241,7 +4337,10 @@ function pmocAparelhosHtml(aparelhos) {
         <strong>${esc(p.tipo)}</strong> ${pmocStatusBadgeHtml(p.status)}
         <div style="font-size:12.5px; color:var(--ink-soft);">${[p.marca, p.modelo].filter(Boolean).map(esc).join(' ')}${p.capacidade_btu ? ` — ${esc(String(p.capacidade_btu))} BTU` : ''}${p.numero_serie ? ` — Série ${esc(p.numero_serie)}` : ''}</div>
       </div>
-      <button class="btn-outline-sm" onclick="abrirModalPmocAparelho(${p.ambiente_id}, window._pmocAmbientesAtual.flatMap((x)=>x.aparelhos).find((x)=>x.id===${p.id}))">✏️</button>
+      <div style="display:flex; gap:6px;">
+        <button class="btn-outline-sm" onclick="abrirModalGasPmoc(${p.id}, '${esc(`${p.tipo} — ${esc(p.marca || '')}`)}')" title="Controle de gás refrigerante">🧊 Gás</button>
+        <button class="btn-outline-sm" onclick="abrirModalPmocAparelho(${p.ambiente_id}, window._pmocAmbientesAtual.flatMap((x)=>x.aparelhos).find((x)=>x.id===${p.id}))">✏️</button>
+      </div>
     </div>`).join('');
 }
 
@@ -5316,7 +5415,11 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     qualidade_ar.forEach((q) => {
       y = novaPaginaSeNecessario(y, 13);
-      doc.text(limparPdf(`${fmtDataIsoAgendaRef(q.data)}${q.laboratorio ? ' — ' + q.laboratorio : ''} — Temp.: ${q.temperatura || '—'} · Umidade: ${q.umidade || '—'} · CO2: ${q.co2 || '—'}`).slice(0, 110), margem, y);
+      const linhaQa = [
+        `Temp.: ${q.temperatura || '—'}`, `Umidade: ${q.umidade || '—'}`, `CO2: ${q.co2 || '—'}`,
+        q.pm10 && `PM10: ${q.pm10}`, q.pm25 && `PM2,5: ${q.pm25}`, q.velocidade_ar && `Vel. ar: ${q.velocidade_ar}`,
+      ].filter(Boolean).join(' · ');
+      doc.text(limparPdf(`${fmtDataIsoAgendaRef(q.data)}${q.laboratorio ? ' — ' + q.laboratorio : ''} — ${linhaQa}`).slice(0, 150), margem, y);
       y += 13;
     });
   } else {
@@ -5470,6 +5573,118 @@ async function baixarRelatorioMensalPmoc() {
   const logoNexor = await logoNexorFlatHeader();
   const doc = montarDocPmocRelatorioMensal(relatorio, null, logoNexor);
   doc.save(`relatorio-mensal-pmoc-${relatorio.cliente.nome.replace(/[^a-zA-Z0-9]+/g, '-')}-${relatorio.mes}.pdf`);
+}
+
+// ===== Fase A (análise de concorrentes/conformidade legal) — Relatório Anual de Gás =====
+// pedido do usuário: controle de carga/recolhimento de gás refrigerante exigido pelo IBAMA
+// (Protocolo de Montreal) — consolidado anual, visão gerencial, mesmo padrão do Relatório Mensal.
+async function renderPmocRelatorioGas() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head"><h1>Relatório de Gás</h1></div>
+    <div class="filtros-row">
+      <input id="pmoc-gas-rel-ano" type="number" min="2000" step="1" value="${hojeIsoAgendaRef().slice(0, 4)}" style="max-width:120px;">
+      <button class="btn btn-primary btn-sm" onclick="carregarPmocRelatorioGas()">Gerar</button>
+    </div>
+    <div id="pmoc-gas-rel-resultado" style="margin-top:12px;"></div>`;
+  carregarPmocRelatorioGas();
+}
+async function carregarPmocRelatorioGas() {
+  const ano = document.getElementById('pmoc-gas-rel-ano').value;
+  const alvo = document.getElementById('pmoc-gas-rel-resultado');
+  if (!ano) { alvo.innerHTML = '<div class="empty">Informe o ano.</div>'; return; }
+  alvo.innerHTML = '<div class="empty">Carregando...</div>';
+  try {
+    const relatorio = await api(`/api/pmoc/relatorio-anual-gas?ano=${ano}`);
+    window._pmocRelatorioGasAtual = relatorio;
+    alvo.innerHTML = `
+      <div class="panel">
+        <h3>Totais por fluido — ${esc(ano)}</h3>
+        ${relatorio.por_fluido.length ? relatorio.por_fluido.map((f) => `
+          <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);">
+            <strong>${esc(f.fluido)}</strong>
+            <span>Carga: ${f.carga_kg.toFixed(2)}kg · Recolhimento: ${f.recolhimento_kg.toFixed(2)}kg</span>
+          </div>`).join('') : '<div class="empty">Nenhum registro neste ano.</div>'}
+      </div>
+      <div class="panel">
+        <h3>Registros — ${esc(ano)}</h3>
+        ${relatorio.registros.length ? relatorio.registros.map((g) => `
+          <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line);">
+            <div>
+              <strong>${PMOC_TIPO_OPERACAO_GAS_LABEL[g.tipo_operacao]}</strong> — ${esc(g.fluido)} — ${g.quantidade_kg}kg
+              <div style="font-size:12px; color:var(--ink-soft);">${esc(g.aparelho_tipo)} — ${esc(g.local_nome)} — ${fmtDataIsoAgendaRef(g.data)}</div>
+            </div>
+          </div>`).join('') : ''}
+      </div>
+      <button class="btn btn-outline-sm" onclick="baixarRelatorioGasPmoc()">📄 Baixar PDF</button>`;
+  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function montarDocPmocRelatorioGas(relatorio, logoNexor) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Relatório de Gás ${relatorio.ano}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  const y0 = margem;
+  desenharCabecalhoEmpresaPdf(doc, null, margem, y0);
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text('Relatório Anual de Gás Refrigerante', pageW - margem, y0, { align: 'right' });
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(String(relatorio.ano), pageW - margem, y0 + 14, { align: 'right' });
+  let y = y0 + 48;
+  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
+
+  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('TOTAIS POR FLUIDO', margem, y); y += 16;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
+  doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('FLUIDO', margem + 6, y + 11); doc.text('CARGA (kg)', margem + largura * 0.5, y + 11); doc.text('RECOLHIMENTO (kg)', margem + largura * 0.75, y + 11);
+  y += 16;
+  doc.setFont(undefined, 'normal');
+  relatorio.por_fluido.forEach((f, i) => {
+    if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+    doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(f.fluido), margem + 6, y + 11);
+    doc.text(f.carga_kg.toFixed(2), margem + largura * 0.5, y + 11);
+    doc.text(f.recolhimento_kg.toFixed(2), margem + largura * 0.75, y + 11);
+    y += 16;
+  });
+  y += 24;
+
+  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('REGISTROS', margem, y); y += 16;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
+  doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('DATA', margem + 6, y + 11); doc.text('LOCAL / APARELHO', margem + 70, y + 11); doc.text('OPERAÇÃO', margem + largura * 0.65, y + 11); doc.text('KG', margem + largura * 0.9, y + 11);
+  y += 16;
+  doc.setFont(undefined, 'normal');
+  relatorio.registros.forEach((g, i) => {
+    if (y > pageH - 80) { doc.addPage(); y = margem; }
+    if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+    doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(fmtDataIsoAgendaRef(g.data), margem + 6, y + 11);
+    doc.text(limparPdf(`${g.local_nome} — ${g.aparelho_tipo}`).slice(0, 44), margem + 70, y + 11);
+    doc.text(PMOC_TIPO_OPERACAO_GAS_LABEL[g.tipo_operacao], margem + largura * 0.65, y + 11);
+    doc.text(String(g.quantidade_kg), margem + largura * 0.9, y + 11);
+    y += 16;
+  });
+
+  const yLinha = pageH - 40;
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+  doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')}`, pageW / 2, pageH - 20, { align: 'center' });
+  desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+  return doc;
+}
+async function baixarRelatorioGasPmoc() {
+  const relatorio = window._pmocRelatorioGasAtual;
+  if (!relatorio) return;
+  const logoNexor = await logoNexorFlatHeader();
+  const doc = montarDocPmocRelatorioGas(relatorio, logoNexor);
+  doc.save(`relatorio-gas-pmoc-${relatorio.ano}.pdf`);
 }
 
 // ===== Pacote "Climatização / PMOC" — Fase 5: Painel/dashboard (item 8 do pedido) =====
@@ -7313,6 +7528,7 @@ async function ir(pagina) {
     if (pagina === 'pmoc-visita-execucao') return renderPmocVisitaExecucao();
     if (pagina === 'pmoc-relatorio-mensal') return renderPmocRelatorioMensal();
     if (pagina === 'pmoc-painel') return renderPmocPainel();
+    if (pagina === 'pmoc-relatorio-gas') return renderPmocRelatorioGas();
     if (pagina === 'pmoc-portal-locais') return renderPmocPortalLocais();
     if (pagina === 'pmoc-portal-local-detalhe') return renderPmocPortalLocalDetalhe();
     if (pagina === 'pmoc-portal-visitas') return renderPmocPortalVisitas();

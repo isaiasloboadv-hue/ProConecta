@@ -6366,11 +6366,17 @@ rota('POST', /^\/api\/pmoc\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res,
 // ---------- Pacote "Climatização / PMOC" — Fase 4: Documento PMOC e portal do cliente ----------
 
 // ---- qualidade do ar (por local, item 1.6 do pedido) ----
+// pedido do usuário (análise de concorrentes/conformidade legal): a RE nº 9/2003 da ANVISA
+// (referência original destes campos) foi revogada em 25/07/2024 pela RDC nº 886/2024 e
+// substituída pela ABNT NBR 17037:2023, que também avalia material particulado (PM10/PM2,5) e
+// velocidade do ar — por isso os 2 campos novos. Mesma filosofia dos campos já existentes: só
+// registra o valor medido, nunca compara contra um limite fixo no código.
 function camposQualidadeArPmoc(body) {
   return {
     data: /^\d{4}-\d{2}-\d{2}$/.test(body.data || '') ? body.data : '',
     laboratorio: body.laboratorio || '',
     temperatura: body.temperatura || '', umidade: body.umidade || '', co2: body.co2 || '',
+    pm10: body.pm10 || '', pm25: body.pm25 || '', velocidade_ar: body.velocidade_ar || '',
     observacoes: body.observacoes || '',
   };
 }
@@ -6432,6 +6438,111 @@ rota('DELETE', /^\/api\/pmoc\/qualidade-ar\/(\d+)$/, async (req, res, m) => {
   data.os_refrigeracao_pmoc_qualidade_ar = data.os_refrigeracao_pmoc_qualidade_ar.filter((q) => q.id !== analise.id);
   db.save(data);
   enviarJSON(res, 200, { ok: true });
+});
+
+// ---- Fase A (análise de concorrentes/conformidade legal) — controle de gás refrigerante por
+// aparelho. O Brasil aderiu ao Protocolo de Montreal (Decreto 99.280/1990); o IBAMA exige
+// cadastro no CTF e o recolhimento correto do gás (liberar na atmosfera é crime ambiental, Lei
+// 9.605/1998). Cada registro é um evento (carga ou recolhimento) de uma quantidade de um fluido
+// específico, numa data — a soma desses eventos por fluido/ano é a base de uma eventual
+// prestação de contas ao IBAMA, além de servir como controle de estoque pra própria empresa.
+const PMOC_TIPOS_OPERACAO_GAS = ['carga', 'recolhimento'];
+function camposGasRegistroPmoc(body) {
+  return {
+    tipo_operacao: PMOC_TIPOS_OPERACAO_GAS.includes(body.tipo_operacao) ? body.tipo_operacao : '',
+    fluido: String(body.fluido || '').trim(),
+    quantidade_kg: Number(body.quantidade_kg) > 0 ? Number(body.quantidade_kg) : null,
+    data: /^\d{4}-\d{2}-\d{2}$/.test(body.data || '') ? body.data : '',
+    observacoes: body.observacoes || '',
+  };
+}
+function validarGasRegistroPmoc(campos) {
+  if (!campos.tipo_operacao) return 'Informe se é carga ou recolhimento de gás.';
+  if (!campos.fluido) return 'Informe o tipo de fluido refrigerante.';
+  if (!campos.quantidade_kg) return 'Informe a quantidade (em kg), maior que zero.';
+  if (!campos.data) return 'Informe a data do evento.';
+  return null;
+}
+// GET /api/pmoc/aparelhos/:id/gas
+rota('GET', /^\/api\/pmoc\/aparelhos\/(\d+)\/gas$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const aparelho = tenant.buscar(data, 'os_refrigeracao_pmoc_aparelhos', Number(m[1]), user.empresa_id);
+  if (!aparelho) return enviarJSON(res, 404, { erro: 'Aparelho não encontrado.' });
+  const registros = data.os_refrigeracao_pmoc_gas_registros
+    .filter((g) => g.aparelho_id === aparelho.id && g.empresa_id === user.empresa_id)
+    .sort((a, b) => b.data.localeCompare(a.data));
+  enviarJSON(res, 200, { registros });
+});
+// POST /api/pmoc/gas-registros { aparelho_id, tipo_operacao, fluido, quantidade_kg, data, observacoes }
+rota('POST', /^\/api\/pmoc\/gas-registros$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const aparelhoId = Number(body.aparelho_id) || null;
+  if (!aparelhoId || !tenant.buscar(data, 'os_refrigeracao_pmoc_aparelhos', aparelhoId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Aparelho inválido.' });
+  const campos = camposGasRegistroPmoc(body);
+  const erro = validarGasRegistroPmoc(campos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const registro = tenant.criar(data, 'os_refrigeracao_pmoc_gas_registros', user.empresa_id, { ...campos, aparelho_id: aparelhoId, criado_em: new Date().toISOString() });
+  db.save(data);
+  enviarJSON(res, 201, { registro });
+});
+// PUT /api/pmoc/gas-registros/:id
+rota('PUT', /^\/api\/pmoc\/gas-registros\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const registro = tenant.buscar(data, 'os_refrigeracao_pmoc_gas_registros', Number(m[1]), user.empresa_id);
+  if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  const body = await lerCorpo(req);
+  const campos = camposGasRegistroPmoc(body);
+  const erro = validarGasRegistroPmoc(campos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  Object.assign(registro, campos);
+  db.save(data);
+  enviarJSON(res, 200, { registro });
+});
+// DELETE /api/pmoc/gas-registros/:id
+rota('DELETE', /^\/api\/pmoc\/gas-registros\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const registro = tenant.buscar(data, 'os_refrigeracao_pmoc_gas_registros', Number(m[1]), user.empresa_id);
+  if (!registro) return enviarJSON(res, 404, { erro: 'Registro não encontrado.' });
+  data.os_refrigeracao_pmoc_gas_registros = data.os_refrigeracao_pmoc_gas_registros.filter((g) => g.id !== registro.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+// GET /api/pmoc/relatorio-anual-gas?ano=AAAA — consolidado da empresa inteira, só administrador
+// (visão gerencial, mesmo padrão do Relatório Mensal e do Painel PMOC).
+rota('GET', /^\/api\/pmoc\/relatorio-anual-gas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Relatório anual de gás é exclusivo do administrador.' });
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}$/.test(query.ano || '')) return enviarJSON(res, 400, { erro: 'Informe o ano (AAAA).' });
+  const registrosDoAno = tenant.listar(data, 'os_refrigeracao_pmoc_gas_registros', user.empresa_id)
+    .filter((g) => g.data.startsWith(query.ano));
+  const porFluido = new Map();
+  for (const g of registrosDoAno) {
+    const totais = porFluido.get(g.fluido) || { fluido: g.fluido, carga_kg: 0, recolhimento_kg: 0 };
+    if (g.tipo_operacao === 'carga') totais.carga_kg += g.quantidade_kg;
+    else totais.recolhimento_kg += g.quantidade_kg;
+    porFluido.set(g.fluido, totais);
+  }
+  const registrosComDetalhes = registrosDoAno
+    .map((g) => {
+      const aparelho = data.os_refrigeracao_pmoc_aparelhos.find((a) => a.id === g.aparelho_id && a.empresa_id === user.empresa_id);
+      const ambiente = aparelho ? data.os_refrigeracao_pmoc_ambientes.find((a) => a.id === aparelho.ambiente_id && a.empresa_id === user.empresa_id) : null;
+      const local = ambiente ? data.os_refrigeracao_pmoc_locais.find((l) => l.id === ambiente.local_id && l.empresa_id === user.empresa_id) : null;
+      return { ...g, aparelho_tipo: aparelho ? aparelho.tipo : '(removido)', local_nome: local ? local.nome : '—' };
+    })
+    .sort((a, b) => b.data.localeCompare(a.data));
+  enviarJSON(res, 200, { ano: query.ano, por_fluido: [...porFluido.values()], registros: registrosComDetalhes });
 });
 
 // ---- Documento PMOC do local (item 4.1 do pedido) — dados completos pras 8 seções do PDF,
