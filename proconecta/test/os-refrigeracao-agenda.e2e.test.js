@@ -139,6 +139,17 @@ test('Agenda (Refrigeração): gate por perfil, config por técnico, grade de ho
     const rSlotsBloqueada = await fetch(`${base}/api/os-refrigeracao-agenda/slots?data=2026-11-09`, { headers: authA });
     assert.equal((await rSlotsBloqueada.json()).slots.length, 0);
 
+    // ---- resumo do mês (calendário — "X/Y" por dia, ver renderMesAgendaRef em app.js) ----
+    const rResumoMesAntes = await fetch(`${base}/api/os-refrigeracao-agenda/resumo-mes?mes=2026-11`, { headers: authA });
+    assert.equal(rResumoMesAntes.status, 200);
+    const resumoAntes = (await rResumoMesAntes.json()).dias;
+    // segunda-feira: capacidade 8 (máx. por dia), nenhum agendamento ainda
+    assert.deepEqual(resumoAntes[SEGUNDA_FUTURA], { total: 8, agendados: 0 });
+    // domingo não tem atendimento -> nem aparece no mapa
+    assert.equal(resumoAntes[DOMINGO_FUTURO], undefined);
+    // data bloqueada (09/11, uma segunda) também não aparece
+    assert.equal(resumoAntes['2026-11-09'], undefined);
+
     // ---- agendamento manual ----
     const corpoAgendamento = {
       cliente_nome: 'João Silva', telefone: '(12) 98882-8780', endereco: 'Rua Durango, 230',
@@ -164,6 +175,10 @@ test('Agenda (Refrigeração): gate por perfil, config por técnico, grade de ho
     assert.equal(criado.tecnico_nome, 'Tecnico A');
     assert.equal(criado.status, 'agendado');
     const agendamentoId = criado.id;
+
+    // resumo do mês reflete o agendamento recém-criado
+    const rResumoMesDepois = await fetch(`${base}/api/os-refrigeracao-agenda/resumo-mes?mes=2026-11`, { headers: authA });
+    assert.deepEqual((await rResumoMesDepois.json()).dias[SEGUNDA_FUTURA], { total: 8, agendados: 1 });
 
     // horário já ocupado agora recusa de novo
     const jaOcupado = await fetch(`${base}/api/os-refrigeracao-agendamentos`, { method: 'POST', headers: authA, body: JSON.stringify(corpoAgendamento) });

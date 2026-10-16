@@ -5276,6 +5276,44 @@ rota('GET', /^\/api\/os-refrigeracao-agenda\/slots$/, async (req, res) => {
   enviarJSON(res, 200, slotsAgendaRefrigeracao(data, tecnicoId, user.empresa_id, query.data));
 });
 
+// total de horários OFERECÍVEIS num dia (fora da pausa, respeitando o máx. por dia) — mesma conta
+// de slotsAgendaRefrigeracao, mas sem olhar quem já está ocupado (é usado só pro resumo do mês,
+// "X/Y atendimentos", onde Y é a capacidade do dia, não quanto já foi preenchido).
+function totalOferecivelDoDiaAgendaRef(config, dataIso) {
+  const grade = gerarGradeAgendaRefrigeracao(config, dataIso);
+  if (!grade.length) return 0;
+  const maxPorDia = Number(config.max_por_dia) > 0 ? Number(config.max_por_dia) : grade.length;
+  return Math.min(grade.filter((s) => !s.pausa).length, maxPorDia);
+}
+// GET /api/os-refrigeracao-agenda/resumo-mes?mes=YYYY-MM&tecnico_id= — pedido do usuário
+// (referência: app concorrente iClima) — calendário do mês mostrando "X/Y" (agendados/capacidade)
+// em cada dia, pra abrir o dia e ver a grade de horários de verdade. Um dia some do mapa `dias`
+// quando a config não oferece nenhum horário ali (fora dos dias de atendimento ou data bloqueada).
+rota('GET', /^\/api\/os-refrigeracao-agenda\/resumo-mes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}$/.test(query.mes || '')) return enviarJSON(res, 400, { erro: 'Informe o mês (AAAA-MM).' });
+  const tecnicoId = resolverTecnicoIdAgendaRef(res, user, data, query.tecnico_id);
+  if (tecnicoId === null) return;
+  const config = data.os_refrigeracao_agenda_config.find((c) => c.tecnico_id === tecnicoId && c.empresa_id === user.empresa_id) || null;
+  const [ano, mes] = query.mes.split('-').map(Number);
+  const dias = {};
+  if (config) {
+    const diasNoMes = new Date(ano, mes, 0).getDate();
+    for (let dia = 1; dia <= diasNoMes; dia++) {
+      const dataIso = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+      const total = totalOferecivelDoDiaAgendaRef(config, dataIso);
+      if (total > 0) {
+        const agendados = data.os_refrigeracao_agendamentos.filter((a) => a.tecnico_id === tecnicoId && a.empresa_id === user.empresa_id && a.data === dataIso && a.status !== 'cancelado').length;
+        dias[dataIso] = { total, agendados };
+      }
+    }
+  }
+  enviarJSON(res, 200, { config_existe: !!config, dias });
+});
+
 // ---- agendamentos ----
 const AGENDA_REF_TIPOS_SERVICO_VALIDOS = ['instalacao', 'manutencao_preventiva', 'manutencao_corretiva', 'higienizacao', 'desinstalacao', 'visita_tecnica', 'orcamento', 'outro'];
 const AGENDA_REF_STATUS_VALIDOS = ['agendado', 'concluido', 'cancelado'];

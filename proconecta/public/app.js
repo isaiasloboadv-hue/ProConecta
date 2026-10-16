@@ -3198,10 +3198,20 @@ function somarDiasIsoAgendaRef(iso, dias) {
 }
 
 // ---- tela principal: seletor de técnico (admin), navegador de dia, grade de horários ----
+const AGENDA_REF_MESES_EXTENSO = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+// pedido do usuário (referência: app concorrente iClima) — a tela principal é um CALENDÁRIO DO
+// MÊS (um dia por célula, "agendados/capacidade" + legenda de ocupação por cor), não um navegador
+// de dia único; clicar num dia abre a visão do dia (grade de horários de verdade, pausa nunca
+// aparece na lista — só é descontada do cálculo). `window._agendaRefVisao` ('mes'|'dia') decide
+// qual das duas é desenhada; `renderAgendaRefrigeracaoLista` é só o ponto de entrada (carrega
+// técnico/config e delega pra uma das duas).
 async function renderAgendaRefrigeracaoLista() {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Agenda (Refrigeração) é exclusiva de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._agendaRefMes) window._agendaRefMes = hojeIsoAgendaRef().slice(0, 7);
   if (!window._agendaRefData) window._agendaRefData = hojeIsoAgendaRef();
+  if (!window._agendaRefVisao) window._agendaRefVisao = 'mes';
   if (!window._agendaRefTecnicoId) window._agendaRefTecnicoId = USER.id;
   main.innerHTML = '<div class="empty">Carregando...</div>';
   if (USER.papel === 'administrador' && !window._agendaRefTecnicosCache) {
@@ -3210,13 +3220,18 @@ async function renderAgendaRefrigeracaoLista() {
       window._agendaRefTecnicosCache = usuarios.filter((u) => ['administrador', 'suporte'].includes(u.papel));
     } catch (e) { window._agendaRefTecnicosCache = []; }
   }
-  await carregarAgendaRefrigeracaoLista();
+  // pedido do usuário: a maioria das empresas que usam o sistema é autônoma (um único técnico — o
+  // próprio administrador) — nesse caso, repetir o nome dele em seletor/cards só polui a tela. O
+  // seletor de técnico e a anotação "· fulano" nos agendamentos (ver linhaAgendamentoAgendaRef) só
+  // aparecem quando a empresa tem mais de um técnico cadastrado.
+  window._agendaRefMultiTecnico = (window._agendaRefTecnicosCache || []).length > 1;
+  await carregarConfigAgendaRef();
 }
 function trocarTecnicoAgendaRef(id) {
   window._agendaRefTecnicoId = Number(id);
-  carregarAgendaRefrigeracaoLista();
+  carregarConfigAgendaRef();
 }
-async function carregarAgendaRefrigeracaoLista() {
+async function carregarConfigAgendaRef() {
   const main = document.getElementById('main');
   const tecnicoId = window._agendaRefTecnicoId;
   const params = new URLSearchParams();
@@ -3227,34 +3242,8 @@ async function carregarAgendaRefrigeracaoLista() {
     config = resp.config;
   } catch (e) { main.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   window._agendaRefConfig = config;
-  // pedido do usuário: a maioria das empresas que usam o sistema é autônoma (um único técnico —
-  // o próprio administrador) — nesse caso, repetir o nome dele em seletor/cards só polui a tela.
-  // O seletor de técnico e a anotação "· fulano" nos agendamentos (ver linhaAgendamentoAgendaRef)
-  // só aparecem quando a empresa tem mais de um técnico cadastrado; a identidade visual da tela
-  // já é a da EMPRESA (nome/marca no cabeçalho do app), não a de uma pessoa isolada.
-  const multiTecnico = (window._agendaRefTecnicosCache || []).length > 1;
-  window._agendaRefMultiTecnico = multiTecnico;
-
-  const seletorTecnico = USER.papel === 'administrador' && multiTecnico ? `
-    <div class="field" style="max-width:280px;">
-      <label>Técnico</label>
-      <select onchange="trocarTecnicoAgendaRef(this.value)">
-        ${(window._agendaRefTecnicosCache || []).map((u) => `<option value="${u.id}" ${Number(tecnicoId) === u.id ? 'selected' : ''}>${esc(u.nome)}${u.id === USER.id ? ' (eu)' : ''}</option>`).join('')}
-      </select>
-    </div>` : '';
-
-  const cabecalho = `
-    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
-      <h1>${USER.papel === 'administrador' && multiTecnico ? 'Agenda geral' : 'Agenda'}</h1>
-      <div style="display:flex; gap:8px;">
-        <button class="btn-outline-sm" onclick="abrirModalConfigAgendaRef()">⚙️ Config</button>
-        <button class="btn btn-primary btn-sm" onclick="abrirModalNovoAgendamentoRef()">+ Novo</button>
-      </div>
-    </div>
-    ${seletorTecnico}`;
-
   if (!config) {
-    main.innerHTML = cabecalho + `
+    main.innerHTML = cabecalhoAgendaRef() + `
       <div class="panel" style="text-align:center; padding:40px 20px;">
         <div style="font-size:40px;">⚙️</div>
         <h3 style="margin-top:10px;">Configure sua agenda</h3>
@@ -3263,38 +3252,156 @@ async function carregarAgendaRefrigeracaoLista() {
       </div>`;
     return;
   }
-
-  main.innerHTML = cabecalho + `
-    <div class="panel" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-      <button class="btn-outline-sm" onclick="navegarDiaAgendaRef(-1)">← Anterior</button>
-      <div id="agenda-ref-data-label" style="text-align:center;">${htmlDataLabelAgendaRef()}</div>
-      <button class="btn-outline-sm" onclick="navegarDiaAgendaRef(1)">Próximo →</button>
-    </div>
-    <div style="text-align:center; margin:4px 0 12px;"><button class="btn-outline-sm" style="padding:4px 14px; font-size:12px;" onclick="irParaHojeAgendaRef()">Hoje</button></div>
-    <div id="agenda-ref-dia-lista"><div class="empty">Carregando...</div></div>`;
-
-  await carregarSlotsAgendaRef();
+  if (window._agendaRefVisao === 'dia') await renderDiaAgendaRef();
+  else await renderMesAgendaRef();
 }
-function htmlDataLabelAgendaRef() {
-  return `<strong>${fmtDataIsoAgendaRef(window._agendaRefData)}</strong><div style="font-size:12px; color:var(--ink-soft);">${diaSemanaLabelAgendaRef(window._agendaRefData)}</div>`;
+function cabecalhoAgendaRef() {
+  const seletorTecnico = USER.papel === 'administrador' && window._agendaRefMultiTecnico ? `
+    <div class="field" style="max-width:280px;">
+      <label>Técnico</label>
+      <select onchange="trocarTecnicoAgendaRef(this.value)">
+        ${(window._agendaRefTecnicosCache || []).map((u) => `<option value="${u.id}" ${Number(window._agendaRefTecnicoId) === u.id ? 'selected' : ''}>${esc(u.nome)}${u.id === USER.id ? ' (eu)' : ''}</option>`).join('')}
+      </select>
+    </div>` : '';
+  return `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <h1>${USER.papel === 'administrador' && window._agendaRefMultiTecnico ? 'Agenda geral' : 'Agenda'}</h1>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="abrirModalConfigAgendaRef()">⚙️ Config</button>
+        <button class="btn btn-primary btn-sm" onclick="abrirModalNovoAgendamentoRef()">+ Novo</button>
+      </div>
+    </div>
+    ${seletorTecnico}`;
+}
+
+// ---- calendário do mês ----
+function somarMesesIsoAgendaRef(mesIso, delta) {
+  const [ano, mes] = mesIso.split('-').map(Number);
+  const d = new Date(ano, mes - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function navegarMesAgendaRef(delta) {
+  window._agendaRefMes = somarMesesIsoAgendaRef(window._agendaRefMes, delta);
+  renderMesAgendaRef();
+}
+function irParaMesAtualAgendaRef() {
+  window._agendaRefMes = hojeIsoAgendaRef().slice(0, 7);
+  renderMesAgendaRef();
+}
+function pontoLegendaAgendaRef(cor, texto) {
+  return `<span style="display:inline-flex; align-items:center; gap:4px;"><span style="width:8px; height:8px; border-radius:50%; background:${cor}; display:inline-block;"></span>${texto}</span>`;
+}
+async function renderMesAgendaRef() {
+  const main = document.getElementById('main');
+  window._agendaRefVisao = 'mes';
+  const [ano, mes] = window._agendaRefMes.split('-').map(Number);
+  main.innerHTML = cabecalhoAgendaRef() + `
+    <div class="panel">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+        <button class="btn-outline-sm" style="padding:6px 12px;" onclick="navegarMesAgendaRef(-1)">‹</button>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <strong>${AGENDA_REF_MESES_EXTENSO[mes - 1]} ${ano}</strong>
+          <button class="btn-outline-sm" style="padding:4px 14px; font-size:12px;" onclick="irParaMesAtualAgendaRef()">Hoje</button>
+        </div>
+        <button class="btn-outline-sm" style="padding:6px 12px;" onclick="navegarMesAgendaRef(1)">›</button>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-top:14px; text-align:center; font-size:12px; color:var(--ink-soft);">
+        ${AGENDA_REF_DIAS.map((d) => `<div>${d.label}</div>`).join('')}
+      </div>
+      <div id="agenda-ref-grade-mes" style="display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-top:6px;">
+        <div class="empty" style="grid-column:1/-1;">Carregando...</div>
+      </div>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:center; margin-top:16px; font-size:12px; color:var(--ink-soft);">
+        ${pontoLegendaAgendaRef('var(--green,#1E8A4C)', '&lt;50%')}
+        ${pontoLegendaAgendaRef('var(--amber,#B45309)', '50-80%')}
+        ${pontoLegendaAgendaRef('var(--red,#B3453A)', '&gt;80%')}
+        ${pontoLegendaAgendaRef('var(--blue)', 'Lotado')}
+      </div>
+    </div>`;
+  await carregarGradeMesAgendaRef();
+}
+async function carregarGradeMesAgendaRef() {
+  const alvo = document.getElementById('agenda-ref-grade-mes');
+  if (!alvo) return;
+  const [ano, mes] = window._agendaRefMes.split('-').map(Number);
+  const tecnicoId = window._agendaRefTecnicoId;
+  const params = new URLSearchParams({ mes: window._agendaRefMes });
+  if (USER.papel === 'administrador' && tecnicoId !== USER.id) params.set('tecnico_id', tecnicoId);
+  let dias;
+  try {
+    const resp = await api('/api/os-refrigeracao-agenda/resumo-mes?' + params.toString());
+    dias = resp.dias;
+  } catch (e) { alvo.innerHTML = `<div class="empty" style="grid-column:1/-1;">${esc(e.message)}</div>`; return; }
+  const primeiroDiaSemana = new Date(ano, mes - 1, 1).getDay();
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const diasNoMesAnterior = new Date(ano, mes - 1, 0).getDate();
+  const hoje = hojeIsoAgendaRef();
+  const celulas = [];
+  for (let i = primeiroDiaSemana - 1; i >= 0; i--) celulas.push({ numero: diasNoMesAnterior - i, foraDoMes: true });
+  for (let dia = 1; dia <= diasNoMes; dia++) {
+    const dataIso = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    celulas.push({ numero: dia, foraDoMes: false, dataIso, resumo: dias[dataIso] || null, hoje: dataIso === hoje });
+  }
+  let proximoContador = 1;
+  while (celulas.length % 7 !== 0) { celulas.push({ numero: proximoContador++, foraDoMes: true }); }
+  alvo.innerHTML = celulas.map((c) => celulaMesAgendaRef(c)).join('');
+}
+function celulaMesAgendaRef(c) {
+  if (c.foraDoMes) return `<div style="aspect-ratio:1; display:flex; align-items:center; justify-content:center; color:var(--line); font-size:13px;">${c.numero}</div>`;
+  const estiloFundo = c.hoje ? 'background:var(--blue); color:#fff;' : 'background:var(--gray-50,#F4F6FA); color:var(--ink);';
+  let rodape = '';
+  if (c.resumo) {
+    const pct = c.resumo.total ? c.resumo.agendados / c.resumo.total : 0;
+    const cor = pct >= 1 ? 'var(--blue)' : pct > 0.8 ? 'var(--red,#B3453A)' : pct >= 0.5 ? 'var(--amber,#B45309)' : 'var(--green,#1E8A4C)';
+    rodape = `<div style="font-size:11px; font-weight:600; ${c.hoje ? 'color:#fff;' : `color:${cor};`}">${c.resumo.agendados}/${c.resumo.total}</div>`;
+  }
+  return `<div style="aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:10px; cursor:pointer; ${estiloFundo}" onclick="abrirDiaAgendaRef('${c.dataIso}')">
+    <div style="font-weight:700; font-size:14px;">${c.numero}</div>
+    ${rodape}
+  </div>`;
+}
+function abrirDiaAgendaRef(dataIso) {
+  window._agendaRefData = dataIso;
+  window._agendaRefVisao = 'dia';
+  renderDiaAgendaRef();
+}
+function voltarParaMesAgendaRef() {
+  window._agendaRefVisao = 'mes';
+  renderMesAgendaRef();
+}
+
+// ---- visão do dia (grade de horários de verdade) ----
+function cabecalhoDiaAgendaRef(dataIso) {
+  const d = new Date(dataIso + 'T12:00:00');
+  return `${diaSemanaLabelAgendaRef(dataIso)}, ${d.getDate()} de ${AGENDA_REF_MESES_EXTENSO[d.getMonth()]}`;
 }
 function navegarDiaAgendaRef(delta) {
   window._agendaRefData = somarDiasIsoAgendaRef(window._agendaRefData, delta);
-  atualizarCabecalhoDataAgendaRef();
+  renderDiaAgendaRef();
 }
-function irParaHojeAgendaRef() {
-  window._agendaRefData = hojeIsoAgendaRef();
-  atualizarCabecalhoDataAgendaRef();
+async function renderDiaAgendaRef() {
+  const main = document.getElementById('main');
+  window._agendaRefVisao = 'dia';
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; align-items:flex-start; gap:10px;">
+      <button class="btn-outline-sm" style="padding:6px 10px;" onclick="voltarParaMesAgendaRef()">←</button>
+      <div>
+        <h1 style="margin:0;">${cabecalhoDiaAgendaRef(window._agendaRefData)}</h1>
+        <p id="agenda-ref-dia-subtitulo" style="color:var(--ink-soft); margin:2px 0 0;">Carregando...</p>
+      </div>
+    </div>
+    <div class="panel" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <button class="btn-outline-sm" onclick="navegarDiaAgendaRef(-1)">← Anterior</button>
+      <button class="btn-outline-sm" onclick="navegarDiaAgendaRef(1)">Próximo →</button>
+    </div>
+    <div id="agenda-ref-dia-lista" style="margin-top:12px;"><div class="empty">Carregando...</div></div>`;
+  await carregarSlotsAgendaRef();
 }
-function atualizarCabecalhoDataAgendaRef() {
-  const label = document.getElementById('agenda-ref-data-label');
-  if (label) label.innerHTML = htmlDataLabelAgendaRef();
-  const lista = document.getElementById('agenda-ref-dia-lista');
-  if (lista) lista.innerHTML = '<div class="empty">Carregando...</div>';
-  carregarSlotsAgendaRef();
-}
+// pedido do usuário (referência: app concorrente iClima): a pausa nunca aparece como linha na
+// lista — só é descontada da contagem "X de Y atendimentos" (ver semPausa abaixo).
 async function carregarSlotsAgendaRef() {
   const alvo = document.getElementById('agenda-ref-dia-lista');
+  const subtituloEl = document.getElementById('agenda-ref-dia-subtitulo');
   if (!alvo) return;
   const tecnicoId = window._agendaRefTecnicoId;
   const params = new URLSearchParams({ data: window._agendaRefData });
@@ -3305,31 +3412,44 @@ async function carregarSlotsAgendaRef() {
       api('/api/os-refrigeracao-agenda/slots?' + params.toString()),
       api('/api/os-refrigeracao-agendamentos?' + params.toString()),
     ]);
-  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; if (subtituloEl) subtituloEl.textContent = ''; return; }
   window._agendaRefAgendamentosDoDia = agendamentos;
-  if (!slots.length) { alvo.innerHTML = '<div class="empty">Sem atendimento configurado para este dia.</div>'; return; }
+  const semPausa = slots.filter((s) => !s.pausa);
+  const ocupados = semPausa.filter((s) => s.ocupado).length;
+  if (subtituloEl) subtituloEl.textContent = `${ocupados} de ${semPausa.length} atendimentos · ${semPausa.length - ocupados} livres`;
+  if (!semPausa.length) { alvo.innerHTML = '<div class="empty">Sem atendimento configurado para este dia.</div>'; return; }
   const porHora = {};
   agendamentos.forEach((a) => { if (a.status !== 'cancelado') porHora[a.hora] = a; });
-  alvo.innerHTML = slots.map((s) => {
-    if (s.pausa) return linhaSlotAgendaRef(s.hora, '<span style="color:var(--ink-soft);">☕ Pausa</span>', null);
+  alvo.innerHTML = semPausa.map((s) => {
     const ag = porHora[s.hora];
     if (ag) return linhaAgendamentoAgendaRef(ag);
-    if (s.disponivel) return linhaSlotAgendaRef(s.hora, '<span style="color:var(--green);">Disponível</span>', `abrirModalNovoAgendamentoRef('${s.hora}')`);
-    return linhaSlotAgendaRef(s.hora, '<span style="color:var(--ink-soft);">Indisponível</span>', null);
+    if (s.disponivel) return linhaHorarioLivreAgendaRef(s.hora);
+    return linhaHorarioIndisponivelAgendaRef(s.hora);
   }).join('');
 }
-function linhaSlotAgendaRef(hora, conteudoHtml, onclick) {
-  return `<div class="panel" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; margin-bottom:6px; ${onclick ? 'cursor:pointer;' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
-    <strong style="width:60px;">${esc(hora)}</strong>
-    <div style="flex:1; text-align:right;">${conteudoHtml}</div>
+function faixaHorarioAgendaRef(hora) {
+  const duracao = Number(window._agendaRefConfig && window._agendaRefConfig.duracao_min) || 60;
+  const [h, m] = hora.split(':').map(Number);
+  const totalFim = h * 60 + m + duracao;
+  return `${hora} - ${String(Math.floor(totalFim / 60)).padStart(2, '0')}:${String(totalFim % 60).padStart(2, '0')}`;
+}
+function linhaHorarioLivreAgendaRef(hora) {
+  return `<div class="panel" style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; margin-bottom:8px;">
+    <div><span style="margin-right:4px;">🕐</span>${faixaHorarioAgendaRef(hora)}<div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">Horário disponível</div></div>
+    <button class="btn-outline-sm" onclick="abrirModalNovoAgendamentoRef('${hora}')">+ Agendar</button>
+  </div>`;
+}
+function linhaHorarioIndisponivelAgendaRef(hora) {
+  return `<div class="panel" style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; margin-bottom:8px; opacity:.6;">
+    <div><span style="margin-right:4px;">🕐</span>${faixaHorarioAgendaRef(hora)}<div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">Indisponível</div></div>
   </div>`;
 }
 function linhaAgendamentoAgendaRef(a) {
-  return `<div class="panel" style="padding:10px 14px; margin-bottom:6px; cursor:pointer;" onclick="abrirAgendamentoRefDetalhe(${a.id})">
+  return `<div class="panel" style="padding:12px 14px; margin-bottom:8px; cursor:pointer;" onclick="abrirAgendamentoRefDetalhe(${a.id})">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-      <strong style="width:60px;">${esc(a.hora)}</strong>
       <div style="flex:1;">
-        <div><strong>${esc(a.cliente_nome)}</strong> ${agendaRefStatusBadgeHtml(a.status)}</div>
+        <div style="font-size:12px; color:var(--ink-soft);">🕐 ${faixaHorarioAgendaRef(a.hora)}</div>
+        <div style="margin-top:2px;"><strong>${esc(a.cliente_nome)}</strong> ${agendaRefStatusBadgeHtml(a.status)}</div>
         <div style="font-size:12px; color:var(--ink-soft);">${esc(AGENDA_REF_TIPO_SERVICO_LABEL[a.tipo_servico] || 'Outro')}${USER.papel === 'administrador' && window._agendaRefMultiTecnico && a.tecnico_nome ? ' · ' + esc(a.tecnico_nome) : ''}</div>
       </div>
       <div style="font-weight:700; white-space:nowrap;">${a.valor_servico ? fmtMoeda(a.valor_servico) : ''}</div>
@@ -3519,7 +3639,7 @@ async function salvarConfigAgendaRef() {
     if (USER.papel === 'administrador' && window._agendaRefTecnicoId !== USER.id) body.tecnico_id = window._agendaRefTecnicoId;
     await api('/api/os-refrigeracao-agenda/config', { method: 'PUT', body });
     fecharModalConfigAgendaRef();
-    await carregarAgendaRefrigeracaoLista();
+    await carregarConfigAgendaRef();
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
@@ -3618,8 +3738,11 @@ async function salvarNovoAgendamentoRef() {
     if (USER.papel === 'administrador' && window._agendaRefTecnicoId !== USER.id) body.tecnico_id = window._agendaRefTecnicoId;
     await api('/api/os-refrigeracao-agendamentos', { method: 'POST', body });
     fecharModalNovoAgendamentoRef();
+    // pousa na visão do dia que acabou de ser agendado, não de volta no calendário do mês — é o
+    // que faz sentido depois de agendar (ver o compromisso recém-criado na lista).
     window._agendaRefData = f.data;
-    await carregarAgendaRefrigeracaoLista();
+    window._agendaRefVisao = 'dia';
+    await carregarConfigAgendaRef();
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
