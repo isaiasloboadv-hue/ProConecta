@@ -123,3 +123,16 @@ test('restrição por menus (acesso_total: false) também vale pro item gated po
   ctx.USER.menus = ['agenda', 'guia-diagnostico-rapido'];
   assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('guia-diagnostico-rapido'));
 });
+
+// pedido do usuário (referência: app concorrente iClima): segundo menu do perfil Refrigeração —
+// "Ordens de Serviço" (ver os-refrigeracao-*.test.js em server.js), mesmo gate por `perfil`.
+test('administrador e suporte só veem "Ordens de Serviço" (Refrigeração) quando a empresa é do perfil refrigeração', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('os-refrigeracao'));
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('os-refrigeracao'));
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('os-refrigeracao'));
+});

@@ -17,7 +17,13 @@
 // /api/cadastro (SaaS, passo 1 — cadastro/trial self-service) também é público: quem ainda não é
 // cliente nenhum precisa criar a própria empresa + primeiro administrador antes de ter qualquer
 // login pra autenticar.
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/outlook/callback', '/api/cadastro'];
+// /api/os-refrigeracao-assinar/:token é o link público (sem login) que o cliente usa pra assinar
+// a O.S. do perfil Refrigeração — mesmo padrão de /api/entregas (token próprio, gerado na
+// criação). As rotas autenticadas (/api/os-refrigeracao e /api/os-refrigeracao-clientes, prefixo
+// diferente, de propósito) NÃO entram aqui — continuam exigindo login normal, caem em "núcleo"
+// por omissão (não há módulo de plano pra isso: o acesso é por `perfil` da empresa, checado nos
+// próprios handlers em server.js — ver PAPEIS_OS_REFRIGERACAO/empresaPerfilRefrigeracao).
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/outlook/callback', '/api/cadastro'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],

@@ -4641,6 +4641,241 @@ rota('DELETE', /^\/api\/atividades-diarias\/(\d+)$/, async (req, res, m) => {
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- Ordens de Serviço — perfil "Refrigeração e Climatização" ----------
+// pedido do usuário: menu construído do zero, específico desse perfil (ver PERFIS_DISPONIVEIS em
+// db.js e perfilAtivoNoMenu em app.js) — cadastro de cliente próprio (os_refrigeracao_clientes,
+// separado da coleção `clientes` genérica: os outros menus desse perfil ainda vão ser construídos
+// um a um, "Criar versões novas e específicas" foi o pedido explícito do usuário), fluxo em
+// etapas (cliente -> equipamento -> serviço e materiais -> finalizar com assinatura do técnico) e
+// um link público com token (mesmo padrão de /api/entregas, ver gerarTokenConvite) pra o cliente
+// assinar a O.S. de qualquer aparelho, sem precisar de login.
+const PAPEIS_OS_REFRIGERACAO = ['administrador', 'suporte'];
+function empresaPerfilRefrigeracao(data, empresaId) {
+  const empresa = data.empresas.find((e) => e.id === empresaId);
+  return !!(empresa && empresa.perfil === 'refrigeracao');
+}
+// não existe módulo de plano pra isso (rotas-modulo.js cai em "núcleo" por omissão pro prefixo
+// /api/os-refrigeracao) — o acesso é por Perfil da empresa, checado aqui dentro, mesmo padrão de
+// outras sub-checagens já feitas "dentro da rota" no sistema (ex.: módulo "filiais" em sub-rotas
+// de /api/agenda). Devolve false (e já respondeu o erro) quando o chamador deve parar ali.
+function exigirPerfilRefrigeracao(res, user, data) {
+  if (!exigirPapel(user, PAPEIS_OS_REFRIGERACAO)) { enviarJSON(res, 403, { erro: 'Sem acesso a Ordens de Serviço.' }); return false; }
+  if (!empresaPerfilRefrigeracao(data, user.empresa_id)) { enviarJSON(res, 403, { erro: 'Ordens de Serviço (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.' }); return false; }
+  return true;
+}
+
+function totaisOsRefrigeracao(os) {
+  const totalMateriais = (os.materiais || []).reduce((s, m) => s + (Number(m.quantidade) || 0) * (Number(m.valor_unitario) || 0), 0);
+  const totalServicos = (os.servicos || []).reduce((s, sv) => s + (Number(sv.valor) || 0), 0);
+  const subtotal = totalMateriais + totalServicos + (Number(os.mao_de_obra) || 0);
+  const descontoBruto = os.desconto_tipo === 'percentual' ? subtotal * ((Number(os.desconto_valor) || 0) / 100) : (Number(os.desconto_valor) || 0);
+  const descontoAplicado = Math.max(0, Math.min(descontoBruto, subtotal));
+  return { total_materiais: totalMateriais, total_servicos: totalServicos, subtotal, desconto_aplicado: descontoAplicado, total: subtotal - descontoAplicado };
+}
+
+async function osRefrigeracaoComDetalhes(data, os) {
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === os.cliente_id && c.empresa_id === os.empresa_id);
+  return {
+    ...os,
+    fotos: await hidratarFotosProfundo(os.fotos),
+    assinatura_tecnico_img: await hidratarFotosProfundo(os.assinatura_tecnico_img),
+    assinatura_cliente_img: await hidratarFotosProfundo(os.assinatura_cliente_img),
+    cliente_nome: cliente ? cliente.nome : null,
+    ...totaisOsRefrigeracao(os),
+  };
+}
+// a versão pública (link de assinatura) nunca devolve token_assinatura/empresa_id/tecnico_id/
+// autor_id pro cliente — só o necessário pra conferir o serviço e assinar.
+async function osRefrigeracaoResumoPublico(data, os) {
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === os.cliente_id && c.empresa_id === os.empresa_id);
+  return {
+    id: os.id, cliente_nome: cliente ? cliente.nome : null, criado_em: os.criado_em,
+    equipamento: os.equipamento, servicos: os.servicos, materiais: os.materiais,
+    mao_de_obra: os.mao_de_obra, desconto_tipo: os.desconto_tipo, desconto_valor: os.desconto_valor,
+    assinatura_cliente_img: await hidratarFotosProfundo(os.assinatura_cliente_img),
+    ...totaisOsRefrigeracao(os),
+  };
+}
+
+// ---- clientes (self-contained a este menu, ver comentário acima) ----
+// GET /api/os-refrigeracao-clientes?q=
+rota('GET', /^\/api\/os-refrigeracao-clientes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao_clientes', user.empresa_id);
+  if (query.q) {
+    const q = String(query.q).trim().toLowerCase();
+    lista = lista.filter((c) => c.nome.toLowerCase().includes(q));
+  }
+  lista = [...lista].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  enviarJSON(res, 200, { clientes: lista });
+});
+
+// POST /api/os-refrigeracao-clientes { nome, telefone, email, cpf_cnpj, endereco }
+rota('POST', /^\/api\/os-refrigeracao-clientes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  if (!body.nome || !String(body.nome).trim()) return enviarJSON(res, 400, { erro: 'Nome do cliente é obrigatório.' });
+  const cliente = tenant.criar(data, 'os_refrigeracao_clientes', user.empresa_id, {
+    nome: String(body.nome).trim(), telefone: body.telefone || '', email: body.email || '',
+    cpf_cnpj: body.cpf_cnpj || '', endereco: body.endereco || '',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { cliente });
+});
+
+// ---- ordens de serviço ----
+function camposOsRefrigeracao(body) {
+  return {
+    cliente_id: Number(body.cliente_id) || null,
+    equipamento: {
+      tipo: (body.equipamento && body.equipamento.tipo) || '',
+      marca: (body.equipamento && body.equipamento.marca) || '',
+      modelo: (body.equipamento && body.equipamento.modelo) || '',
+      btu: (body.equipamento && body.equipamento.btu) || '',
+    },
+    problema_relatado: body.problema_relatado || '',
+    diagnostico: body.diagnostico || '',
+    servicos: Array.isArray(body.servicos) ? body.servicos.map((s) => ({ descricao: String(s.descricao || ''), valor: Number(s.valor) || 0 })) : [],
+    materiais: Array.isArray(body.materiais) ? body.materiais.map((mt) => ({ nome: String(mt.nome || ''), quantidade: Number(mt.quantidade) || 1, valor_unitario: Number(mt.valor_unitario) || 0 })) : [],
+    mao_de_obra: Number(body.mao_de_obra) || 0,
+    desconto_tipo: body.desconto_tipo === 'percentual' ? 'percentual' : 'valor',
+    desconto_valor: Number(body.desconto_valor) || 0,
+    observacoes_servico: body.observacoes_servico || '',
+    endereco_servico: body.endereco_servico || '',
+    garantia_dias: Number.isFinite(Number(body.garantia_dias)) ? Number(body.garantia_dias) : 90,
+    observacoes: body.observacoes || '',
+  };
+}
+const MAX_FOTOS_OS_REFRIGERACAO = 10;
+function validarOsRefrigeracao(data, user, campos, fotos) {
+  if (!campos.cliente_id || !tenant.buscar(data, 'os_refrigeracao_clientes', campos.cliente_id, user.empresa_id)) return 'Escolha um cliente.';
+  if (!campos.equipamento.tipo) return 'Informe o tipo de equipamento.';
+  if (Array.isArray(fotos) && fotos.length > MAX_FOTOS_OS_REFRIGERACAO) return `No máximo ${MAX_FOTOS_OS_REFRIGERACAO} fotos.`;
+  return null;
+}
+
+// GET /api/os-refrigeracao?q=&status=assinada|pendente_assinatura
+rota('GET', /^\/api\/os-refrigeracao$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao', user.empresa_id);
+  if (query.status === 'assinada') lista = lista.filter((o) => !!o.assinatura_cliente_img);
+  if (query.status === 'pendente_assinatura') lista = lista.filter((o) => !o.assinatura_cliente_img);
+  lista = [...lista].sort((a, b) => b.id - a.id);
+  let comDetalhes = await Promise.all(lista.map((o) => osRefrigeracaoComDetalhes(data, o)));
+  if (query.q) {
+    const q = String(query.q).trim().toLowerCase();
+    comDetalhes = comDetalhes.filter((o) => String(o.id).includes(q) || (o.cliente_nome || '').toLowerCase().includes(q));
+  }
+  enviarJSON(res, 200, { ordens: comDetalhes });
+});
+
+// GET /api/os-refrigeracao/:id
+rota('GET', /^\/api\/os-refrigeracao\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const os = tenant.buscar(data, 'os_refrigeracao', Number(m[1]), user.empresa_id);
+  if (!os) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  enviarJSON(res, 200, { os: await osRefrigeracaoComDetalhes(data, os) });
+});
+
+// POST /api/os-refrigeracao — cria já com a assinatura do técnico (etapa final do assistente, ver
+// renderOsRefrigeracaoNova em app.js) e gera o token do link público de assinatura do cliente.
+rota('POST', /^\/api\/os-refrigeracao$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const campos = camposOsRefrigeracao(body);
+  const erro = validarOsRefrigeracao(data, user, campos, body.fotos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  if (!body.assinatura_tecnico_img) return enviarJSON(res, 400, { erro: 'Colete a assinatura do técnico antes de criar a O.S.' });
+  const os = tenant.criar(data, 'os_refrigeracao', user.empresa_id, {
+    ...campos,
+    fotos: Array.isArray(body.fotos) ? body.fotos.slice(0, MAX_FOTOS_OS_REFRIGERACAO) : [],
+    assinatura_tecnico_img: body.assinatura_tecnico_img,
+    assinatura_cliente_img: null, assinado_cliente_em: null,
+    tecnico_id: user.id, tecnico_nome: user.nome, autor_id: user.id,
+    token_assinatura: gerarTokenConvite(),
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { os: await osRefrigeracaoComDetalhes(data, os) });
+});
+
+// PUT /api/os-refrigeracao/:id — edita tudo, exceto a assinatura do cliente (só o link público
+// grava isso, ver POST /api/os-refrigeracao-assinar/:token abaixo). Reassinar pelo técnico é
+// opcional: se não vier `assinatura_tecnico_img` no corpo, mantém a que já existia.
+rota('PUT', /^\/api\/os-refrigeracao\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const os = tenant.buscar(data, 'os_refrigeracao', Number(m[1]), user.empresa_id);
+  if (!os) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const campos = camposOsRefrigeracao(body);
+  const erro = validarOsRefrigeracao(data, user, campos, body.fotos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  Object.assign(os, campos, {
+    fotos: Array.isArray(body.fotos) ? body.fotos.slice(0, MAX_FOTOS_OS_REFRIGERACAO) : os.fotos,
+    assinatura_tecnico_img: body.assinatura_tecnico_img || os.assinatura_tecnico_img,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { os: await osRefrigeracaoComDetalhes(data, os) });
+});
+
+// DELETE /api/os-refrigeracao/:id
+rota('DELETE', /^\/api\/os-refrigeracao\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const os = tenant.buscar(data, 'os_refrigeracao', Number(m[1]), user.empresa_id);
+  if (!os) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  data.os_refrigeracao = data.os_refrigeracao.filter((o) => o.id !== os.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- link público de assinatura do cliente (sem login, token próprio — mesmo padrão de /api/entregas) ----
+function buscarOsRefrigeracaoPorToken(data, token) {
+  return data.os_refrigeracao.find((o) => o.token_assinatura === token) || null;
+}
+// GET /api/os-refrigeracao-assinar/:token — pública
+rota('GET', /^\/api\/os-refrigeracao-assinar\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const os = buscarOsRefrigeracaoPorToken(data, m[1]);
+  if (!os) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  enviarJSON(res, 200, { os: await osRefrigeracaoResumoPublico(data, os) });
+});
+// POST /api/os-refrigeracao-assinar/:token — pública: grava a assinatura do cliente (uma vez só —
+// o link vira só-leitura depois, igual à Entrega para Teste) e avisa o técnico por push.
+rota('POST', /^\/api\/os-refrigeracao-assinar\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const os = buscarOsRefrigeracaoPorToken(data, m[1]);
+  if (!os) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  if (os.assinatura_cliente_img) return enviarJSON(res, 409, { erro: 'Esta O.S. já foi assinada pelo cliente.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), os.empresa_id);
+  if (!body.assinatura_cliente_img) return enviarJSON(res, 400, { erro: 'Desenhe a assinatura antes de confirmar.' });
+  os.assinatura_cliente_img = body.assinatura_cliente_img;
+  os.assinado_cliente_em = new Date().toISOString();
+  db.save(data);
+  enviarPush(data, os.autor_id, {
+    titulo: 'Cliente assinou a O.S. #' + os.id,
+    corpo: `A assinatura do cliente da O.S. #${os.id} foi registrada.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { os: await osRefrigeracaoResumoPublico(data, os) });
+});
+
 // GET /api/clientes/:id/historico — Histórico Unificado (CRM nativo, passo 4): agrega tudo que já
 // existe espalhado (agenda, relatórios, chamados, equipamentos, oportunidades, propostas) numa
 // timeline só, na própria tela de Clientes. relatorios_manutencao não tem cliente_id nenhum — só

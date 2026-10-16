@@ -340,6 +340,13 @@ function seed() {
     // mensal, data + descrição do serviço + valor, pra gerar um PDF comparando o entregue com o
     // valor do contrato.
     atividades_diarias: [],
+    // pedido do usuário: Ordens de Serviço do perfil "Refrigeração e Climatização" (ver
+    // PERFIS_DISPONIVEIS acima) — menu novo, construído do zero, com seu próprio cadastro de
+    // clientes (os_refrigeracao_clientes) separado da coleção `clientes` genérica do sistema, já
+    // que os outros menus desse perfil (Orçamentos, Agenda, Clientes, PMOC, Financeiro) ainda vão
+    // ser construídos um a um e podem evoluir pra um modelo próprio diferente do núcleo.
+    os_refrigeracao_clientes: [],
+    os_refrigeracao: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -349,7 +356,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -1134,6 +1141,12 @@ function migrar(data) {
   // entregue no período (ver POST/GET /api/atividades-diarias em server.js).
   if (!Array.isArray(data.atividades_diarias)) data.atividades_diarias = [];
   if (!data._seq.atividades_diarias) data._seq.atividades_diarias = 1;
+  // pedido do usuário: Ordens de Serviço do perfil "Refrigeração e Climatização" — menu do zero,
+  // com cadastro de clientes próprio (ver comentário acima em os_refrigeracao_clientes).
+  if (!Array.isArray(data.os_refrigeracao_clientes)) data.os_refrigeracao_clientes = [];
+  if (!data._seq.os_refrigeracao_clientes) data._seq.os_refrigeracao_clientes = 1;
+  if (!Array.isArray(data.os_refrigeracao)) data.os_refrigeracao = [];
+  if (!data._seq.os_refrigeracao) data._seq.os_refrigeracao = 1;
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }

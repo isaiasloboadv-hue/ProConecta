@@ -703,6 +703,7 @@ function sincronizarApp() {
 const MENUS_LABEL_POR_PAPEL = {
   suporte: {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
+    'os-refrigeracao': 'Ordens de Serviço',
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
     'solicitacoes-peca': 'Solicitações de Peça',
@@ -723,6 +724,7 @@ const MENUS_LABEL_POR_PAPEL = {
   },
   administrador: {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
+    'os-refrigeracao': 'Ordens de Serviço',
     'agenda': 'Agenda geral',
     'chat-admin': 'Chat',
     'aprovacoes-visitas': 'Ordem de Serviço',
@@ -768,6 +770,11 @@ const NAV = {
     // rápida de códigos de erro por marca de ar-condicionado (ver GUIA_DIAGNOSTICO_MARCAS abaixo).
     // Gate é por `perfil`, não por `modulo` — não é um módulo de plano contratado.
     { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
+    // pedido do usuário (referência: app concorrente iClima): segundo menu do perfil Refrigeração
+    // — "Criar versões novas e específicas" (não reaproveitar o Agenda/Ordem de Serviço do
+    // núcleo), com fluxo em etapas, cadastro de cliente próprio e assinatura do cliente por link
+    // público (ver /api/os-refrigeracao* em server.js).
+    { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
     // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
     // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
@@ -831,6 +838,7 @@ const NAV = {
     // dashboards" — pedido do usuário), não do O.S. básico.
     { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
     { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
+    { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
@@ -1071,6 +1079,7 @@ const ICONE_MENU = {
   'mensagens-canal': '🗨️',
   'atividades-diarias': '📋',
   'guia-diagnostico-rapido': '🧊',
+  'os-refrigeracao': '🧾',
 };
 
 // ===== Guia de Diagnóstico Rápido (perfil "Refrigeração e Climatização") =====
@@ -1267,13 +1276,15 @@ const GUIA_DIAGNOSTICO_PULO_DO_GATO = [
   { titulo: '5. A Tomada 127v na Máquina 220v', sintoma: 'A evaporadora liga, abre a aleta, mas a condensadora nunca parte. Sem código de erro.', segredo: 'Parece bobo, mas acontece muito. A eletrônica liga com 110v, mas o motor não tem força para partir.', solucao: 'Meça a tensão na entrada da borneira antes de desmontar a máquina inteira.' },
 ];
 
-function guiaDiagnosticoAcessoLiberado() {
+// gate compartilhado por todo menu do perfil Refrigeração (Guia de Diagnóstico Rápido, Ordens de
+// Serviço, e os próximos que ainda vão ser construídos, um a um — ver NAV/perfilAtivoNoMenu).
+function perfilRefrigeracaoAtivo() {
   return !!(window._empresa && window._empresa.perfil === 'refrigeracao');
 }
 
 async function renderGuiaDiagnosticoRapido() {
   const main = document.getElementById('main');
-  if (!guiaDiagnosticoAcessoLiberado()) {
+  if (!perfilRefrigeracaoAtivo()) {
     main.innerHTML = `<div class="page-head"><h1>Guia de Diagnóstico Rápido</h1></div><div class="empty">Este guia é exclusivo de empresas com o perfil "Refrigeração e Climatização".</div>`;
     return;
   }
@@ -1309,7 +1320,7 @@ function abrirGuiaDiagnosticoMarca(chave) {
 
 async function renderGuiaDiagnosticoMarca() {
   const main = document.getElementById('main');
-  if (!guiaDiagnosticoAcessoLiberado()) return renderGuiaDiagnosticoRapido();
+  if (!perfilRefrigeracaoAtivo()) return renderGuiaDiagnosticoRapido();
   const marca = GUIA_DIAGNOSTICO_MARCAS.find((m) => m.chave === window._guiaDiagnosticoMarcaAtual);
   if (!marca) return renderGuiaDiagnosticoRapido();
   main.innerHTML = `
@@ -1333,7 +1344,7 @@ async function renderGuiaDiagnosticoMarca() {
 
 async function renderGuiaDiagnosticoPuloDoGato() {
   const main = document.getElementById('main');
-  if (!guiaDiagnosticoAcessoLiberado()) return renderGuiaDiagnosticoRapido();
+  if (!perfilRefrigeracaoAtivo()) return renderGuiaDiagnosticoRapido();
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
       <div><h1>🐱 O "Pulo do Gato"</h1><p>Top 5 defeitos fantasmas — a máquina não dá código de erro, mas não funciona. A culpa é de um desses aqui:</p></div>
@@ -1346,6 +1357,594 @@ async function renderGuiaDiagnosticoPuloDoGato() {
         <div style="margin-top:4px;"><strong>O Segredo:</strong> ${esc(d.segredo)}</div>
         <div style="margin-top:4px;"><strong>Solução:</strong> ${esc(d.solucao)}</div>
       </div>`).join('')}`;
+}
+
+// ===== Ordens de Serviço (perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, "Vamos criar os 6 menus (atalho) na
+// sequência com mandar as funcionalidades") — segundo menu do perfil, construído do zero
+// ("Criar versões novas e específicas" foi a resposta explícita do usuário quando perguntado
+// sobre reaproveitar o Agenda/Ordem de Serviço do núcleo). Fluxo em 4 etapas (cliente ->
+// equipamento -> serviço e materiais -> finalizar com assinatura do técnico), cadastro de cliente
+// próprio (ver /api/os-refrigeracao-clientes em server.js) e assinatura do cliente por link
+// público com token (mesmo padrão de /api/entregas / entrega-publico.html, ver
+// os-refrigeracao-assinar.html).
+const OS_REF_TIPOS_EQUIPAMENTO = ['Split', 'Multi-Split', 'Janela', 'Cassete', 'Piso-Teto', 'Portátil', 'Chiller', 'Outro'];
+const OS_REF_BTUS_COMUNS = [7000, 9000, 12000, 18000, 22000, 24000, 30000, 36000, 48000, 60000];
+
+function osRefFormVazio() {
+  return {
+    cliente_id: null, cliente_nome: '',
+    equipamento: { tipo: 'Split', marca: '', modelo: '', btu: '' },
+    problema_relatado: '', diagnostico: '',
+    servicos: [], materiais: [],
+    mao_de_obra: 0, desconto_tipo: 'valor', desconto_valor: 0,
+    observacoes_servico: '', endereco_servico: '', garantia_dias: 90, observacoes: '',
+    fotos: [], assinatura_tecnico_img: null,
+  };
+}
+window._osRefForm = osRefFormVazio();
+window._osRefEtapa = 1;
+window._osRefEditandoId = null;
+
+// linha simples de "rótulo: valor" usada nos cards de resumo/valores (etapa Finalizar, detalhe e
+// no link público de assinatura) — não existe componente assim pronto no sistema hoje.
+function osRefLinha(label, valorHtml) {
+  return `<div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px;"><span style="color:var(--ink-soft);">${esc(label)}</span><span>${valorHtml}</span></div>`;
+}
+function osRefTotais(form) {
+  const totalMateriais = form.materiais.reduce((s, m) => s + (Number(m.quantidade) || 0) * (Number(m.valor_unitario) || 0), 0);
+  const totalServicos = form.servicos.reduce((s, sv) => s + (Number(sv.valor) || 0), 0);
+  const maoDeObra = Number(form.mao_de_obra) || 0;
+  const subtotal = totalMateriais + totalServicos + maoDeObra;
+  const descontoBruto = form.desconto_tipo === 'percentual' ? subtotal * ((Number(form.desconto_valor) || 0) / 100) : (Number(form.desconto_valor) || 0);
+  const desconto = Math.max(0, Math.min(descontoBruto, subtotal));
+  return { totalMateriais, totalServicos, maoDeObra, subtotal, desconto, total: subtotal - desconto };
+}
+function osRefTotalBoxHtml(tot) {
+  return `
+    ${osRefLinha('Materiais', fmtMoeda(tot.totalMateriais))}
+    ${osRefLinha('Serviços', fmtMoeda(tot.totalServicos))}
+    ${osRefLinha('Mão de obra', fmtMoeda(tot.maoDeObra))}
+    ${tot.desconto ? osRefLinha('Desconto', '- ' + fmtMoeda(tot.desconto)) : ''}
+    <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; border-top:1px solid var(--line); margin-top:6px; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(tot.total)}</span></div>`;
+}
+function fmtDataOsRef(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR');
+}
+function garantiaAteOsRef(criadoEm, dias) {
+  if (!criadoEm) return '—';
+  const d = new Date(criadoEm);
+  if (isNaN(d.getTime())) return '—';
+  d.setDate(d.getDate() + (Number(dias) || 0));
+  return d.toLocaleDateString('pt-BR');
+}
+function linkAssinaturaOsRef(token) {
+  return `${window.location.origin}/os-refrigeracao-assinar.html?token=${token}`;
+}
+
+function abrirOsRefrigeracaoNova() {
+  window._osRefForm = osRefFormVazio();
+  window._osRefEtapa = 1;
+  window._osRefEditandoId = null;
+  ir('os-refrigeracao-nova');
+}
+async function abrirOsRefrigeracaoEditar(id) {
+  const { os } = await api('/api/os-refrigeracao/' + id);
+  window._osRefForm = {
+    cliente_id: os.cliente_id, cliente_nome: os.cliente_nome || '',
+    equipamento: { ...os.equipamento },
+    problema_relatado: os.problema_relatado || '', diagnostico: os.diagnostico || '',
+    servicos: (os.servicos || []).map((s) => ({ ...s })), materiais: (os.materiais || []).map((mt) => ({ ...mt })),
+    mao_de_obra: os.mao_de_obra || 0, desconto_tipo: os.desconto_tipo || 'valor', desconto_valor: os.desconto_valor || 0,
+    observacoes_servico: os.observacoes_servico || '', endereco_servico: os.endereco_servico || '',
+    garantia_dias: os.garantia_dias != null ? os.garantia_dias : 90, observacoes: os.observacoes || '',
+    fotos: [...(os.fotos || [])], assinatura_tecnico_img: os.assinatura_tecnico_img || null,
+  };
+  window._osRefEtapa = 1;
+  window._osRefEditandoId = id;
+  ir('os-refrigeracao-nova');
+}
+function osRefProgresso() { return (window._osRefEtapa / 4) * 100; }
+function osRefCabecalhoEtapa(subtitulo) {
+  return `
+    <div class="page-head"><h1>${window._osRefEditandoId ? 'Editar OS' : 'Nova OS'}</h1><p>${esc(subtitulo)}</p></div>
+    <div style="height:8px; border-radius:4px; background:var(--line); overflow:hidden; margin-bottom:18px; max-width:560px;">
+      <div style="height:100%; width:${osRefProgresso()}%; background:var(--blue); transition:width .2s;"></div>
+    </div>`;
+}
+
+async function renderOsRefrigeracaoNova() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ordens de Serviço (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  const etapa = window._osRefEtapa;
+  if (etapa === 1) return desenharOsRefEtapaCliente();
+  if (etapa === 2) return desenharOsRefEtapaEquipamento();
+  if (etapa === 3) return desenharOsRefEtapaServico();
+  return desenharOsRefEtapaFinalizar();
+}
+
+// ---- etapa 1: cliente ----
+function desenharOsRefEtapaCliente() {
+  const main = document.getElementById('main');
+  const f = window._osRefForm;
+  main.innerHTML = osRefCabecalhoEtapa('Cliente') + `
+    <div class="panel" style="max-width:560px;">
+      ${f.cliente_id ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border:1px solid var(--line); border-radius:8px;">
+          <strong>${esc(f.cliente_nome)}</strong>
+          <button class="btn-outline-sm" onclick="trocarClienteOsRef()">Trocar</button>
+        </div>` : `
+        <div style="display:flex; gap:8px;">
+          <input id="os-ref-busca-cliente" placeholder="Buscar cliente" oninput="buscarClientesOsRef(this.value)" style="flex:1;">
+          <button class="btn-outline-sm" onclick="mostrarModalNovoClienteOsRef()" title="Novo cliente">+ Cliente</button>
+        </div>
+        <div id="os-ref-lista-clientes" style="margin-top:12px;"><div class="empty">Digite para buscar.</div></div>`}
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:10px; max-width:560px; margin-top:16px;">
+      <button class="btn btn-primary btn-sm" ${f.cliente_id ? '' : 'disabled'} onclick="window._osRefEtapa=2; renderOsRefrigeracaoNova();">Próximo →</button>
+    </div>`;
+}
+function trocarClienteOsRef() {
+  window._osRefForm.cliente_id = null;
+  window._osRefForm.cliente_nome = '';
+  desenharOsRefEtapaCliente();
+}
+let _osRefBuscaClienteTimer = null;
+window._osRefClientesCache = [];
+function buscarClientesOsRef(q) {
+  clearTimeout(_osRefBuscaClienteTimer);
+  _osRefBuscaClienteTimer = setTimeout(async () => {
+    const alvo = document.getElementById('os-ref-lista-clientes');
+    if (!alvo) return;
+    if (!q || !q.trim()) { alvo.innerHTML = '<div class="empty">Digite para buscar.</div>'; return; }
+    const { clientes } = await api('/api/os-refrigeracao-clientes?q=' + encodeURIComponent(q.trim()));
+    window._osRefClientesCache = clientes;
+    alvo.innerHTML = clientes.length ? clientes.map((c, i) => `
+      <div style="padding:8px 4px; border-bottom:1px solid var(--line); cursor:pointer;" onclick="selecionarClienteOsRef(${i})">
+        <strong>${esc(c.nome)}</strong>${c.telefone ? ` — ${esc(c.telefone)}` : ''}
+      </div>`).join('') : '<div class="empty">Nenhum cliente encontrado.</div>';
+  }, 300);
+}
+function selecionarClienteOsRef(i) {
+  const c = window._osRefClientesCache[i];
+  window._osRefForm.cliente_id = c.id;
+  window._osRefForm.cliente_nome = c.nome;
+  desenharOsRefEtapaCliente();
+}
+function fecharModalNovoClienteOsRef() {
+  const modal = document.getElementById('modal-os-ref-cliente');
+  if (modal) modal.classList.remove('show');
+}
+function mostrarModalNovoClienteOsRef() {
+  let modal = document.getElementById('modal-os-ref-cliente');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-os-ref-cliente';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Novo cliente</h3>
+      <div class="field"><label>Nome *</label><input id="os-ref-nc-nome"></div>
+      <div class="field"><label>Telefone</label><input id="os-ref-nc-telefone"></div>
+      <div class="field"><label>Email</label><input id="os-ref-nc-email" type="email"></div>
+      <div class="field"><label>CPF/CNPJ</label><input id="os-ref-nc-cpf"></div>
+      <div class="field"><label>Endereço</label><input id="os-ref-nc-endereco"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="fecharModalNovoClienteOsRef()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarNovoClienteOsRef()">Criar cliente</button>
+      </div>
+    </div>`;
+}
+async function salvarNovoClienteOsRef() {
+  const nome = document.getElementById('os-ref-nc-nome').value.trim();
+  if (!nome) return alert('Informe o nome do cliente.');
+  try {
+    const { cliente } = await api('/api/os-refrigeracao-clientes', { method: 'POST', body: {
+      nome, telefone: document.getElementById('os-ref-nc-telefone').value,
+      email: document.getElementById('os-ref-nc-email').value,
+      cpf_cnpj: document.getElementById('os-ref-nc-cpf').value,
+      endereco: document.getElementById('os-ref-nc-endereco').value,
+    } });
+    fecharModalNovoClienteOsRef();
+    window._osRefForm.cliente_id = cliente.id;
+    window._osRefForm.cliente_nome = cliente.nome;
+    desenharOsRefEtapaCliente();
+  } catch (e) { alert(e.message); }
+}
+
+// ---- etapa 2: equipamento ----
+function desenharOsRefEtapaEquipamento() {
+  const main = document.getElementById('main');
+  const eq = window._osRefForm.equipamento;
+  main.innerHTML = osRefCabecalhoEtapa('Equipamento') + `
+    <div class="panel" style="max-width:560px;">
+      <div class="field"><label>Tipo de equipamento</label>
+        <select id="os-ref-eq-tipo">${OS_REF_TIPOS_EQUIPAMENTO.map((t) => `<option value="${esc(t)}" ${t === eq.tipo ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Marca</label><input id="os-ref-eq-marca" list="os-ref-marcas-list" value="${esc(eq.marca)}" placeholder="Selecione ou digite a marca">
+        <datalist id="os-ref-marcas-list">${GUIA_DIAGNOSTICO_MARCAS.map((m) => `<option value="${esc(m.nome)}">`).join('')}</datalist>
+      </div>
+      <div class="field"><label>Modelo</label><input id="os-ref-eq-modelo" value="${esc(eq.modelo)}" placeholder="Selecione ou digite o modelo"></div>
+      <div class="field"><label>BTU</label><input id="os-ref-eq-btu" list="os-ref-btu-list" value="${esc(eq.btu)}" placeholder="Ex: 12000">
+        <datalist id="os-ref-btu-list">${OS_REF_BTUS_COMUNS.map((b) => `<option value="${b}">`).join('')}</datalist>
+      </div>
+    </div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._osRefEtapa=1; renderOsRefrigeracaoNova();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="avancarOsRefEquipamento()">Próximo →</button>
+    </div>`;
+}
+function avancarOsRefEquipamento() {
+  window._osRefForm.equipamento = {
+    tipo: document.getElementById('os-ref-eq-tipo').value,
+    marca: document.getElementById('os-ref-eq-marca').value,
+    modelo: document.getElementById('os-ref-eq-modelo').value,
+    btu: document.getElementById('os-ref-eq-btu').value,
+  };
+  window._osRefEtapa = 3;
+  renderOsRefrigeracaoNova();
+}
+
+// ---- etapa 3: serviço e materiais ----
+function desenharOsRefEtapaServico() {
+  const main = document.getElementById('main');
+  const f = window._osRefForm;
+  main.innerHTML = osRefCabecalhoEtapa('Serviço e Materiais') + `
+    <div class="panel" style="max-width:560px;">
+      <div class="field"><label>Problema relatado</label><textarea id="os-ref-problema" rows="3">${esc(f.problema_relatado)}</textarea></div>
+      <div class="field"><label>Diagnóstico</label><textarea id="os-ref-diagnostico" rows="3">${esc(f.diagnostico)}</textarea></div>
+      <h3 style="margin-top:16px;">Serviços</h3>
+      <div id="os-ref-servicos-lista">${desenharListaServicosOsRef()}</div>
+      <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+        <input id="os-ref-novo-servico-desc" placeholder="Descrição do serviço" style="flex:2; min-width:140px;">
+        <input id="os-ref-novo-servico-valor" type="number" step="0.01" placeholder="R$" style="flex:1; min-width:80px;">
+        <button class="btn-outline-sm" onclick="adicionarServicoOsRef()">+</button>
+      </div>
+      <h3 style="margin-top:16px;">Materiais</h3>
+      <div id="os-ref-materiais-lista">${desenharListaMateriaisOsRef()}</div>
+      <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+        <input id="os-ref-novo-material-nome" placeholder="Material" style="flex:2; min-width:120px;">
+        <input id="os-ref-novo-material-qtd" type="number" value="1" min="1" style="flex:0.6; min-width:60px;">
+        <input id="os-ref-novo-material-valor" type="number" step="0.01" placeholder="R$" style="flex:1; min-width:80px;">
+        <button class="btn-outline-sm" onclick="adicionarMaterialOsRef()">+</button>
+      </div>
+      <div class="field" style="margin-top:16px;"><label>Mão de obra (R$)</label><input id="os-ref-mao-de-obra" type="number" step="0.01" value="${f.mao_de_obra || ''}" oninput="atualizarTotalOsRef()"></div>
+      <div class="field"><label>Desconto</label>
+        <div style="display:flex; gap:8px;">
+          <select id="os-ref-desconto-tipo" style="flex:0.5;" onchange="atualizarTotalOsRef()">
+            <option value="valor" ${f.desconto_tipo === 'valor' ? 'selected' : ''}>R$</option>
+            <option value="percentual" ${f.desconto_tipo === 'percentual' ? 'selected' : ''}>%</option>
+          </select>
+          <input id="os-ref-desconto-valor" type="number" step="0.01" value="${f.desconto_valor || ''}" placeholder="Ex: 50,00" style="flex:1;" oninput="atualizarTotalOsRef()">
+        </div>
+      </div>
+      <div class="field"><label>Observações adicionais sobre o serviço</label><textarea id="os-ref-obs-servico" rows="2">${esc(f.observacoes_servico)}</textarea></div>
+      <div class="panel" style="background:var(--gray-50, #F4F6FA); margin-top:10px;" id="os-ref-total-box">${osRefTotalBoxHtml(osRefTotais(f))}</div>
+    </div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._osRefEtapa=2; renderOsRefrigeracaoNova();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="avancarOsRefServico()">Próximo →</button>
+    </div>`;
+}
+function desenharListaServicosOsRef() {
+  const f = window._osRefForm;
+  if (!f.servicos.length) return '';
+  return f.servicos.map((s, i) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+      <span>${esc(s.descricao)}</span>
+      <span style="display:flex; align-items:center; gap:8px;">${fmtMoeda(s.valor)} <button class="btn-outline-sm" style="padding:2px 8px; font-size:11px;" onclick="removerServicoOsRef(${i})">Excluir</button></span>
+    </div>`).join('');
+}
+function adicionarServicoOsRef() {
+  const descEl = document.getElementById('os-ref-novo-servico-desc');
+  const valorEl = document.getElementById('os-ref-novo-servico-valor');
+  const desc = descEl.value.trim();
+  if (!desc) return;
+  window._osRefForm.servicos.push({ descricao: desc, valor: Number(valorEl.value) || 0 });
+  descEl.value = ''; valorEl.value = '';
+  document.getElementById('os-ref-servicos-lista').innerHTML = desenharListaServicosOsRef();
+  atualizarTotalOsRef();
+}
+function removerServicoOsRef(i) {
+  window._osRefForm.servicos.splice(i, 1);
+  document.getElementById('os-ref-servicos-lista').innerHTML = desenharListaServicosOsRef();
+  atualizarTotalOsRef();
+}
+function desenharListaMateriaisOsRef() {
+  const f = window._osRefForm;
+  if (!f.materiais.length) return '';
+  return f.materiais.map((m, i) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+      <span>${esc(m.nome)}<br><span style="font-size:12px; color:var(--ink-soft);">${m.quantidade}x ${fmtMoeda(m.valor_unitario)}</span></span>
+      <span style="display:flex; align-items:center; gap:8px;">${fmtMoeda(m.quantidade * m.valor_unitario)} <button class="btn-outline-sm" style="padding:2px 8px; font-size:11px;" onclick="removerMaterialOsRef(${i})">Excluir</button></span>
+    </div>`).join('');
+}
+function adicionarMaterialOsRef() {
+  const nomeEl = document.getElementById('os-ref-novo-material-nome');
+  const qtdEl = document.getElementById('os-ref-novo-material-qtd');
+  const valorEl = document.getElementById('os-ref-novo-material-valor');
+  const nome = nomeEl.value.trim();
+  if (!nome) return;
+  window._osRefForm.materiais.push({ nome, quantidade: Number(qtdEl.value) || 1, valor_unitario: Number(valorEl.value) || 0 });
+  nomeEl.value = ''; qtdEl.value = '1'; valorEl.value = '';
+  document.getElementById('os-ref-materiais-lista').innerHTML = desenharListaMateriaisOsRef();
+  atualizarTotalOsRef();
+}
+function removerMaterialOsRef(i) {
+  window._osRefForm.materiais.splice(i, 1);
+  document.getElementById('os-ref-materiais-lista').innerHTML = desenharListaMateriaisOsRef();
+  atualizarTotalOsRef();
+}
+function atualizarTotalOsRef() {
+  const f = window._osRefForm;
+  f.mao_de_obra = Number(document.getElementById('os-ref-mao-de-obra').value) || 0;
+  f.desconto_tipo = document.getElementById('os-ref-desconto-tipo').value;
+  f.desconto_valor = Number(document.getElementById('os-ref-desconto-valor').value) || 0;
+  const box = document.getElementById('os-ref-total-box');
+  if (box) box.innerHTML = osRefTotalBoxHtml(osRefTotais(f));
+}
+function avancarOsRefServico() {
+  const f = window._osRefForm;
+  f.problema_relatado = document.getElementById('os-ref-problema').value;
+  f.diagnostico = document.getElementById('os-ref-diagnostico').value;
+  f.mao_de_obra = Number(document.getElementById('os-ref-mao-de-obra').value) || 0;
+  f.desconto_tipo = document.getElementById('os-ref-desconto-tipo').value;
+  f.desconto_valor = Number(document.getElementById('os-ref-desconto-valor').value) || 0;
+  f.observacoes_servico = document.getElementById('os-ref-obs-servico').value;
+  window._osRefEtapa = 4;
+  renderOsRefrigeracaoNova();
+}
+
+// ---- etapa 4: finalizar ----
+function desenharOsRefEtapaFinalizar() {
+  const main = document.getElementById('main');
+  const f = window._osRefForm;
+  const tot = osRefTotais(f);
+  main.innerHTML = osRefCabecalhoEtapa('Finalizar') + `
+    <div class="panel" style="max-width:560px;">
+      ${osRefLinha('Cliente', esc(f.cliente_nome))}
+      ${osRefLinha('Equipamento', esc([f.equipamento.tipo, f.equipamento.marca, f.equipamento.btu ? f.equipamento.btu + ' BTU' : ''].filter(Boolean).join(' ')))}
+      <div style="display:flex; justify-content:space-between; font-weight:800; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(tot.total)}</span></div>
+    </div>
+    <div class="panel" style="max-width:560px;">
+      <div class="field"><label>Endereço do serviço</label><input id="os-ref-endereco" value="${esc(f.endereco_servico)}"></div>
+      <div class="field"><label>Garantia (dias)</label><input id="os-ref-garantia" type="number" value="${f.garantia_dias}"></div>
+      <div class="field"><label>Observações</label><textarea id="os-ref-observacoes" rows="3">${esc(f.observacoes)}</textarea></div>
+      <div class="field"><label>Fotos (${f.fotos.length}/10)</label><br>
+        <input type="file" accept="image/*" multiple id="os-ref-fotos-input" style="display:none;" onchange="adicionarFotosOsRef(event)">
+        <button class="btn-outline-sm" onclick="document.getElementById('os-ref-fotos-input').click()">Adicionar</button>
+        <div id="os-ref-fotos-grid" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">${desenharFotosOsRef()}</div>
+      </div>
+    </div>
+    <div class="panel" style="max-width:560px;">
+      <h3>Assinatura do técnico</h3>
+      <canvas id="os-ref-canvas-tecnico" width="560" height="180" style="width:100%; max-width:560px; height:180px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none; display:block;"></canvas>
+      <button class="btn-outline-sm" style="margin-top:8px;" onclick="limparAssinaturaOsRef()">Limpar assinatura</button>
+    </div>
+    <div id="os-ref-erro" class="auth-error hidden" style="max-width:560px; margin-top:10px;"></div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._osRefEtapa=3; renderOsRefrigeracaoNova();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="salvarOsRefrigeracao()">${window._osRefEditandoId ? 'Salvar OS' : '✓ Criar OS'}</button>
+    </div>`;
+  montarAssinaturaOsRef();
+}
+function desenharFotosOsRef() {
+  return window._osRefForm.fotos.map((foto, i) => `
+    <div class="photo-thumb"><img src="${foto}" onclick="abrirLightbox('${foto}')" alt="Foto da O.S.">
+      <button class="photo-rm" onclick="removerFotoOsRef(${i})">×</button>
+    </div>`).join('');
+}
+function adicionarFotosOsRef(event) {
+  lerFotosComoDataUrl(event.target.files || []).then((dataUrls) => {
+    const restantes = 10 - window._osRefForm.fotos.length;
+    window._osRefForm.fotos.push(...dataUrls.slice(0, Math.max(0, restantes)));
+    document.getElementById('os-ref-fotos-grid').innerHTML = desenharFotosOsRef();
+  });
+}
+function removerFotoOsRef(i) {
+  window._osRefForm.fotos.splice(i, 1);
+  document.getElementById('os-ref-fotos-grid').innerHTML = desenharFotosOsRef();
+}
+let _osRefAssinaturaTemTraco = false;
+function montarAssinaturaOsRef() {
+  const canvas = document.getElementById('os-ref-canvas-tecnico');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  _osRefAssinaturaTemTraco = false;
+  if (window._osRefForm.assinatura_tecnico_img) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); _osRefAssinaturaTemTraco = true; };
+    img.src = window._osRefForm.assinatura_tecnico_img;
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  let desenhando = false;
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); _osRefAssinaturaTemTraco = true; }
+  function parar() {
+    if (!desenhando) return;
+    desenhando = false;
+    if (_osRefAssinaturaTemTraco) window._osRefForm.assinatura_tecnico_img = canvas.toDataURL('image/png');
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function limparAssinaturaOsRef() {
+  const canvas = document.getElementById('os-ref-canvas-tecnico');
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  _osRefAssinaturaTemTraco = false;
+  window._osRefForm.assinatura_tecnico_img = null;
+}
+async function salvarOsRefrigeracao() {
+  const f = window._osRefForm;
+  const erroEl = document.getElementById('os-ref-erro');
+  erroEl.classList.add('hidden');
+  f.endereco_servico = document.getElementById('os-ref-endereco').value;
+  f.garantia_dias = Number(document.getElementById('os-ref-garantia').value) || 0;
+  f.observacoes = document.getElementById('os-ref-observacoes').value;
+  if (!f.assinatura_tecnico_img) { erroEl.textContent = 'Colete a assinatura do técnico antes de continuar.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const corpo = {
+      cliente_id: f.cliente_id, equipamento: f.equipamento,
+      problema_relatado: f.problema_relatado, diagnostico: f.diagnostico,
+      servicos: f.servicos, materiais: f.materiais,
+      mao_de_obra: f.mao_de_obra, desconto_tipo: f.desconto_tipo, desconto_valor: f.desconto_valor,
+      observacoes_servico: f.observacoes_servico, endereco_servico: f.endereco_servico,
+      garantia_dias: f.garantia_dias, observacoes: f.observacoes,
+      fotos: f.fotos, assinatura_tecnico_img: f.assinatura_tecnico_img,
+    };
+    const resp = window._osRefEditandoId
+      ? await api('/api/os-refrigeracao/' + window._osRefEditandoId, { method: 'PUT', body: corpo })
+      : await api('/api/os-refrigeracao', { method: 'POST', body: corpo });
+    window._osRefDetalheId = resp.os.id;
+    ir('os-refrigeracao-detalhe');
+  } catch (e) {
+    erroEl.textContent = e.message; erroEl.classList.remove('hidden');
+  }
+}
+
+// ---- lista ----
+async function renderOsRefrigeracaoLista() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ordens de Serviço (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <h1>Ordens de Serviço</h1>
+      <button class="btn btn-primary btn-sm" onclick="abrirOsRefrigeracaoNova()">+ Nova OS</button>
+    </div>
+    <div class="filtros-row">
+      <div class="field"><input id="os-ref-busca" placeholder="Buscar por nº ou cliente" oninput="buscarOsRefrigeracaoLista()"></div>
+      <select id="os-ref-filtro-status" onchange="buscarOsRefrigeracaoLista()">
+        <option value="">Todos</option>
+        <option value="pendente_assinatura">Aguardando assinatura do cliente</option>
+        <option value="assinada">Assinada pelo cliente</option>
+      </select>
+    </div>
+    <div id="os-ref-lista" style="margin-top:12px;"><div class="empty">Carregando...</div></div>`;
+  await carregarOsRefrigeracaoLista();
+}
+let _osRefBuscaListaTimer = null;
+function buscarOsRefrigeracaoLista() {
+  clearTimeout(_osRefBuscaListaTimer);
+  _osRefBuscaListaTimer = setTimeout(carregarOsRefrigeracaoLista, 300);
+}
+async function carregarOsRefrigeracaoLista() {
+  const buscaEl = document.getElementById('os-ref-busca');
+  const statusEl = document.getElementById('os-ref-filtro-status');
+  const params = new URLSearchParams();
+  if (buscaEl && buscaEl.value) params.set('q', buscaEl.value);
+  if (statusEl && statusEl.value) params.set('status', statusEl.value);
+  const { ordens } = await api('/api/os-refrigeracao?' + params.toString());
+  const alvo = document.getElementById('os-ref-lista');
+  if (!alvo) return;
+  alvo.innerHTML = ordens.length ? ordens.map((o) => `
+    <div class="panel" style="cursor:pointer; margin-bottom:10px;" onclick="abrirOsRefrigeracaoDetalhe(${o.id})">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div>
+          <span style="color:var(--blue); font-weight:700;">#${o.id}</span>
+          <span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-left:8px;">Concluída</span>
+          ${o.assinatura_cliente_img ? `<span class="tag" style="background:var(--green-pale, #DEF7EC); color:var(--green); margin-left:4px;">Assinada</span>` : `<span class="tag tag-amber" style="margin-left:4px;">Aguardando assinatura</span>`}
+          <div style="margin-top:4px;"><strong>${esc(o.cliente_nome || '—')}</strong></div>
+          <div style="font-size:12.5px; color:var(--ink-soft);">${fmtDataOsRef(o.criado_em)}</div>
+        </div>
+        <div style="font-weight:800; white-space:nowrap;">${fmtMoeda(o.total)}</div>
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhuma O.S. encontrada.</div>';
+}
+function abrirOsRefrigeracaoDetalhe(id) {
+  window._osRefDetalheId = id;
+  ir('os-refrigeracao-detalhe');
+}
+
+// ---- detalhe ----
+async function renderOsRefrigeracaoDetalhe() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ordens de Serviço (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  const { os } = await api('/api/os-refrigeracao/' + window._osRefDetalheId);
+  const eq = os.equipamento || {};
+  const link = linkAssinaturaOsRef(os.token_assinatura);
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div><h1>OS #${os.id}</h1><span class="tag" style="background:var(--blue-pale); color:var(--blue);">Concluída</span></div>
+      <button class="btn-outline-sm" onclick="ir('os-refrigeracao-lista')">← Voltar</button>
+    </div>
+    <div class="panel">
+      <h3>Informações gerais</h3>
+      ${osRefLinha('Cliente', esc(os.cliente_nome || '—'))}
+      ${osRefLinha('Técnico', esc(os.tecnico_nome || '—'))}
+      ${osRefLinha('Data', fmtDataOsRef(os.criado_em))}
+      ${osRefLinha('Garantia', 'Até ' + garantiaAteOsRef(os.criado_em, os.garantia_dias))}
+    </div>
+    <div class="panel">
+      <h3>Equipamento</h3>
+      ${osRefLinha('Tipo', esc(eq.tipo || '—'))}
+      ${osRefLinha('Marca', esc(eq.marca || '—'))}
+      ${osRefLinha('Modelo', esc(eq.modelo || '—'))}
+      ${osRefLinha('BTU', esc(eq.btu || '—'))}
+    </div>
+    <div class="panel">
+      <h3>Serviço</h3>
+      <div><strong>Problema relatado</strong><p style="margin:4px 0 10px;">${esc(os.problema_relatado) || '—'}</p></div>
+      <div><strong>Diagnóstico</strong><p style="margin:4px 0;">${esc(os.diagnostico) || '—'}</p></div>
+      ${os.endereco_servico ? `<div><strong>Endereço do serviço</strong><p style="margin:4px 0;">${esc(os.endereco_servico)}</p></div>` : ''}
+      ${os.observacoes ? `<div><strong>Observações</strong><p style="margin:4px 0;">${esc(os.observacoes)}</p></div>` : ''}
+    </div>
+    <div class="panel">
+      <h3>Valores</h3>
+      ${(os.materiais || []).map((m) => osRefLinha(`${m.nome} (${m.quantidade}x)`, fmtMoeda(m.quantidade * m.valor_unitario))).join('')}
+      ${(os.servicos || []).map((s) => osRefLinha(s.descricao, fmtMoeda(s.valor))).join('')}
+      ${osRefLinha('Mão de obra', fmtMoeda(os.mao_de_obra))}
+      ${os.desconto_aplicado ? osRefLinha('Desconto', '- ' + fmtMoeda(os.desconto_aplicado)) : ''}
+      <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; border-top:1px solid var(--line); margin-top:6px; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(os.total)}</span></div>
+    </div>
+    ${(os.fotos || []).length ? `<div class="panel"><h3>Fotos</h3><div style="display:flex; gap:8px; flex-wrap:wrap;">${os.fotos.map((f) => `<div class="photo-thumb"><img src="${f}" onclick="abrirLightbox('${f}')" alt="Foto da O.S."></div>`).join('')}</div></div>` : ''}
+    <div class="panel">
+      <h3>Assinaturas</h3>
+      <div style="margin-bottom:12px;">
+        <strong>Assinatura do técnico</strong> <span style="color:var(--green);">✓</span><br>
+        <img src="${os.assinatura_tecnico_img}" style="max-width:220px; border:1px solid var(--line); border-radius:8px; margin-top:6px;">
+      </div>
+      <div>
+        <strong>Assinatura do cliente</strong> ${os.assinatura_cliente_img ? '<span style="color:var(--green);">✓</span>' : ''}
+        ${os.assinatura_cliente_img
+          ? `<br><img src="${os.assinatura_cliente_img}" style="max-width:220px; border:1px solid var(--line); border-radius:8px; margin-top:6px;">`
+          : `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+               <button class="btn-outline-sm" onclick="copiarLinkAssinaturaOsRef('${link}')">Copiar link</button>
+               <a class="btn btn-primary btn-sm" href="https://wa.me/?text=${encodeURIComponent('Segue o link para visualizar e assinar a Ordem de Serviço #' + os.id + ': ' + link)}" target="_blank" rel="noopener">Enviar link para assinar</a>
+             </div>`}
+      </div>
+      ${os.assinatura_cliente_img ? `<div style="margin-top:12px; padding:10px; background:var(--green-pale, #DEF7EC); border-radius:8px; color:var(--green);">✓ Documento confirmado com ambas assinaturas</div>` : ''}
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn-outline-sm" onclick="abrirOsRefrigeracaoEditar(${os.id})">Editar</button>
+      <a class="btn-outline-sm" href="https://wa.me/?text=${encodeURIComponent('OS #' + os.id + ' — Cliente: ' + (os.cliente_nome || '') + '. Veja os detalhes aqui: ' + link)}" target="_blank" rel="noopener">Enviar</a>
+      <button class="btn-outline-sm" onclick="excluirOsRefrigeracao(${os.id})">Excluir</button>
+    </div>`;
+}
+async function copiarLinkAssinaturaOsRef(link) {
+  try { await navigator.clipboard.writeText(link); mostrarToast('Link copiado.'); }
+  catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o link manualmente.'); }
+}
+async function excluirOsRefrigeracao(id) {
+  const ok = await mostrarConfirmacao('Excluir esta Ordem de Serviço? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/os-refrigeracao/' + id, { method: 'DELETE' });
+    ir('os-refrigeracao-lista');
+  } catch (e) { alert(e.message); }
 }
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
@@ -1504,6 +2103,9 @@ async function ir(pagina) {
     if (pagina === 'guia-diagnostico-rapido') return renderGuiaDiagnosticoRapido();
     if (pagina === 'guia-diagnostico-marca') return renderGuiaDiagnosticoMarca();
     if (pagina === 'guia-diagnostico-pulo-do-gato') return renderGuiaDiagnosticoPuloDoGato();
+    if (pagina === 'os-refrigeracao-lista') return renderOsRefrigeracaoLista();
+    if (pagina === 'os-refrigeracao-nova') return renderOsRefrigeracaoNova();
+    if (pagina === 'os-refrigeracao-detalhe') return renderOsRefrigeracaoDetalhe();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexor Connect — Assinar Ordem de Serviço</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  body{background:var(--bg, #F4F6FA);}
+  .osa-wrap{max-width:640px;margin:0 auto;padding:28px 16px 60px;}
+  .osa-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+  .osa-brand img{height:34px;width:auto;display:block;}
+  .osa-brand .wordmark{font-family:Montserrat,sans-serif;font-weight:800;font-size:19px;color:var(--navy);}
+  .osa-brand .wordmark .conecta{color:var(--blue);}
+  .osa-kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .osa-kv:last-child{border-bottom:none;}
+  .osa-kv b{color:var(--ink-soft);font-weight:600;}
+  .osa-total{display:flex;justify-content:space-between;padding-top:10px;margin-top:4px;border-top:1.5px solid var(--navy);font-size:15px;font-weight:800;}
+  .osa-total span:last-child{color:var(--blue);}
+  #osa-canvas{width:100%;max-width:560px;height:200px;border:1.5px dashed var(--line);border-radius:9px;background:#fff;touch-action:none;display:block;}
+  .osa-status{margin-top:8px;font-size:12.5px;color:var(--ink-soft);}
+  .osa-center{text-align:center;padding:40px 10px;color:var(--ink-soft);font-size:13.5px;}
+</style>
+</head>
+<body>
+<div class="osa-wrap">
+  <div class="osa-brand">
+    <img src="/logo.png" alt="Nexor Connect">
+    <div class="wordmark">Nexor<span class="conecta">Connect</span></div>
+  </div>
+  <div id="conteudo"><div class="osa-center">Carregando...</div></div>
+</div>
+
+<script>
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmtMoeda(v) { return `R$ ${Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function fmtDataHora(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
+function nomeEquipamento(eq) {
+  if (!eq) return '—';
+  return [eq.tipo, eq.marca, eq.modelo].filter(Boolean).join(' ') || '—';
+}
+function paramToken() { return new URLSearchParams(window.location.search).get('token') || ''; }
+const TOKEN = paramToken();
+
+let os = null;
+let assinaturaImg = null;
+let temTraco = false;
+
+async function carregar() {
+  const conteudo = document.getElementById('conteudo');
+  if (!TOKEN) { conteudo.innerHTML = '<div class="auth-error">Link inválido: token não informado.</div>'; return; }
+  try {
+    const res = await fetch('/api/os-refrigeracao-assinar/' + TOKEN);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Link inválido ou expirado.');
+    os = data.os;
+    assinaturaImg = os.assinatura_cliente_img || null;
+    if (assinaturaImg) renderAssinado(); else renderFormulario();
+  } catch (e) {
+    conteudo.innerHTML = `<div class="auth-error">${esc(e.message)}</div>`;
+  }
+}
+
+function blocoResumo() {
+  return `
+    <div class="panel">
+      <h2>Resumo</h2>
+      <div class="osa-kv"><b>Cliente</b><span>${esc(os.cliente_nome || '—')}</span></div>
+      <div class="osa-kv"><b>Data</b><span>${fmtDataHora(os.criado_em)}</span></div>
+      <div class="osa-kv"><b>Equipamento</b><span>${esc(nomeEquipamento(os.equipamento))}</span></div>
+      ${(os.servicos || []).length ? `<div class="osa-kv" style="display:block;"><b>Serviços</b><div style="margin-top:4px;">${os.servicos.map((s) => esc(s.descricao)).join('<br>')}</div></div>` : ''}
+    </div>
+    <div class="panel">
+      <h2>Valores</h2>
+      ${(os.materiais || []).map((m) => `<div class="osa-kv"><span>${esc(m.nome)} (${m.quantidade}x)</span><span>${fmtMoeda(m.quantidade * m.valor_unitario)}</span></div>`).join('')}
+      ${(os.servicos || []).map((s) => `<div class="osa-kv"><span>${esc(s.descricao)}</span><span>${fmtMoeda(s.valor)}</span></div>`).join('')}
+      <div class="osa-kv"><span>Mão de obra</span><span>${fmtMoeda(os.mao_de_obra)}</span></div>
+      ${os.desconto_aplicado ? `<div class="osa-kv"><span>Desconto</span><span>- ${fmtMoeda(os.desconto_aplicado)}</span></div>` : ''}
+      <div class="osa-total"><span>Total</span><span>${fmtMoeda(os.total)}</span></div>
+    </div>`;
+}
+
+function renderAssinado() {
+  document.getElementById('conteudo').innerHTML = blocoResumo() + `
+    <div class="panel">
+      <h2>Documento confirmado</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Esta Ordem de Serviço já foi assinada — obrigado por confirmar o recebimento do serviço.</p>
+      <div style="margin-top:14px;"><b style="font-size:12.5px; color:var(--ink-soft);">Sua assinatura:</b><br><img src="${esc(assinaturaImg)}" style="max-width:280px; border:1px solid var(--line); border-radius:8px; margin-top:6px;"></div>
+    </div>`;
+}
+
+function renderFormulario() {
+  document.getElementById('conteudo').innerHTML = blocoResumo() + `
+    <div class="panel">
+      <h2>Sua assinatura</h2>
+      <p style="font-size:13px; color:var(--ink-soft); line-height:1.6;">Assine abaixo para confirmar o recebimento do serviço.</p>
+      <canvas id="osa-canvas" width="600" height="200"></canvas>
+      <div class="osa-status" id="osa-assinatura-status">Assinatura pendente</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="limparAssinatura()">Limpar</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmar()">Confirmar assinatura</button>
+      </div>
+    </div>
+    <div id="osa-erro" class="auth-error hidden" style="margin-bottom:14px;"></div>`;
+  montarCanvas();
+}
+
+function montarCanvas() {
+  const canvas = document.getElementById('osa-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  temTraco = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  let desenhando = false;
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); temTraco = true; }
+  function parar() {
+    if (!desenhando) return;
+    desenhando = false;
+    if (temTraco) { assinaturaImg = canvas.toDataURL('image/png'); atualizarStatusAssinatura(); }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinatura() {
+  const el = document.getElementById('osa-assinatura-status');
+  if (el) { el.textContent = temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinatura() {
+  const canvas = document.getElementById('osa-canvas');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  temTraco = false;
+  assinaturaImg = null;
+  atualizarStatusAssinatura();
+}
+
+async function confirmar() {
+  const erroEl = document.getElementById('osa-erro');
+  erroEl.classList.add('hidden');
+  if (!temTraco || !assinaturaImg) { erroEl.textContent = 'Desenhe a assinatura antes de confirmar.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const res = await fetch('/api/os-refrigeracao-assinar/' + TOKEN, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assinatura_cliente_img: assinaturaImg }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Não foi possível confirmar.');
+    os = data.os;
+    renderAssinado();
+  } catch (e) {
+    erroEl.textContent = e.message; erroEl.classList.remove('hidden');
+  }
+}
+
+carregar();
+</script>
+</body>
+</html>
