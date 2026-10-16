@@ -1083,11 +1083,16 @@ function usuarioPublico(u) {
 // de qual empresa é a sessão atual (super_admin não tem empresa, vem null).
 async function empresaResumo(empresa) {
   if (!empresa) return null;
-  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes } = empresa;
+  const { id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio, logo_url, valor_bonus_viagem, limite_viagens_bonus_mes, perfil } = empresa;
   return {
     id, nome, site, whatsapp, telefone, emails, cor_primaria, cor_secundaria, subdominio,
     logo_url: await hidratarFotosProfundo(logo_url),
     valor_bonus_viagem: valorBonusViagem(empresa), limite_viagens_bonus_mes: limiteViagensBonusMes(empresa),
+    // pedido do usuário: menu "Guia de Diagnóstico Rápido" só aparece pra empresa do perfil
+    // "refrigeracao" (ver NAV/navDoUsuario em app.js) — precisa vir no login/GET /api/me,
+    // não só no GET /api/empresa, senão montarSidebar() (chamada logo após o login, ver
+    // entrarNoApp) roda antes do perfil real chegar e o menu não aparece no primeiro acesso.
+    perfil: perfil || null,
   };
 }
 

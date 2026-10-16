@@ -702,6 +702,7 @@ function sincronizarApp() {
 // escolhe se libera tudo ou só alguns desses itens.
 const MENUS_LABEL_POR_PAPEL = {
   suporte: {
+    'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
     'solicitacoes-peca': 'Solicitações de Peça',
@@ -721,6 +722,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'atividades-diarias': 'Registro de Atividades',
   },
   administrador: {
+    'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'agenda': 'Agenda geral',
     'chat-admin': 'Chat',
     'aprovacoes-visitas': 'Ordem de Serviço',
@@ -760,6 +762,12 @@ const MENUS_LABEL_POR_PAPEL = {
 
 const NAV = {
   suporte: [
+    // pedido do usuário: perfil "Refrigeração e Climatização" (ver PERFIS_DISPONIVEIS em db.js) —
+    // menu construído do zero, específico pra esse perfil, sem reaproveitar nenhuma tela/dado já
+    // existente no sistema (Agenda/Relatório/Equipamentos/Biblioteca etc). Guia de referência
+    // rápida de códigos de erro por marca de ar-condicionado (ver GUIA_DIAGNOSTICO_MARCAS abaixo).
+    // Gate é por `perfil`, não por `modulo` — não é um módulo de plano contratado.
+    { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
     // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
     // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
@@ -822,6 +830,7 @@ const NAV = {
     // dashboard de KPIs é recurso de equipe maior ("quando a equipe aumenta, precisa de
     // dashboards" — pedido do usuário), não do O.S. básico.
     { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
+    { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
     { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
@@ -1061,7 +1070,283 @@ const ICONE_MENU = {
   'avisos': '📣',
   'mensagens-canal': '🗨️',
   'atividades-diarias': '📋',
+  'guia-diagnostico-rapido': '🧊',
 };
+
+// ===== Guia de Diagnóstico Rápido (perfil "Refrigeração e Climatização") =====
+// pedido do usuário: "vamos começar criando um menu dentro do perfil refrigeração chamado guia
+// de diagnostico rápido vou mandar o pdf com as informações" — conteúdo abaixo transcrito do PDF
+// "Guia do Técnico em Refrigeração: Códigos de Erro & Proteção Inverter" (27 págs, enviado pelo
+// usuário), um índice por marca seguido da tabela de códigos de erro de cada uma. É conteúdo de
+// referência fixo (igual um manual técnico), não dado de tenant — por isso fica embutido aqui
+// como dado estático, sem rota de API nem collection no db.js (nada aqui é "do zero" reaproveitado
+// de outro menu: é uma tela e um dado novos, exclusivos deste guia).
+const GUIA_DIAGNOSTICO_MARCAS = [
+  { chave: 'samsung', nome: 'Samsung', subtitulo: 'Inverter', dica: 'A maioria dos sensores da Samsung são de 10k (a 25°C).', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E101 / E1', significado: 'Falha de Comunicação', acao: 'Verificar fios S (sinal) entre interna e externa. Ver se há emenda no fio ou cabo PP rompido.' },
+    { codigo: 'E121', significado: 'Sensor de Ambiente (Interna)', acao: 'Medir sensor de temperatura da evaporadora (Preto). Deve dar aprox. 10k.' },
+    { codigo: 'E122 / E123', significado: 'Sensor da Serpentina (Interna)', acao: 'Medir sensor de tubo da evaporadora (Metálico). Deve dar aprox. 10k.' },
+    { codigo: 'E464', significado: 'Pico de Corrente (Módulo IPM)', acao: 'Verificar se o compressor está travado ou em curto. Limpar a pasta térmica do dissipador da placa externa.' },
+    { codigo: 'E461', significado: 'Compressor não parte', acao: 'Testar continuidade das bobinas do compressor. Verificar se chega tensão na externa.' },
+    { codigo: '3 Leds Piscando', significado: 'Erro de Configuração/EEPROM', acao: 'Precisa do controle remoto para reinserir o código da máquina (Reset).' },
+  ]},
+  { chave: 'lg', nome: 'LG', subtitulo: 'Dual Inverter / Libero', dica: 'Sensores de 10k (Ambiente) e 5k (Tubo).', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'CH 05 / 5 Piscadas', significado: 'Falha de Comunicação', acao: 'Verificar conexão dos fios 1(L), 2(N) e 3(S). Conferir aperto dos bornes.' },
+    { codigo: 'CH 01 / CH 02', significado: 'Sensores da Evaporadora', acao: 'CH01: Medir sensor de ambiente (10k). CH02: Medir sensor de tubo (5k).' },
+    { codigo: 'CH 10', significado: 'Ventilador da Interna Travado', acao: 'Girar a turbina com a mão (está presa?). Verificar conector do motor na placa.' },
+    { codigo: 'CH 21', significado: 'Pico de Corrente (IPM)', acao: 'Excesso de fluido refrigerante? Compressor travado? Sujeira excessiva na condensadora?' },
+    { codigo: 'CH 23', significado: 'Baixa Tensão (DC Link)', acao: 'Tensão da tomada está muito baixa (abaixo de 190V)? Capacitor do reator da placa externa.' },
+    { codigo: 'CH 26', significado: 'Compressor Travado/Queimado', acao: 'Medir resistência dos bornes do compressor (U, V, W). Se der "aberto", compressor morreu.' },
+  ]},
+  { chave: 'midea', nome: 'Midea / Springer Midea', subtitulo: 'Inverter', dica: 'Sensores geralmente são de 10k.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Falha de Comunicação', acao: 'Cabo PP com emenda? Fio de sinal solto? Placa externa sem energia?' },
+    { codigo: 'E3', significado: 'Ventilador da Evaporadora', acao: 'Motor ventilador com defeito ou sensor Hall do motor sujo/com defeito.' },
+    { codigo: 'E5', significado: 'Sensor de Ambiente (Aberto/Curto)', acao: 'Trocar sensor de temperatura ambiente.' },
+    { codigo: 'EC', significado: 'Vazamento de Gás', acao: 'A máquina liga, gela pouco e para? Verifique a pressão do gás.' },
+    { codigo: 'P0', significado: 'Proteção do Módulo IPM', acao: 'Placa externa superaquecida? Condensadora suja? Pasta térmica seca na placa.' },
+    { codigo: 'P4', significado: 'Proteção do Compressor', acao: 'Compressor tentando partir e não consegue. Verificar terminais do compressor.' },
+  ]},
+  { chave: 'gree', nome: 'Gree', subtitulo: 'Eco Garden / G-Top', dica: 'Sensores variam (Ambiente 15k ou 20k / Tubo 20k). Confira a tabela na tampa da máquina.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E6', significado: 'Falha de Comunicação', acao: 'O clássico da Gree. Cabo de sinal oxidado ou fusível da placa queimado.' },
+    { codigo: 'H6', significado: 'Motor Ventilador (Interna)', acao: 'Motor não gira ou sensor de rotação com defeito. Trocar capacitor do ventilador (se tiver).' },
+    { codigo: 'F1 / F2', significado: 'Sensores de Temperatura', acao: 'F1: Sensor de ambiente. F2: Sensor de tubo. Medir resistência.' },
+    { codigo: 'F0', significado: 'Vazamento de Gás ou Entupimento', acao: 'Sensor de tubo percebe que não está gelando. Verificar pressão e capilar entupido.' },
+    { codigo: 'H3', significado: 'Proteção de Sobrecarga', acao: 'Compressor desligou por calor excessivo. O ventilador da externa parou?' },
+    { codigo: 'U1', significado: 'Corrente de Fase (Compressor)', acao: 'Verificar conexões do compressor. Pode ser placa defeituosa.' },
+  ]},
+  { chave: 'philco', nome: 'Philco', subtitulo: 'Inverter', dica: 'Sensores geralmente de 15k ou 20k.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E6', significado: 'Falha de Comunicação', acao: 'Verificar cabo S. Verificar se há tensão chegando na unidade externa.' },
+    { codigo: 'E1 / E2', significado: 'Sensores de Temperatura', acao: 'E1: Ambiente. E2: Serpentina. Verificar se o plugue está bem encaixado na placa.' },
+    { codigo: 'E4', significado: 'Compressor / IPM', acao: 'Compressor superaquecido ou falta de gás refrigerante.' },
+    { codigo: 'F3', significado: 'Proteção da Condensadora', acao: 'Motor ventilador externo parou ou condensadora bloqueada de sujeira.' },
+    { codigo: 'P0', significado: 'Proteção de Condensadora', acao: 'Motor ventilador externo parou ou condensadora bloqueada de sujeira.' },
+    { codigo: 'P0', significado: 'Proteção de Corrente', acao: 'Tensão da rede elétrica oscilando muito ou compressor travado.' },
+  ]},
+  { chave: 'agratto', nome: 'Agratto / One', subtitulo: 'Entrada', dica: 'A Agratto é campeã de vendas. Usa códigos muito parecidos com a TCL/Midea. Sensores geralmente 10k.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Sensor de Ambiente', acao: 'Sensor plástico da evaporadora.' },
+    { codigo: 'E2', significado: 'Sensor de Tubo', acao: 'Sensor metálico da evaporadora.' },
+    { codigo: 'E4', significado: 'Motor Ventilador (Interna)', acao: 'Turbina suja travando o motor ou capacitor fraco.' },
+    { codigo: 'E5', significado: 'Falha de Comunicação', acao: 'Cabo S rompido. Como é máquina de entrada, verifique muito bem os bornes.' },
+    { codigo: 'F0', significado: 'Falta de Gás', acao: 'Sistema detectou baixo rendimento. Procure vazamento.' },
+  ]},
+  { chave: 'britania', nome: 'Britânia', subtitulo: 'Inverter', dica: 'A Britânia é "irmã" da Philco. Usa a mesma lógica e muitas vezes as mesmas peças. Sensores 15k ou 20k.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E6', significado: 'Falha de Comunicação', acao: 'Verifique o cabo S. Britânia é sensível a cabo PP má qualidade.' },
+    { codigo: 'E1', significado: 'Sensor de Ambiente', acao: 'Aberto ou em curto.' },
+    { codigo: 'E2', significado: 'Sensor de Tubo', acao: 'Aberto ou em curto.' },
+    { codigo: 'E4', significado: 'Proteção do Compressor', acao: 'Compressor quente demais ou gás baixo.' },
+    { codigo: 'F3', significado: 'Proteção da Condensadora', acao: 'Erro na unidade externa (ventilador ou sujeira).' },
+  ]},
+  { chave: 'carrier', nome: 'Carrier', subtitulo: 'X-Power / Commerciais', dica: 'Do grupo Midea — muitos códigos são iguais (E1 = comunicação). Em máquinas Piso Teto ou Cassete, confira os LEDs na placa da condensadora.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Falha de Comunicação', acao: 'Padrão Midea/Carrier. Cabo PP ou placas.' },
+    { codigo: 'E2 / E3', significado: 'Sensores de Temperatura', acao: 'E2: Ambiente. E3: Serpentina.' },
+    { codigo: 'E4', significado: 'Sensor T3 (Condensadora)', acao: 'Sensor de tubo da unidade externa.' },
+    { codigo: 'P4', significado: 'Proteção do Inverter', acao: 'Erro de acionamento do compressor. Verifique se os terminais UVW estão bem conectados.' },
+    { codigo: 'Ed', significado: 'Proteção da Unidade Externa', acao: 'Pasta térmica seca no dissipador ou placa externa com defeito.' },
+    { codigo: 'CH23', significado: 'Falta de fase (em máquinas trifásicas)', acao: 'Falta de fase (em máquinas trifásicas) ou erro geral na externa.' },
+  ]},
+  { chave: 'comfee', nome: 'Comfee', subtitulo: 'Inverter', dica: 'A Comfee é a segunda linha da Midea. Usa praticamente os mesmos códigos e peças (sensores de 10k).', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Falha de Comunicação', acao: 'Verifique os bornes de interligação. Aperte bem os parafusos.' },
+    { codigo: 'E3', significado: 'Motor Ventilador (Interna)', acao: 'A turbina roda devagar? Pode ser o capacitor na placa ou o sensor Hall.' },
+    { codigo: 'E5', significado: 'Sensores de Temperatura', acao: 'Erro nos sensores da evaporadora (Ambiente ou Tubo).' },
+    { codigo: 'EC', significado: 'Vazamento de Gás', acao: 'A máquina gela pouco e desliga por proteção. Procure vazamento nas flanges.' },
+    { codigo: 'P0 / P4', significado: 'Proteção da Placa Externa', acao: 'Módulo IPM superaquecido. Limpe a condensadora urgentemente.' },
+  ]},
+  { chave: 'consul', nome: 'Consul', subtitulo: 'Inverter / Bem Estar', dica: 'A Consul Inverter (unidade externa redonda ou quadrada) avisa erros piscando os LEDs da evaporadora. Conte as piscadas.', colCodigo: 'Código (Piscadas)', linhas: [
+    { codigo: '2 Piscadas', significado: 'Falha de Comunicação', acao: 'Cabo de sinal rompido ou fusível da placa externa aberto.' },
+    { codigo: '3 Piscadas', significado: 'Sensor de Temperatura (Ambiente)', acao: 'Sensor aberto ou curto. Trocar sensor da interna.' },
+    { codigo: '4 Piscadas', significado: 'Sensor de Serpentina (Interna)', acao: 'Sensor de tubo com defeito.' },
+    { codigo: '5 Piscadas', significado: 'Proteção do Compressor', acao: 'Sobrecarga. Condensadora suja ou motor ventilador externo parado.' },
+    { codigo: '6 Piscadas', significado: 'Falha na Unidade Externa', acao: 'Erro genérico na condensadora (Sensor de descarga ou placa).' },
+  ]},
+  { chave: 'daikin', nome: 'Daikin', subtitulo: 'A Gigante Japonesa', dica: 'A Daikin não mostra erro no display sozinha. Segure o botão "Cancel" do controle por 5s até aparecer "00". Vá apertando "Cancel" até ouvir um BIP LONGO — o código na tela é o erro.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'U4', significado: 'Falha de Comunicação', acao: 'O erro mais famoso da Daikin. Cabo de sinal ou fusível da placa externa queimado.' },
+    { codigo: 'A5', significado: 'Controle de Alta Pressão', acao: 'Filtros sujos? Condensadora bloqueada? Falta de gás? (Proteção Antigelo).' },
+    { codigo: 'L5', significado: 'Sobrecorrente no Inverter', acao: 'Compressor travado ou placa IPM (Externa) com defeito. Teste o compressor.' },
+    { codigo: 'C4 / C9', significado: 'Sensores da Interna', acao: 'C4: Tubo (Líquido). C9: Ambiente (Retorno de ar).' },
+    { codigo: 'E7', significado: 'Motor Ventilador (Externa)', acao: 'O ventilador da condensadora parou ou está ventando contra a hélice.' },
+    { codigo: 'U0', significado: 'Falta de Gás', acao: 'Sistema detectou baixa eficiência. Procure vazamento.' },
+  ]},
+  { chave: 'electrolux', nome: 'Electrolux', subtitulo: 'Linhas Xi / Yi / Technic', dica: 'A maioria dos sensores são 10k (Ambiente). O sensor de tubo varia (10k ou metálico de 15k). Na dúvida, meça: se der infinito ou zero, o sensor morreu.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Falha de Comunicação', acao: 'Verifique a emenda do cabo PP e se há tensão chegando na externa (Borne S).' },
+    { codigo: 'E3', significado: 'Sensor de Tubo (Evaporadora)', acao: 'Sensor metálico da unidade interna. Verificar se está bem encaixado ou aberto.' },
+    { codigo: 'E4', significado: 'Sensor de Descarga (Compressor)', acao: 'Fica em cima do compressor. Verifique se o plugue oxidou ou o fio rompeu.' },
+    { codigo: 'E5', significado: 'Proteção de Sobrecorrente', acao: 'Compressor travado? Sujeira excessiva na condensadora? Tensão da rede muito baixa?' },
+    { codigo: 'H6', significado: 'Motor Ventilador (Interna)', acao: 'Girar a turbina com a mão (está presa?). Motor queimado? Verifique o capacitor (se tiver).' },
+    { codigo: 'F1 / F3', significado: 'Sensores de Temperatura', acao: 'Geralmente F1 é ambiente e F3 é serpentina externa. Medir suas resistências.' },
+  ]},
+  { chave: 'elgin', nome: 'Elgin', subtitulo: 'Eco Inverter / Plus', dica: 'Modelos mais antigos costumam usar sensores de 15k, mas os Inverter novos (Eco) padronizaram em 10k (Ambiente) e 10k (Tubo) a 25°C.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Sensor de Ambiente (Interna)', acao: 'Trocar sensor de temperatura do quarto (plástico).' },
+    { codigo: 'E2', significado: 'Sensor de Tubo (Interna)', acao: 'Trocar sensor da serpentina (metálico).' },
+    { codigo: 'E2 / E3', significado: 'Sensor de Tubo (Externa)', acao: 'Fica lá na condensadora. Verifique oxidação no plugue.' },
+    { codigo: 'E4 / F0', significado: 'Falha no Compressor / Gás', acao: 'Pode indicar falta de gás, compressor não parte ou módulo IPM com defeito.' },
+    { codigo: 'F6 / E5', significado: 'Falha de Comunicação', acao: 'Verifique a interligação (Fios 1, 2, 3 ou L, N, S).' },
+  ]},
+  { chave: 'fujitsu', nome: 'Fujitsu', subtitulo: 'Inverter', dica: 'A Fujitsu geralmente não tem display numérico — conte as piscadas do LED "Operation" (Verde) e "Timer" (Laranja). Ex.: 2 piscadas verdes e 3 laranjas.', colCodigo: 'Piscadas (Op/Timer)', linhas: [
+    { codigo: '02 (Op) / 03 (Timer)', significado: 'Sensor de Ambiente', acao: 'Sensor da evaporadora aberto ou em curto.' },
+    { codigo: '05 (Op) / 15 (Timer)', significado: 'Erro na Unidade Interna', acao: 'Verifique a placa da evaporadora e motor ventilador.' },
+    { codigo: '05 (Op) / 07 (Timer)', significado: 'Falha de Comunicação', acao: 'O erro clássico. Cabo de interligação ou placa externa sem energia.' },
+    { codigo: '09 (Op) / 04 (Timer)', significado: 'Pico de Corrente (Trip)', acao: 'Compressor travado ou problema no IPM (Placa externa).' },
+    { codigo: '09 (Op) / 07 (Timer)', significado: 'Motor Ventilador (Externa)', acao: 'Motor da condensadora queimado ou travado.' },
+    { codigo: '10 (Op) / Qualquer', significado: 'Erro de Tensão', acao: 'Tensão da rede elétrica muito baixa ou muito alta.' },
+  ]},
+  { chave: 'hisense', nome: 'Hisense', subtitulo: 'Inverter', dica: 'Marca nova no Brasil, crescendo rápido. Códigos numéricos diretos no display.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Falha de Comunicação', acao: 'Sinal interrompido entre as unidades.' },
+    { codigo: '33', significado: 'Sensor de Ambiente', acao: 'Sensor de temperatura aberto ou curto.' },
+    { codigo: '34', significado: 'Sensor de Tubo', acao: 'Sensor da serpentina evaporadora.' },
+    { codigo: '05', significado: 'Erro de EEPROM', acao: 'Memória da placa corrompida. Tente desligar o disjuntor por 5 min.' },
+    { codigo: '14', significado: 'Proteção do Módulo IPM', acao: 'Corrente excessiva na placa externa.' },
+  ]},
+  { chave: 'hitachi', nome: 'Hitachi', subtitulo: 'Inverter', dica: 'A Hitachi usa piscadas no LED do "Timer" (Unidade Interna). Conte quantas vezes pisca entre as pausas.', colCodigo: 'Piscadas (Timer)', linhas: [
+    { codigo: '01 Vez', significado: 'Sensor de Serpentina (Interna)', acao: 'Sensor de tubo com defeito ou desconectado.' },
+    { codigo: '02 Vezes', significado: 'Sensor de Ar (Ambiente)', acao: 'Sensor de temperatura ambiente com defeito.' },
+    { codigo: '03 Vezes', significado: 'Falha de Comunicação', acao: 'Erro de interface. Verifique fiação e fusíveis.' },
+    { codigo: '04 Vezes', significado: 'Unidade Externa com Erro', acao: 'O problema está lá fora. Olhe os LEDs da placa da condensadora (LD301).' },
+    { codigo: '09 Vezes', significado: 'Motor Ventilador (Interna)', acao: 'Motor travado ou conector solto na placa.' },
+    { codigo: '12 Vezes', significado: 'Erro na EEPROM', acao: 'Memória da placa corrompida ou placa com defeito.' },
+  ]},
+  { chave: 'komeco', nome: 'Komeco', subtitulo: 'Linhas Inverter', dica: 'Sensores padrão de 10k na maioria dos modelos novos.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Sensor de Ambiente', acao: 'Aberto ou em curto. Trocar sensor plástico.' },
+    { codigo: 'E2', significado: 'Sensor de Tubo (Interna)', acao: 'Aberto ou em curto. Trocar sensor cobre.' },
+    { codigo: 'E5', significado: 'Falha de Comunicação', acao: 'Verificar cabo de sinal. Komeco sofre muito com emenda em fio.' },
+    { codigo: 'F0', significado: 'Motor Ventilador (Interna)', acao: 'Falha no feedback do motor (sensor hall) ou motor queimado.' },
+    { codigo: 'P0', significado: 'Erro de Módulo IPM', acao: 'Corrente muito alta ou sobreaquecimento da placa.' },
+  ]},
+  { chave: 'mitsubishi', nome: 'Mitsubishi Electric', subtitulo: 'Industrial/High End', dica: 'A "Ferrari" dos ares. Geralmente indica erro por piscadas no LED da evaporadora. Conte os ciclos de piscada.', colCodigo: 'Piscadas', linhas: [
+    { codigo: '2 Piscadas', significado: 'Sensor de Temperatura (Interna)', acao: 'Sensor de admissão de ar ou tubo com defeito.' },
+    { codigo: '5 Piscadas', significado: 'Erro na Tensão DC', acao: 'Problema na filtragem da energia ou placa externa.' },
+    { codigo: '6 Piscadas', significado: 'Motor Ventilador (Interna)', acao: 'Motor interno travado ou com defeito.' },
+    { codigo: '14 Piscadas', significado: 'Falha de Proteção Térmica', acao: 'Compressor superaquecido. Verifique gás e sujeira.' },
+    { codigo: 'Piscada Contínua', significado: 'Falha de Comunicação', acao: 'Cabo de interligação cortado ou desconectado.' },
+  ]},
+  { chave: 'panasonic', nome: 'Panasonic', subtitulo: 'Econavi / Inverter', dica: 'Para ver o erro, use um clipe e segure "CHECK" no controle por 5s até aparecer "--". Aponte pra máquina e aperte "Timer ▲". Quando apitar 4x, o código na tela é o erro.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'H11', significado: 'Falha de Comunicação', acao: 'O erro mais comum da Panasonic. Verifique o cabo 3 (Sinal) e a placa interna.' },
+    { codigo: 'F90 / F91', significado: 'Erro no Ciclo de Refrigeração', acao: 'Vazamento de gás, válvula de expansão fechada ou compressor pifado.' },
+    { codigo: 'H16', significado: 'Transformador de Corrente', acao: 'A placa externa não detecta corrente direito. Geralmente defeito na placa externa.' },
+    { codigo: 'H19', significado: 'Motor Ventilador (Interna)', acao: 'Motor travado. A Panasonic usa motores DC muito sensíveis.' },
+    { codigo: 'H97', significado: 'Motor Ventilador (Externa)', acao: 'Motor da condensadora queimado ou placa externa.' },
+    { codigo: 'F99', significado: 'Pico de Corrente DC', acao: 'Módulo IPM em curto. Compressor travado ou placa externa queimada.' },
+  ]},
+  { chave: 'rheem', nome: 'Rheem', subtitulo: 'Inverter', dica: 'Marca americana forte. O display mostra o código direto. Sensores geralmente 5k e 10k.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1', significado: 'Sensor de Ambiente', acao: 'Sensor de temperatura do retorno de ar.' },
+    { codigo: 'E3', significado: 'Sensor de Tubo (Interna)', acao: 'Sensor da serpentina.' },
+    { codigo: 'E6', significado: 'Falha de Comunicação', acao: 'Verifique a fiação e se a placa externa está ligada (LED aceso).' },
+    { codigo: 'L3', significado: 'Motor Ventilador (Externa)', acao: 'Motor da condensadora com problemas.' },
+    { codigo: 'P0', significado: 'Proteção do Sistema', acao: 'Alta temperatura de descarga. Falta de gás ou entupimento.' },
+  ]},
+  { chave: 'tcl', nome: 'TCL', subtitulo: 'Tac / Elite Series', dica: 'Usada muito no mercado genérico. Sensores geralmente 5k e 10k ou 10k e 10k. Sempre meça antes de comprar.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E0', significado: 'Falha de Comunicação', acao: 'Verifique cabos S. Módulo externo pode estar desligado (fusível).' },
+    { codigo: 'E1', significado: 'Sensor de Ambiente', acao: 'Sensor de temperatura do quarto com defeito.' },
+    { codigo: 'E2', significado: 'Sensor de Tubo (Interna)', acao: 'Sensor da serpentina evaporadora.' },
+    { codigo: 'E6', significado: 'Motor Ventilador (Interna)', acao: 'Turbina pesada ou motor sem força (Capacitor ou placa).' },
+    { codigo: 'P0', significado: 'Proteção IPM (Placa)', acao: 'Pasta térmica seca no dissipador ou placa externa com defeito.' },
+    { codigo: 'E1', significado: 'Erro de Tensão', acao: 'Pasta térmica seca no dissipador ou placa externa com defeito.' },
+  ]},
+  { chave: 'trane', nome: 'Trane', subtitulo: 'Inverter', dica: 'Máquina robusta, muito usada em comércios. Atenção: sensores de 15k ou 20k são comuns aqui.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'E1 / E2', significado: 'Sensores da Evaporadora', acao: 'E1: Ambiente. E2: Tubo. Verifique a resistência.' },
+    { codigo: 'E6', significado: 'Falha de Comunicação', acao: 'Erro de transmissão de dados entre interna e externa.' },
+    { codigo: 'E9 / EE', significado: 'Bomba de Dreno (Cassete)', acao: 'Se for Cassete, verifique se a boia travou ou a bomba queimou.' },
+    { codigo: 'P0', significado: 'Proteção de Corrente', acao: 'Compressor travado ou capacitor fraco (em modelos com capacitor).' },
+    { codigo: 'H6', significado: 'Motor Ventilador', acao: 'Falha no ventilador interno. Verifique se tem obstrução.' },
+  ]},
+  { chave: 'york', nome: 'York', subtitulo: 'Inverter', dica: 'Marca tradicional. Sensores costumam ser 5k (Ambiente) e 5k (Tubo) nos modelos mais antigos — confira a tabela na tampa.', colCodigo: 'Código do Erro', linhas: [
+    { codigo: 'F6', significado: 'Falha de Comunicação', acao: 'O clássico erro de fio solto ou oxidado entre as unidades.' },
+    { codigo: 'F7', significado: 'Sensor de Ambiente', acao: 'Sensor de temperatura do quarto.' },
+    { codigo: 'F8', significado: 'Sensor de Tubo (Interna)', acao: 'Sensor da serpentina.' },
+    { codigo: 'F9', significado: 'Sensor de Tubo (Externa)', acao: 'Sensor da condensadora.' },
+    { codigo: 'E1', significado: 'Proteção do Compressor', acao: 'Alta pressão ou corrente excessiva. Limpe a condensadora.' },
+  ]},
+];
+
+// seção especial do guia: defeitos que não geram código de erro nenhum (ver PDF do usuário,
+// "Seção Especial: O Pulo do Gato — Top 5 Defeitos Fantasmas").
+const GUIA_DIAGNOSTICO_PULO_DO_GATO = [
+  { titulo: '1. A "Maldição" da Emenda no Cabo PP', sintoma: 'A máquina funciona às vezes, às vezes dá erro de comunicação.', segredo: 'Inverter odeia emenda. Mesmo que pareça bem feita, a emenda gera ruído no sinal digital.', solucao: 'Troque o cabo inteiro. Sem emendas.' },
+  { titulo: '2. Sensor "Mentiroso" (Descalibrado)', sintoma: 'A máquina não dá erro, mas o compressor não parte ou desliga rápido demais.', segredo: 'O sensor não está queimado (aberto), ele só "descalibrou". Ele diz pra placa que está 20°C quando na verdade está 30°C.', solucao: 'Não confie só no visual. Meça a resistência com o multímetro.' },
+  { titulo: '3. Pasta Térmica Seca (O Assassino Silencioso)', sintoma: 'A máquina funciona 10 minutos e desliga (Módulo IPM protege).', segredo: 'Debaixo da placa externa tem um dissipador de alumínio. Se a pasta térmica secou, a placa frita e desliga para não queimar.', solucao: 'Troque a pasta térmica a cada manutenção preventiva.' },
+  { titulo: '4. Umidade no Conector do Sensor', sintoma: 'Erro de sensor logo após você fazer a higienização.', segredo: 'Entrou água no plugue do sensor na placa. A água conduz eletricidade e muda a leitura.', solucao: 'Seque os conectores com secador de cabelo antes de condenar a peça.' },
+  { titulo: '5. A Tomada 127v na Máquina 220v', sintoma: 'A evaporadora liga, abre a aleta, mas a condensadora nunca parte. Sem código de erro.', segredo: 'Parece bobo, mas acontece muito. A eletrônica liga com 110v, mas o motor não tem força para partir.', solucao: 'Meça a tensão na entrada da borneira antes de desmontar a máquina inteira.' },
+];
+
+function guiaDiagnosticoAcessoLiberado() {
+  return !!(window._empresa && window._empresa.perfil === 'refrigeracao');
+}
+
+async function renderGuiaDiagnosticoRapido() {
+  const main = document.getElementById('main');
+  if (!guiaDiagnosticoAcessoLiberado()) {
+    main.innerHTML = `<div class="page-head"><h1>Guia de Diagnóstico Rápido</h1></div><div class="empty">Este guia é exclusivo de empresas com o perfil "Refrigeração e Climatização".</div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="page-head"><h1>Guia de Diagnóstico Rápido</h1><p>Toque na marca do aparelho para ver os códigos de erro e a ação imediata de cada um.</p></div>
+    <div class="kpis-tiles" id="guia-diag-tiles"></div>
+    <div class="panel" style="margin-top:16px; cursor:pointer;" onclick="ir('guia-diagnostico-pulo-do-gato')">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span style="font-size:28px;">🐱</span>
+        <div>
+          <strong>Seção Especial: O "Pulo do Gato"</strong>
+          <div style="font-size:13px; color:var(--gray-500, #666);">Top 5 defeitos que não geram código de erro nenhum</div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('guia-diag-tiles').innerHTML = GUIA_DIAGNOSTICO_MARCAS.map((m, i) => `
+    <div class="kpis-tile" style="background:${GUIA_DIAGNOSTICO_CORES[i % GUIA_DIAGNOSTICO_CORES.length]};" onclick="abrirGuiaDiagnosticoMarca('${m.chave}')">
+      <div class="kpis-tile-label"><span>${esc(m.nome)}</span></div>
+      <div class="kpis-tile-valor" style="font-size:13px;">${esc(m.subtitulo)}</div>
+    </div>`).join('');
+}
+
+const GUIA_DIAGNOSTICO_CORES = ['var(--blue)', 'var(--teal)', 'var(--green)', 'var(--purple)', 'var(--orange)', 'var(--navy)', 'var(--amber)'];
+
+function botaoVoltarGuiaDiagnostico() {
+  return `<button class="btn-outline-sm" onclick="ir('guia-diagnostico-rapido')">← Voltar ao Guia</button>`;
+}
+
+function abrirGuiaDiagnosticoMarca(chave) {
+  window._guiaDiagnosticoMarcaAtual = chave;
+  ir('guia-diagnostico-marca');
+}
+
+async function renderGuiaDiagnosticoMarca() {
+  const main = document.getElementById('main');
+  if (!guiaDiagnosticoAcessoLiberado()) return renderGuiaDiagnosticoRapido();
+  const marca = GUIA_DIAGNOSTICO_MARCAS.find((m) => m.chave === window._guiaDiagnosticoMarcaAtual);
+  if (!marca) return renderGuiaDiagnosticoRapido();
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(marca.nome)}</h1><p>${esc(marca.subtitulo)}</p></div>
+      ${botaoVoltarGuiaDiagnostico()}
+    </div>
+    <div class="panel" style="background:#FFF8E1; border-left:4px solid #F5A623; margin-bottom:16px;">
+      <strong>💡 Dica de Ouro:</strong> ${esc(marca.dica)}
+    </div>
+    <div class="panel"><table>
+      <tr><th>${esc(marca.colCodigo)}</th><th>O que Significa</th><th>Onde Testar (Ação Imediata)</th></tr>
+      ${marca.linhas.map((l) => `
+        <tr>
+          <td data-label="${esc(marca.colCodigo)}"><strong>${esc(l.codigo)}</strong></td>
+          <td data-label="O que Significa">${esc(l.significado)}</td>
+          <td data-label="Ação Imediata">${esc(l.acao)}</td>
+        </tr>`).join('')}
+    </table></div>`;
+}
+
+async function renderGuiaDiagnosticoPuloDoGato() {
+  const main = document.getElementById('main');
+  if (!guiaDiagnosticoAcessoLiberado()) return renderGuiaDiagnosticoRapido();
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>🐱 O "Pulo do Gato"</h1><p>Top 5 defeitos fantasmas — a máquina não dá código de erro, mas não funciona. A culpa é de um desses aqui:</p></div>
+      ${botaoVoltarGuiaDiagnostico()}
+    </div>
+    ${GUIA_DIAGNOSTICO_PULO_DO_GATO.map((d) => `
+      <div class="panel" style="margin-bottom:12px;">
+        <strong>${esc(d.titulo)}</strong>
+        <div style="margin-top:8px;"><strong>Sintoma:</strong> ${esc(d.sintoma)}</div>
+        <div style="margin-top:4px;"><strong>O Segredo:</strong> ${esc(d.segredo)}</div>
+        <div style="margin-top:4px;"><strong>Solução:</strong> ${esc(d.solucao)}</div>
+      </div>`).join('')}`;
+}
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
 // tem acesso_total, que aí só vê os itens de topo marcados em `menus` (ver MENUS_LABEL_POR_PAPEL /
@@ -1078,8 +1363,18 @@ function moduloAtivoNoMenu(modulo) {
   return ativos.includes(modulo);
 }
 
+// gate por Perfil (não por módulo/plano contratado): pedido do usuário — menus específicos de um
+// tipo de serviço (ex. "Guia de Diagnóstico Rápido", perfil "Refrigeração e Climatização", ver
+// GUIA_DIAGNOSTICO_MARCAS abaixo) só existem pra empresa cadastrada com aquele Perfil (ver
+// PERFIS_DISPONIVEIS em db.js e empresa.perfil, vindo do login em window._empresa — ver
+// entrarNoApp). Item sem `perfil` no node do NAV nunca é afetado por este filtro.
+function perfilAtivoNoMenu(perfilExigido) {
+  if (!perfilExigido) return true;
+  return !!(window._empresa && window._empresa.perfil === perfilExigido);
+}
+
 function navDoUsuario() {
-  const nav = (NAV[USER.papel] || []).filter((node) => moduloAtivoNoMenu(node.modulo));
+  const nav = (NAV[USER.papel] || []).filter((node) => moduloAtivoNoMenu(node.modulo) && perfilAtivoNoMenu(node.perfil));
   if (USER.acesso_total !== false) return nav;
   const menus = Array.isArray(USER.menus) ? USER.menus : [];
   return nav.filter((node) => menus.includes(node.key));
@@ -1206,6 +1501,9 @@ async function ir(pagina) {
     if (pagina === 'avisos') return renderAvisos();
     if (pagina === 'mensagens-canal') return renderMensagensCanal();
     if (pagina === 'atividades-diarias') return renderAtividadesDiarias();
+    if (pagina === 'guia-diagnostico-rapido') return renderGuiaDiagnosticoRapido();
+    if (pagina === 'guia-diagnostico-marca') return renderGuiaDiagnosticoMarca();
+    if (pagina === 'guia-diagnostico-pulo-do-gato') return renderGuiaDiagnosticoPuloDoGato();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();

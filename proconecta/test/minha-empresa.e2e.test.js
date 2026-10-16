@@ -23,7 +23,7 @@ function dadosDuasEmpresas() {
     clientes: [], equipamentos: [], agenda: [], visitas: [],
     _seq: { usuarios: 4, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1 },
     empresas: [
-      { id: 1, nome: 'Empresa A', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#000', cor_secundaria: '#000', versao_id: 1, modulos_ativos: ['os_chamados'], terminologia: {}, logo_url: null, valor_bonus_viagem: 200, limite_viagens_bonus_mes: 7 },
+      { id: 1, nome: 'Empresa A', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#000', cor_secundaria: '#000', versao_id: 1, modulos_ativos: ['os_chamados'], terminologia: {}, logo_url: null, valor_bonus_viagem: 200, limite_viagens_bonus_mes: 7, perfil: 'refrigeracao' },
       { id: 2, nome: 'Empresa B', site: '', whatsapp: '', telefone: '', emails: [], cor_primaria: '#111', cor_secundaria: '#111', versao_id: 1, modulos_ativos: ['os_chamados'], terminologia: {}, logo_url: null, valor_bonus_viagem: 200, limite_viagens_bonus_mes: 7 },
     ],
     versoes: [{ id: 1, nome: 'Manutenção', modulos: ['os_chamados'] }],
@@ -99,12 +99,19 @@ test('PUT /api/empresa: administrador edita a própria marca, logo e bônus — 
     const me = await (await fetch(`${base}/api/me`, { headers: authAdminA })).json();
     assert.equal(me.usuario.empresa.nome, 'Empresa A Renovada');
     assert.ok(me.usuario.empresa.logo_url.startsWith('data:image/png;base64,'));
+    // pedido do usuário: menu "Guia de Diagnóstico Rápido" (perfil refrigeração, ver NAV em
+    // app.js) precisa do `perfil` já no login/GET /api/me, não só em GET /api/empresa — senão
+    // montarSidebar() roda com o perfil errado no primeiro acesso (ver empresaResumo em server.js).
+    assert.equal(me.usuario.empresa.perfil, 'refrigeracao');
 
     // empresa B nunca foi afetada
     const meB = await (await fetch(`${base}/api/me`, { headers: authAdminB })).json();
     assert.equal(meB.usuario.empresa.nome, 'Empresa B');
     assert.equal(meB.usuario.empresa.logo_url, null);
     assert.equal(meB.usuario.empresa.valor_bonus_viagem, 200);
+    // empresa sem perfil cadastrado (campo ausente no fixture) devolve null, nunca undefined —
+    // perfilAtivoNoMenu em app.js trata null/undefined igual, mas o contrato da API fica explícito.
+    assert.equal(meB.usuario.empresa.perfil, null);
 
     // remover a logo (null explícito) volta pro padrão (sem logo própria)
     const remocao = await fetch(`${base}/api/empresa`, {

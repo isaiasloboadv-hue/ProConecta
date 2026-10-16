@@ -17,9 +17,12 @@ function carregarLogicaDeMenu() {
   const fimFuncoes = src.indexOf('\n}\n', src.indexOf('function navDoUsuario() {')) + 2;
   if (inicioNav < 0 || inicioFuncoes < 0) throw new Error('NAV ou moduloAtivoNoMenu não encontrados em app.js — teste desatualizado?');
   const trecho = src.slice(inicioNav, fimNav) + '\n' + src.slice(inicioFuncoes, fimFuncoes);
-  const sandbox = { USER: null, console };
+  // perfilAtivoNoMenu (gate do menu "Guia de Diagnóstico Rápido", perfil refrigeração) lê
+  // window._empresa.perfil — igual ao app.js de verdade (ver window._empresa = null no topo do
+  // arquivo), senão a chamada quebra aqui dentro (vm não tem window do navegador).
+  const sandbox = { USER: null, window: { _empresa: null }, console };
   vm.createContext(sandbox);
-  new vm.Script(trecho + '\nthis.NAV = NAV; this.navDoUsuario = navDoUsuario; this.moduloAtivoNoMenu = moduloAtivoNoMenu;').runInContext(sandbox);
+  new vm.Script(trecho + '\nthis.NAV = NAV; this.navDoUsuario = navDoUsuario; this.moduloAtivoNoMenu = moduloAtivoNoMenu; this.perfilAtivoNoMenu = perfilAtivoNoMenu;').runInContext(sandbox);
   return sandbox;
 }
 
@@ -82,4 +85,41 @@ test('moduloAtivoNoMenu trata módulo núcleo/vazio como sempre ativo', () => {
   assert.equal(ctx.moduloAtivoNoMenu.call(ctx, undefined), true);
   assert.equal(ctx.moduloAtivoNoMenu.call(ctx, 'nucleo'), true);
   assert.equal(ctx.moduloAtivoNoMenu.call(ctx, 'comercial'), false);
+});
+
+// pedido do usuário: perfil "Refrigeração e Climatização" (ver PERFIS_DISPONIVEIS em db.js) — o
+// menu "Guia de Diagnóstico Rápido" (NAV.suporte/NAV.administrador) é gated por `perfil` no node
+// do NAV, não por `modulo`/plano contratado — ver perfilAtivoNoMenu em app.js.
+test('perfilAtivoNoMenu trata node sem `perfil` como sempre ativo, e só libera quando window._empresa.perfil bate', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = null;
+  assert.equal(ctx.perfilAtivoNoMenu.call(ctx, undefined), true);
+  assert.equal(ctx.perfilAtivoNoMenu.call(ctx, 'refrigeracao'), false);
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.equal(ctx.perfilAtivoNoMenu.call(ctx, 'refrigeracao'), false);
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  assert.equal(ctx.perfilAtivoNoMenu.call(ctx, 'refrigeracao'), true);
+});
+
+test('técnico (suporte) só vê "Guia de Diagnóstico Rápido" quando a empresa é do perfil refrigeração', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('guia-diagnostico-rapido'));
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  const chaves = Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key);
+  assert.ok(chaves.includes('guia-diagnostico-rapido'));
+  // continua sem `modulo` nenhum (não é item de plano contratado) — não some mesmo sem
+  // modulos_ativos nenhum, já que moduloAtivoNoMenu só olha `node.modulo` (ausente aqui).
+  ctx.USER.modulos_ativos = [];
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('guia-diagnostico-rapido'));
+});
+
+test('restrição por menus (acesso_total: false) também vale pro item gated por perfil', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.USER = { papel: 'suporte', acesso_total: false, menus: ['agenda'], modulos_ativos: ['os_chamados'] };
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('guia-diagnostico-rapido'));
+  ctx.USER.menus = ['agenda', 'guia-diagnostico-rapido'];
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('guia-diagnostico-rapido'));
 });
