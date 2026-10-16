@@ -3838,7 +3838,7 @@ function slugFerramentaRef(texto) {
 }
 const FERRAMENTAS_REF_CATEGORIAS = [
   { chave: 'calculadoras', titulo: 'Calculadoras', cor: 'var(--blue)', corIconeBg: 'var(--blue-pale)', itens: [
-    { icone: '🧮', label: 'Calculadora Blindada', descricao: 'Orçamento com mensagens prontas' },
+    { icone: '🧮', label: 'Calculadora Blindada', descricao: 'Orçamento com mensagens prontas', page: 'calculadora-blindada' },
     { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC' },
     { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores' },
     { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária' },
@@ -3887,6 +3887,299 @@ function ferramentaRefWidgetHtml(w, cat) {
 // placeholder pras ferramentas do catálogo que ainda não têm a funcionalidade de verdade
 // construída (ver comentário acima) — identifica qual card foi clicado pelo slug na própria
 // página (ver slugFerramentaRef), sem precisar de uma página dedicada pra cada uma ainda.
+// ===== Calculadora Blindada (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima) — orçamento rápido pra mandar por
+// WhatsApp na hora, sem passar pelo fluxo formal de Orçamentos (que exige cliente cadastrado,
+// assinatura etc. — ver os_refrigeracao_orcamentos). Por ser rápida/informal, fica 100%
+// client-side: nada vai pro servidor, o histórico e os ajustes de deslocamento (preço do
+// combustível/consumo) ficam só no localStorage deste aparelho.
+// pedido do usuário: pesquisei por um site público de referência de preços de serviços de
+// refrigeração, atualizado constantemente, pra servir de base aqui — não existe: não há tabela
+// oficial de sindicato nem fonte de mercado com atualização contínua (só estimativas de
+// matérias de consumo e preços de licitações públicas antigas, que variam demais por região pra
+// virar padrão). Por isso, igual ao próprio app de referência (os campos de valor vêm em
+// branco), o técnico digita o preço de cada item — a calculadora não tenta sugerir preço nenhum.
+const CALC_BLINDADA_SERVICOS = [
+  'Instalação Split 9000/12000 BTUs', 'Instalação Split 18000/24000 BTUs',
+  'Instalação Piso Teto / Cassete', 'Instalação Multi-Split (Por Evaporadora)',
+  'Desinstalação de Equipamento', 'Limpeza e Higienização (Simples)',
+  'Limpeza Química (Desmontagem Completa)', 'PMOC (Manutenção Mensal)',
+  'Carga de Gás (R410A/R22/R32)', 'Troca de Capacitor / Relé',
+  'Troca de Compressor (Mão de Obra)', 'Correção de Vazamento (Flange/Solda)',
+  'Teste de Estanqueidade (Nitrogênio)', 'Vácuo no Sistema',
+  'Visita Técnica / Diagnóstico', 'Infraestrutura (Metro Linear)',
+  'Instalação de Bomba de Dreno', 'Troca de Placa Eletrônica',
+  'Higienização de Dutos', 'Reparo em Comando Elétrico',
+  'Outro (digite abaixo)',
+];
+function calcBlindadaAjustesPadrao() { return { combustivel_litro: 6.15, consumo_km_l: 10 }; }
+function carregarAjustesCalcBlindada() {
+  try {
+    const salvo = JSON.parse(localStorage.getItem('pc_calc_blindada_ajustes') || 'null');
+    if (salvo && Number(salvo.combustivel_litro) > 0 && Number(salvo.consumo_km_l) > 0) return salvo;
+  } catch (e) {}
+  return calcBlindadaAjustesPadrao();
+}
+function salvarAjustesCalcBlindada(ajustes) {
+  try { localStorage.setItem('pc_calc_blindada_ajustes', JSON.stringify(ajustes)); } catch (e) {}
+}
+function carregarHistoricoCalcBlindada() {
+  try { return JSON.parse(localStorage.getItem('pc_calc_blindada_historico') || '[]'); } catch (e) { return []; }
+}
+function salvarHistoricoCalcBlindada(lista) {
+  try { localStorage.setItem('pc_calc_blindada_historico', JSON.stringify(lista.slice(0, 20))); } catch (e) {}
+}
+
+function calcBlindadaFormVazio() {
+  const hoje = new Date();
+  return {
+    tecnico: USER.nome || '', cliente_nome: '', endereco: '', telefone: '',
+    data: hojeIsoAgendaRef(), hora: `${String(hoje.getHours()).padStart(2, '0')}:${String(hoje.getMinutes()).padStart(2, '0')}`,
+    garantia_dias: 90,
+    servicos: [{ tipo: '', outro: '', valor: 0, qtd: 1 }],
+    observacoes: '', material: 0, km_total: 0,
+  };
+}
+
+async function renderCalculadoraBlindada() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._calcBlindadaForm) window._calcBlindadaForm = calcBlindadaFormVazio();
+  window._calcBlindadaResultado = null;
+  desenharCalculadoraBlindada();
+}
+function desenharCalculadoraBlindada() {
+  const main = document.getElementById('main');
+  const f = window._calcBlindadaForm;
+  const ajustes = carregarAjustesCalcBlindada();
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button class="btn-outline-sm" style="padding:6px 10px;" onclick="ir('ferramentas-hub')">←</button>
+        <h1 style="margin:0;">Calculadora Blindada</h1>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" style="padding:6px 10px;" title="Histórico" onclick="abrirModalHistoricoCalcBlindada()">🕘</button>
+        <button class="btn-outline-sm" style="padding:6px 10px;" title="Ajustes" onclick="abrirModalAjustesCalcBlindada()">⚙️</button>
+      </div>
+    </div>
+    <div class="panel" style="max-width:560px;">
+      <h3 style="color:var(--blue); text-transform:uppercase; font-size:13px; letter-spacing:.4px; margin-top:0;">Dados do orçamento</h3>
+      <div class="field"><label>Técnico responsável</label><input id="cb-tecnico" value="${esc(f.tecnico)}" placeholder="Nome do técnico"></div>
+      <div class="field"><label>Nome do cliente</label><input id="cb-cliente" value="${esc(f.cliente_nome)}" placeholder="Nome do cliente"></div>
+      <div class="field"><label>Endereço</label><input id="cb-endereco" value="${esc(f.endereco)}" placeholder="Rua, nº, bairro"></div>
+      <div class="field"><label>Telefone</label><input id="cb-telefone" value="${esc(f.telefone)}" placeholder="(DD) 9XXXX-XXXX"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Data</label><input id="cb-data" type="date" value="${f.data}"></div>
+        <div class="field" style="flex:1;"><label>Hora</label><input id="cb-hora" type="time" value="${f.hora}"></div>
+      </div>
+      <div class="field"><label>Garantia (dias)</label><input id="cb-garantia" type="number" min="0" value="${f.garantia_dias}"></div>
+    </div>
+
+    <h3 style="margin:18px 0 10px; text-transform:uppercase; font-size:13px; letter-spacing:.4px; color:var(--ink-soft);">Serviços</h3>
+    <div id="cb-servicos-lista">${desenharListaServicosCalcBlindada()}</div>
+    <button class="btn-outline-sm" style="width:100%; max-width:560px; border-style:dashed; margin-top:4px;" onclick="adicionarServicoCalcBlindada()">+ Adicionar item</button>
+    <div class="field" style="max-width:560px; margin-top:12px;"><textarea id="cb-observacoes" rows="2" placeholder="Observações técnicas (ex: tubulação de cobre, suporte...)">${esc(f.observacoes)}</textarea></div>
+
+    <h3 style="margin:18px 0 10px; text-transform:uppercase; font-size:13px; letter-spacing:.4px; color:var(--ink-soft);">Custos operacionais</h3>
+    <div class="panel" style="max-width:560px;">
+      <div class="field"><label>Material (R$)</label><input id="cb-material" type="number" step="0.01" value="${f.material || ''}" placeholder="0,00"></div>
+      <div class="field"><label>Km total (ida e volta)</label><input id="cb-km" type="number" step="0.1" value="${f.km_total || ''}" placeholder="0"></div>
+      <p style="font-size:12px; color:var(--ink-soft); margin:4px 0 0;">Deslocamento calculado por carro de passeio a ${fmtMoeda(ajustes.combustivel_litro)}/litro (${ajustes.consumo_km_l} km/l). Muda em Ajustes (⚙️).</p>
+    </div>
+
+    <button class="btn btn-primary btn-sm" style="width:100%; max-width:560px; margin-top:16px; padding:12px;" onclick="calcularCalcBlindada()">🧮 Calcular agora</button>
+    <div id="cb-resultado" style="max-width:560px;"></div>`;
+}
+function desenharListaServicosCalcBlindada() {
+  const f = window._calcBlindadaForm;
+  return f.servicos.map((s, i) => `
+    <div class="panel" style="max-width:560px; margin-bottom:8px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <select style="flex:1;" onchange="atualizarServicoCalcBlindada(${i}, 'tipo', this.value)">
+          <option value="">Selecione...</option>
+          ${CALC_BLINDADA_SERVICOS.map((nome) => `<option value="${esc(nome)}" ${s.tipo === nome ? 'selected' : ''}>${esc(nome)}</option>`).join('')}
+        </select>
+        ${f.servicos.length > 1 ? `<button class="btn-outline-sm" style="padding:6px 10px; color:var(--red,#B3453A); border-color:var(--red,#B3453A);" onclick="removerServicoCalcBlindada(${i})">🗑️</button>` : ''}
+      </div>
+      ${s.tipo === 'Outro (digite abaixo)' ? `<input style="margin-top:8px;" value="${esc(s.outro)}" placeholder="Descreva o serviço" oninput="atualizarServicoCalcBlindada(${i}, 'outro', this.value)">` : ''}
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input type="number" step="0.01" style="flex:2;" value="${s.valor || ''}" placeholder="R$ 0,00" oninput="atualizarServicoCalcBlindada(${i}, 'valor', this.value)">
+        <div style="flex:1; display:flex; align-items:center; gap:6px; justify-content:center;">
+          <button class="btn-outline-sm" style="padding:4px 10px;" onclick="atualizarServicoCalcBlindada(${i}, 'qtd', ${Math.max(1, s.qtd - 1)})">−</button>
+          <span style="min-width:20px; text-align:center;">${s.qtd}</span>
+          <button class="btn-outline-sm" style="padding:4px 10px;" onclick="atualizarServicoCalcBlindada(${i}, 'qtd', ${s.qtd + 1})">+</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+function sincronizarCamposBasicosCalcBlindada() {
+  const f = window._calcBlindadaForm;
+  f.tecnico = document.getElementById('cb-tecnico').value;
+  f.cliente_nome = document.getElementById('cb-cliente').value;
+  f.endereco = document.getElementById('cb-endereco').value;
+  f.telefone = document.getElementById('cb-telefone').value;
+  f.data = document.getElementById('cb-data').value;
+  f.hora = document.getElementById('cb-hora').value;
+  f.garantia_dias = Number(document.getElementById('cb-garantia').value) || 0;
+  f.observacoes = document.getElementById('cb-observacoes').value;
+  f.material = Number(document.getElementById('cb-material').value) || 0;
+  f.km_total = Number(document.getElementById('cb-km').value) || 0;
+}
+function adicionarServicoCalcBlindada() {
+  sincronizarCamposBasicosCalcBlindada();
+  window._calcBlindadaForm.servicos.push({ tipo: '', outro: '', valor: 0, qtd: 1 });
+  document.getElementById('cb-servicos-lista').innerHTML = desenharListaServicosCalcBlindada();
+}
+function removerServicoCalcBlindada(i) {
+  sincronizarCamposBasicosCalcBlindada();
+  window._calcBlindadaForm.servicos.splice(i, 1);
+  document.getElementById('cb-servicos-lista').innerHTML = desenharListaServicosCalcBlindada();
+}
+function atualizarServicoCalcBlindada(i, campo, valor) {
+  const s = window._calcBlindadaForm.servicos[i];
+  if (campo === 'valor') s.valor = Number(valor) || 0;
+  else if (campo === 'qtd') s.qtd = Math.max(1, Number(valor) || 1);
+  else s[campo] = valor;
+  if (campo === 'tipo') document.getElementById('cb-servicos-lista').innerHTML = desenharListaServicosCalcBlindada();
+}
+
+function calcBlindadaTotais(f, ajustes) {
+  const subtotalServicos = f.servicos.reduce((s, item) => s + (Number(item.valor) || 0) * (Number(item.qtd) || 1), 0);
+  const deslocamento = ajustes.consumo_km_l > 0 ? (Number(f.km_total) || 0) / ajustes.consumo_km_l * ajustes.combustivel_litro : 0;
+  const material = Number(f.material) || 0;
+  return { subtotalServicos, material, deslocamento, total: subtotalServicos + material + deslocamento };
+}
+function nomeServicoCalcBlindada(s) { return s.tipo === 'Outro (digite abaixo)' ? (s.outro || 'Serviço') : s.tipo; }
+function gerarMensagemCalcBlindada(f, totais) {
+  const linhas = [];
+  linhas.push(`*Orçamento — ${empresaNome()}*`);
+  if (f.cliente_nome) linhas.push(`Cliente: ${f.cliente_nome}`);
+  if (f.endereco) linhas.push(`Endereço: ${f.endereco}`);
+  linhas.push(`Data: ${fmtDataIsoAgendaRef(f.data)}${f.hora ? ' às ' + f.hora : ''}`);
+  linhas.push('');
+  linhas.push('*Serviços*');
+  f.servicos.filter((s) => s.tipo).forEach((s) => {
+    linhas.push(`${nomeServicoCalcBlindada(s)}${s.qtd > 1 ? ` (${s.qtd}x)` : ''} — ${fmtMoeda(s.valor * s.qtd)}`);
+  });
+  if (totais.material) linhas.push(`Material — ${fmtMoeda(totais.material)}`);
+  if (totais.deslocamento) linhas.push(`Deslocamento (${f.km_total} km) — ${fmtMoeda(totais.deslocamento)}`);
+  linhas.push('');
+  linhas.push(`*Total: ${fmtMoeda(totais.total)}*`);
+  if (f.garantia_dias) linhas.push(`Garantia: ${f.garantia_dias} dias`);
+  if (f.observacoes) { linhas.push(''); linhas.push(f.observacoes); }
+  linhas.push('');
+  linhas.push(`${f.tecnico || empresaNome()}`);
+  return linhas.join('\n');
+}
+function calcularCalcBlindada() {
+  sincronizarCamposBasicosCalcBlindada();
+  const f = window._calcBlindadaForm;
+  const servicosValidos = f.servicos.filter((s) => s.tipo);
+  const resultadoEl = document.getElementById('cb-resultado');
+  if (!servicosValidos.length) { resultadoEl.innerHTML = '<div class="auth-error" style="margin-top:12px;">Adicione ao menos um serviço.</div>'; return; }
+  const ajustes = carregarAjustesCalcBlindada();
+  const totais = calcBlindadaTotais(f, ajustes);
+  const mensagem = gerarMensagemCalcBlindada(f, totais);
+  window._calcBlindadaResultado = { totais, mensagem };
+  resultadoEl.innerHTML = `
+    <div class="panel" style="margin-top:14px; background:var(--gray-50,#F4F6FA);">
+      <h3 style="margin-top:0;">Resumo</h3>
+      ${osRefLinha('Serviços', fmtMoeda(totais.subtotalServicos))}
+      ${totais.material ? osRefLinha('Material', fmtMoeda(totais.material)) : ''}
+      ${totais.deslocamento ? osRefLinha('Deslocamento', fmtMoeda(totais.deslocamento)) : ''}
+      <div style="display:flex; justify-content:space-between; font-weight:800; font-size:16px; border-top:1px solid var(--line); margin-top:6px; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(totais.total)}</span></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+        <button class="btn-outline-sm" onclick="copiarMensagemCalcBlindada()">📋 Copiar mensagem</button>
+        <a class="btn btn-primary btn-sm" href="https://wa.me/?text=${encodeURIComponent(mensagem)}" target="_blank" rel="noopener">Enviar pelo WhatsApp</a>
+      </div>
+    </div>`;
+  // salva no histórico local (não vai pro servidor — ver comentário no topo do arquivo)
+  const historico = carregarHistoricoCalcBlindada();
+  historico.unshift({ id: Date.now(), criado_em: new Date().toISOString(), cliente_nome: f.cliente_nome || 'Sem nome', total: totais.total, mensagem });
+  salvarHistoricoCalcBlindada(historico);
+}
+async function copiarMensagemCalcBlindada() {
+  if (!window._calcBlindadaResultado) return;
+  try { await navigator.clipboard.writeText(window._calcBlindadaResultado.mensagem); mostrarToast('Mensagem copiada.'); }
+  catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o texto manualmente.'); }
+}
+
+// ---- ajustes de deslocamento (combustível/consumo), só neste aparelho ----
+function abrirModalAjustesCalcBlindada() {
+  const ajustes = carregarAjustesCalcBlindada();
+  let modal = document.getElementById('modal-cb-ajustes');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-cb-ajustes';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalAjustesCalcBlindada(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:380px;">
+      <h3>Ajustes de deslocamento</h3>
+      <p style="font-size:12.5px; color:var(--ink-soft); margin-top:-6px;">Usado pra calcular o custo de deslocamento (km ÷ consumo × preço do combustível).</p>
+      <div class="field"><label>Combustível (R$/litro)</label><input id="cb-aj-combustivel" type="number" step="0.01" value="${ajustes.combustivel_litro}"></div>
+      <div class="field"><label>Consumo (km/litro)</label><input id="cb-aj-consumo" type="number" step="0.1" value="${ajustes.consumo_km_l}"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="fecharModalAjustesCalcBlindada()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarModalAjustesCalcBlindada()">Salvar</button>
+      </div>
+    </div>`;
+}
+function fecharModalAjustesCalcBlindada() {
+  const modal = document.getElementById('modal-cb-ajustes');
+  if (modal) modal.classList.remove('show');
+}
+function salvarModalAjustesCalcBlindada() {
+  const combustivel = Number(document.getElementById('cb-aj-combustivel').value);
+  const consumo = Number(document.getElementById('cb-aj-consumo').value);
+  if (!(combustivel > 0) || !(consumo > 0)) return alert('Informe valores maiores que zero.');
+  salvarAjustesCalcBlindada({ combustivel_litro: combustivel, consumo_km_l: consumo });
+  fecharModalAjustesCalcBlindada();
+  desenharCalculadoraBlindada();
+}
+
+// ---- histórico local (só neste aparelho — ver comentário no topo do arquivo) ----
+function abrirModalHistoricoCalcBlindada() {
+  const historico = carregarHistoricoCalcBlindada();
+  let modal = document.getElementById('modal-cb-historico');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-cb-historico';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalHistoricoCalcBlindada(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  const corpo = historico.length ? historico.map((h) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line);">
+      <div>
+        <strong>${esc(h.cliente_nome)}</strong><br>
+        <span style="font-size:12px; color:var(--ink-soft);">${fmtDataOsRef(h.criado_em)} · ${fmtMoeda(h.total)}</span>
+      </div>
+      <button class="btn-outline-sm" style="padding:4px 10px; font-size:12px;" onclick="copiarHistoricoCalcBlindada(${h.id})">Copiar</button>
+    </div>`).join('') : '<div class="empty">Nenhum cálculo feito ainda neste aparelho.</div>';
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:440px; max-height:80vh; overflow-y:auto;">
+      <h3>Histórico (só este aparelho)</h3>
+      ${corpo}
+      <button class="btn-outline-sm" style="width:100%; margin-top:12px;" onclick="fecharModalHistoricoCalcBlindada()">Fechar</button>
+    </div>`;
+}
+function fecharModalHistoricoCalcBlindada() {
+  const modal = document.getElementById('modal-cb-historico');
+  if (modal) modal.classList.remove('show');
+}
+async function copiarHistoricoCalcBlindada(id) {
+  const item = carregarHistoricoCalcBlindada().find((h) => h.id === id);
+  if (!item) return;
+  try { await navigator.clipboard.writeText(item.mensagem); mostrarToast('Mensagem copiada.'); }
+  catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o texto manualmente.'); }
+}
+
 async function renderFerramentaEmBreve(pagina) {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
@@ -4482,6 +4775,7 @@ async function ir(pagina) {
     if (pagina === 'orcamentos-refrigeracao-detalhe') return renderOrcamentoRefrigeracaoDetalhe();
     if (pagina === 'agenda-refrigeracao-lista') return renderAgendaRefrigeracaoLista();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
+    if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
