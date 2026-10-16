@@ -3839,7 +3839,7 @@ function slugFerramentaRef(texto) {
 const FERRAMENTAS_REF_CATEGORIAS = [
   { chave: 'calculadoras', titulo: 'Calculadoras', cor: 'var(--blue)', corIconeBg: 'var(--blue-pale)', itens: [
     { icone: '🧮', label: 'Calculadora Blindada', descricao: 'Orçamento com mensagens prontas', page: 'calculadora-blindada' },
-    { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC' },
+    { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC', page: 'calculadora-btu' },
     { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores' },
     { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária' },
     { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro' },
@@ -4507,6 +4507,198 @@ async function copiarHistoricoCalcBlindada(id) {
   catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o texto manualmente.'); }
 }
 
+// ===== Calculadora de BTU (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima) — estimativa de BTU a partir de
+// área/pessoas/equipamentos/incidência solar/andar, com o passo a passo do cálculo sempre visível
+// ("Ver cálculo detalhado") pro técnico conferir/ajustar, e um botão pra mandar esse passo a
+// passo pronto pro cliente pelo WhatsApp. 100% client-side, sem persistir no servidor (mesma
+// razão da Calculadora Blindada — é uma estimativa rápida, não um documento formal).
+// IMPORTANTE sobre a fórmula: só consegui confirmar os números de "Incidência solar: Média"
+// (×1,1) e "andar intermediário/térreo" (+0%) a partir do próprio print do resultado do app de
+// referência (o passo a passo bateu exatamente com área=35, pessoas=2, equipamentos=1 → 25.080
+// BTU → modelo 30.000). "Pouca"/"Muita" incidência e "Último andar/Cobertura" eu estimei (não dá
+// pra confirmar sem outro exemplo calculado) — e os 3 campos do "Modo avançado" (pé-direito, tipo
+// de telhado, qtd. de janelas) aparecem no formulário do app de referência mas NÃO aparecem em
+// nenhum dos 6 passos do cálculo detalhado deles, então não entram na conta aqui também (capturo
+// os campos pra manter a tela igual, mas não invento um efeito pra eles sem confirmação).
+const CALC_BTU_BASE_POR_M2 = 600;
+const CALC_BTU_POR_PESSOA = 600;
+const CALC_BTU_POR_EQUIPAMENTO = 600;
+const CALC_BTU_MODELOS = [9000, 12000, 18000, 24000, 30000, 36000, 48000, 60000];
+const CALC_BTU_FATOR_SOLAR = { pouca: 1.0, media: 1.1, muita: 1.2 };
+const CALC_BTU_FATOR_SOLAR_LABEL = { pouca: 'Pouca (sombra)', media: 'Média', muita: 'Muita (sol direto)' };
+const CALC_BTU_FATOR_ANDAR = { terreo: 0, intermediario: 0, ultimo: 0.10 };
+const CALC_BTU_ANDAR_LABEL = { terreo: 'Térreo', intermediario: 'Intermediário', ultimo: 'Último andar / Cobertura' };
+const CALC_BTU_ANDAR_TEXTO_FORMULA = { terreo: 'andar intermediário/térreo', intermediario: 'andar intermediário/térreo', ultimo: 'último andar/cobertura' };
+const CALC_BTU_TIPOS_TELHADO = [
+  { chave: 'laje', label: 'Laje' }, { chave: 'telha_ceramica', label: 'Telha cerâmica' },
+  { chave: 'telha_metalica', label: 'Telha metálica' }, { chave: 'forro', label: 'Forro (PVC/madeira)' },
+];
+function fmtBtuNum(n) { return Math.round(n).toLocaleString('pt-BR'); }
+function calcBtuFormVazio() {
+  return {
+    area_m2: '', pessoas: 0, equipamentos: 0, incidencia_solar: 'media', andar: 'intermediario',
+    modo_avancado: false, pe_direito: 2.7, tipo_telhado: 'laje', qtd_janelas: 0,
+  };
+}
+function calcularBtuResultado(f) {
+  const area = Number(f.area_m2) || 0;
+  const pessoas = Number(f.pessoas) || 0;
+  const equipamentos = Number(f.equipamentos) || 0;
+  const passo1 = area * CALC_BTU_BASE_POR_M2;
+  const passo2 = pessoas * CALC_BTU_POR_PESSOA;
+  const passo3 = equipamentos * CALC_BTU_POR_EQUIPAMENTO;
+  const subtotal = passo1 + passo2 + passo3;
+  const fatorSolar = CALC_BTU_FATOR_SOLAR[f.incidencia_solar] != null ? CALC_BTU_FATOR_SOLAR[f.incidencia_solar] : 1;
+  const passo4 = subtotal * fatorSolar;
+  const fatorAndarPct = CALC_BTU_FATOR_ANDAR[f.andar] || 0;
+  const passo5 = passo4 * fatorAndarPct;
+  const total = passo4 + passo5;
+  const modeloSugerido = CALC_BTU_MODELOS.find((m) => m >= total) || CALC_BTU_MODELOS[CALC_BTU_MODELOS.length - 1];
+  return { area, pessoas, equipamentos, passo1, passo2, passo3, subtotal, fatorSolar, passo4, fatorAndarPct, passo5, total, modeloSugerido };
+}
+function calcularPassosBtu(f, r) {
+  return [
+    { titulo: 'Carga base pela área', formula: `Área × ${CALC_BTU_BASE_POR_M2} BTU/m²`, substituicao: `${r.area}m² × ${CALC_BTU_BASE_POR_M2}`, resultado: `${fmtBtuNum(r.passo1)} BTU`, dica: `Base de ${CALC_BTU_BASE_POR_M2} BTU/m² é o padrão para ambientes residenciais` },
+    { titulo: 'Acréscimo por pessoas', formula: `N° pessoas × ${CALC_BTU_POR_PESSOA} BTU`, substituicao: `${r.pessoas} × ${CALC_BTU_POR_PESSOA}`, resultado: `+${fmtBtuNum(r.passo2)} BTU`, dica: `Cada pessoa emite ~${CALC_BTU_POR_PESSOA} BTU/h de calor` },
+    { titulo: 'Acréscimo por equipamentos', formula: `N° equipamentos × ${CALC_BTU_POR_EQUIPAMENTO} BTU`, substituicao: `${r.equipamentos} × ${CALC_BTU_POR_EQUIPAMENTO}`, resultado: `+${fmtBtuNum(r.passo3)} BTU` },
+    { titulo: 'Fator solar', formula: 'Subtotal × fator solar', substituicao: `${fmtBtuNum(r.subtotal)} × ${r.fatorSolar}`, resultado: `${fmtBtuNum(r.passo4)} BTU`, dica: `Incidência solar: ${CALC_BTU_FATOR_SOLAR_LABEL[f.incidencia_solar]} (×${r.fatorSolar})` },
+    { titulo: 'Fator andar', formula: `+${Math.round(r.fatorAndarPct * 100)}% (${CALC_BTU_ANDAR_TEXTO_FORMULA[f.andar]})`, substituicao: '—', resultado: `+${fmtBtuNum(r.passo5)} BTU` },
+    { titulo: 'Total e modelo recomendado', formula: 'Soma de todos os fatores → modelo comercial', substituicao: `Total: ${fmtBtuNum(r.total)} BTU`, resultado: `${fmtBtuNum(r.modeloSugerido)} BTU`, dica: 'Sempre arredonde para o modelo comercial acima' },
+  ];
+}
+
+async function renderCalculadoraBtu() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._calcBtuForm) window._calcBtuForm = calcBtuFormVazio();
+  window._calcBtuResultado = null;
+  window._calcBtuDetalheAberto = false;
+  desenharCalculadoraBtu();
+}
+function desenharCalculadoraBtu() {
+  const main = document.getElementById('main');
+  const f = window._calcBtuForm;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; align-items:center; gap:10px;">
+      <button class="btn-outline-sm" style="padding:6px 10px;" onclick="ir('ferramentas-hub')">←</button>
+      <h1 style="margin:0;">Calculadora de BTU</h1>
+    </div>
+    <div style="max-width:560px;">
+      <div class="field"><label>Área (m²) *</label><input id="btu-area" type="number" step="0.1" min="0" value="${esc(f.area_m2)}" placeholder="Ex: 20"></div>
+      <div class="field"><label>Número de pessoas</label><input id="btu-pessoas" type="number" min="0" value="${f.pessoas}"></div>
+      <div class="field"><label>Equipamentos eletrônicos (PCs, TVs...)</label><input id="btu-equip" type="number" min="0" value="${f.equipamentos}"></div>
+      <div class="field"><label>Incidência solar</label>
+        <select id="btu-solar">
+          ${Object.entries(CALC_BTU_FATOR_SOLAR_LABEL).map(([k, label]) => `<option value="${k}" ${f.incidencia_solar === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Andar</label>
+        <select id="btu-andar">
+          ${Object.entries(CALC_BTU_ANDAR_LABEL).map(([k, label]) => `<option value="${k}" ${f.andar === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); margin:10px 0;">
+        <strong>Modo avançado</strong>
+        <input type="checkbox" id="btu-avancado" ${f.modo_avancado ? 'checked' : ''} onchange="alternarModoAvancadoBtu(this.checked)" style="width:auto;">
+      </div>
+      ${f.modo_avancado ? `
+        <div class="field"><label>Pé-direito (m)</label><input id="btu-pedireito" type="number" step="0.1" min="0" value="${f.pe_direito}"></div>
+        <div class="field"><label>Tipo de telhado</label>
+          <select id="btu-telhado">
+            ${CALC_BTU_TIPOS_TELHADO.map((t) => `<option value="${t.chave}" ${f.tipo_telhado === t.chave ? 'selected' : ''}>${t.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Quantidade de janelas</label><input id="btu-janelas" type="number" min="0" value="${f.qtd_janelas}"></div>` : ''}
+      <button class="btn btn-primary btn-sm" style="width:100%; padding:12px; margin-top:6px;" onclick="calcularBtu()">Calcular</button>
+      <div id="btu-resultado"></div>
+    </div>`;
+}
+function sincronizarCamposBtu() {
+  const f = window._calcBtuForm;
+  f.area_m2 = document.getElementById('btu-area').value;
+  f.pessoas = Number(document.getElementById('btu-pessoas').value) || 0;
+  f.equipamentos = Number(document.getElementById('btu-equip').value) || 0;
+  f.incidencia_solar = document.getElementById('btu-solar').value;
+  f.andar = document.getElementById('btu-andar').value;
+  if (f.modo_avancado) {
+    f.pe_direito = Number(document.getElementById('btu-pedireito').value) || 0;
+    f.tipo_telhado = document.getElementById('btu-telhado').value;
+    f.qtd_janelas = Number(document.getElementById('btu-janelas').value) || 0;
+  }
+}
+function alternarModoAvancadoBtu(checked) {
+  sincronizarCamposBtu();
+  window._calcBtuForm.modo_avancado = checked;
+  desenharCalculadoraBtu();
+}
+function calcularBtu() {
+  sincronizarCamposBtu();
+  const f = window._calcBtuForm;
+  if (!(Number(f.area_m2) > 0)) { alert('Informe a área em m².'); return; }
+  const r = calcularBtuResultado(f);
+  window._calcBtuResultado = r;
+  window._calcBtuDetalheAberto = false;
+  window._calcBtuModeloEscolhido = r.modeloSugerido;
+  desenharResultadoBtu();
+}
+function desenharResultadoBtu() {
+  const el = document.getElementById('btu-resultado');
+  if (!el || !window._calcBtuResultado) return;
+  const r = window._calcBtuResultado;
+  const modeloEscolhido = window._calcBtuModeloEscolhido || r.modeloSugerido;
+  el.innerHTML = `
+    <div class="panel" style="text-align:center; border:1.5px solid var(--blue); margin-top:16px;">
+      <div style="font-size:30px;">❄️</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">BTU calculado</div>
+      <div style="font-size:30px; font-weight:800; color:var(--blue);">${fmtBtuNum(r.total)}</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:10px;">Modelo sugerido</div>
+      <div style="font-size:22px; font-weight:800;">${fmtBtuNum(r.modeloSugerido)} BTU</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:12px;">
+        ${CALC_BTU_MODELOS.map((m) => `<button type="button" class="${m === modeloEscolhido ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" style="padding:6px 10px; font-size:12px;" onclick="escolherModeloBtu(${m})">${fmtBtuNum(m)}</button>`).join('')}
+      </div>
+    </div>
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px; display:flex; justify-content:space-between; align-items:center;" onclick="alternarDetalheBtu()">📐 Ver cálculo detalhado <span>${window._calcBtuDetalheAberto ? '▲' : '▼'}</span></button>
+    ${window._calcBtuDetalheAberto ? desenharPassosBtu(r) : ''}
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="compartilharBtuWhatsapp()">🔗 Compartilhar via WhatsApp</button>`;
+}
+function escolherModeloBtu(m) {
+  window._calcBtuModeloEscolhido = m;
+  desenharResultadoBtu();
+}
+function alternarDetalheBtu() {
+  window._calcBtuDetalheAberto = !window._calcBtuDetalheAberto;
+  desenharResultadoBtu();
+}
+function desenharPassosBtu(r) {
+  const passos = calcularPassosBtu(window._calcBtuForm, r);
+  return `<div class="panel" style="margin-top:10px;">${passos.map((p, i) => `
+    <div style="padding:12px 0; ${i < passos.length - 1 ? 'border-bottom:1px solid var(--line);' : ''}">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+        <span style="width:24px; height:24px; border-radius:50%; background:var(--blue-pale); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">${i + 1}</span>
+        <strong>${esc(p.titulo)}</strong>
+      </div>
+      <div style="background:var(--gray-50,#F4F6FA); border-radius:8px; padding:8px 10px; font-size:13px; font-family:monospace; margin-bottom:6px;">${esc(p.formula)}</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-bottom:4px;">${esc(p.substituicao)}</div>
+      <div style="font-weight:800; color:var(--blue); font-size:15px;">= ${esc(p.resultado)}</div>
+      ${p.dica ? `<div style="background:var(--amber-pale,#FEF3C7); border-radius:8px; padding:8px 10px; font-size:12px; color:var(--amber,#B45309); margin-top:8px;">💡 ${esc(p.dica)}</div>` : ''}
+    </div>`).join('')}</div>`;
+}
+async function compartilharBtuWhatsapp() {
+  if (!window._calcBtuResultado) return;
+  const r = window._calcBtuResultado;
+  const passos = calcularPassosBtu(window._calcBtuForm, r);
+  const modeloEscolhido = window._calcBtuModeloEscolhido || r.modeloSugerido;
+  const linhas = [`🧊 *Cálculo de BTU (${empresaNome()})*`, ''];
+  passos.forEach((p, i) => linhas.push(`${i + 1}. ${p.titulo}: ${p.substituicao} = ${p.resultado}`));
+  linhas.push('', `✅ *Modelo sugerido: ${fmtBtuNum(modeloEscolhido)} BTU*`);
+  const texto = linhas.join('\n');
+  if (navigator.share) {
+    try { await navigator.share({ text: texto }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
 async function renderFerramentaEmBreve(pagina) {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
@@ -5103,6 +5295,7 @@ async function ir(pagina) {
     if (pagina === 'agenda-refrigeracao-lista') return renderAgendaRefrigeracaoLista();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
+    if (pagina === 'calculadora-btu') return renderCalculadoraBtu();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
