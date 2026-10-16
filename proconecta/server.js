@@ -4806,6 +4806,10 @@ rota('POST', /^\/api\/os-refrigeracao$/, async (req, res) => {
     assinatura_cliente_img: null, assinado_cliente_em: null,
     tecnico_id: user.id, tecnico_nome: user.nome, autor_id: user.id,
     token_assinatura: gerarTokenConvite(),
+    // pedido do usuário: status da O.S. (Concluída/Pendente/Cancelada — ver menu "⋮" no detalhe,
+    // PUT .../status abaixo). Nasce "concluida": o técnico já terminou o serviço e assinou na
+    // hora de criar — "Pendente"/"Cancelada" são mudanças manuais feitas depois.
+    status: 'concluida',
     criado_em: new Date().toISOString(),
   });
   db.save(data);
@@ -4829,6 +4833,23 @@ rota('PUT', /^\/api\/os-refrigeracao\/(\d+)$/, async (req, res, m) => {
     fotos: Array.isArray(body.fotos) ? body.fotos.slice(0, MAX_FOTOS_OS_REFRIGERACAO) : os.fotos,
     assinatura_tecnico_img: body.assinatura_tecnico_img || os.assinatura_tecnico_img,
   });
+  db.save(data);
+  enviarJSON(res, 200, { os: await osRefrigeracaoComDetalhes(data, os) });
+});
+
+// PUT /api/os-refrigeracao/:id/status — pedido do usuário: menu "⋮" no detalhe da O.S.
+// (Pendente/Cancelada), separado da edição completa (PUT /:id acima) pra não exigir reenviar
+// todos os campos só pra mudar o status.
+const OS_REFRIGERACAO_STATUS_VALIDOS = ['concluida', 'pendente', 'cancelada'];
+rota('PUT', /^\/api\/os-refrigeracao\/(\d+)\/status$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const os = tenant.buscar(data, 'os_refrigeracao', Number(m[1]), user.empresa_id);
+  if (!os) return enviarJSON(res, 404, { erro: 'Ordem de serviço não encontrada.' });
+  const body = await lerCorpo(req);
+  if (!OS_REFRIGERACAO_STATUS_VALIDOS.includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
+  os.status = body.status;
   db.save(data);
   enviarJSON(res, 200, { os: await osRefrigeracaoComDetalhes(data, os) });
 });

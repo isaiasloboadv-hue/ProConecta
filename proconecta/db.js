@@ -1147,6 +1147,11 @@ function migrar(data) {
   if (!data._seq.os_refrigeracao_clientes) data._seq.os_refrigeracao_clientes = 1;
   if (!Array.isArray(data.os_refrigeracao)) data.os_refrigeracao = [];
   if (!data._seq.os_refrigeracao) data._seq.os_refrigeracao = 1;
+  // pedido do usuário: status da O.S. (Concluída/Pendente/Cancelada, ver menu "⋮" no detalhe —
+  // PUT /api/os-refrigeracao/:id/status em server.js) — toda O.S. já nascia "Concluída" até aqui
+  // (implícito, sem campo), então o backfill é só pra não deixar undefined numa O.S. criada antes
+  // deste campo existir.
+  for (const o of data.os_refrigeracao) { if (o.status === undefined) o.status = 'concluida'; }
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }

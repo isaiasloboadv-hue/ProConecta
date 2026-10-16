@@ -1423,6 +1423,16 @@ function garantiaAteOsRef(criadoEm, dias) {
 function linkAssinaturaOsRef(token) {
   return `${window.location.origin}/os-refrigeracao-assinar.html?token=${token}`;
 }
+// pedido do usuário: menu "⋮" no detalhe da O.S. (Pendente/Cancelada/Excluir, ver abrirMenuOpcoesOsRef).
+const OS_REF_STATUS_LABEL = { concluida: 'Concluída', pendente: 'Pendente', cancelada: 'Cancelada' };
+const OS_REF_STATUS_ESTILO = {
+  concluida: 'background:var(--blue-pale); color:var(--blue);',
+  pendente: 'background:var(--amber-pale, #FEF3C7); color:var(--amber, #B45309);',
+  cancelada: 'background:var(--red-pale, #FBE1E1); color:var(--red, #B3453A);',
+};
+function osRefStatusBadgeHtml(status) {
+  return `<span class="tag" style="${OS_REF_STATUS_ESTILO[status] || OS_REF_STATUS_ESTILO.concluida}">${OS_REF_STATUS_LABEL[status] || 'Concluída'}</span>`;
+}
 
 function abrirOsRefrigeracaoNova() {
   window._osRefForm = osRefFormVazio();
@@ -1855,7 +1865,7 @@ async function carregarOsRefrigeracaoLista() {
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
         <div>
           <span style="color:var(--blue); font-weight:700;">#${o.id}</span>
-          <span class="tag" style="background:var(--blue-pale); color:var(--blue); margin-left:8px;">Concluída</span>
+          <span style="margin-left:8px;">${osRefStatusBadgeHtml(o.status)}</span>
           ${o.assinatura_cliente_img ? `<span class="tag" style="background:var(--green-pale, #DEF7EC); color:var(--green); margin-left:4px;">Assinada</span>` : `<span class="tag tag-amber" style="margin-left:4px;">Aguardando assinatura</span>`}
           <div style="margin-top:4px;"><strong>${esc(o.cliente_nome || '—')}</strong></div>
           <div style="font-size:12.5px; color:var(--ink-soft);">${fmtDataOsRef(o.criado_em)}</div>
@@ -1874,11 +1884,12 @@ async function renderOsRefrigeracaoDetalhe() {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ordens de Serviço (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
   const { os } = await api('/api/os-refrigeracao/' + window._osRefDetalheId);
+  window._osRefDetalheAtual = os;
   const eq = os.equipamento || {};
   const link = linkAssinaturaOsRef(os.token_assinatura);
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-      <div><h1>OS #${os.id}</h1><span class="tag" style="background:var(--blue-pale); color:var(--blue);">Concluída</span></div>
+      <div><h1>OS #${os.id}</h1>${osRefStatusBadgeHtml(os.status)}</div>
       <button class="btn-outline-sm" onclick="ir('os-refrigeracao-lista')">← Voltar</button>
     </div>
     <div class="panel">
@@ -1930,8 +1941,10 @@ async function renderOsRefrigeracaoDetalhe() {
     </div>
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
       <button class="btn-outline-sm" onclick="abrirOsRefrigeracaoEditar(${os.id})">Editar</button>
-      <a class="btn-outline-sm" href="https://wa.me/?text=${encodeURIComponent('OS #' + os.id + ' — Cliente: ' + (os.cliente_nome || '') + '. Veja os detalhes aqui: ' + link)}" target="_blank" rel="noopener">Enviar</a>
-      <button class="btn-outline-sm" onclick="excluirOsRefrigeracao(${os.id})">Excluir</button>
+      ${os.assinatura_cliente_img
+        ? `<button class="btn-outline-sm" onclick="abrirMenuEnviarOsRef()">Enviar</button>`
+        : `<a class="btn-outline-sm" href="https://wa.me/?text=${encodeURIComponent('OS #' + os.id + ' — Cliente: ' + (os.cliente_nome || '') + '. Veja os detalhes aqui: ' + link)}" target="_blank" rel="noopener">Enviar</a>`}
+      <button class="btn-outline-sm" onclick="abrirMenuOpcoesOsRef()" title="Mais opções">⋮</button>
     </div>`;
 }
 async function copiarLinkAssinaturaOsRef(link) {
@@ -1945,6 +1958,284 @@ async function excluirOsRefrigeracao(id) {
     await api('/api/os-refrigeracao/' + id, { method: 'DELETE' });
     ir('os-refrigeracao-lista');
   } catch (e) { alert(e.message); }
+}
+
+// ---- modal compartilhado pelos dois menus de ação (mesma técnica de mostrarModalNovoClienteOsRef) ----
+function fecharModalOsRefAcao() {
+  const modal = document.getElementById('modal-os-ref-acao');
+  if (modal) modal.classList.remove('show');
+}
+function abrirModalOsRefAcao(tituloHtml, corpoHtml) {
+  let modal = document.getElementById('modal-os-ref-acao');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-os-ref-acao';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalOsRefAcao(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `<div class="modal-card" style="max-width:420px;">${tituloHtml}${corpoHtml}</div>`;
+}
+function osRefBotaoAcao(texto, subtitulo, onclick, cor) {
+  return `
+    <button class="btn-outline-sm" style="width:100%; text-align:left; padding:12px; margin-bottom:8px; ${cor ? `color:${cor}; border-color:${cor};` : ''}" onclick="${onclick}">
+      ${esc(texto)}${subtitulo ? `<br><span style="font-weight:400; font-size:12px; color:var(--ink-soft);">${esc(subtitulo)}</span>` : ''}
+    </button>`;
+}
+
+// pedido do usuário: "no menu dos 3 pontinhos colocar status" — Pendente/Cancelada (muda só o
+// status, ver PUT /api/os-refrigeracao/:id/status) + Excluir (saiu de botão próprio pra cá).
+function abrirMenuOpcoesOsRef() {
+  const os = window._osRefDetalheAtual;
+  if (!os) return;
+  const corpo =
+    osRefBotaoAcao('🕒 Pendente', null, `alterarStatusOsRef(${os.id}, 'pendente')`) +
+    osRefBotaoAcao('✕ Cancelada', null, `alterarStatusOsRef(${os.id}, 'cancelada')`) +
+    osRefBotaoAcao('🗑️ Excluir', null, `fecharModalOsRefAcao(); excluirOsRefrigeracao(${os.id});`, 'var(--red, #B3453A)');
+  abrirModalOsRefAcao(`<h3>OS #${os.id}</h3>`, corpo);
+}
+async function alterarStatusOsRef(id, status) {
+  try {
+    await api(`/api/os-refrigeracao/${id}/status`, { method: 'PUT', body: { status } });
+    fecharModalOsRefAcao();
+    if (window._osRefDetalheId === id) renderOsRefrigeracaoDetalhe();
+  } catch (e) { alert(e.message); }
+}
+
+// pedido do usuário: "depois que a OS é assinada pelo cliente fica disponível esse submenu em
+// enviar" (referência: app concorrente iClima — Enviar PDF / Enviar como imagem / Baixar PDF).
+// Antes de assinada, "Enviar" continua mandando o link de assinatura (ver botão acima).
+function abrirMenuEnviarOsRef() {
+  const os = window._osRefDetalheAtual;
+  if (!os) return;
+  const corpo =
+    `<p style="color:var(--ink-soft); font-size:13px; margin:-6px 0 14px;">Ordem de Serviço #${os.id} — ${esc(os.cliente_nome || '')}</p>` +
+    osRefBotaoAcao('📄 Enviar PDF', 'Anexa o arquivo na conversa, sem link junto', `fecharModalOsRefAcao(); enviarOsRefPdf(${os.id});`) +
+    osRefBotaoAcao('🖼️ Enviar como imagem', 'O cliente vê o documento direto no WhatsApp', `fecharModalOsRefAcao(); enviarOsRefImagem(${os.id});`) +
+    osRefBotaoAcao('⬇️ Baixar PDF', 'Salva no aparelho para enviar depois', `fecharModalOsRefAcao(); baixarOsRefPdf(${os.id});`);
+  abrirModalOsRefAcao('<h3>Enviar documento</h3>', corpo);
+}
+
+function nomeArquivoOsRef(os) {
+  return `OS-${os.id}-${String(os.cliente_nome || 'cliente').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-')}`;
+}
+
+// PDF de 2 páginas (Atendimento/Equipamento/Serviços/Materiais, depois Resumo Financeiro/Garantia/
+// Assinaturas) — mesma convenção de cabeçalho/rodapé/tabela já usada em gerarPdfProposta (PDF_COR,
+// carregarLogoVariantes, limparPdf, fmtMoeda).
+function montarDocOsRefrigeracaoPdf(os, logo) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Ordem de Serviço ${os.id}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  const eq = os.equipamento || {};
+  const statusLabel = OS_REF_STATUS_LABEL[os.status] || 'Concluída';
+  const statusCor = os.status === 'cancelada' ? PDF_COR.red : os.status === 'pendente' ? PDF_COR.amber : PDF_COR.green;
+
+  function cabecalho() {
+    const y0 = margem;
+    if (logo && logo.header) doc.addImage(logo.header, 'PNG', margem, y0 - 8, 90, 32);
+    else { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 10); }
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Ordem de Serviço', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(`Nº ${os.id} · ${fmtDataOsRef(os.criado_em)}`, pageW - margem, y0 + 14, { align: 'right' });
+    doc.setFillColor(...statusCor); doc.roundedRect(pageW - margem - 76, y0 + 20, 76, 16, 3, 3, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text(statusLabel.toUpperCase(), pageW - margem - 38, y0 + 31, { align: 'center' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function rodape(pagina, total) {
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, pageH - 36, pageW - margem, pageH - 36);
+    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem, y);
+    return y + 16;
+  }
+  function campo(x, y, label, valor) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), x, y);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+
+  // ---- página 1 ----
+  let y = cabecalho();
+  y = secaoTitulo(y, 'ATENDIMENTO');
+  campo(margem, y, 'Cliente', os.cliente_nome); campo(margem + largura / 2, y, 'Técnico', os.tecnico_nome); y += 26;
+  campo(margem, y, 'Abertura', fmtDataOsRef(os.criado_em)); campo(margem + largura / 2, y, 'Conclusão', os.assinado_cliente_em ? fmtDataOsRef(os.assinado_cliente_em) : '—'); y += 30;
+
+  y = secaoTitulo(y, 'EQUIPAMENTO');
+  campo(margem, y, 'Tipo', eq.tipo); campo(margem + largura / 2, y, 'Marca', eq.marca); y += 26;
+  campo(margem, y, 'Modelo', eq.modelo); campo(margem + largura / 2, y, 'BTU', eq.btu); y += 30;
+
+  y = secaoTitulo(y, 'SERVIÇOS REALIZADOS');
+  if (os.problema_relatado) { campo(margem, y, 'Problema relatado', os.problema_relatado); y += 26; }
+  if (os.diagnostico) { campo(margem, y, 'Diagnóstico', os.diagnostico); y += 26; }
+  if ((os.servicos || []).length) { campo(margem, y, 'Serviços executados', os.servicos.map((s) => s.descricao).join(', ')); y += 30; }
+
+  if ((os.materiais || []).length) {
+    y = secaoTitulo(y, 'MATERIAIS');
+    doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('ITEM', margem + 8, y + 12);
+    doc.text('QTD', margem + largura * 0.55, y + 12);
+    doc.text('VALOR UNIT.', margem + largura * 0.68, y + 12);
+    doc.text('SUBTOTAL', margem + largura * 0.86, y + 12);
+    y += 18;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); doc.setFontSize(8.5);
+    os.materiais.forEach((m, i) => {
+      if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+      doc.text(limparPdf(m.nome), margem + 8, y + 11);
+      doc.text(String(m.quantidade), margem + largura * 0.55, y + 11);
+      doc.text(fmtMoeda(m.valor_unitario), margem + largura * 0.68, y + 11);
+      doc.text(fmtMoeda(m.quantidade * m.valor_unitario), margem + largura * 0.86, y + 11);
+      y += 16;
+    });
+  }
+  rodape(1, 2);
+
+  // ---- página 2 ----
+  doc.addPage();
+  y = cabecalho();
+  y = secaoTitulo(y, 'RESUMO FINANCEIRO');
+  [['Materiais', os.total_materiais], ['Serviços', os.total_servicos], ['Mão de obra', os.mao_de_obra], os.desconto_aplicado ? ['Desconto', -os.desconto_aplicado] : null]
+    .filter(Boolean)
+    .forEach(([label, valor]) => {
+      doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(label, margem, y);
+      doc.setTextColor(...PDF_COR.ink);
+      doc.text((valor < 0 ? '- ' : '') + fmtMoeda(Math.abs(valor)), pageW - margem, y, { align: 'right' });
+      y += 16;
+    });
+  y += 6;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 28, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
+  doc.text('TOTAL', margem + 10, y + 19);
+  doc.text(fmtMoeda(os.total), pageW - margem - 10, y + 19, { align: 'right' });
+  y += 46;
+
+  if (os.garantia_dias) {
+    doc.setFillColor(...PDF_COR.greenBg); doc.rect(margem, y, largura, 22, 'F');
+    doc.setFontSize(9.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.green);
+    doc.text(`Garantia válida até ${garantiaAteOsRef(os.criado_em, os.garantia_dias)}`, margem + 10, y + 15);
+    y += 38;
+  }
+
+  y = secaoTitulo(y, 'ASSINATURAS');
+  y += 4;
+  const largAssin = (largura - 20) / 2;
+  if (os.assinatura_tecnico_img) doc.addImage(os.assinatura_tecnico_img, 'PNG', margem, y, largAssin, 70);
+  if (os.assinatura_cliente_img) doc.addImage(os.assinatura_cliente_img, 'PNG', margem + largAssin + 20, y, largAssin, 70);
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+  doc.line(margem, y + 74, margem + largAssin, y + 74);
+  doc.line(margem + largAssin + 20, y + 74, margem + largAssin * 2 + 20, y + 74);
+  doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text('TÉCNICO RESPONSÁVEL', margem, y + 86);
+  doc.text('CLIENTE', margem + largAssin + 20, y + 86);
+  rodape(2, 2);
+
+  return doc;
+}
+
+async function baixarOsRefPdf(id) {
+  try {
+    const { os } = await api('/api/os-refrigeracao/' + id);
+    const logo = await carregarLogoVariantes();
+    montarDocOsRefrigeracaoPdf(os, logo).save(nomeArquivoOsRef(os) + '.pdf');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+}
+// mesmo mecanismo de compartilhamento nativo (Web Share API com arquivo anexado, fallback pra
+// baixar + abrir o WhatsApp com o texto) já usado em encaminharRelatorioManutencaoWhatsapp.
+async function enviarOsRefPdf(id) {
+  try {
+    const { os } = await api('/api/os-refrigeracao/' + id);
+    const logo = await carregarLogoVariantes();
+    const blob = montarDocOsRefrigeracaoPdf(os, logo).output('blob');
+    const nomeArquivo = nomeArquivoOsRef(os) + '.pdf';
+    const texto = `Ordem de Serviço #${os.id} — ${os.cliente_nome || ''}.`;
+    const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe o PDF que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar o PDF: ' + e.message); }
+}
+
+// "Enviar como imagem" (o cliente vê o documento direto no WhatsApp, sem precisar abrir um PDF) —
+// um resumo desenhado num canvas (mesma técnica do canvas de assinatura), não o PDF rasterizado.
+function gerarImagemOsRefrigeracao(os) {
+  const linhas = (os.materiais || []).length + (os.servicos || []).length;
+  const canvas = document.createElement('canvas');
+  const W = 720;
+  canvas.width = W; canvas.height = 420 + linhas * 24;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let y = 46;
+  ctx.fillStyle = '#0B2D4F'; ctx.font = 'bold 24px Arial, sans-serif';
+  ctx.fillText(`Ordem de Serviço #${os.id}`, 32, y);
+  ctx.font = '13px Arial, sans-serif'; ctx.fillStyle = '#667';
+  y += 24; ctx.fillText(fmtDataOsRef(os.criado_em), 32, y);
+  y += 20;
+  ctx.strokeStyle = '#D9E1E8'; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(W - 32, y); ctx.stroke();
+  y += 34;
+  function linha(label, valor) {
+    ctx.font = '13px Arial, sans-serif'; ctx.fillStyle = '#667'; ctx.textAlign = 'left'; ctx.fillText(label, 32, y);
+    ctx.font = '14px Arial, sans-serif'; ctx.fillStyle = '#17293A'; ctx.textAlign = 'right'; ctx.fillText(valor, W - 32, y);
+    ctx.textAlign = 'left';
+    y += 24;
+  }
+  const eq = os.equipamento || {};
+  linha('Cliente', os.cliente_nome || '—');
+  linha('Equipamento', [eq.tipo, eq.marca, eq.modelo].filter(Boolean).join(' ') || '—');
+  linha('Técnico', os.tecnico_nome || '—');
+  y += 10;
+  (os.materiais || []).forEach((m) => linha(`${m.nome} (${m.quantidade}x)`, fmtMoeda(m.quantidade * m.valor_unitario)));
+  (os.servicos || []).forEach((s) => linha(s.descricao, fmtMoeda(s.valor)));
+  linha('Mão de obra', fmtMoeda(os.mao_de_obra));
+  if (os.desconto_aplicado) linha('Desconto', '- ' + fmtMoeda(os.desconto_aplicado));
+  y += 4;
+  ctx.fillStyle = '#0B2D4F'; ctx.fillRect(32, y - 20, W - 64, 36);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('TOTAL', 48, y + 4);
+  ctx.textAlign = 'right'; ctx.fillText(fmtMoeda(os.total), W - 48, y + 4); ctx.textAlign = 'left';
+  y += 44;
+  if (os.assinatura_cliente_img) {
+    ctx.font = 'bold 13px Arial, sans-serif'; ctx.fillStyle = '#198754';
+    ctx.fillText('✓ Documento confirmado com ambas assinaturas', 32, y);
+  }
+  return canvas;
+}
+async function enviarOsRefImagem(id) {
+  try {
+    const { os } = await api('/api/os-refrigeracao/' + id);
+    const canvas = gerarImagemOsRefrigeracao(os);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const nomeArquivo = nomeArquivoOsRef(os) + '.png';
+    const texto = `Ordem de Serviço #${os.id} — ${os.cliente_nome || ''}.`;
+    const arquivo = new File([blob], nomeArquivo, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe a imagem que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar a imagem: ' + e.message); }
 }
 
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não

@@ -145,12 +145,28 @@ test('Ordens de Serviço (Refrigeração): gate por perfil, cliente próprio, CR
     assert.ok(criada.assinatura_tecnico_img.startsWith('data:image/png;base64,'));
     assert.equal(criada.assinatura_cliente_img, null);
     assert.ok(criada.token_assinatura);
+    // pedido do usuário: toda O.S. nasce "Concluída" (ver menu "⋮" — Pendente/Cancelada abaixo)
+    assert.equal(criada.status, 'concluida');
     const osId = criada.id;
 
     // GET detalhe
     const rDetalhe = await fetch(`${base}/api/os-refrigeracao/${osId}`, { headers: authAdmin });
     assert.equal(rDetalhe.status, 200);
     assert.equal((await rDetalhe.json()).os.total, 720);
+
+    // ---- pedido do usuário: menu "⋮" — mudar status (Pendente/Cancelada) ----
+    const negaStatusPerfil = await fetch(`${base}/api/os-refrigeracao/${osId}/status`, { method: 'PUT', headers: auth(tokenOutroPerfil), body: JSON.stringify({ status: 'pendente' }) });
+    assert.equal(negaStatusPerfil.status, 403);
+    const statusInvalido = await fetch(`${base}/api/os-refrigeracao/${osId}/status`, { method: 'PUT', headers: authAdmin, body: JSON.stringify({ status: 'em-andamento' }) });
+    assert.equal(statusInvalido.status, 400);
+    const rStatusPendente = await fetch(`${base}/api/os-refrigeracao/${osId}/status`, { method: 'PUT', headers: authAdmin, body: JSON.stringify({ status: 'pendente' }) });
+    assert.equal(rStatusPendente.status, 200);
+    assert.equal((await rStatusPendente.json()).os.status, 'pendente');
+    const rStatusCancelada = await fetch(`${base}/api/os-refrigeracao/${osId}/status`, { method: 'PUT', headers: authAdmin, body: JSON.stringify({ status: 'cancelada' }) });
+    assert.equal(rStatusCancelada.status, 200);
+    assert.equal((await rStatusCancelada.json()).os.status, 'cancelada');
+    // volta pra "concluida" pro resto do teste (lista/público abaixo não dependem de status)
+    await fetch(`${base}/api/os-refrigeracao/${osId}/status`, { method: 'PUT', headers: authAdmin, body: JSON.stringify({ status: 'concluida' }) });
 
     // lista: aparece, filtro "pendente_assinatura" também acha, "assinada" não acha ainda
     const { ordens: listaTodos } = await (await fetch(`${base}/api/os-refrigeracao`, { headers: authAdmin })).json();
