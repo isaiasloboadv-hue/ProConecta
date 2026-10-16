@@ -709,6 +709,7 @@ const MENUS_LABEL_POR_PAPEL = {
   suporte: {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
+    'orcamentos-refrigeracao': 'Orçamentos',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
@@ -731,6 +732,7 @@ const MENUS_LABEL_POR_PAPEL = {
   administrador: {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
+    'orcamentos-refrigeracao': 'Orçamentos',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda geral',
     'chat-admin': 'Chat',
@@ -782,6 +784,12 @@ const NAV = {
     // núcleo), com fluxo em etapas, cadastro de cliente próprio e assinatura do cliente por link
     // público (ver /api/os-refrigeracao* em server.js).
     { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
+    // pedido do usuário (referência: app concorrente iClima): terceiro atalho do perfil
+    // Refrigeração — Orçamentos, também construído do zero, reaproveitando só o cadastro de
+    // clientes de os_refrigeracao_clientes (mesma base da O.S. acima). Diferente da O.S., a
+    // assinatura do técnico é opcional/posterior ("Assinar agora" no detalhe) e o Enviar fica
+    // disponível já em Rascunho (ver orcamentoRefAssinavel/renderOrcamentoRefrigeracaoDetalhe).
+    { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
     // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — primeira
     // ferramenta: Gerador de Etiquetas (ver renderGeradorEtiquetas), também acessível a partir do
     // menu "⋮" de uma O.S. já criada (ver abrirMenuOpcoesOsRef), que pré-preenche os dados.
@@ -852,6 +860,7 @@ const NAV = {
     { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
     { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
     { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
+    { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
     { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
       { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
     ]},
@@ -1096,6 +1105,7 @@ const ICONE_MENU = {
   'atividades-diarias': '📋',
   'guia-diagnostico-rapido': '🧊',
   'os-refrigeracao': '🧾',
+  'orcamentos-refrigeracao': '📋',
   'ferramentas': '🧰',
 };
 
@@ -2039,13 +2049,33 @@ function nomeArquivoOsRef(os) {
   return `OS-${os.id}-${String(os.cliente_nome || 'cliente').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-')}`;
 }
 
+// pedido do usuário: "o logo da Nexor tem que ficar no meio centralizado desse espaço em
+// branco, igual o logo na página de login" — mesmo lockup do login (ver #authView em
+// index.html: ícone /logo.png em cima, "NEXOR"/"CONNECT" empilhados embaixo, mesmas cores de
+// .wordmark.stacked .pro/.conecta em style.css), só que com "Tecnologia" embaixo também.
+// Compartilhado entre todos os PDFs do perfil Refrigeração (O.S., Orçamento) — ver rodape() em
+// cada montarDoc*Pdf, que calcula centroX/centroY próprios e só chama esta função.
+function desenharCreditoNexorConnect(doc, logoNexor, centroX, centroY) {
+  // proporção ícone:texto igual à da página de login (.brand-mark-img 64px de altura pra
+  // .wordmark.stacked 28px de fonte, ver index.html/style.css — ≈2,3:1); ícone grande demais
+  // (44pt) ficava desproporcional ao nome "Nexor" — 30pt mantém a mesma proporção do login.
+  const tam = 30;
+  if (logoNexor) doc.addImage(logoNexor, 'PNG', centroX - tam / 2, centroY - tam - 8, tam, tam);
+  doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.setTextColor(...PDF_COR.blueBright);
+  doc.text('NEXOR', centroX, centroY + 4, { align: 'center' });
+  doc.setTextColor(...PDF_COR.navy);
+  doc.text('CONNECT', centroX, centroY + 17, { align: 'center' });
+  doc.setFont(undefined, 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text('Tecnologia', centroX, centroY + 28, { align: 'center' });
+}
+
 // PDF de 2 páginas (Atendimento/Equipamento/Serviços/Materiais, depois Resumo Financeiro/Garantia/
 // Assinaturas) — mesma convenção de cabeçalho/rodapé/tabela já usada em gerarPdfProposta (PDF_COR,
 // carregarLogoVariantes, limparPdf, fmtMoeda).
 // pedido do usuário: cabeçalho é a marca do CLIENTE (logo próprio se configurado, senão só o
 // nome — nunca o logo da Nexor); o rodapé da última página é que leva o crédito "Nexor Connect ·
-// Tecnologia" (ver logoClienteFlatHeader e creditoNexorConnect). `logoCliente` já vem pronto
-// (data: URI achatada em branco) ou null — ver chamadores (baixarOsRefPdf/enviarOsRefPdf).
+// Tecnologia" (ver logoClienteFlatHeader e desenharCreditoNexorConnect). `logoCliente` já vem
+// pronto (data: URI achatada em branco) ou null — ver chamadores (baixarOsRefPdf/enviarOsRefPdf).
 function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -2073,24 +2103,6 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
-  // pedido do usuário: "o logo da Nexor tem que ficar no meio centralizado desse espaço em
-  // branco, igual o logo na página de login" — mesmo lockup do login (ver #authView em
-  // index.html: ícone /logo.png em cima, "NEXOR"/"CONNECT" empilhados embaixo, mesmas cores de
-  // .wordmark.stacked .pro/.conecta em style.css), só que com "Tecnologia" embaixo também, e
-  // centralizado no espaço que sobra no fim da ÚLTIMA página ("no final da fila").
-  function creditoNexorConnect(centroX, centroY) {
-    // proporção ícone:texto igual à da página de login (.brand-mark-img 64px de altura pra
-    // .wordmark.stacked 28px de fonte, ver index.html/style.css — ≈2,3:1); ícone grande demais
-    // (44pt) ficava desproporcional ao nome "Nexor" — 30pt mantém a mesma proporção do login.
-    const tam = 30;
-    if (logoNexor) doc.addImage(logoNexor, 'PNG', centroX - tam / 2, centroY - tam - 8, tam, tam);
-    doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.setTextColor(...PDF_COR.blueBright);
-    doc.text('NEXOR', centroX, centroY + 4, { align: 'center' });
-    doc.setTextColor(...PDF_COR.navy);
-    doc.text('CONNECT', centroX, centroY + 17, { align: 'center' });
-    doc.setFont(undefined, 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
-    doc.text('Tecnologia', centroX, centroY + 28, { align: 'center' });
-  }
   function rodape(pagina, total, yConteudoFinal) {
     const yLinha = pageH - 40;
     doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
@@ -2098,10 +2110,10 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
       doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
       // centraliza no meio do espaço em branco que sobra entre o fim do conteúdo e essa linha —
-      // com limites (nunca cola no conteúdo nem na linha) pra OS com pouco ou muito conteúdo.
+      // com limites (nunca cola no conteúdo nem na linha) pra pouco ou muito conteúdo.
       const topo = yConteudoFinal || margem;
       const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
-      creditoNexorConnect(pageW / 2, centroY);
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, centroY);
     } else {
       doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
@@ -2277,6 +2289,834 @@ async function enviarOsRefImagem(id) {
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     const nomeArquivo = nomeArquivoOsRef(os) + '.png';
     const texto = `Ordem de Serviço #${os.id} — ${os.cliente_nome || ''}.`;
+    const arquivo = new File([blob], nomeArquivo, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe a imagem que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar a imagem: ' + e.message); }
+}
+
+// ===== Orçamentos (perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, 3º dos 6 atalhos) — reaproveita só o
+// cadastro de clientes de os_refrigeracao_clientes (mesma base da O.S. acima, ver comentário em
+// "Criar versões novas e específicas"). Fluxo em 3 etapas (cliente -> serviços e materiais ->
+// detalhes), DIFERENTE da O.S. em dois pontos: a assinatura do técnico é opcional/posterior
+// ("Assinar agora" no detalhe, não exigida na criação) e "Enviar" fica disponível já em Rascunho
+// (não só depois de assinado). ATENÇÃO (pedido explícito do usuário, apontando um defeito do app
+// de referência): o PDF e o link público de aprovação SEMPRE mostram o detalhamento completo —
+// serviços, materiais, mão de obra, desconto e condições de pagamento — nunca só o total, como o
+// iClima faz (ver orcamentoRefrigeracaoResumoPublico em server.js e montarDocOrcamentoRefrigeracaoPdf
+// abaixo).
+function orcamentoRefFormVazio() {
+  return {
+    cliente_id: null, cliente_nome: '',
+    titulo: '', descricao_cliente: '', diagnostico_tecnico: '', descricao_geral: '',
+    servicos: [], materiais: [],
+    mao_de_obra: 0, desconto_tipo: 'valor', desconto_valor: 0,
+    condicoes_pagamento: '', validade_dias: 15, observacoes: '',
+  };
+}
+window._orcamentoRefForm = orcamentoRefFormVazio();
+window._orcamentoRefEtapa = 1;
+window._orcamentoRefEditandoId = null;
+
+// mesmas funções de total/rótulo/formatação de data da O.S. (osRefLinha/fmtMoeda/fmtDataOsRef) são
+// reaproveitadas aqui de propósito — são utilitários genéricos de UI, não dado específico da O.S.
+function orcamentoRefTotais(form) {
+  const totalMateriais = form.materiais.reduce((s, m) => s + (Number(m.quantidade) || 0) * (Number(m.valor_unitario) || 0), 0);
+  const totalServicos = form.servicos.reduce((s, sv) => s + (Number(sv.valor) || 0), 0);
+  const maoDeObra = Number(form.mao_de_obra) || 0;
+  const subtotal = totalMateriais + totalServicos + maoDeObra;
+  const descontoBruto = form.desconto_tipo === 'percentual' ? subtotal * ((Number(form.desconto_valor) || 0) / 100) : (Number(form.desconto_valor) || 0);
+  const desconto = Math.max(0, Math.min(descontoBruto, subtotal));
+  return { totalMateriais, totalServicos, maoDeObra, subtotal, desconto, total: subtotal - desconto };
+}
+function orcamentoRefTotalBoxHtml(tot) {
+  return `
+    ${osRefLinha('Materiais', fmtMoeda(tot.totalMateriais))}
+    ${osRefLinha('Serviços', fmtMoeda(tot.totalServicos))}
+    ${osRefLinha('Mão de obra', fmtMoeda(tot.maoDeObra))}
+    ${tot.desconto ? osRefLinha('Desconto', '- ' + fmtMoeda(tot.desconto)) : ''}
+    <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; border-top:1px solid var(--line); margin-top:6px; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(tot.total)}</span></div>`;
+}
+function validadeAteOrcamentoRef(criadoEm, dias) {
+  if (!criadoEm) return '—';
+  const d = new Date(criadoEm);
+  if (isNaN(d.getTime())) return '—';
+  d.setDate(d.getDate() + (Number(dias) || 0));
+  return d.toLocaleDateString('pt-BR');
+}
+function linkAprovacaoOrcamentoRef(token) {
+  return `${window.location.origin}/os-refrigeracao-orcamento-assinar.html?token=${token}`;
+}
+const ORCAMENTO_REF_STATUS_LABEL = { rascunho: 'Rascunho', aprovado: 'Aprovado', cancelado: 'Cancelado' };
+const ORCAMENTO_REF_STATUS_ESTILO = {
+  rascunho: 'background:var(--amber-pale, #FEF3C7); color:var(--amber, #B45309);',
+  aprovado: 'background:var(--green-pale, #DEF7EC); color:var(--green);',
+  cancelado: 'background:var(--red-pale, #FBE1E1); color:var(--red, #B3453A);',
+};
+function orcamentoRefStatusBadgeHtml(status) {
+  return `<span class="tag" style="${ORCAMENTO_REF_STATUS_ESTILO[status] || ORCAMENTO_REF_STATUS_ESTILO.rascunho}">${ORCAMENTO_REF_STATUS_LABEL[status] || 'Rascunho'}</span>`;
+}
+
+function abrirOrcamentoRefrigeracaoNovo() {
+  window._orcamentoRefForm = orcamentoRefFormVazio();
+  window._orcamentoRefEtapa = 1;
+  window._orcamentoRefEditandoId = null;
+  ir('orcamentos-refrigeracao-nova');
+}
+async function abrirOrcamentoRefrigeracaoEditar(id) {
+  const { orcamento } = await api('/api/os-refrigeracao-orcamentos/' + id);
+  window._orcamentoRefForm = {
+    cliente_id: orcamento.cliente_id, cliente_nome: orcamento.cliente_nome || '',
+    titulo: orcamento.titulo || '', descricao_cliente: orcamento.descricao_cliente || '',
+    diagnostico_tecnico: orcamento.diagnostico_tecnico || '', descricao_geral: orcamento.descricao_geral || '',
+    servicos: (orcamento.servicos || []).map((s) => ({ ...s })), materiais: (orcamento.materiais || []).map((mt) => ({ ...mt })),
+    mao_de_obra: orcamento.mao_de_obra || 0, desconto_tipo: orcamento.desconto_tipo || 'valor', desconto_valor: orcamento.desconto_valor || 0,
+    condicoes_pagamento: orcamento.condicoes_pagamento || '', validade_dias: orcamento.validade_dias != null ? orcamento.validade_dias : 15,
+    observacoes: orcamento.observacoes || '',
+  };
+  window._orcamentoRefEtapa = 1;
+  window._orcamentoRefEditandoId = id;
+  ir('orcamentos-refrigeracao-nova');
+}
+function orcamentoRefProgresso() { return (window._orcamentoRefEtapa / 3) * 100; }
+function orcamentoRefCabecalhoEtapa(subtitulo) {
+  return `
+    <div class="page-head"><h1>${window._orcamentoRefEditandoId ? 'Editar orçamento' : 'Novo orçamento'}</h1><p>${esc(subtitulo)}</p></div>
+    <div style="height:8px; border-radius:4px; background:var(--line); overflow:hidden; margin-bottom:18px; max-width:560px;">
+      <div style="height:100%; width:${orcamentoRefProgresso()}%; background:var(--blue); transition:width .2s;"></div>
+    </div>`;
+}
+
+async function renderOrcamentoRefrigeracaoNova() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Orçamentos (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  const etapa = window._orcamentoRefEtapa;
+  if (etapa === 1) return desenharOrcamentoRefEtapaCliente();
+  if (etapa === 2) return desenharOrcamentoRefEtapaServico();
+  return desenharOrcamentoRefEtapaDetalhes();
+}
+
+// ---- etapa 1: cliente (mesma técnica de busca/criação da O.S., mesma base de clientes) ----
+function desenharOrcamentoRefEtapaCliente() {
+  const main = document.getElementById('main');
+  const f = window._orcamentoRefForm;
+  main.innerHTML = orcamentoRefCabecalhoEtapa('Cliente') + `
+    <div class="panel" style="max-width:560px;">
+      ${f.cliente_id ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; border:1px solid var(--line); border-radius:8px;">
+          <strong>${esc(f.cliente_nome)}</strong>
+          <button class="btn-outline-sm" onclick="trocarClienteOrcamentoRef()">Trocar</button>
+        </div>` : `
+        <div style="display:flex; gap:8px;">
+          <input id="orcamento-ref-busca-cliente" placeholder="Buscar cliente" oninput="buscarClientesOrcamentoRef(this.value)" style="flex:1;">
+          <button class="btn-outline-sm" onclick="mostrarModalNovoClienteOrcamentoRef()" title="Novo cliente">+ Cliente</button>
+        </div>
+        <div id="orcamento-ref-lista-clientes" style="margin-top:12px;"><div class="empty">Digite para buscar.</div></div>`}
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:10px; max-width:560px; margin-top:16px;">
+      <button class="btn btn-primary btn-sm" ${f.cliente_id ? '' : 'disabled'} onclick="window._orcamentoRefEtapa=2; renderOrcamentoRefrigeracaoNova();">Próximo →</button>
+    </div>`;
+}
+function trocarClienteOrcamentoRef() {
+  window._orcamentoRefForm.cliente_id = null;
+  window._orcamentoRefForm.cliente_nome = '';
+  desenharOrcamentoRefEtapaCliente();
+}
+let _orcamentoRefBuscaClienteTimer = null;
+window._orcamentoRefClientesCache = [];
+function buscarClientesOrcamentoRef(q) {
+  clearTimeout(_orcamentoRefBuscaClienteTimer);
+  _orcamentoRefBuscaClienteTimer = setTimeout(async () => {
+    const alvo = document.getElementById('orcamento-ref-lista-clientes');
+    if (!alvo) return;
+    if (!q || !q.trim()) { alvo.innerHTML = '<div class="empty">Digite para buscar.</div>'; return; }
+    const { clientes } = await api('/api/os-refrigeracao-clientes?q=' + encodeURIComponent(q.trim()));
+    window._orcamentoRefClientesCache = clientes;
+    alvo.innerHTML = clientes.length ? clientes.map((c, i) => `
+      <div style="padding:8px 4px; border-bottom:1px solid var(--line); cursor:pointer;" onclick="selecionarClienteOrcamentoRef(${i})">
+        <strong>${esc(c.nome)}</strong>${c.telefone ? ` — ${esc(c.telefone)}` : ''}
+      </div>`).join('') : '<div class="empty">Nenhum cliente encontrado.</div>';
+  }, 300);
+}
+function selecionarClienteOrcamentoRef(i) {
+  const c = window._orcamentoRefClientesCache[i];
+  window._orcamentoRefForm.cliente_id = c.id;
+  window._orcamentoRefForm.cliente_nome = c.nome;
+  desenharOrcamentoRefEtapaCliente();
+}
+function fecharModalNovoClienteOrcamentoRef() {
+  const modal = document.getElementById('modal-orcamento-ref-cliente');
+  if (modal) modal.classList.remove('show');
+}
+function mostrarModalNovoClienteOrcamentoRef() {
+  let modal = document.getElementById('modal-orcamento-ref-cliente');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-orcamento-ref-cliente';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Novo cliente</h3>
+      <div class="field"><label>Nome *</label><input id="orcamento-ref-nc-nome"></div>
+      <div class="field"><label>Telefone</label><input id="orcamento-ref-nc-telefone"></div>
+      <div class="field"><label>Email</label><input id="orcamento-ref-nc-email" type="email"></div>
+      <div class="field"><label>CPF/CNPJ</label><input id="orcamento-ref-nc-cpf"></div>
+      <div class="field"><label>Endereço</label><input id="orcamento-ref-nc-endereco"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="fecharModalNovoClienteOrcamentoRef()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarNovoClienteOrcamentoRef()">Criar cliente</button>
+      </div>
+    </div>`;
+}
+async function salvarNovoClienteOrcamentoRef() {
+  const nome = document.getElementById('orcamento-ref-nc-nome').value.trim();
+  if (!nome) return alert('Informe o nome do cliente.');
+  try {
+    const { cliente } = await api('/api/os-refrigeracao-clientes', { method: 'POST', body: {
+      nome, telefone: document.getElementById('orcamento-ref-nc-telefone').value,
+      email: document.getElementById('orcamento-ref-nc-email').value,
+      cpf_cnpj: document.getElementById('orcamento-ref-nc-cpf').value,
+      endereco: document.getElementById('orcamento-ref-nc-endereco').value,
+    } });
+    fecharModalNovoClienteOrcamentoRef();
+    window._orcamentoRefForm.cliente_id = cliente.id;
+    window._orcamentoRefForm.cliente_nome = cliente.nome;
+    desenharOrcamentoRefEtapaCliente();
+  } catch (e) { alert(e.message); }
+}
+
+// ---- etapa 2: serviços e materiais (+ condições de pagamento) ----
+function desenharOrcamentoRefEtapaServico() {
+  const main = document.getElementById('main');
+  const f = window._orcamentoRefForm;
+  main.innerHTML = orcamentoRefCabecalhoEtapa('Serviços e Materiais') + `
+    <div class="panel" style="max-width:560px;">
+      <h3 style="margin-top:0;">Serviços</h3>
+      <div id="orcamento-ref-servicos-lista">${desenharListaServicosOrcamentoRef()}</div>
+      <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+        <input id="orcamento-ref-novo-servico-desc" placeholder="Descrição do serviço" style="flex:2; min-width:140px;">
+        <input id="orcamento-ref-novo-servico-valor" type="number" step="0.01" placeholder="R$" style="flex:1; min-width:80px;">
+        <button class="btn-outline-sm" onclick="adicionarServicoOrcamentoRef()">+</button>
+      </div>
+      <h3 style="margin-top:16px;">Materiais</h3>
+      <div id="orcamento-ref-materiais-lista">${desenharListaMateriaisOrcamentoRef()}</div>
+      <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+        <input id="orcamento-ref-novo-material-nome" placeholder="Material" style="flex:2; min-width:120px;">
+        <input id="orcamento-ref-novo-material-qtd" type="number" value="1" min="1" style="flex:0.6; min-width:60px;">
+        <input id="orcamento-ref-novo-material-valor" type="number" step="0.01" placeholder="R$" style="flex:1; min-width:80px;">
+        <button class="btn-outline-sm" onclick="adicionarMaterialOrcamentoRef()">+</button>
+      </div>
+      <div class="field" style="margin-top:16px;"><label>Mão de obra (R$)</label><input id="orcamento-ref-mao-de-obra" type="number" step="0.01" value="${f.mao_de_obra || ''}" oninput="atualizarTotalOrcamentoRef()"></div>
+      <div class="field"><label>Desconto</label>
+        <div style="display:flex; gap:8px;">
+          <select id="orcamento-ref-desconto-tipo" style="flex:0.5;" onchange="atualizarTotalOrcamentoRef()">
+            <option value="valor" ${f.desconto_tipo === 'valor' ? 'selected' : ''}>R$</option>
+            <option value="percentual" ${f.desconto_tipo === 'percentual' ? 'selected' : ''}>%</option>
+          </select>
+          <input id="orcamento-ref-desconto-valor" type="number" step="0.01" value="${f.desconto_valor || ''}" placeholder="Ex: 50,00" style="flex:1;" oninput="atualizarTotalOrcamentoRef()">
+        </div>
+      </div>
+      <div class="field"><label>Condições de pagamento</label><textarea id="orcamento-ref-condicoes" rows="2" placeholder="Ex: 50% de entrada, 50% na conclusão">${esc(f.condicoes_pagamento)}</textarea></div>
+      <div class="panel" style="background:var(--gray-50, #F4F6FA); margin-top:10px;" id="orcamento-ref-total-box">${orcamentoRefTotalBoxHtml(orcamentoRefTotais(f))}</div>
+    </div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._orcamentoRefEtapa=1; renderOrcamentoRefrigeracaoNova();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="avancarOrcamentoRefServico()">Próximo →</button>
+    </div>`;
+}
+function desenharListaServicosOrcamentoRef() {
+  const f = window._orcamentoRefForm;
+  if (!f.servicos.length) return '';
+  return f.servicos.map((s, i) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+      <span>${esc(s.descricao)}</span>
+      <span style="display:flex; align-items:center; gap:8px;">${fmtMoeda(s.valor)} <button class="btn-outline-sm" style="padding:2px 8px; font-size:11px;" onclick="removerServicoOrcamentoRef(${i})">Excluir</button></span>
+    </div>`).join('');
+}
+function adicionarServicoOrcamentoRef() {
+  const descEl = document.getElementById('orcamento-ref-novo-servico-desc');
+  const valorEl = document.getElementById('orcamento-ref-novo-servico-valor');
+  const desc = descEl.value.trim();
+  if (!desc) return;
+  window._orcamentoRefForm.servicos.push({ descricao: desc, valor: Number(valorEl.value) || 0 });
+  descEl.value = ''; valorEl.value = '';
+  document.getElementById('orcamento-ref-servicos-lista').innerHTML = desenharListaServicosOrcamentoRef();
+  atualizarTotalOrcamentoRef();
+}
+function removerServicoOrcamentoRef(i) {
+  window._orcamentoRefForm.servicos.splice(i, 1);
+  document.getElementById('orcamento-ref-servicos-lista').innerHTML = desenharListaServicosOrcamentoRef();
+  atualizarTotalOrcamentoRef();
+}
+function desenharListaMateriaisOrcamentoRef() {
+  const f = window._orcamentoRefForm;
+  if (!f.materiais.length) return '';
+  return f.materiais.map((m, i) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+      <span>${esc(m.nome)}<br><span style="font-size:12px; color:var(--ink-soft);">${m.quantidade}x ${fmtMoeda(m.valor_unitario)}</span></span>
+      <span style="display:flex; align-items:center; gap:8px;">${fmtMoeda(m.quantidade * m.valor_unitario)} <button class="btn-outline-sm" style="padding:2px 8px; font-size:11px;" onclick="removerMaterialOrcamentoRef(${i})">Excluir</button></span>
+    </div>`).join('');
+}
+function adicionarMaterialOrcamentoRef() {
+  const nomeEl = document.getElementById('orcamento-ref-novo-material-nome');
+  const qtdEl = document.getElementById('orcamento-ref-novo-material-qtd');
+  const valorEl = document.getElementById('orcamento-ref-novo-material-valor');
+  const nome = nomeEl.value.trim();
+  if (!nome) return;
+  window._orcamentoRefForm.materiais.push({ nome, quantidade: Number(qtdEl.value) || 1, valor_unitario: Number(valorEl.value) || 0 });
+  nomeEl.value = ''; qtdEl.value = '1'; valorEl.value = '';
+  document.getElementById('orcamento-ref-materiais-lista').innerHTML = desenharListaMateriaisOrcamentoRef();
+  atualizarTotalOrcamentoRef();
+}
+function removerMaterialOrcamentoRef(i) {
+  window._orcamentoRefForm.materiais.splice(i, 1);
+  document.getElementById('orcamento-ref-materiais-lista').innerHTML = desenharListaMateriaisOrcamentoRef();
+  atualizarTotalOrcamentoRef();
+}
+function atualizarTotalOrcamentoRef() {
+  const f = window._orcamentoRefForm;
+  f.mao_de_obra = Number(document.getElementById('orcamento-ref-mao-de-obra').value) || 0;
+  f.desconto_tipo = document.getElementById('orcamento-ref-desconto-tipo').value;
+  f.desconto_valor = Number(document.getElementById('orcamento-ref-desconto-valor').value) || 0;
+  const box = document.getElementById('orcamento-ref-total-box');
+  if (box) box.innerHTML = orcamentoRefTotalBoxHtml(orcamentoRefTotais(f));
+}
+function avancarOrcamentoRefServico() {
+  const f = window._orcamentoRefForm;
+  f.mao_de_obra = Number(document.getElementById('orcamento-ref-mao-de-obra').value) || 0;
+  f.desconto_tipo = document.getElementById('orcamento-ref-desconto-tipo').value;
+  f.desconto_valor = Number(document.getElementById('orcamento-ref-desconto-valor').value) || 0;
+  f.condicoes_pagamento = document.getElementById('orcamento-ref-condicoes').value;
+  if (!f.servicos.length && !f.materiais.length) { alert('Adicione ao menos um serviço ou material.'); return; }
+  window._orcamentoRefEtapa = 3;
+  renderOrcamentoRefrigeracaoNova();
+}
+
+// ---- etapa 3: detalhes (título/descrições/validade) ----
+function desenharOrcamentoRefEtapaDetalhes() {
+  const main = document.getElementById('main');
+  const f = window._orcamentoRefForm;
+  const tot = orcamentoRefTotais(f);
+  main.innerHTML = orcamentoRefCabecalhoEtapa('Detalhes') + `
+    <div class="panel" style="max-width:560px;">
+      ${osRefLinha('Cliente', esc(f.cliente_nome))}
+      <div style="display:flex; justify-content:space-between; font-weight:800; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(tot.total)}</span></div>
+    </div>
+    <div class="panel" style="max-width:560px;">
+      <div class="field"><label>Título do orçamento *</label><input id="orcamento-ref-titulo" value="${esc(f.titulo)}" placeholder="Ex: Instalação de ar-condicionado Split 12000 BTU"></div>
+      <div class="field"><label>O que o cliente relatou</label><textarea id="orcamento-ref-descricao-cliente" rows="2">${esc(f.descricao_cliente)}</textarea></div>
+      <div class="field"><label>Diagnóstico técnico</label><textarea id="orcamento-ref-diagnostico" rows="2">${esc(f.diagnostico_tecnico)}</textarea></div>
+      <div class="field"><label>Descrição geral</label><textarea id="orcamento-ref-descricao-geral" rows="2">${esc(f.descricao_geral)}</textarea></div>
+      <div class="field"><label>Validade (dias)</label><input id="orcamento-ref-validade" type="number" value="${f.validade_dias}"></div>
+      <div class="field"><label>Observações</label><textarea id="orcamento-ref-observacoes" rows="2">${esc(f.observacoes)}</textarea></div>
+    </div>
+    <div id="orcamento-ref-erro" class="auth-error hidden" style="max-width:560px; margin-top:10px;"></div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._orcamentoRefEtapa=2; renderOrcamentoRefrigeracaoNova();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="salvarOrcamentoRefrigeracao()">${window._orcamentoRefEditandoId ? 'Salvar orçamento' : '✓ Criar orçamento'}</button>
+    </div>`;
+}
+// diferente da O.S.: a assinatura do técnico NÃO é exigida aqui — é opcional/posterior, via
+// "Assinar agora" na tela de detalhe (ver abrirModalAssinarTecnicoOrcamentoRef mais abaixo).
+async function salvarOrcamentoRefrigeracao() {
+  const f = window._orcamentoRefForm;
+  const erroEl = document.getElementById('orcamento-ref-erro');
+  erroEl.classList.add('hidden');
+  f.titulo = document.getElementById('orcamento-ref-titulo').value;
+  f.descricao_cliente = document.getElementById('orcamento-ref-descricao-cliente').value;
+  f.diagnostico_tecnico = document.getElementById('orcamento-ref-diagnostico').value;
+  f.descricao_geral = document.getElementById('orcamento-ref-descricao-geral').value;
+  f.validade_dias = Number(document.getElementById('orcamento-ref-validade').value) || 0;
+  f.observacoes = document.getElementById('orcamento-ref-observacoes').value;
+  if (!f.titulo.trim()) { erroEl.textContent = 'Informe um título pro orçamento.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const corpo = {
+      cliente_id: f.cliente_id, titulo: f.titulo,
+      descricao_cliente: f.descricao_cliente, diagnostico_tecnico: f.diagnostico_tecnico, descricao_geral: f.descricao_geral,
+      servicos: f.servicos, materiais: f.materiais,
+      mao_de_obra: f.mao_de_obra, desconto_tipo: f.desconto_tipo, desconto_valor: f.desconto_valor,
+      condicoes_pagamento: f.condicoes_pagamento, validade_dias: f.validade_dias, observacoes: f.observacoes,
+    };
+    const resp = window._orcamentoRefEditandoId
+      ? await api('/api/os-refrigeracao-orcamentos/' + window._orcamentoRefEditandoId, { method: 'PUT', body: corpo })
+      : await api('/api/os-refrigeracao-orcamentos', { method: 'POST', body: corpo });
+    window._orcamentoRefDetalheId = resp.orcamento.id;
+    ir('orcamentos-refrigeracao-detalhe');
+  } catch (e) {
+    erroEl.textContent = e.message; erroEl.classList.remove('hidden');
+  }
+}
+
+// ---- lista ----
+async function renderOrcamentoRefrigeracaoLista() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Orçamentos (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <h1>Orçamentos</h1>
+      <button class="btn btn-primary btn-sm" onclick="abrirOrcamentoRefrigeracaoNovo()">+ Novo orçamento</button>
+    </div>
+    <div class="filtros-row">
+      <div class="field"><input id="orcamento-ref-busca" placeholder="Buscar por nº, cliente ou título" oninput="buscarOrcamentoRefrigeracaoLista()"></div>
+      <select id="orcamento-ref-filtro-status" onchange="buscarOrcamentoRefrigeracaoLista()">
+        <option value="">Todos</option>
+        <option value="rascunho">Rascunho</option>
+        <option value="aprovado">Aprovado</option>
+        <option value="cancelado">Cancelado</option>
+      </select>
+    </div>
+    <div id="orcamento-ref-lista" style="margin-top:12px;"><div class="empty">Carregando...</div></div>`;
+  await carregarOrcamentoRefrigeracaoLista();
+}
+let _orcamentoRefBuscaListaTimer = null;
+function buscarOrcamentoRefrigeracaoLista() {
+  clearTimeout(_orcamentoRefBuscaListaTimer);
+  _orcamentoRefBuscaListaTimer = setTimeout(carregarOrcamentoRefrigeracaoLista, 300);
+}
+async function carregarOrcamentoRefrigeracaoLista() {
+  const buscaEl = document.getElementById('orcamento-ref-busca');
+  const statusEl = document.getElementById('orcamento-ref-filtro-status');
+  const params = new URLSearchParams();
+  if (buscaEl && buscaEl.value) params.set('q', buscaEl.value);
+  if (statusEl && statusEl.value) params.set('status', statusEl.value);
+  const { orcamentos } = await api('/api/os-refrigeracao-orcamentos?' + params.toString());
+  const alvo = document.getElementById('orcamento-ref-lista');
+  if (!alvo) return;
+  alvo.innerHTML = orcamentos.length ? orcamentos.map((o) => `
+    <div class="panel" style="cursor:pointer; margin-bottom:10px;" onclick="abrirOrcamentoRefrigeracaoDetalhe(${o.id})">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div>
+          <span style="color:var(--blue); font-weight:700;">#${o.id}</span>
+          <span style="margin-left:8px;">${orcamentoRefStatusBadgeHtml(o.status)}</span>
+          <div style="margin-top:4px;"><strong>${esc(o.titulo || 'Orçamento')}</strong></div>
+          <div style="font-size:12.5px; color:var(--ink-soft);">${esc(o.cliente_nome || '—')} · ${fmtDataOsRef(o.criado_em)}</div>
+        </div>
+        <div style="font-weight:800; white-space:nowrap;">${fmtMoeda(o.total)}</div>
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhum orçamento encontrado.</div>';
+}
+function abrirOrcamentoRefrigeracaoDetalhe(id) {
+  window._orcamentoRefDetalheId = id;
+  ir('orcamentos-refrigeracao-detalhe');
+}
+
+// ---- detalhe ----
+async function renderOrcamentoRefrigeracaoDetalhe() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Orçamentos (Refrigeração) é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  const { orcamento } = await api('/api/os-refrigeracao-orcamentos/' + window._orcamentoRefDetalheId);
+  window._orcamentoRefDetalheAtual = orcamento;
+  const link = linkAprovacaoOrcamentoRef(orcamento.token_assinatura);
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(orcamento.titulo || 'Orçamento')} — #${orcamento.id}</h1>${orcamentoRefStatusBadgeHtml(orcamento.status)}</div>
+      <button class="btn-outline-sm" onclick="ir('orcamentos-refrigeracao-lista')">← Voltar</button>
+    </div>
+    <div class="panel">
+      <h3>Informações gerais</h3>
+      ${osRefLinha('Cliente', esc(orcamento.cliente_nome || '—'))}
+      ${osRefLinha('Técnico', esc(orcamento.tecnico_nome || '—'))}
+      ${osRefLinha('Data', fmtDataOsRef(orcamento.criado_em))}
+      ${osRefLinha('Válido até', validadeAteOrcamentoRef(orcamento.criado_em, orcamento.validade_dias))}
+    </div>
+    <div class="panel">
+      <h3>Descrição</h3>
+      ${orcamento.descricao_cliente ? `<div><strong>O que o cliente relatou</strong><p style="margin:4px 0 10px;">${esc(orcamento.descricao_cliente)}</p></div>` : ''}
+      ${orcamento.diagnostico_tecnico ? `<div><strong>Diagnóstico técnico</strong><p style="margin:4px 0 10px;">${esc(orcamento.diagnostico_tecnico)}</p></div>` : ''}
+      ${orcamento.descricao_geral ? `<div><strong>Descrição geral</strong><p style="margin:4px 0;">${esc(orcamento.descricao_geral)}</p></div>` : ''}
+      ${orcamento.observacoes ? `<div><strong>Observações</strong><p style="margin:4px 0;">${esc(orcamento.observacoes)}</p></div>` : ''}
+      ${!orcamento.descricao_cliente && !orcamento.diagnostico_tecnico && !orcamento.descricao_geral && !orcamento.observacoes ? '<div class="empty">Sem descrições adicionais.</div>' : ''}
+    </div>
+    <div class="panel">
+      <h3>Valores</h3>
+      ${(orcamento.materiais || []).map((m) => osRefLinha(`${m.nome} (${m.quantidade}x)`, fmtMoeda(m.quantidade * m.valor_unitario))).join('')}
+      ${(orcamento.servicos || []).map((s) => osRefLinha(s.descricao, fmtMoeda(s.valor))).join('')}
+      ${orcamento.mao_de_obra ? osRefLinha('Mão de obra', fmtMoeda(orcamento.mao_de_obra)) : ''}
+      ${orcamento.desconto_aplicado ? osRefLinha('Desconto', '- ' + fmtMoeda(orcamento.desconto_aplicado)) : ''}
+      <div style="display:flex; justify-content:space-between; font-weight:800; font-size:15px; border-top:1px solid var(--line); margin-top:6px; padding-top:6px;"><span>Total</span><span style="color:var(--blue);">${fmtMoeda(orcamento.total)}</span></div>
+    </div>
+    ${orcamento.condicoes_pagamento ? `<div class="panel"><h3>Condições de pagamento</h3><p style="margin:0;">${esc(orcamento.condicoes_pagamento)}</p></div>` : ''}
+    <div class="panel">
+      <h3>Assinaturas</h3>
+      <div style="margin-bottom:12px;">
+        <strong>Assinatura do técnico</strong> ${orcamento.assinatura_tecnico_img ? '<span style="color:var(--green);">✓</span>' : ''}
+        ${orcamento.assinatura_tecnico_img
+          ? `<br><img src="${orcamento.assinatura_tecnico_img}" style="max-width:220px; border:1px solid var(--line); border-radius:8px; margin-top:6px;">`
+          : `<div style="margin-top:8px;"><button class="btn-outline-sm" onclick="abrirModalAssinarTecnicoOrcamentoRef()">Assinar agora</button></div>`}
+      </div>
+      <div>
+        <strong>Assinatura do cliente</strong> ${orcamento.assinatura_cliente_img ? '<span style="color:var(--green);">✓</span>' : ''}
+        ${orcamento.assinatura_cliente_img
+          ? `<br><img src="${orcamento.assinatura_cliente_img}" style="max-width:220px; border:1px solid var(--line); border-radius:8px; margin-top:6px;">`
+          : orcamento.status === 'cancelado' ? '<div class="empty">Orçamento cancelado.</div>' : `
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+              <button class="btn-outline-sm" onclick="copiarLinkAssinaturaOsRef('${link}')">Copiar link</button>
+              <a class="btn btn-primary btn-sm" href="https://wa.me/?text=${encodeURIComponent('Segue o link para visualizar e aprovar o orçamento #' + orcamento.id + ': ' + link)}" target="_blank" rel="noopener">Enviar link para aprovar</a>
+            </div>`}
+      </div>
+      ${orcamento.status === 'aprovado' ? `<div style="margin-top:12px; padding:10px; background:var(--green-pale, #DEF7EC); border-radius:8px; color:var(--green);">✓ Orçamento aprovado pelo cliente</div>` : ''}
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn-outline-sm" onclick="abrirOrcamentoRefrigeracaoEditar(${orcamento.id})">Editar</button>
+      <button class="btn-outline-sm" onclick="abrirMenuEnviarOrcamentoRef()">Enviar</button>
+      <button class="btn-outline-sm" onclick="abrirMenuOpcoesOrcamentoRef()" title="Mais opções">⋮</button>
+    </div>`;
+}
+async function excluirOrcamentoRefrigeracao(id) {
+  const ok = await mostrarConfirmacao('Excluir este orçamento? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/os-refrigeracao-orcamentos/' + id, { method: 'DELETE' });
+    ir('orcamentos-refrigeracao-lista');
+  } catch (e) { alert(e.message); }
+}
+
+// pedido do usuário: "⋮" no detalhe só com Cancelado (muda status, ver PUT
+// /api/os-refrigeracao-orcamentos/:id/status) + Excluir — "Aprovado" nunca é manual (só o
+// cliente aprova, assinando pelo link público).
+function abrirMenuOpcoesOrcamentoRef() {
+  const orcamento = window._orcamentoRefDetalheAtual;
+  if (!orcamento) return;
+  const corpo =
+    osRefBotaoAcao('↩️ Voltar para Rascunho', null, `alterarStatusOrcamentoRef(${orcamento.id}, 'rascunho')`) +
+    osRefBotaoAcao('✕ Cancelado', null, `alterarStatusOrcamentoRef(${orcamento.id}, 'cancelado')`) +
+    osRefBotaoAcao('🗑️ Excluir', null, `fecharModalOsRefAcao(); excluirOrcamentoRefrigeracao(${orcamento.id});`, 'var(--red, #B3453A)');
+  abrirModalOsRefAcao(`<h3>Orçamento #${orcamento.id}</h3>`, corpo);
+}
+async function alterarStatusOrcamentoRef(id, status) {
+  try {
+    await api(`/api/os-refrigeracao-orcamentos/${id}/status`, { method: 'PUT', body: { status } });
+    fecharModalOsRefAcao();
+    if (window._orcamentoRefDetalheId === id) renderOrcamentoRefrigeracaoDetalhe();
+  } catch (e) { alert(e.message); }
+}
+
+// pedido do usuário: diferente da O.S. (que exige assinatura do técnico já na criação), aqui o
+// "Enviar" fica disponível já em Rascunho — reaproveita o mesmo modal/botões da O.S.
+// (abrirModalOsRefAcao/osRefBotaoAcao), só muda o alvo das funções chamadas.
+function abrirMenuEnviarOrcamentoRef() {
+  const orcamento = window._orcamentoRefDetalheAtual;
+  if (!orcamento) return;
+  const corpo =
+    `<p style="color:var(--ink-soft); font-size:13px; margin:-6px 0 14px;">Orçamento #${orcamento.id} — ${esc(orcamento.cliente_nome || '')}</p>` +
+    osRefBotaoAcao('📄 Enviar PDF', 'Anexa o arquivo na conversa, sem link junto', `fecharModalOsRefAcao(); enviarOrcamentoRefPdf(${orcamento.id});`) +
+    osRefBotaoAcao('🖼️ Enviar como imagem', 'O cliente vê o documento direto no WhatsApp', `fecharModalOsRefAcao(); enviarOrcamentoRefImagem(${orcamento.id});`) +
+    osRefBotaoAcao('⬇️ Baixar PDF', 'Salva no aparelho para enviar depois', `fecharModalOsRefAcao(); baixarOrcamentoRefPdf(${orcamento.id});`);
+  abrirModalOsRefAcao('<h3>Enviar documento</h3>', corpo);
+}
+
+// ---- "Assinar agora" (assinatura do técnico, opcional/posterior — diferente da O.S.) ----
+let _orcamentoRefAssinaturaTemTraco = false;
+function fecharModalAssinarTecnicoOrcamentoRef() {
+  const modal = document.getElementById('modal-orcamento-ref-assinar');
+  if (modal) modal.classList.remove('show');
+}
+function abrirModalAssinarTecnicoOrcamentoRef() {
+  const orcamento = window._orcamentoRefDetalheAtual;
+  if (!orcamento) return;
+  let modal = document.getElementById('modal-orcamento-ref-assinar');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-orcamento-ref-assinar';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalAssinarTecnicoOrcamentoRef(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Assinatura do técnico</h3>
+      <canvas id="orcamento-ref-canvas-tecnico" width="520" height="180" style="width:100%; max-width:520px; height:180px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none; display:block;"></canvas>
+      <div id="orcamento-ref-assinar-erro" class="auth-error hidden" style="margin-top:10px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="limparAssinaturaTecnicoOrcamentoRef()">Limpar</button>
+        <button class="btn-outline-sm" onclick="fecharModalAssinarTecnicoOrcamentoRef()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmarAssinaturaTecnicoOrcamentoRef(${orcamento.id})">Confirmar assinatura</button>
+      </div>
+    </div>`;
+  montarAssinaturaTecnicoOrcamentoRef();
+}
+function montarAssinaturaTecnicoOrcamentoRef() {
+  const canvas = document.getElementById('orcamento-ref-canvas-tecnico');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  _orcamentoRefAssinaturaTemTraco = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  let desenhando = false;
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); _orcamentoRefAssinaturaTemTraco = true; }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function limparAssinaturaTecnicoOrcamentoRef() {
+  const canvas = document.getElementById('orcamento-ref-canvas-tecnico');
+  if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  _orcamentoRefAssinaturaTemTraco = false;
+}
+async function confirmarAssinaturaTecnicoOrcamentoRef(id) {
+  const erroEl = document.getElementById('orcamento-ref-assinar-erro');
+  erroEl.classList.add('hidden');
+  if (!_orcamentoRefAssinaturaTemTraco) { erroEl.textContent = 'Desenhe a assinatura antes de confirmar.'; erroEl.classList.remove('hidden'); return; }
+  const canvas = document.getElementById('orcamento-ref-canvas-tecnico');
+  try {
+    await api(`/api/os-refrigeracao-orcamentos/${id}/assinar-tecnico`, { method: 'POST', body: { assinatura_tecnico_img: canvas.toDataURL('image/png') } });
+    fecharModalAssinarTecnicoOrcamentoRef();
+    if (window._orcamentoRefDetalheId === id) renderOrcamentoRefrigeracaoDetalhe();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+function nomeArquivoOrcamentoRef(orcamento) {
+  return `Orcamento-${orcamento.id}-${String(orcamento.cliente_nome || 'cliente').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-')}`;
+}
+
+// PDF de 2 páginas, mesma convenção visual da O.S. (cabeçalho com a marca do cliente, rodapé com
+// o crédito Nexor Connect — ver desenharCreditoNexorConnect, compartilhado com montarDocOsRefrigeracaoPdf).
+// ATENÇÃO (pedido explícito do usuário, apontando um defeito do app de referência iClima): este
+// PDF SEMPRE detalha serviços, materiais, mão de obra, desconto e condições de pagamento — nunca
+// só o total.
+function montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Orçamento ${orcamento.id}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  const statusLabel = ORCAMENTO_REF_STATUS_LABEL[orcamento.status] || 'Rascunho';
+  const statusCor = orcamento.status === 'cancelado' ? PDF_COR.red : orcamento.status === 'aprovado' ? PDF_COR.green : PDF_COR.amber;
+
+  function cabecalho() {
+    const y0 = margem;
+    if (logoCliente) doc.addImage(logoCliente, 'PNG', margem, y0 - 8, 90, 32);
+    else { doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 8); }
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Orçamento', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(`Nº ${orcamento.id} · ${fmtDataOsRef(orcamento.criado_em)}`, pageW - margem, y0 + 14, { align: 'right' });
+    doc.setFillColor(...statusCor); doc.roundedRect(pageW - margem - 76, y0 + 20, 76, 16, 3, 3, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text(statusLabel.toUpperCase(), pageW - margem - 38, y0 + 31, { align: 'center' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function rodape(pagina, total, yConteudoFinal) {
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (pagina === total) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
+      const topo = yConteudoFinal || margem;
+      const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, centroY);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem, y);
+    return y + 16;
+  }
+  function campo(x, y, label, valor) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), x, y);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+
+  // ---- página 1 ----
+  let y = cabecalho();
+  y = secaoTitulo(y, (orcamento.titulo || 'ORÇAMENTO').toUpperCase());
+  campo(margem, y, 'Cliente', orcamento.cliente_nome); campo(margem + largura / 2, y, 'Válido até', validadeAteOrcamentoRef(orcamento.criado_em, orcamento.validade_dias)); y += 30;
+
+  if (orcamento.descricao_cliente || orcamento.diagnostico_tecnico || orcamento.descricao_geral) {
+    y = secaoTitulo(y, 'DESCRIÇÃO');
+    if (orcamento.descricao_cliente) { campo(margem, y, 'O que o cliente relatou', orcamento.descricao_cliente); y += 26; }
+    if (orcamento.diagnostico_tecnico) { campo(margem, y, 'Diagnóstico técnico', orcamento.diagnostico_tecnico); y += 26; }
+    if (orcamento.descricao_geral) { campo(margem, y, 'Descrição geral', orcamento.descricao_geral); y += 30; }
+  }
+
+  if ((orcamento.servicos || []).length) {
+    y = secaoTitulo(y, 'SERVIÇOS');
+    orcamento.servicos.forEach((s, i) => {
+      if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+      doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(limparPdf(s.descricao), margem + 8, y + 11);
+      doc.text(fmtMoeda(s.valor), pageW - margem - 8, y + 11, { align: 'right' });
+      y += 16;
+    });
+    y += 10;
+  }
+
+  if ((orcamento.materiais || []).length) {
+    y = secaoTitulo(y, 'MATERIAIS');
+    doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 18, 'F');
+    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('ITEM', margem + 8, y + 12);
+    doc.text('QTD', margem + largura * 0.55, y + 12);
+    doc.text('VALOR UNIT.', margem + largura * 0.68, y + 12);
+    doc.text('SUBTOTAL', margem + largura * 0.86, y + 12);
+    y += 18;
+    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); doc.setFontSize(8.5);
+    orcamento.materiais.forEach((m, i) => {
+      if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+      doc.text(limparPdf(m.nome), margem + 8, y + 11);
+      doc.text(String(m.quantidade), margem + largura * 0.55, y + 11);
+      doc.text(fmtMoeda(m.valor_unitario), margem + largura * 0.68, y + 11);
+      doc.text(fmtMoeda(m.quantidade * m.valor_unitario), margem + largura * 0.86, y + 11);
+      y += 16;
+    });
+  }
+  rodape(1, 2);
+
+  // ---- página 2 ----
+  doc.addPage();
+  y = cabecalho();
+  // pedido explícito do usuário: diferente do iClima (só o total), aqui o RESUMO FINANCEIRO
+  // sempre detalha materiais/serviços/mão de obra/desconto antes do total.
+  y = secaoTitulo(y, 'RESUMO FINANCEIRO');
+  [['Materiais', orcamento.total_materiais], ['Serviços', orcamento.total_servicos], orcamento.mao_de_obra ? ['Mão de obra', orcamento.mao_de_obra] : null, orcamento.desconto_aplicado ? ['Desconto', -orcamento.desconto_aplicado] : null]
+    .filter(Boolean)
+    .forEach(([label, valor]) => {
+      doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(label, margem, y);
+      doc.setTextColor(...PDF_COR.ink);
+      doc.text((valor < 0 ? '- ' : '') + fmtMoeda(Math.abs(valor)), pageW - margem, y, { align: 'right' });
+      y += 16;
+    });
+  y += 6;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 28, 'F');
+  doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
+  doc.text('TOTAL', margem + 10, y + 19);
+  doc.text(fmtMoeda(orcamento.total), pageW - margem - 10, y + 19, { align: 'right' });
+  y += 46;
+
+  if (orcamento.condicoes_pagamento) {
+    y = secaoTitulo(y, 'CONDIÇÕES DE PAGAMENTO');
+    doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(orcamento.condicoes_pagamento), margem, y, { maxWidth: largura });
+    y += 34;
+  }
+
+  y = secaoTitulo(y, 'ASSINATURAS');
+  y += 4;
+  const largAssin = (largura - 20) / 2;
+  if (orcamento.assinatura_tecnico_img) doc.addImage(orcamento.assinatura_tecnico_img, 'PNG', margem, y, largAssin, 70);
+  if (orcamento.assinatura_cliente_img) doc.addImage(orcamento.assinatura_cliente_img, 'PNG', margem + largAssin + 20, y, largAssin, 70);
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+  doc.line(margem, y + 74, margem + largAssin, y + 74);
+  doc.line(margem + largAssin + 20, y + 74, margem + largAssin * 2 + 20, y + 74);
+  doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text('TÉCNICO RESPONSÁVEL', margem, y + 86);
+  doc.text('CLIENTE', margem + largAssin + 20, y + 86);
+  rodape(2, 2, y + 96);
+
+  return doc;
+}
+
+async function baixarOrcamentoRefPdf(id) {
+  try {
+    const { orcamento } = await api('/api/os-refrigeracao-orcamentos/' + id);
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor).save(nomeArquivoOrcamentoRef(orcamento) + '.pdf');
+  } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
+}
+async function enviarOrcamentoRefPdf(id) {
+  try {
+    const { orcamento } = await api('/api/os-refrigeracao-orcamentos/' + id);
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    const blob = montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor).output('blob');
+    const nomeArquivo = nomeArquivoOrcamentoRef(orcamento) + '.pdf';
+    const texto = `Orçamento #${orcamento.id} — ${orcamento.cliente_nome || ''}.`;
+    const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      try { await navigator.share({ files: [arquivo], text: texto }); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = nomeArquivo;
+    document.body.appendChild(link); link.click(); link.remove();
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto + ' Anexe o PDF que acabou de baixar.')}`, '_blank');
+  } catch (e) { alert('Erro ao preparar o PDF: ' + e.message); }
+}
+
+// "Enviar como imagem" — mesma técnica de canvas da O.S. (gerarImagemOsRefrigeracao), mas com o
+// detalhamento completo (nunca só o total, mesmo pedido explícito do usuário).
+function gerarImagemOrcamentoRefrigeracao(orcamento) {
+  const linhas = (orcamento.materiais || []).length + (orcamento.servicos || []).length;
+  const canvas = document.createElement('canvas');
+  const W = 720;
+  canvas.height = 420 + linhas * 24;
+  canvas.width = W;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  let y = 46;
+  ctx.fillStyle = '#0B2D4F'; ctx.font = 'bold 22px Arial, sans-serif';
+  ctx.fillText(orcamento.titulo || `Orçamento #${orcamento.id}`, 32, y);
+  ctx.font = '13px Arial, sans-serif'; ctx.fillStyle = '#667';
+  y += 24; ctx.fillText(`#${orcamento.id} · ${fmtDataOsRef(orcamento.criado_em)}`, 32, y);
+  y += 20;
+  ctx.strokeStyle = '#D9E1E8'; ctx.beginPath(); ctx.moveTo(32, y); ctx.lineTo(W - 32, y); ctx.stroke();
+  y += 34;
+  function linha(label, valor) {
+    ctx.font = '13px Arial, sans-serif'; ctx.fillStyle = '#667'; ctx.textAlign = 'left'; ctx.fillText(label, 32, y);
+    ctx.font = '14px Arial, sans-serif'; ctx.fillStyle = '#17293A'; ctx.textAlign = 'right'; ctx.fillText(valor, W - 32, y);
+    ctx.textAlign = 'left';
+    y += 24;
+  }
+  linha('Cliente', orcamento.cliente_nome || '—');
+  linha('Válido até', validadeAteOrcamentoRef(orcamento.criado_em, orcamento.validade_dias));
+  y += 10;
+  (orcamento.materiais || []).forEach((m) => linha(`${m.nome} (${m.quantidade}x)`, fmtMoeda(m.quantidade * m.valor_unitario)));
+  (orcamento.servicos || []).forEach((s) => linha(s.descricao, fmtMoeda(s.valor)));
+  if (orcamento.mao_de_obra) linha('Mão de obra', fmtMoeda(orcamento.mao_de_obra));
+  if (orcamento.desconto_aplicado) linha('Desconto', '- ' + fmtMoeda(orcamento.desconto_aplicado));
+  y += 4;
+  ctx.fillStyle = '#0B2D4F'; ctx.fillRect(32, y - 20, W - 64, 36);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Arial, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('TOTAL', 48, y + 4);
+  ctx.textAlign = 'right'; ctx.fillText(fmtMoeda(orcamento.total), W - 48, y + 4); ctx.textAlign = 'left';
+  y += 44;
+  if (orcamento.condicoes_pagamento) {
+    ctx.font = 'bold 12.5px Arial, sans-serif'; ctx.fillStyle = '#17293A';
+    ctx.fillText('Condições de pagamento: ' + orcamento.condicoes_pagamento, 32, y);
+    y += 22;
+  }
+  if (orcamento.status === 'aprovado') {
+    ctx.font = 'bold 13px Arial, sans-serif'; ctx.fillStyle = '#198754';
+    ctx.fillText('✓ Orçamento aprovado pelo cliente', 32, y);
+  }
+  return canvas;
+}
+async function enviarOrcamentoRefImagem(id) {
+  try {
+    const { orcamento } = await api('/api/os-refrigeracao-orcamentos/' + id);
+    const canvas = gerarImagemOrcamentoRefrigeracao(orcamento);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const nomeArquivo = nomeArquivoOrcamentoRef(orcamento) + '.png';
+    const texto = `Orçamento #${orcamento.id} — ${orcamento.cliente_nome || ''}.`;
     const arquivo = new File([blob], nomeArquivo, { type: 'image/png' });
     if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
       try { await navigator.share({ files: [arquivo], text: texto }); return; }
@@ -2844,6 +3684,9 @@ async function ir(pagina) {
     if (pagina === 'os-refrigeracao-lista') return renderOsRefrigeracaoLista();
     if (pagina === 'os-refrigeracao-nova') return renderOsRefrigeracaoNova();
     if (pagina === 'os-refrigeracao-detalhe') return renderOsRefrigeracaoDetalhe();
+    if (pagina === 'orcamentos-refrigeracao-lista') return renderOrcamentoRefrigeracaoLista();
+    if (pagina === 'orcamentos-refrigeracao-nova') return renderOrcamentoRefrigeracaoNova();
+    if (pagina === 'orcamentos-refrigeracao-detalhe') return renderOrcamentoRefrigeracaoDetalhe();
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();

@@ -137,6 +137,19 @@ test('administrador e suporte só veem "Ordens de Serviço" (Refrigeração) qua
   assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('os-refrigeracao'));
 });
 
+// pedido do usuário (referência: app concorrente iClima): 3º atalho do perfil Refrigeração —
+// "Orçamentos" (ver os-refrigeracao-orcamento.e2e.test.js em server.js), mesmo gate por `perfil`.
+test('administrador e suporte só veem "Orçamentos" (Refrigeração) quando a empresa é do perfil refrigeração', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('orcamentos-refrigeracao'));
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('orcamentos-refrigeracao'));
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('orcamentos-refrigeracao'));
+});
+
 // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): grupo com
 // children (mesmo padrão de Biblioteca/Comercial) — gate fica só no node pai, os filhos
 // (ex.: "gerador-etiquetas") não têm `perfil`/`modulo` próprio, igual os outros grupos com filhos.

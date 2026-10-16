@@ -4927,6 +4927,220 @@ rota('POST', /^\/api\/os-refrigeracao-assinar\/([a-f0-9]+)$/, async (req, res, m
   enviarJSON(res, 200, { os: await osRefrigeracaoResumoPublico(data, os) });
 });
 
+// ---------- Orçamentos — perfil "Refrigeração e Climatização" ----------
+// pedido do usuário (atalho #3 dos 6 do menu iClima): reaproveita o cadastro de clientes de
+// os_refrigeracao_clientes (mesma base da O.S.), mas coleção própria (os_refrigeracao_orcamentos)
+// porque o fluxo diverge da O.S. em dois pontos: (1) a assinatura do TÉCNICO é opcional e
+// posterior — não é exigida na criação, só quando ele usa "Assinar agora" na tela de detalhe
+// (ver POST .../assinar-tecnico abaixo); (2) o status vira "aprovado" automaticamente quando o
+// CLIENTE assina pelo link público, não quando o técnico cria. ATENÇÃO (pedido explícito do
+// usuário): no app de referência (iClima), o PDF e o link público do orçamento mostram só o
+// total, escondendo do cliente o detalhamento do que está sendo cobrado — isso é um defeito da
+// referência, não um comportamento a copiar. orcamentoRefrigeracaoResumoPublico abaixo SEMPRE
+// devolve o detalhamento completo (serviços, materiais, mão de obra, desconto, condições de
+// pagamento), nunca só o total.
+function totaisOrcamentoRefrigeracao(orc) { return totaisOsRefrigeracao(orc); }
+
+async function orcamentoRefrigeracaoComDetalhes(data, orc) {
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === orc.cliente_id && c.empresa_id === orc.empresa_id);
+  return {
+    ...orc,
+    assinatura_tecnico_img: await hidratarFotosProfundo(orc.assinatura_tecnico_img),
+    assinatura_cliente_img: await hidratarFotosProfundo(orc.assinatura_cliente_img),
+    cliente_nome: cliente ? cliente.nome : null,
+    ...totaisOrcamentoRefrigeracao(orc),
+  };
+}
+// a versão pública (link de assinatura) nunca devolve token_assinatura/empresa_id/tecnico_id/
+// autor_id pro cliente — mas leva o detalhamento completo (serviços/materiais/desconto/condições
+// de pagamento), nunca só o total (ver comentário acima).
+async function orcamentoRefrigeracaoResumoPublico(data, orc) {
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === orc.cliente_id && c.empresa_id === orc.empresa_id);
+  return {
+    id: orc.id, cliente_nome: cliente ? cliente.nome : null, criado_em: orc.criado_em, status: orc.status,
+    titulo: orc.titulo, descricao_cliente: orc.descricao_cliente, diagnostico_tecnico: orc.diagnostico_tecnico,
+    descricao_geral: orc.descricao_geral, servicos: orc.servicos, materiais: orc.materiais,
+    mao_de_obra: orc.mao_de_obra, desconto_tipo: orc.desconto_tipo, desconto_valor: orc.desconto_valor,
+    condicoes_pagamento: orc.condicoes_pagamento, validade_dias: orc.validade_dias,
+    assinatura_tecnico_img: await hidratarFotosProfundo(orc.assinatura_tecnico_img),
+    assinatura_cliente_img: await hidratarFotosProfundo(orc.assinatura_cliente_img),
+    ...totaisOrcamentoRefrigeracao(orc),
+  };
+}
+
+function camposOrcamentoRefrigeracao(body) {
+  return {
+    cliente_id: Number(body.cliente_id) || null,
+    titulo: body.titulo || '',
+    descricao_cliente: body.descricao_cliente || '',
+    diagnostico_tecnico: body.diagnostico_tecnico || '',
+    descricao_geral: body.descricao_geral || '',
+    servicos: Array.isArray(body.servicos) ? body.servicos.map((s) => ({ descricao: String(s.descricao || ''), valor: Number(s.valor) || 0 })) : [],
+    materiais: Array.isArray(body.materiais) ? body.materiais.map((mt) => ({ nome: String(mt.nome || ''), quantidade: Number(mt.quantidade) || 1, valor_unitario: Number(mt.valor_unitario) || 0 })) : [],
+    mao_de_obra: Number(body.mao_de_obra) || 0,
+    desconto_tipo: body.desconto_tipo === 'percentual' ? 'percentual' : 'valor',
+    desconto_valor: Number(body.desconto_valor) || 0,
+    condicoes_pagamento: body.condicoes_pagamento || '',
+    validade_dias: Number.isFinite(Number(body.validade_dias)) && body.validade_dias !== '' ? Number(body.validade_dias) : 15,
+    observacoes: body.observacoes || '',
+  };
+}
+function validarOrcamentoRefrigeracao(data, user, campos) {
+  if (!campos.cliente_id || !tenant.buscar(data, 'os_refrigeracao_clientes', campos.cliente_id, user.empresa_id)) return 'Escolha um cliente.';
+  if (!String(campos.titulo).trim()) return 'Informe um título pro orçamento.';
+  if (!campos.servicos.length && !campos.materiais.length) return 'Adicione ao menos um serviço ou material.';
+  return null;
+}
+
+// GET /api/os-refrigeracao-orcamentos?q=&status=rascunho|aprovado|cancelado
+rota('GET', /^\/api\/os-refrigeracao-orcamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao_orcamentos', user.empresa_id);
+  if (query.status) lista = lista.filter((o) => o.status === query.status);
+  lista = [...lista].sort((a, b) => b.id - a.id);
+  let comDetalhes = await Promise.all(lista.map((o) => orcamentoRefrigeracaoComDetalhes(data, o)));
+  if (query.q) {
+    const q = String(query.q).trim().toLowerCase();
+    comDetalhes = comDetalhes.filter((o) => String(o.id).includes(q) || (o.cliente_nome || '').toLowerCase().includes(q) || (o.titulo || '').toLowerCase().includes(q));
+  }
+  enviarJSON(res, 200, { orcamentos: comDetalhes });
+});
+
+// GET /api/os-refrigeracao-orcamentos/:id
+rota('GET', /^\/api\/os-refrigeracao-orcamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const orc = tenant.buscar(data, 'os_refrigeracao_orcamentos', Number(m[1]), user.empresa_id);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
+  enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoComDetalhes(data, orc) });
+});
+
+// POST /api/os-refrigeracao-orcamentos — cria em Rascunho; diferente da O.S., NÃO exige
+// assinatura do técnico na criação (ela é opcional/posterior, ver "Assinar agora" na tela de
+// detalhe, POST .../assinar-tecnico abaixo) — já nasce com o link público pronto porque o
+// técnico pode querer enviar pro cliente antes mesmo de assinar.
+rota('POST', /^\/api\/os-refrigeracao-orcamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const campos = camposOrcamentoRefrigeracao(body);
+  const erro = validarOrcamentoRefrigeracao(data, user, campos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const orc = tenant.criar(data, 'os_refrigeracao_orcamentos', user.empresa_id, {
+    ...campos,
+    assinatura_tecnico_img: null, assinado_tecnico_em: null,
+    assinatura_cliente_img: null, assinado_cliente_em: null,
+    tecnico_id: user.id, tecnico_nome: user.nome, autor_id: user.id,
+    token_assinatura: gerarTokenConvite(),
+    status: 'rascunho',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { orcamento: await orcamentoRefrigeracaoComDetalhes(data, orc) });
+});
+
+// PUT /api/os-refrigeracao-orcamentos/:id — edita o conteúdo; não toca em status nem nas
+// assinaturas (ver rotas dedicadas abaixo).
+rota('PUT', /^\/api\/os-refrigeracao-orcamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const orc = tenant.buscar(data, 'os_refrigeracao_orcamentos', Number(m[1]), user.empresa_id);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
+  const body = await lerCorpo(req);
+  const campos = camposOrcamentoRefrigeracao(body);
+  const erro = validarOrcamentoRefrigeracao(data, user, campos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  Object.assign(orc, campos);
+  db.save(data);
+  enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoComDetalhes(data, orc) });
+});
+
+// POST /api/os-refrigeracao-orcamentos/:id/assinar-tecnico — pedido do usuário: "Assinar agora"
+// na tela de detalhe (diferente da O.S., aqui a assinatura do técnico não é exigida na criação).
+rota('POST', /^\/api\/os-refrigeracao-orcamentos\/(\d+)\/assinar-tecnico$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const orc = tenant.buscar(data, 'os_refrigeracao_orcamentos', Number(m[1]), user.empresa_id);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!body.assinatura_tecnico_img) return enviarJSON(res, 400, { erro: 'Desenhe a assinatura antes de confirmar.' });
+  orc.assinatura_tecnico_img = body.assinatura_tecnico_img;
+  orc.assinado_tecnico_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoComDetalhes(data, orc) });
+});
+
+// PUT /api/os-refrigeracao-orcamentos/:id/status — menu "⋮" no detalhe: só Rascunho/Cancelado
+// (manual) — "Aprovado" só é gravado automaticamente quando o cliente assina pelo link público
+// (ver POST .../assinar abaixo), nunca por aqui.
+const OS_REFRIGERACAO_ORCAMENTO_STATUS_VALIDOS = ['rascunho', 'cancelado'];
+rota('PUT', /^\/api\/os-refrigeracao-orcamentos\/(\d+)\/status$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const orc = tenant.buscar(data, 'os_refrigeracao_orcamentos', Number(m[1]), user.empresa_id);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
+  const body = await lerCorpo(req);
+  if (!OS_REFRIGERACAO_ORCAMENTO_STATUS_VALIDOS.includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
+  orc.status = body.status;
+  db.save(data);
+  enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoComDetalhes(data, orc) });
+});
+
+// DELETE /api/os-refrigeracao-orcamentos/:id
+rota('DELETE', /^\/api\/os-refrigeracao-orcamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const orc = tenant.buscar(data, 'os_refrigeracao_orcamentos', Number(m[1]), user.empresa_id);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
+  data.os_refrigeracao_orcamentos = data.os_refrigeracao_orcamentos.filter((o) => o.id !== orc.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- link público de assinatura do cliente (sem login, token próprio — mesmo padrão da O.S.) ----
+function buscarOrcamentoRefrigeracaoPorToken(data, token) {
+  return data.os_refrigeracao_orcamentos.find((o) => o.token_assinatura === token) || null;
+}
+// GET /api/os-refrigeracao-orcamentos-assinar/:token — pública. Resumo SEMPRE com o
+// detalhamento completo (ver orcamentoRefrigeracaoResumoPublico) — nunca só o total.
+rota('GET', /^\/api\/os-refrigeracao-orcamentos-assinar\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const orc = buscarOrcamentoRefrigeracaoPorToken(data, m[1]);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoResumoPublico(data, orc) });
+});
+// POST /api/os-refrigeracao-orcamentos-assinar/:token — pública: grava a assinatura do cliente
+// (uma vez só) e já aprova o orçamento (status vira "aprovado" automaticamente), avisando o
+// técnico por push.
+rota('POST', /^\/api\/os-refrigeracao-orcamentos-assinar\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const orc = buscarOrcamentoRefrigeracaoPorToken(data, m[1]);
+  if (!orc) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  if (orc.assinatura_cliente_img) return enviarJSON(res, 409, { erro: 'Este orçamento já foi assinado pelo cliente.' });
+  if (orc.status === 'cancelado') return enviarJSON(res, 409, { erro: 'Este orçamento foi cancelado.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), orc.empresa_id);
+  if (!body.assinatura_cliente_img) return enviarJSON(res, 400, { erro: 'Desenhe a assinatura antes de confirmar.' });
+  orc.assinatura_cliente_img = body.assinatura_cliente_img;
+  orc.assinado_cliente_em = new Date().toISOString();
+  orc.status = 'aprovado';
+  db.save(data);
+  enviarPush(data, orc.autor_id, {
+    titulo: 'Orçamento aprovado — #' + orc.id,
+    corpo: `O cliente assinou e aprovou o orçamento #${orc.id}.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoResumoPublico(data, orc) });
+});
+
 // GET /api/clientes/:id/historico — Histórico Unificado (CRM nativo, passo 4): agrega tudo que já
 // existe espalhado (agenda, relatórios, chamados, equipamentos, oportunidades, propostas) numa
 // timeline só, na própria tela de Clientes. relatorios_manutencao não tem cliente_id nenhum — só
