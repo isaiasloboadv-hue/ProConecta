@@ -537,6 +537,11 @@ function entrarNoApp() {
   sincronizarFilaOffline();
   montarWidgetChatInterno();
   if (['suporte', 'administrador', 'producao', 'cliente', 'pos_venda', 'estoque', 'gerente_loja', 'coordenador_tecnico', 'consultor_mercado'].includes(USER.papel)) ativarNotificacoesPush();
+  // pedido do usuário (referência: app concorrente iClima) — administrador que acabou de
+  // cadastrar uma empresa do perfil Refrigeração e ainda não concluiu o onboarding (ver
+  // onboardingRefrigeracaoPendente) sempre cai aqui primeiro, nunca na página inicial normal do
+  // papel — roda de novo a cada login até ser concluído, não só na primeira vez de verdade.
+  if (onboardingRefrigeracaoPendente()) { ir('onboarding-refrigeracao'); return; }
   const primeiraPaginaPermitida = (function primeiraPagina(nodes) {
     for (const node of nodes) {
       if (node.page) return node.page;
@@ -2037,7 +2042,11 @@ function nomeArquivoOsRef(os) {
 // PDF de 2 páginas (Atendimento/Equipamento/Serviços/Materiais, depois Resumo Financeiro/Garantia/
 // Assinaturas) — mesma convenção de cabeçalho/rodapé/tabela já usada em gerarPdfProposta (PDF_COR,
 // carregarLogoVariantes, limparPdf, fmtMoeda).
-function montarDocOsRefrigeracaoPdf(os, logo) {
+// pedido do usuário: cabeçalho é a marca do CLIENTE (logo próprio se configurado, senão só o
+// nome — nunca o logo da Nexor); o rodapé da última página é que leva o crédito "Nexor Connect ·
+// Tecnologia" (ver logoClienteFlatHeader e creditoNexorConnect). `logoCliente` já vem pronto
+// (data: URI achatada em branco) ou null — ver chamadores (baixarOsRefPdf/enviarOsRefPdf).
+function montarDocOsRefrigeracaoPdf(os, logoCliente) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   doc.setProperties({ title: `Ordem de Serviço ${os.id}` });
@@ -2051,8 +2060,8 @@ function montarDocOsRefrigeracaoPdf(os, logo) {
 
   function cabecalho() {
     const y0 = margem;
-    if (logo && logo.header) doc.addImage(logo.header, 'PNG', margem, y0 - 8, 90, 32);
-    else { doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 10); }
+    if (logoCliente) doc.addImage(logoCliente, 'PNG', margem, y0 - 8, 90, 32);
+    else { doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 8); }
     doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
     doc.text('Ordem de Serviço', pageW - margem, y0, { align: 'right' });
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -2064,10 +2073,28 @@ function montarDocOsRefrigeracaoPdf(os, logo) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
+  // monograma "N" + "NexorConnect"/"Tecnologia" — mesmo desenho do cabeçalho de gerarPdfProposta,
+  // só que em miniatura e só no rodapé da ÚLTIMA página ("no final da fila", pedido do usuário).
+  function creditoNexorConnect(x, y) {
+    doc.setFillColor(...PDF_COR.navy); doc.roundedRect(x, y, 16, 16, 3, 3, 'F');
+    doc.setFillColor(...PDF_COR.orange); doc.triangle(x + 8, y + 16, x + 16, y + 8, x + 16, y + 16, 'F');
+    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('N', x + 4.5, y + 11.5);
+    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text('NexorConnect', x + 22, y + 7.5);
+    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Tecnologia', x + 22, y + 15);
+  }
   function rodape(pagina, total) {
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, pageH - 36, pageW - margem, pageH - 36);
-    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-    doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, pageH - 44, pageW - margem, pageH - 44);
+    if (pagina === total) {
+      creditoNexorConnect(margem, pageH - 38);
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW - margem, pageH - 24, { align: 'right' });
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 24, { align: 'center' });
+    }
   }
   function secaoTitulo(y, texto) {
     doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
@@ -2163,8 +2190,8 @@ function montarDocOsRefrigeracaoPdf(os, logo) {
 async function baixarOsRefPdf(id) {
   try {
     const { os } = await api('/api/os-refrigeracao/' + id);
-    const logo = await carregarLogoVariantes();
-    montarDocOsRefrigeracaoPdf(os, logo).save(nomeArquivoOsRef(os) + '.pdf');
+    const logoCliente = await logoClienteFlatHeader();
+    montarDocOsRefrigeracaoPdf(os, logoCliente).save(nomeArquivoOsRef(os) + '.pdf');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 // mesmo mecanismo de compartilhamento nativo (Web Share API com arquivo anexado, fallback pra
@@ -2172,8 +2199,8 @@ async function baixarOsRefPdf(id) {
 async function enviarOsRefPdf(id) {
   try {
     const { os } = await api('/api/os-refrigeracao/' + id);
-    const logo = await carregarLogoVariantes();
-    const blob = montarDocOsRefrigeracaoPdf(os, logo).output('blob');
+    const logoCliente = await logoClienteFlatHeader();
+    const blob = montarDocOsRefrigeracaoPdf(os, logoCliente).output('blob');
     const nomeArquivo = nomeArquivoOsRef(os) + '.pdf';
     const texto = `Ordem de Serviço #${os.id} — ${os.cliente_nome || ''}.`;
     const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
@@ -2486,6 +2513,167 @@ async function enviarEtiquetasWhatsapp() {
   } catch (e) { alert('Erro ao preparar o PDF: ' + e.message); }
 }
 
+// ===== Onboarding do administrador (perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima) — só o administrador que acabou de
+// cadastrar a empresa, na primeira vez que entra: Especialidades/Anos de experiência -> Foto de
+// perfil -> Notificações -> Termos de Uso. Gate em onboardingRefrigeracaoPendente (chamado em
+// entrarNoApp) — USER.termos_aceitos_em null = pendente, preenchido só na conclusão (ver
+// POST /api/me/onboarding-refrigeracao em server.js).
+function onboardingRefrigeracaoPendente() {
+  return !!(USER && USER.papel === 'administrador' && window._empresa && window._empresa.perfil === 'refrigeracao' && !USER.termos_aceitos_em);
+}
+const ONB_REF_ESPECIALIDADES = [
+  { chave: 'instalacao', label: 'Instalação' },
+  { chave: 'manutencao_preventiva', label: 'Manutenção preventiva' },
+  { chave: 'manutencao_corretiva', label: 'Manutenção corretiva' },
+  { chave: 'higienizacao', label: 'Higienização' },
+  { chave: 'desinstalacao', label: 'Desinstalação' },
+  { chave: 'infraestrutura', label: 'Infraestrutura' },
+  { chave: 'camara_fria', label: 'Câmara fria' },
+  { chave: 'automacao', label: 'Automação' },
+];
+window._onbRefEtapa = 1;
+window._onbRefForm = { especialidades: [], anos_experiencia: '', foto_perfil: '' };
+
+function renderOnboardingRefrigeracao() {
+  const main = document.getElementById('main');
+  if (!onboardingRefrigeracaoPendente()) { ir('kpis-dashboard'); return; }
+  const etapa = window._onbRefEtapa || 1;
+  main.innerHTML = `
+    <div class="page-head"><h1>Complete seu perfil</h1><p>Só mais alguns passos antes de começar.</p></div>
+    <div style="height:8px; border-radius:4px; background:var(--line); overflow:hidden; margin-bottom:20px; max-width:560px;">
+      <div style="height:100%; width:${(etapa / 4) * 100}%; background:var(--blue); transition:width .2s;"></div>
+    </div>
+    <div id="onb-ref-conteudo"></div>`;
+  if (etapa === 1) desenharOnbRefEspecialidades();
+  else if (etapa === 2) desenharOnbRefFoto();
+  else if (etapa === 3) desenharOnbRefNotificacoes();
+  else desenharOnbRefTermos();
+}
+
+function desenharOnbRefEspecialidades() {
+  const f = window._onbRefForm;
+  document.getElementById('onb-ref-conteudo').innerHTML = `
+    <div class="panel" style="max-width:560px;">
+      <h3>Especialidades</h3>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+        ${ONB_REF_ESPECIALIDADES.map((e) => `
+          <label style="display:flex; align-items:center; gap:8px; border:1.5px solid ${f.especialidades.includes(e.chave) ? 'var(--blue)' : 'var(--line)'}; border-radius:10px; padding:14px; cursor:pointer;">
+            <input type="checkbox" value="${e.chave}" ${f.especialidades.includes(e.chave) ? 'checked' : ''} onchange="alternarEspecialidadeOnbRef('${e.chave}')" style="width:auto;">
+            <span>${esc(e.label)}</span>
+          </label>`).join('')}
+      </div>
+      <div class="field" style="margin-top:16px;"><label>Anos de experiência</label><input id="onb-ref-anos" type="number" min="0" placeholder="Ex: 5" value="${esc(f.anos_experiencia)}"></div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; max-width:560px; margin-top:16px;">
+      <button class="btn btn-primary btn-sm" onclick="avancarOnbRefEspecialidades()">Próximo →</button>
+    </div>`;
+}
+function alternarEspecialidadeOnbRef(chave) {
+  const f = window._onbRefForm;
+  const i = f.especialidades.indexOf(chave);
+  if (i >= 0) f.especialidades.splice(i, 1); else f.especialidades.push(chave);
+  desenharOnbRefEspecialidades();
+}
+function avancarOnbRefEspecialidades() {
+  window._onbRefForm.anos_experiencia = document.getElementById('onb-ref-anos').value;
+  window._onbRefEtapa = 2;
+  renderOnboardingRefrigeracao();
+}
+
+function desenharOnbRefFoto() {
+  const f = window._onbRefForm;
+  document.getElementById('onb-ref-conteudo').innerHTML = `
+    <div class="panel" style="max-width:560px; text-align:center;">
+      <div id="onb-ref-foto-preview" style="margin:10px auto 16px;">${f.foto_perfil
+        ? `<img src="${f.foto_perfil}" style="width:120px; height:120px; border-radius:50%; object-fit:cover;">`
+        : `<div style="width:120px; height:120px; border-radius:50%; background:var(--blue-pale); margin:0 auto;"></div>`}</div>
+      <input type="file" accept="image/*" id="onb-ref-foto-input" style="display:none;" onchange="escolherFotoOnbRef(event)">
+      <button class="btn-outline-sm" onclick="document.getElementById('onb-ref-foto-input').click()">⬆️ Escolher foto</button>
+      <p style="font-size:12px; color:var(--ink-soft); margin-top:10px;">Opcional — JPEG/PNG</p>
+    </div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._onbRefEtapa=1; renderOnboardingRefrigeracao();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="window._onbRefEtapa=3; renderOnboardingRefrigeracao();">Próximo →</button>
+    </div>`;
+}
+function escolherFotoOnbRef(event) {
+  const arquivo = (event.target.files || [])[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    comprimirImagemDataUrl(leitor.result).then((dataUrl) => {
+      window._onbRefForm.foto_perfil = dataUrl;
+      desenharOnbRefFoto();
+    });
+  };
+  leitor.readAsDataURL(arquivo);
+}
+
+function desenharOnbRefNotificacoes() {
+  document.getElementById('onb-ref-conteudo').innerHTML = `
+    <div class="panel" style="max-width:560px; text-align:center;">
+      <div style="font-size:40px;">🔔</div>
+      <h3 style="margin-top:10px;">Receba lembretes dos seus atendimentos</h3>
+      <p style="font-size:13px; color:var(--ink-soft);">Avisamos no seu celular antes de cada atendimento. Nunca perca um cliente.</p>
+      <button class="btn btn-primary btn-sm" style="margin-top:14px;" onclick="ativarLembretesOnbRef()">🔔 Ativar lembretes</button>
+      <p style="font-size:12px; color:var(--ink-soft); margin-top:8px;">Opcional — você pode ativar depois no app.</p>
+    </div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._onbRefEtapa=2; renderOnboardingRefrigeracao();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="window._onbRefEtapa=4; renderOnboardingRefrigeracao();">Próximo →</button>
+    </div>`;
+}
+async function ativarLembretesOnbRef() {
+  await ativarNotificacoesPush();
+  mostrarToast('Lembretes ativados.');
+}
+
+const ONB_REF_TERMOS_TEXTO = `Ao utilizar a plataforma Nexor Connect, você concorda com os seguintes termos:
+
+1. A plataforma conecta sua empresa de refrigeração e climatização às ferramentas de gestão de atendimento (Ordens de Serviço, Orçamentos, Agenda, Clientes, PMOC, Financeiro).
+2. Sua empresa é responsável pela qualidade dos serviços prestados aos seus clientes.
+3. A Nexor Connect não se responsabiliza por danos causados por serviços de terceiros.
+4. Seus dados são tratados conforme a LGPD.
+5. Estes termos podem ser atualizados a qualquer momento.`;
+function desenharOnbRefTermos() {
+  const f = window._onbRefForm;
+  document.getElementById('onb-ref-conteudo').innerHTML = `
+    <div class="panel" style="max-width:560px;">
+      <div style="background:var(--gray-50, #F4F6FA); border-radius:10px; padding:14px; max-height:220px; overflow-y:auto; font-size:13px; color:var(--ink-soft); white-space:pre-line;">
+        <strong style="color:var(--ink); display:block; margin-bottom:8px;">Termos de Uso — Nexor Connect</strong>
+        ${esc(ONB_REF_TERMOS_TEXTO)}
+      </div>
+      <label style="display:flex; align-items:flex-start; gap:8px; margin-top:14px; cursor:pointer;">
+        <input type="checkbox" id="onb-ref-termos-check" style="width:auto; margin-top:3px;">
+        <span>Li e aceito os Termos de Uso e Política de Privacidade</span>
+      </label>
+    </div>
+    <div id="onb-ref-erro" class="auth-error hidden" style="max-width:560px; margin-top:10px;"></div>
+    <div style="display:flex; justify-content:space-between; max-width:560px; margin-top:16px;">
+      <button class="btn-outline-sm" onclick="window._onbRefEtapa=3; renderOnboardingRefrigeracao();">← Voltar</button>
+      <button class="btn btn-primary btn-sm" onclick="concluirOnboardingRefrigeracao()">✓ Concluir</button>
+    </div>`;
+}
+async function concluirOnboardingRefrigeracao() {
+  const erroEl = document.getElementById('onb-ref-erro');
+  erroEl.classList.add('hidden');
+  const aceito = document.getElementById('onb-ref-termos-check').checked;
+  if (!aceito) { erroEl.textContent = 'Marque que você leu e aceita os Termos de Uso.'; erroEl.classList.remove('hidden'); return; }
+  const f = window._onbRefForm;
+  try {
+    const { usuario } = await api('/api/me/onboarding-refrigeracao', { method: 'POST', body: {
+      especialidades: f.especialidades, anos_experiencia: f.anos_experiencia || null,
+      foto_perfil: f.foto_perfil, termos_aceito: true,
+    } });
+    Object.assign(USER, usuario);
+    window._onbRefForm = { especialidades: [], anos_experiencia: '', foto_perfil: '' };
+    window._onbRefEtapa = 1;
+    mostrarToast('Perfil completo!');
+    ir('kpis-dashboard');
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
 // lista de menu de fato disponível pro usuário logado — igual ao NAV do papel, exceto quando não
 // tem acesso_total, que aí só vê os itens de topo marcados em `menus` (ver MENUS_LABEL_POR_PAPEL /
 // checkboxes no cadastro). Vale pra qualquer tipo de acesso, não só suporte.
@@ -2646,6 +2834,7 @@ async function ir(pagina) {
     if (pagina === 'os-refrigeracao-nova') return renderOsRefrigeracaoNova();
     if (pagina === 'os-refrigeracao-detalhe') return renderOsRefrigeracaoDetalhe();
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
+    if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
     if (pagina === 'kpis-dashboard') return renderKpisDashboard();
     if (pagina === 'usuarios') return renderUsuarios();
@@ -8318,6 +8507,25 @@ function carregarLogoVariantes() {
     });
   }
   return _logoVariantesPromise;
+}
+
+// pedido do usuário: no cabeçalho dos PDFs da Refrigeração (O.S.), "onde está o logo da Nexor
+// colocar o da empresa cliente" — ao contrário de carregarLogoVariantes/carregarLogoDataUri (que
+// caem pro /logo.png padrão do sistema quando a empresa não configurou logo própria), esta versão
+// NUNCA cai pro logo da Nexor: sem logo_url configurado, devolve null (o cabeçalho então mostra só
+// o nome da empresa em texto — ver montarDocOsRefrigeracaoPdf) — a marca da Nexor Connect fica só
+// no rodapé da última página (ver creditoNexorConnect), nunca disfarçada de marca do cliente.
+function logoClienteFlatHeader() {
+  const logoEmpresa = window._empresa && window._empresa.logo_url;
+  if (!logoEmpresa) return Promise.resolve(null);
+  const pronto = (dataUri) => dataUri ? flatarLogoSobreCor(dataUri, PDF_COR.white) : null;
+  if (logoEmpresa.startsWith('data:')) return pronto(logoEmpresa);
+  return fetch(logoEmpresa).then((r) => r.blob()).then((blob) => new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(leitor.result);
+    leitor.onerror = reject;
+    leitor.readAsDataURL(blob);
+  })).then(pronto).catch(() => null);
 }
 
 async function abrirPdfBiblioteca(tipo, i) {

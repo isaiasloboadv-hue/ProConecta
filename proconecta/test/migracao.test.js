@@ -282,3 +282,36 @@ test('migrar do resgate de "atividades" no Básico é idempotente: rodar de novo
   assert.deepEqual(duas.versoes, uma.versoes);
   assert.deepEqual(duas.empresas[0].modulos_ativos.sort(), uma.empresas[0].modulos_ativos.sort());
 });
+
+// pedido do usuário (referência: app concorrente iClima) — onboarding do administrador do perfil
+// Refrigeração (ver POST /api/me/onboarding-refrigeracao em server.js). `termos_aceitos_em`
+// null/ausente = onboarding pendente (ver onboardingRefrigeracaoPendente em app.js). O backfill
+// PRECISA ser com flag: sem ela, rodaria de novo em todo migrar() futuro e marcaria um usuário
+// recém-criado (cujo termos_aceitos_em nasce ausente de propósito) como "já concluído" antes
+// mesmo dele ver o assistente — é exatamente o bug que esses testes travam.
+test('migrar marca usuário PRÉ-EXISTENTE (de antes do campo existir) como onboarding já concluído', () => {
+  const depois = db.migrar(dadosAntigos());
+  const admin = depois.usuarios.find((u) => u.id === 1);
+  assert.ok(admin.termos_aceitos_em, 'usuário que já existia antes não deveria ficar pendente do nada');
+  assert.deepEqual(admin.especialidades, []);
+  assert.equal(admin.anos_experiencia, null);
+});
+
+test('migrar NÃO mexe no onboarding de usuário criado DEPOIS que a migração já rodou uma vez (fica pendente de verdade)', () => {
+  const jaMigrada = db.migrar(dadosAntigos());
+  // usuário novo, criado depois da migração já ter rodado nesta instalação — nasce sem
+  // termos_aceitos_em, exatamente como um admin recém-cadastrado de verdade.
+  jaMigrada.usuarios.push({ id: 99, nome: 'Admin Novo', email: 'novo@refrigera.com', papel: 'administrador', status: 'ativo', empresa_id: 1 });
+  const depois = db.migrar(jaMigrada);
+  const novo = depois.usuarios.find((u) => u.id === 99);
+  assert.equal(novo.termos_aceitos_em, undefined, 'usuário novo não pode nascer "já onboardado" sozinho — senão o assistente nunca aparece pra ninguém');
+});
+
+test('migrar do onboarding é idempotente: rodar de novo não sobrescreve quem já aceitou os termos de verdade', () => {
+  const uma = db.migrar(dadosAntigos());
+  const admin = uma.usuarios.find((u) => u.id === 1);
+  const dataAceiteReal = '2026-05-01T10:00:00.000Z';
+  admin.termos_aceitos_em = dataAceiteReal; // simula aceite de verdade, não o backfill genérico
+  const duas = db.migrar(JSON.parse(JSON.stringify(uma)));
+  assert.equal(duas.usuarios.find((u) => u.id === 1).termos_aceitos_em, dataAceiteReal);
+});

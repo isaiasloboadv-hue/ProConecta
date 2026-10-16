@@ -1155,6 +1155,23 @@ function migrar(data) {
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }
+  // pedido do usuário (referência: app concorrente iClima) — onboarding do administrador do
+  // perfil "Refrigeração e Climatização" (especialidades, anos de experiência, foto de perfil,
+  // termos de uso — ver POST /api/me/onboarding-refrigeracao em server.js). `termos_aceitos_em`
+  // null/ausente = onboarding pendente (ver onboardingRefrigeracaoPendente em app.js, roda de novo
+  // a cada login até ser preenchido). PRECISA ser com flag (só roda uma vez) — um backfill sem
+  // flag rodaria de novo em TODO load() futuro, inclusive pra usuário novo criado depois (cujo
+  // termos_aceitos_em nasce ausente de propósito, pra ficar pendente) — marcaria ele como "já
+  // concluído" sozinho antes de ele nunca ter visto o assistente. Com flag, só quem já existia no
+  // momento desta migração (nunca deve ver o assistente aparecer do nada) é marcado como concluído.
+  if (!data._migracaoOnboardingRefrigeracaoV1) {
+    for (const u of data.usuarios) {
+      if (u.especialidades === undefined) u.especialidades = [];
+      if (u.anos_experiencia === undefined) u.anos_experiencia = null;
+      if (u.termos_aceitos_em === undefined) u.termos_aceitos_em = u.criado_em || new Date().toISOString();
+    }
+    data._migracaoOnboardingRefrigeracaoV1 = true;
+  }
   if (!data._migracaoFiliaisV1) {
     for (const e of data.equipamentos) {
       if (e.filial_id === undefined) e.filial_id = null;

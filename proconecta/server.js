@@ -4697,6 +4697,36 @@ async function osRefrigeracaoResumoPublico(data, os) {
   };
 }
 
+// ---- onboarding do administrador (perfil Refrigeração) ----
+// pedido do usuário (referência: app concorrente iClima) — só o administrador que acabou de
+// cadastrar a empresa passa por isso, uma vez, na primeira vez que entra: especialidades, anos de
+// experiência, foto de perfil, aceite dos Termos de Uso. Nasce pendente (ver backfill de
+// `termos_aceitos_em` em db.js) e nunca mais aparece depois de concluído — não tem "salvar
+// parcial", só conclusão (a última etapa do assistente, ver concluirOnboardingRefrigeracao em
+// app.js), porque não faz sentido meio-aceito os Termos de Uso.
+const ESPECIALIDADES_REFRIGERACAO_VALIDAS = ['instalacao', 'manutencao_preventiva', 'manutencao_corretiva', 'higienizacao', 'desinstalacao', 'infraestrutura', 'camara_fria', 'automacao'];
+rota('POST', /^\/api\/me\/onboarding-refrigeracao$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Esse onboarding é só pro administrador.' });
+  if (!empresaPerfilRefrigeracao(data, user.empresa_id)) return enviarJSON(res, 403, { erro: 'Exclusivo de empresas com o perfil Refrigeração e Climatização.' });
+  const alvo = tenant.buscar(data, 'usuarios', user.id, user.empresa_id);
+  if (!alvo) return enviarJSON(res, 404, { erro: 'Usuário não encontrado.' });
+  const body = await lerCorpo(req);
+  if (!body.termos_aceito) return enviarJSON(res, 400, { erro: 'É preciso aceitar os Termos de Uso e a Política de Privacidade.' });
+  const especialidades = Array.isArray(body.especialidades) ? body.especialidades.filter((e) => ESPECIALIDADES_REFRIGERACAO_VALIDAS.includes(e)) : [];
+  const anos = Number(body.anos_experiencia);
+  // foto_perfil segue o mesmo padrão do resto do sistema pra esse campo (ver PUT /api/usuarios/:id
+  // acima): guardado direto como data: URI no registro, sem passar por extrairFotosProfundo.
+  Object.assign(alvo, {
+    especialidades, anos_experiencia: Number.isFinite(anos) && body.anos_experiencia !== '' ? anos : null,
+    foto_perfil: body.foto_perfil !== undefined ? (body.foto_perfil || '') : (alvo.foto_perfil || ''),
+    termos_aceitos_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 200, { usuario: usuarioPublico(alvo) });
+});
+
 // ---- clientes (self-contained a este menu, ver comentário acima) ----
 // GET /api/os-refrigeracao-clientes?q=
 rota('GET', /^\/api\/os-refrigeracao-clientes$/, async (req, res) => {
