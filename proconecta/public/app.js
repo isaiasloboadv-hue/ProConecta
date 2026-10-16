@@ -762,6 +762,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'biblioteca': 'Biblioteca',
     'equipamentos': 'Meus equipamentos',
     'chamados': 'Atendimento',
+    'pmoc-portal': 'PMOC',
   },
   producao: {
     'biblioteca': 'Biblioteca',
@@ -900,6 +901,9 @@ const NAV = {
       // pedido do usuário: "o administrador designa o técnico" — fila de visitas PMOC geradas
       // automaticamente ainda sem técnico, só no menu do administrador (ver exigirPapel no server).
       { key: 'pmoc-pendentes', label: 'Preventivas pendentes', page: 'pmoc-visitas-pendentes' },
+      // pedido do usuário (item 4.3): relatório mensal consolidado por cliente — visão gerencial,
+      // só faz sentido pro administrador.
+      { key: 'pmoc-relatorio-mensal', label: 'Relatório Mensal', page: 'pmoc-relatorio-mensal' },
       { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
     ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
@@ -992,6 +996,12 @@ const NAV = {
     ]},
     { key: 'equipamentos', modulo: 'relatorios', label: 'Meus equipamentos', page: 'equipamentos' },
     { key: 'chamados', modulo: 'os_chamados', label: 'Atendimento', page: 'chamados' },
+    // pedido do usuário (item 5 — portal do cliente final do pacote PMOC): mesmo gate duplo do
+    // menu do administrador/técnico (perfil Refrigeração + módulo pmoc) — ver renderPmocPortal*.
+    { key: 'pmoc-portal', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
+      { key: 'pmoc-portal-locais', label: 'Meus Locais', page: 'pmoc-portal-locais' },
+      { key: 'pmoc-portal-visitas', label: 'Minhas Visitas', page: 'pmoc-portal-visitas' },
+    ]},
   ],
   producao: [
     { key: 'biblioteca', modulo: 'biblioteca', label: 'Biblioteca', children: [
@@ -1147,6 +1157,7 @@ const ICONE_MENU = {
   'orcamentos-refrigeracao': '📋',
   'agenda-refrigeracao': '📅',
   'pmoc': '🌡️',
+  'pmoc-portal': '🌡️',
   'ferramentas': '🧰',
 };
 
@@ -4004,10 +4015,12 @@ function abrirPmocLocalDetalhe(id) {
 async function renderPmocLocalDetalhe() {
   const main = document.getElementById('main');
   if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
-  const [{ local, ambientes }, { planos }] = await Promise.all([
+  const [{ local, ambientes }, { planos }, { analises }] = await Promise.all([
     api('/api/pmoc/locais/' + window._pmocLocalDetalheId),
     api('/api/pmoc/planos?hoje=' + hojeIsoAgendaRef()),
+    api('/api/pmoc/locais/' + window._pmocLocalDetalheId + '/qualidade-ar'),
   ]);
+  window._pmocQualidadeArAtual = analises;
   window._pmocLocalAtual = local;
   window._pmocAmbientesAtual = ambientes;
   const planoResumo = planos.find((p) => p.local_id === local.id) || null;
@@ -4021,7 +4034,8 @@ async function renderPmocLocalDetalhe() {
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
       <div><h1>${esc(local.nome)}</h1><span class="tag">${esc(pmocTipoAtividadeLabel(local.tipo_atividade))}</span></div>
-      <div style="display:flex; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="baixarDocumentoPmoc(${local.id})">📄 Baixar PMOC</button>
         <button class="btn-outline-sm" onclick="abrirModalPmocLocal(window._pmocLocalAtual)">✏️ Editar</button>
         <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocLocal(${local.id})">🗑️ Excluir</button>
         <button class="btn-outline-sm" onclick="ir('pmoc-locais')">← Voltar</button>
@@ -4040,7 +4054,104 @@ async function renderPmocLocalDetalhe() {
       <button class="btn btn-primary btn-sm" onclick="abrirModalPmocAmbiente()">+ Novo ambiente</button>
     </div>
     <div id="pmoc-ambientes-lista">${pmocAmbientesHtml(ambientes)}</div>
-    ${pmocSecaoPlanoHtml(plano, visitasPlano)}`;
+    ${pmocSecaoPlanoHtml(plano, visitasPlano)}
+    <div class="page-head" style="margin-top:18px;">
+      <h2>Qualidade do Ar</h2>
+      <button class="btn-outline-sm" onclick="abrirModalPmocQualidadeAr()">+ Nova análise</button>
+    </div>
+    <div id="pmoc-qualidade-ar-lista">${pmocQualidadeArHtml(analises)}</div>`;
+}
+function pmocQualidadeArHtml(analises) {
+  if (!analises.length) return '<div class="empty">Nenhuma análise de qualidade do ar registrada ainda.</div>';
+  return analises.map((a) => `
+    <div class="panel" style="margin-bottom:8px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <strong>${fmtDataIsoAgendaRef(a.data)}</strong>${a.laboratorio ? ` — ${esc(a.laboratorio)}` : ''}
+          <div style="font-size:12.5px; color:var(--ink-soft);">${[a.temperatura && `Temp.: ${esc(a.temperatura)}`, a.umidade && `Umidade: ${esc(a.umidade)}`, a.co2 && `CO₂: ${esc(a.co2)}`].filter(Boolean).join(' · ')}</div>
+          ${a.observacoes ? `<div style="font-size:12.5px; margin-top:4px;">${esc(a.observacoes)}</div>` : ''}
+          ${a.laudo_pdf ? `<a href="${a.laudo_pdf}" download="laudo-qualidade-ar-${a.id}" style="font-size:12.5px;">📎 Baixar laudo anexado</a>` : ''}
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn-outline-sm" onclick="abrirModalPmocQualidadeAr(window._pmocQualidadeArAtual.find((x)=>x.id===${a.id}))">✏️</button>
+          <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocQualidadeAr(${a.id})">🗑️</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+function abrirModalPmocQualidadeAr(analiseExistente) {
+  window._pmocQualidadeArEditando = analiseExistente || null;
+  window._pmocQualidadeArLaudo = (analiseExistente && analiseExistente.laudo_pdf) || null;
+  let modal = document.getElementById('modal-pmoc-qualidade-ar');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-qualidade-ar';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  const a = analiseExistente || {};
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:460px;">
+      <h3>${analiseExistente ? 'Editar análise' : 'Nova análise de qualidade do ar'}</h3>
+      <div class="field"><label>Data</label><input id="pmoc-qa-data" type="date" value="${esc(a.data || hojeIsoAgendaRef())}"></div>
+      <div class="field"><label>Laboratório</label><input id="pmoc-qa-laboratorio" value="${esc(a.laboratorio || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Temperatura</label><input id="pmoc-qa-temperatura" value="${esc(a.temperatura || '')}" placeholder="Ex: 23°C"></div>
+        <div class="field" style="flex:1;"><label>Umidade</label><input id="pmoc-qa-umidade" value="${esc(a.umidade || '')}" placeholder="Ex: 55%"></div>
+        <div class="field" style="flex:1;"><label>CO₂</label><input id="pmoc-qa-co2" value="${esc(a.co2 || '')}" placeholder="Ex: 700ppm"></div>
+      </div>
+      <div class="field"><label>Observações</label><textarea id="pmoc-qa-observacoes" style="min-height:50px;">${esc(a.observacoes || '')}</textarea></div>
+      <div class="field"><label>Laudo (PDF ou imagem)</label>
+        <input type="file" accept="application/pdf,image/*" onchange="carregarLaudoQualidadeAr(this)">
+        <div id="pmoc-qa-laudo-preview" style="margin-top:4px; font-size:12px; color:var(--ink-soft);">${window._pmocQualidadeArLaudo ? 'Laudo já anexado — escolha outro arquivo pra substituir.' : ''}</div>
+      </div>
+      <div id="pmoc-qa-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-qualidade-ar').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocQualidadeAr()">Salvar</button>
+      </div>
+    </div>`;
+}
+function carregarLaudoQualidadeAr(input) {
+  const arquivo = input.files && input.files[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    window._pmocQualidadeArLaudo = leitor.result;
+    document.getElementById('pmoc-qa-laudo-preview').textContent = `Anexado: ${arquivo.name}`;
+  };
+  leitor.readAsDataURL(arquivo);
+}
+async function salvarPmocQualidadeAr() {
+  const erroEl = document.getElementById('pmoc-qa-erro');
+  erroEl.classList.add('hidden');
+  const body = {
+    local_id: window._pmocLocalDetalheId,
+    data: document.getElementById('pmoc-qa-data').value,
+    laboratorio: document.getElementById('pmoc-qa-laboratorio').value,
+    temperatura: document.getElementById('pmoc-qa-temperatura').value,
+    umidade: document.getElementById('pmoc-qa-umidade').value,
+    co2: document.getElementById('pmoc-qa-co2').value,
+    observacoes: document.getElementById('pmoc-qa-observacoes').value,
+    laudo_pdf: window._pmocQualidadeArLaudo,
+  };
+  try {
+    const editando = window._pmocQualidadeArEditando;
+    if (editando) await api('/api/pmoc/qualidade-ar/' + editando.id, { method: 'PUT', body });
+    else await api('/api/pmoc/qualidade-ar', { method: 'POST', body });
+    document.getElementById('modal-pmoc-qualidade-ar').classList.remove('show');
+    await renderPmocLocalDetalhe();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function excluirPmocQualidadeAr(id) {
+  const ok = await mostrarConfirmacao('Excluir esta análise de qualidade do ar? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/pmoc/qualidade-ar/' + id, { method: 'DELETE' });
+    await renderPmocLocalDetalhe();
+  } catch (e) { alert(e.message); }
 }
 function pmocAmbientesHtml(ambientes) {
   if (!ambientes.length) return '<div class="empty">Nenhum ambiente cadastrado ainda.</div>';
@@ -4492,6 +4603,7 @@ function pmocSecaoPlanoHtml(plano, visitas) {
       ${osRefLinha('Início', fmtDataIsoAgendaRef(plano.data_inicio))}
       ${osRefLinha('Vigência', `${plano.vigencia_meses} meses (até ${fmtDataIsoAgendaRef(plano.data_fim)})`)}
       ${osRefLinha('Itens de manutenção', String(plano.itens.length))}
+      ${plano.art_trt_numero ? osRefLinha('ART/TRT', esc(plano.art_trt_numero)) : ''}
     </div>
     <h3 style="margin-top:14px;">Visitas geradas</h3>
     <div class="panel">${visitasHtml}</div>`;
@@ -4509,6 +4621,7 @@ async function abrirModalPmocPlano(planoExistente) {
   }
   window._pmocPlanoItensEditando = itensIniciais;
   window._pmocPlanoEditando = planoExistente || null;
+  window._pmocPlanoArtTrtAnexo = null;
   let modal = document.getElementById('modal-pmoc-plano');
   if (!modal) {
     modal = document.createElement('div');
@@ -4530,6 +4643,11 @@ async function abrirModalPmocPlano(planoExistente) {
       <div style="display:flex; gap:10px;">
         <div class="field" style="flex:1;"><label>Data de início</label><input id="pmoc-plano-inicio" type="date" value="${esc((planoExistente && planoExistente.data_inicio) || hojeIsoAgendaRef())}"></div>
         <div class="field" style="flex:1;"><label>Vigência (meses)</label><input id="pmoc-plano-vigencia" type="number" min="1" value="${(planoExistente && planoExistente.vigencia_meses) || 12}"></div>
+      </div>
+      <div class="field"><label>Número da ART/TRT</label><input id="pmoc-plano-art-trt-numero" value="${esc((planoExistente && planoExistente.art_trt_numero) || '')}"></div>
+      <div class="field"><label>Anexo da ART/TRT (PDF ou imagem)</label>
+        <input id="pmoc-plano-art-trt-arquivo" type="file" accept="application/pdf,image/*" onchange="carregarAnexoArtTrtPmoc(this)">
+        <div id="pmoc-plano-art-trt-preview" style="margin-top:4px; font-size:12px; color:var(--ink-soft);">${planoExistente && planoExistente.art_trt_anexo ? 'Já tem um anexo — escolha outro arquivo pra substituir.' : ''}</div>
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
         <h3 style="margin:0;">Itens de manutenção</h3>
@@ -4553,6 +4671,16 @@ function fecharModalPmocPlano() {
   const modal = document.getElementById('modal-pmoc-plano');
   if (modal) modal.classList.remove('show');
 }
+function carregarAnexoArtTrtPmoc(input) {
+  const arquivo = input.files && input.files[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    window._pmocPlanoArtTrtAnexo = leitor.result;
+    document.getElementById('pmoc-plano-art-trt-preview').textContent = `Anexado: ${arquivo.name}`;
+  };
+  leitor.readAsDataURL(arquivo);
+}
 async function salvarPmocPlano() {
   const erroEl = document.getElementById('pmoc-plano-erro');
   erroEl.classList.add('hidden');
@@ -4562,8 +4690,10 @@ async function salvarPmocPlano() {
     responsavel_tecnico_id: document.getElementById('pmoc-plano-responsavel').value,
     data_inicio: document.getElementById('pmoc-plano-inicio').value,
     vigencia_meses: document.getElementById('pmoc-plano-vigencia').value,
+    art_trt_numero: document.getElementById('pmoc-plano-art-trt-numero').value,
     itens,
   };
+  if (window._pmocPlanoArtTrtAnexo) body.art_trt_anexo = window._pmocPlanoArtTrtAnexo;
   const editando = window._pmocPlanoEditando;
   try {
     if (editando) await api(`/api/pmoc/planos/${editando.id}?hoje=${hojeIsoAgendaRef()}`, { method: 'PUT', body });
@@ -4990,6 +5120,419 @@ async function confirmarEnvioEmailPmoc() {
     document.getElementById('modal-pmoc-email').classList.remove('show');
     mostrarToast(envio.modo === 'simulado' ? 'Provedor de e-mail não configurado neste ambiente — o envio foi simulado (ver log do servidor).' : 'Relatório enviado por e-mail.');
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ===== Pacote "Climatização / PMOC" — Fase 4: Documento PMOC e Relatório Mensal =====
+function pmocMesLabel(mes) { return ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][mes - 1] || mes; }
+
+// pedido do usuário (item 4.1): documento PMOC de 8 seções, gerado a qualquer momento a partir
+// do plano — reaproveitado tanto pelo admin (aqui) quanto pelo portal do cliente (ver
+// baixarDocumentoPmocPortal), mesmo gerador, fonte de dados diferente (GET /documento vs
+// GET /portal/.../documento, ambas devolvendo o mesmo formato — ver montarDocumentoPmocLocal em server.js).
+function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
+  const { local, ambientes, plano, responsavel_tecnico, cronograma, execucoes, qualidade_ar } = documento;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `PMOC ${local.nome}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+
+  function cabecalho() {
+    const y0 = margem;
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0);
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('PMOC', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(new Date().toLocaleDateString('pt-BR'), pageW - margem, y0 + 14, { align: 'right' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem, y);
+    return y + 16;
+  }
+  function campo(x, y, label, valor) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), x, y);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+  function novaPaginaSeNecessario(y, espaco) {
+    if (y + espaco <= pageH - 60) return y;
+    doc.addPage();
+    return cabecalho();
+  }
+
+  let y = cabecalho();
+
+  y = secaoTitulo(y, '1. IDENTIFICAÇÃO DO ESTABELECIMENTO');
+  campo(margem, y, 'Cliente', local.cliente_nome); campo(margem + largura / 2, y, 'Local', local.nome); y += 26;
+  campo(margem, y, 'Endereço', local.endereco); campo(margem + largura / 2, y, 'Atividade', pmocTipoAtividadeLabel(local.tipo_atividade)); y += 26;
+  campo(margem, y, 'Área climatizada', local.area_climatizada_m2 ? local.area_climatizada_m2 + ' m²' : '—');
+  campo(margem + largura / 2, y, 'Ocupantes', `${local.ocupantes_fixos ?? '—'} fixos / ${local.ocupantes_flutuantes ?? '—'} flutuantes`); y += 30;
+
+  y = novaPaginaSeNecessario(y, 50);
+  y = secaoTitulo(y, '2. RESPONSÁVEL TÉCNICO');
+  if (responsavel_tecnico) {
+    campo(margem, y, 'Nome', responsavel_tecnico.nome); campo(margem + largura / 2, y, 'Registro', responsavel_tecnico.registro_profissional); y += 26;
+    campo(margem, y, 'ART/TRT', (plano && plano.art_trt_numero) || '—'); y += 30;
+  } else {
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Nenhum responsável técnico definido — crie um Plano PMOC pra este local.', margem, y); y += 20;
+  }
+
+  y = novaPaginaSeNecessario(y, 40);
+  y = secaoTitulo(y, '3. INVENTÁRIO DE AMBIENTES E APARELHOS');
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
+  doc.setFontSize(7); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('AMBIENTE', margem + 6, y + 11); doc.text('APARELHO', margem + largura * 0.28, y + 11);
+  doc.text('MARCA/MODELO', margem + largura * 0.56, y + 11); doc.text('BTU', margem + largura * 0.78, y + 11); doc.text('STATUS', margem + largura * 0.9, y + 11);
+  y += 16;
+  doc.setFont(undefined, 'normal');
+  let totalAparelhos = 0;
+  ambientes.forEach((amb) => {
+    (amb.aparelhos || []).forEach((ap) => {
+      y = novaPaginaSeNecessario(y, 14);
+      if (totalAparelhos % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 14, 'F'); }
+      doc.setFontSize(7); doc.setTextColor(...PDF_COR.ink);
+      doc.text(limparPdf(amb.nome).slice(0, 22), margem + 6, y + 10);
+      doc.text(limparPdf(ap.tipo).slice(0, 22), margem + largura * 0.28, y + 10);
+      doc.text(limparPdf([ap.marca, ap.modelo].filter(Boolean).join(' ')).slice(0, 22), margem + largura * 0.56, y + 10);
+      doc.text(String(ap.capacidade_btu || '—'), margem + largura * 0.78, y + 10);
+      doc.text((PMOC_STATUS_APARELHO[ap.status] || PMOC_STATUS_APARELHO.ativo).label, margem + largura * 0.9, y + 10);
+      y += 14; totalAparelhos++;
+    });
+  });
+  if (!totalAparelhos) { doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhum aparelho cadastrado ainda.', margem, y + 10); y += 16; }
+
+  y += 10; y = novaPaginaSeNecessario(y, 40);
+  y = secaoTitulo(y, '4. PLANO DE MANUTENÇÃO');
+  if (plano && plano.itens.length) {
+    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    plano.itens.forEach((item) => {
+      y = novaPaginaSeNecessario(y, 13);
+      doc.text(limparPdf(`• ${item.descricao} — ${pmocPeriodicidadeLabelExec(item.periodicidade)}${item.tipos_aparelho && item.tipos_aparelho.length ? ' (' + item.tipos_aparelho.join(', ') + ')' : ''}`).slice(0, 110), margem, y);
+      y += 13;
+    });
+  } else {
+    doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhum plano PMOC ativo pra este local.', margem, y); y += 16;
+  }
+
+  y += 10; y = novaPaginaSeNecessario(y, 60);
+  y = secaoTitulo(y, '5. CRONOGRAMA ANUAL');
+  if (cronograma.length) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    cronograma.forEach((mesInfo) => {
+      y = novaPaginaSeNecessario(y, 13);
+      doc.setFont(undefined, 'bold'); doc.text(`${pmocMesLabel(mesInfo.mes)}/${mesInfo.ano}`, margem, y);
+      doc.setFont(undefined, 'normal'); doc.text(limparPdf(mesInfo.itens.length ? mesInfo.itens.join(', ') : '—').slice(0, 90), margem + 90, y);
+      y += 13;
+    });
+  } else {
+    doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Sem cronograma — nenhum plano ativo.', margem, y); y += 16;
+  }
+
+  y += 10; y = novaPaginaSeNecessario(y, 40);
+  y = secaoTitulo(y, '6. REGISTRO DE EXECUÇÕES');
+  if (execucoes.length) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    execucoes.forEach((ex) => {
+      y = novaPaginaSeNecessario(y, 13);
+      doc.text(limparPdf(`${fmtDataIsoAgendaRef(ex.data)} — ${ex.tecnico_nome || 'sem técnico'} — ${ex.status === 'concluido' ? 'Concluída' : ex.status === 'cancelado' ? 'Cancelada' : 'Agendada'}`), margem, y);
+      y += 13;
+    });
+  } else {
+    doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhuma visita registrada ainda.', margem, y); y += 16;
+  }
+
+  y += 10; y = novaPaginaSeNecessario(y, 40);
+  y = secaoTitulo(y, '7. QUALIDADE DO AR');
+  if (qualidade_ar.length) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    qualidade_ar.forEach((q) => {
+      y = novaPaginaSeNecessario(y, 13);
+      doc.text(limparPdf(`${fmtDataIsoAgendaRef(q.data)}${q.laboratorio ? ' — ' + q.laboratorio : ''} — Temp.: ${q.temperatura || '—'} · Umidade: ${q.umidade || '—'} · CO2: ${q.co2 || '—'}`).slice(0, 110), margem, y);
+      y += 13;
+    });
+  } else {
+    doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhuma análise registrada ainda.', margem, y); y += 16;
+  }
+
+  y += 14; y = novaPaginaSeNecessario(y, 90);
+  y = secaoTitulo(y, '8. ASSINATURAS');
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+  doc.line(margem, y + 50, margem + 200, y + 50);
+  doc.line(margem + largura - 200, y + 50, margem + largura, y + 50);
+  if (responsavel_tecnico && responsavel_tecnico.assinatura_img) { try { doc.addImage(responsavel_tecnico.assinatura_img, 'PNG', margem, y, 180, 48); } catch (e) {} }
+  doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+  doc.text(limparPdf((responsavel_tecnico && responsavel_tecnico.nome) || 'Responsável técnico'), margem, y + 62);
+  doc.text('Responsável no local', margem + largura - 200, y + 62);
+
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (p === totalPaginas) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
+  return doc;
+}
+async function baixarDocumentoPmoc(localId) {
+  try {
+    const documento = await api('/api/pmoc/locais/' + localId + '/documento');
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    const doc = montarDocPmocDocumento(documento, logoCliente, logoNexor);
+    doc.save(`PMOC-${documento.local.nome.replace(/[^a-zA-Z0-9]+/g, '-')}.pdf`);
+  } catch (e) { alert(e.message); }
+}
+
+// ---- Relatório mensal consolidado (item 4.3 do pedido) ----
+async function renderPmocRelatorioMensal() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  const { clientes } = await api('/api/os-refrigeracao-clientes');
+  main.innerHTML = `
+    <div class="page-head"><h1>Relatório Mensal</h1></div>
+    <div class="filtros-row">
+      <select id="pmoc-rm-cliente"><option value="">Selecione o cliente...</option>${clientes.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('')}</select>
+      <input id="pmoc-rm-mes" type="month" value="${hojeIsoAgendaRef().slice(0, 7)}">
+      <button class="btn btn-primary btn-sm" onclick="carregarPmocRelatorioMensal()">Gerar</button>
+    </div>
+    <div id="pmoc-rm-resultado" style="margin-top:12px;"></div>`;
+}
+function pmocStatBox(label, valor) {
+  return `<div style="text-align:center; min-width:100px;"><div style="font-size:22px; font-weight:800; color:var(--blue);">${valor}</div><div style="font-size:11px; color:var(--ink-soft);">${esc(label)}</div></div>`;
+}
+async function carregarPmocRelatorioMensal() {
+  const clienteId = document.getElementById('pmoc-rm-cliente').value;
+  const mes = document.getElementById('pmoc-rm-mes').value;
+  const alvo = document.getElementById('pmoc-rm-resultado');
+  if (!clienteId || !mes) { alvo.innerHTML = '<div class="empty">Escolha o cliente e o mês.</div>'; return; }
+  alvo.innerHTML = '<div class="empty">Carregando...</div>';
+  try {
+    const relatorio = await api(`/api/pmoc/clientes/${clienteId}/relatorio-mensal?mes=${mes}`);
+    window._pmocRelatorioMensalAtual = relatorio;
+    alvo.innerHTML = `
+      <div class="panel">
+        <h3>${esc(relatorio.cliente.nome)} — ${pmocMesLabel(Number(mes.slice(5, 7)))}/${mes.slice(0, 4)}</h3>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:10px;">
+          ${pmocStatBox('Visitas no mês', relatorio.total_visitas)}
+          ${pmocStatBox('Concluídas', relatorio.concluidas)}
+          ${pmocStatBox('Pendentes', relatorio.pendentes)}
+          ${pmocStatBox('% no prazo', relatorio.percentual_no_prazo != null ? relatorio.percentual_no_prazo + '%' : '—')}
+          ${pmocStatBox('Não conform. abertas', relatorio.nao_conformidades_abertas)}
+        </div>
+      </div>
+      <h3 style="margin-top:14px;">Visitas do mês</h3>
+      <div class="panel">${relatorio.visitas.length ? relatorio.visitas.map((v) => `
+        <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px;">
+          <span>${fmtDataIsoAgendaRef(v.data)} — ${esc(v.cliente_nome)}</span>
+          <span>${v.status === 'concluido' ? 'Concluída' : v.status === 'cancelado' ? 'Cancelada' : 'Pendente'}</span>
+        </div>`).join('') : '<div class="empty">Nenhuma visita nesse mês.</div>'}</div>
+      <button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="baixarRelatorioMensalPmoc()">📄 Baixar PDF</button>`;
+  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function montarDocPmocRelatorioMensal(relatorio, logoCliente, logoNexor) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Relatório Mensal PMOC — ${relatorio.cliente.nome}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+  const y0 = margem;
+  desenharCabecalhoEmpresaPdf(doc, null, margem, y0);
+  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+  doc.text('Relatório Mensal PMOC', pageW - margem, y0, { align: 'right' });
+  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(`${pmocMesLabel(Number(relatorio.mes.slice(5, 7)))}/${relatorio.mes.slice(0, 4)}`, pageW - margem, y0 + 14, { align: 'right' });
+  let y = y0 + 48;
+  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
+
+  doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(limparPdf(relatorio.cliente.nome), margem, y); y += 24;
+
+  const stats = [
+    ['Visitas no mês', relatorio.total_visitas], ['Concluídas', relatorio.concluidas],
+    ['Pendentes', relatorio.pendentes], ['Canceladas', relatorio.canceladas],
+    ['% no prazo', relatorio.percentual_no_prazo != null ? relatorio.percentual_no_prazo + '%' : '—'],
+    ['Não conformidades abertas', relatorio.nao_conformidades_abertas],
+  ];
+  stats.forEach(([label, valor], i) => {
+    const col = i % 2, linha = Math.floor(i / 2);
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(String(label).toUpperCase(), margem + col * largura / 2, y + linha * 26);
+    doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(String(valor), margem + col * largura / 2, y + linha * 26 + 14);
+  });
+  y += Math.ceil(stats.length / 2) * 26 + 16;
+
+  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text('VISITAS DO MÊS', margem, y); y += 16;
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
+  doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('DATA', margem + 6, y + 11); doc.text('LOCAL', margem + 80, y + 11); doc.text('TÉCNICO', margem + largura * 0.6, y + 11); doc.text('STATUS', margem + largura * 0.85, y + 11);
+  y += 16;
+  doc.setFont(undefined, 'normal');
+  relatorio.visitas.forEach((v, i) => {
+    if (y > pageH - 80) { doc.addPage(); y = margem; }
+    if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+    doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(fmtDataIsoAgendaRef(v.data), margem + 6, y + 11);
+    doc.text(limparPdf(v.cliente_nome).slice(0, 40), margem + 80, y + 11);
+    doc.text(limparPdf(v.tecnico_nome || '—').slice(0, 20), margem + largura * 0.6, y + 11);
+    doc.text(v.status === 'concluido' ? 'Concluída' : v.status === 'cancelado' ? 'Cancelada' : 'Pendente', margem + largura * 0.85, y + 11);
+    y += 16;
+  });
+
+  const yLinha = pageH - 40;
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+  doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+  doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')}`, pageW / 2, pageH - 20, { align: 'center' });
+  desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+  return doc;
+}
+async function baixarRelatorioMensalPmoc() {
+  const relatorio = window._pmocRelatorioMensalAtual;
+  if (!relatorio) return;
+  const logoNexor = await logoNexorFlatHeader();
+  const doc = montarDocPmocRelatorioMensal(relatorio, null, logoNexor);
+  doc.save(`relatorio-mensal-pmoc-${relatorio.cliente.nome.replace(/[^a-zA-Z0-9]+/g, '-')}-${relatorio.mes}.pdf`);
+}
+
+// ===== Pacote "Climatização / PMOC" — Fase 4: portal do cliente final (item 5 do pedido) =====
+// pedido do usuário: cliente loga (papel 'cliente', ligado a um os_refrigeracao_clientes — ver
+// campo-cliente-pmoc no form de usuários) e vê só os próprios locais/ambientes/aparelhos/visitas.
+function pmocPortalAtivo() {
+  return USER.papel === 'cliente' && !!USER.os_refrigeracao_cliente_id && pmocPacoteAtivo();
+}
+function pmocPortalGuardHtml() {
+  return '<div class="empty">Portal exclusivo de clientes do pacote PMOC — fale com a empresa se você acha que deveria ter acesso.</div>';
+}
+
+async function renderPmocPortalLocais() {
+  const main = document.getElementById('main');
+  if (!pmocPortalAtivo()) { main.innerHTML = pmocPortalGuardHtml(); return; }
+  main.innerHTML = `<div class="page-head"><h1>Meus Locais</h1></div><div id="pmoc-portal-locais-lista"><div class="empty">Carregando...</div></div>`;
+  const { locais } = await api('/api/pmoc/portal/locais');
+  const alvo = document.getElementById('pmoc-portal-locais-lista');
+  alvo.innerHTML = locais.length ? locais.map((l) => `
+    <div class="panel" style="cursor:pointer; margin-bottom:10px;" onclick="abrirPmocPortalLocalDetalhe(${l.id})">
+      <strong>${esc(l.nome)}</strong> <span class="tag">${esc(pmocTipoAtividadeLabel(l.tipo_atividade))}</span>
+      <div style="font-size:12.5px; color:var(--ink-soft); margin-top:2px;">${esc(l.endereco || '—')}</div>
+      <div style="font-size:12.5px; color:var(--ink-soft); margin-top:4px;">${l.total_ambientes} ambiente${l.total_ambientes === 1 ? '' : 's'} · ${l.total_aparelhos} aparelho${l.total_aparelhos === 1 ? '' : 's'}</div>
+    </div>`).join('') : '<div class="empty">Nenhum local cadastrado ainda.</div>';
+}
+function abrirPmocPortalLocalDetalhe(id) {
+  window._pmocPortalLocalId = id;
+  ir('pmoc-portal-local-detalhe');
+}
+async function renderPmocPortalLocalDetalhe() {
+  const main = document.getElementById('main');
+  if (!pmocPortalAtivo()) { main.innerHTML = pmocPortalGuardHtml(); return; }
+  main.innerHTML = '<div class="empty">Carregando...</div>';
+  const { local, ambientes } = await api('/api/pmoc/portal/locais/' + window._pmocPortalLocalId);
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(local.nome)}</h1><span class="tag">${esc(pmocTipoAtividadeLabel(local.tipo_atividade))}</span></div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary btn-sm" onclick="baixarDocumentoPmocPortal(${local.id})">📄 Baixar PMOC</button>
+        <button class="btn-outline-sm" onclick="ir('pmoc-portal-locais')">← Voltar</button>
+      </div>
+    </div>
+    ${ambientes.map((amb) => `
+      <div class="panel" style="margin-bottom:12px;">
+        <h3 style="margin-top:0;">${esc(amb.nome)}${amb.andar ? ` — ${esc(amb.andar)}` : ''}</h3>
+        ${(amb.aparelhos || []).length ? amb.aparelhos.map((ap) => `
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+            <div>
+              <strong>${esc(ap.tipo)}</strong> ${pmocStatusBadgeHtml(ap.status)}
+              <div style="font-size:12px; color:var(--ink-soft);">${[ap.marca, ap.modelo].filter(Boolean).map(esc).join(' ')}</div>
+            </div>
+            <button class="btn-outline-sm" onclick="abrirModalChamadoPmocPortal(${ap.id}, '${esc(`${ap.tipo} — ${amb.nome}`)}')">Abrir chamado</button>
+          </div>`).join('') : '<div class="empty">Nenhum aparelho neste ambiente.</div>'}
+      </div>`).join('') || '<div class="empty">Nenhum ambiente cadastrado ainda.</div>'}`;
+}
+async function baixarDocumentoPmocPortal(localId) {
+  try {
+    const documento = await api('/api/pmoc/portal/locais/' + localId + '/documento');
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    const doc = montarDocPmocDocumento(documento, logoCliente, logoNexor);
+    doc.save(`PMOC-${documento.local.nome.replace(/[^a-zA-Z0-9]+/g, '-')}.pdf`);
+  } catch (e) { alert(e.message); }
+}
+function abrirModalChamadoPmocPortal(aparelhoId, aparelhoLabel) {
+  window._pmocPortalChamadoAparelhoId = aparelhoId;
+  let modal = document.getElementById('modal-pmoc-portal-chamado');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-portal-chamado';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Abrir chamado</h3>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">${esc(aparelhoLabel)}</p>
+      <div class="field"><label>Descreva o problema</label><textarea id="pmoc-portal-chamado-descricao" style="min-height:70px;"></textarea></div>
+      <div id="pmoc-portal-chamado-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-portal-chamado').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmarChamadoPmocPortal()">Enviar</button>
+      </div>
+    </div>`;
+}
+async function confirmarChamadoPmocPortal() {
+  const erroEl = document.getElementById('pmoc-portal-chamado-erro');
+  erroEl.classList.add('hidden');
+  const descricao = document.getElementById('pmoc-portal-chamado-descricao').value.trim();
+  if (!descricao) { erroEl.textContent = 'Descreva o problema.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    await api(`/api/pmoc/portal/aparelhos/${window._pmocPortalChamadoAparelhoId}/chamado`, { method: 'POST', body: { descricao } });
+    document.getElementById('modal-pmoc-portal-chamado').classList.remove('show');
+    mostrarToast('Chamado aberto — nossa equipe vai entrar em contato.');
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ---- histórico de visitas + próximas preventivas agendadas ----
+async function renderPmocPortalVisitas() {
+  const main = document.getElementById('main');
+  if (!pmocPortalAtivo()) { main.innerHTML = pmocPortalGuardHtml(); return; }
+  main.innerHTML = `<div class="page-head"><h1>Minhas Visitas</h1></div><div id="pmoc-portal-visitas-lista"><div class="empty">Carregando...</div></div>`;
+  const { visitas } = await api('/api/pmoc/portal/visitas');
+  window._pmocPortalVisitasCache = visitas;
+  const alvo = document.getElementById('pmoc-portal-visitas-lista');
+  alvo.innerHTML = visitas.length ? visitas.map((v) => `
+    <div class="panel" style="margin-bottom:10px; ${v.status === 'concluido' ? 'cursor:pointer;' : ''}" ${v.status === 'concluido' ? `onclick="baixarRelatorioVisitaPmocPortal(${v.id})"` : ''}>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div>
+          <strong>${fmtDataIsoAgendaRef(v.data)}</strong>${v.hora ? ` ${esc(v.hora)}` : ''}
+          <div style="font-size:12.5px; color:var(--ink-soft);">${esc(v.cliente_nome)}${v.tecnico_nome ? ' — ' + esc(v.tecnico_nome) : ''}</div>
+        </div>
+        ${v.status === 'pendente_designacao' ? '<span class="tag tag-amber">Sem técnico</span>' : v.status === 'concluido' ? '<span class="tag" style="background:none; border:1px solid var(--green); color:var(--green);">Concluída — baixar relatório</span>' : v.status === 'cancelado' ? '<span class="tag" style="background:none; border:1px solid var(--red); color:var(--red);">Cancelada</span>' : '<span class="tag">Agendada</span>'}
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhuma visita registrada ainda.</div>';
+}
+async function baixarRelatorioVisitaPmocPortal(id) {
+  try {
+    const { visita } = await api('/api/pmoc/portal/visitas/' + id);
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    const doc = montarDocPmocVisitaPdf(visita, null, logoCliente, logoNexor);
+    doc.save(`visita-pmoc-${visita.id}.pdf`);
+  } catch (e) { alert(e.message); }
 }
 
 // ===== Início (Home) — perfil "Refrigeração e Climatização" =====
@@ -6520,6 +7063,10 @@ async function ir(pagina) {
     if (pagina === 'pmoc-planos') return renderPmocPlanos();
     if (pagina === 'pmoc-visitas-pendentes') return renderPmocVisitasPendentes();
     if (pagina === 'pmoc-visita-execucao') return renderPmocVisitaExecucao();
+    if (pagina === 'pmoc-relatorio-mensal') return renderPmocRelatorioMensal();
+    if (pagina === 'pmoc-portal-locais') return renderPmocPortalLocais();
+    if (pagina === 'pmoc-portal-local-detalhe') return renderPmocPortalLocalDetalhe();
+    if (pagina === 'pmoc-portal-visitas') return renderPmocPortalVisitas();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();
@@ -24951,6 +25498,11 @@ function mostrarFormUsuario(usuario) {
           ${permitidos.map((p) => `<option value="${p}" ${papelPadrao === p ? 'selected' : ''}>${opcoesPapel[p]}</option>`).join('')}
         </select></div>
         <div id="campo-cliente"><label>Empresa (cliente)</label>${campoClienteHTML('nu-cliente', clientes)}</div>
+        <div id="campo-cliente-pmoc" style="display:none;">
+          <label>Cliente do perfil Refrigeração (PMOC)</label>
+          <select id="nu-cliente-pmoc"><option value="">Selecione...</option></select>
+          <p style="color:var(--ink-soft); font-size:12px; margin:4px 0 0;">Alternativa ao campo "Empresa (cliente)" acima — use este quando o cliente for do perfil Refrigeração/PMOC, pra liberar o portal dele.</p>
+        </div>
         <div id="campo-filial"><label>Filial (loja)${papelPadrao === 'gerente_loja' ? '*' : ' — opcional, loja base'}</label>
           <select id="nu-filial">
             <option value="">${papelPadrao === 'suporte' ? 'Nenhuma (vê todas as lojas)' : 'Selecione'}</option>
@@ -25024,6 +25576,14 @@ function atualizarChecklistMenus() {
 function alternarCampoCliente() {
   const papel = document.getElementById('nu-papel').value;
   document.getElementById('campo-cliente').style.display = papel === 'cliente' ? '' : 'none';
+  // pedido do usuário: portal do cliente final do pacote PMOC (Fase 4) — alternativa ao combo de
+  // cliente núcleo acima, só pra empresa do perfil Refrigeração (ver os_refrigeracao_cliente_id).
+  const campoClientePmoc = document.getElementById('campo-cliente-pmoc');
+  if (campoClientePmoc) {
+    const mostra = papel === 'cliente' && perfilRefrigeracaoAtivo();
+    campoClientePmoc.style.display = mostra ? '' : 'none';
+    if (mostra) carregarOpcoesClientePmoc();
+  }
   // versão Restaurantes/rede multiunidade (Fase 1 — Base): filial só faz sentido pra gerente_loja
   // (obrigatório) e suporte/técnico (opcional, loja base); setor só pra coordenador/consultor.
   const campoFilial = document.getElementById('campo-filial');
@@ -25037,6 +25597,18 @@ function alternarCampoCliente() {
   atualizarChecklistMenus();
   alternarChecklistMenus();
 }
+// pedido do usuário: portal do cliente final do pacote PMOC (Fase 4) — busca uma vez só (cacheada)
+// e pré-seleciona o cliente do usuário em edição, se ele já tiver um os_refrigeracao_cliente_id.
+window._clientesPmocCacheForm = null;
+async function carregarOpcoesClientePmoc() {
+  const select = document.getElementById('nu-cliente-pmoc');
+  if (!select) return;
+  if (!window._clientesPmocCacheForm) {
+    try { window._clientesPmocCacheForm = (await api('/api/os-refrigeracao-clientes')).clientes; } catch (e) { window._clientesPmocCacheForm = []; }
+  }
+  const usuario = usuarioEmEdicaoId ? (window._usuariosCache || []).find((u) => u.id === usuarioEmEdicaoId) : null;
+  select.innerHTML = '<option value="">Selecione...</option>' + window._clientesPmocCacheForm.map((c) => `<option value="${c.id}" ${usuario && usuario.os_refrigeracao_cliente_id === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('');
+}
 // desmarcar "Liberar todos os menus" revela os checkboxes de cada menu pra personalizar; marcado,
 // os checkboxes ficam desabilitados (o usuário tem tudo, independente do que estava marcado antes)
 function alternarChecklistMenus() {
@@ -25049,8 +25621,10 @@ function alternarChecklistMenus() {
 }
 async function salvarUsuario() {
   const papel = document.getElementById('nu-papel').value;
-  if (papel === 'cliente' && !document.getElementById('nu-cliente').value) {
-    return alert('Escolha uma empresa cadastrada na lista.');
+  const clientePmocEl = document.getElementById('nu-cliente-pmoc');
+  const clientePmocEscolhido = clientePmocEl && clientePmocEl.style.display !== 'none' && clientePmocEl.value;
+  if (papel === 'cliente' && !document.getElementById('nu-cliente').value && !clientePmocEscolhido) {
+    return alert('Escolha uma empresa cadastrada na lista (ou um cliente do perfil Refrigeração, se for o caso).');
   }
   if (papel === 'gerente_loja' && !document.getElementById('nu-filial').value) {
     return alert('Escolha a filial deste gerente.');
@@ -25064,7 +25638,8 @@ async function salvarUsuario() {
     cargo: document.getElementById('nu-cargo').value,
     setor: document.getElementById('nu-setor').value,
     papel,
-    cliente_id: papel === 'cliente' ? Number(document.getElementById('nu-cliente').value) : null,
+    cliente_id: papel === 'cliente' && document.getElementById('nu-cliente').value ? Number(document.getElementById('nu-cliente').value) : null,
+    os_refrigeracao_cliente_id: papel === 'cliente' && clientePmocEscolhido ? Number(clientePmocEscolhido) : null,
     filial_id: (papel === 'gerente_loja' || papel === 'suporte') && document.getElementById('nu-filial').value ? Number(document.getElementById('nu-filial').value) : null,
     setor_id: (papel === 'coordenador_tecnico' || papel === 'consultor_mercado') && document.getElementById('nu-setor-estrutura').value ? Number(document.getElementById('nu-setor-estrutura').value) : null,
   };

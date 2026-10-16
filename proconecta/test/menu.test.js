@@ -243,3 +243,22 @@ test('"Preventivas pendentes" (fila de designação de técnico) só existe no m
   const pmocSuporte = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
   assert.ok(!pmocSuporte.children.map((c) => c.page).includes('pmoc-visitas-pendentes'));
 });
+
+// pedido do usuário: Fase 4, item 5 — portal do cliente final do pacote PMOC. Igual ao item
+// "pmoc" do administrador/suporte, combina os dois gates (`perfil: 'refrigeracao'` + `modulo:
+// 'pmoc'`), só que no menu do papel "cliente" (ver GET /api/pmoc/portal/* em server.js).
+test('"PMOC" (portal do cliente) só aparece quando a empresa é do perfil refrigeração E tem o módulo `pmoc` ativo', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.USER = { papel: 'cliente', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc-portal'));
+  ctx.USER.modulos_ativos = ['pmoc'];
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc-portal'));
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  const pmocPortal = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc-portal');
+  assert.ok(pmocPortal);
+  const paginasFilhas = pmocPortal.children.map((c) => c.page);
+  assert.ok(paginasFilhas.includes('pmoc-portal-locais'));
+  assert.ok(paginasFilhas.includes('pmoc-portal-visitas'));
+});

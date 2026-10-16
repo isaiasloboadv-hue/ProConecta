@@ -1199,6 +1199,22 @@ async function extrairFotosProfundo(valor, empresaId) {
   return valor;
 }
 
+// variante de extrairFotosProfundo (acima) sem a restrição a imagem — pro laudo de qualidade do
+// ar do PMOC (ver os_refrigeracao_pmoc_qualidade_ar), que é tipicamente um PDF. Mesma indireção
+// de armazenamento (db.salvarFoto/__foto_ref), só sem o TIPO_FOTO_REGEX; hidratarFotosProfundo já
+// lida com qualquer `__foto_ref` genérico, então não precisa de hidratação própria.
+async function extrairAnexoGenerico(valor, empresaId) {
+  if (typeof valor !== 'string' || !valor.startsWith('data:') || valor.length < 100) return valor;
+  const base64 = valor.slice(valor.indexOf(',') + 1);
+  if (Buffer.byteLength(base64, 'base64') > TAMANHO_MAX_FOTO_BYTES) {
+    const erro = new Error('O arquivo passa do limite de 8MB.');
+    erro.publico = true;
+    throw erro;
+  }
+  const id = await db.salvarFoto(valor, empresaId);
+  return { __foto_ref: id };
+}
+
 async function hidratarFotosProfundo(valor) {
   if (valor && typeof valor === 'object' && !Array.isArray(valor) && typeof valor.__foto_ref === 'string' && Object.keys(valor).length === 1) {
     return (await db.carregarFoto(valor.__foto_ref)) || null;
@@ -1284,7 +1300,12 @@ rota('POST', /^\/api\/login$/, async (req, res) => {
   if (empresaDoUsuario && verificarExpiracaoTeste(empresaDoUsuario, data)) {
     return enviarJSON(res, 403, { erro: 'Seu período de teste acabou — fale com o suporte pra continuar.', codigo: 'teste_expirado' });
   }
-  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
+  // pedido do usuário: portal do cliente final do pacote PMOC (Fase 4) — paralelo ao `cliente_id`
+  // núcleo (que aponta pra `clientes`), um usuário papel "cliente" pode em vez disso apontar pra
+  // um registro de `os_refrigeracao_clientes` (perfil Refrigeração), pelas rotas /api/pmoc/portal/*
+  // abaixo — precisa estar no token (igual cliente_id) pra usuarioAutenticado(req) devolver sem
+  // precisar recarregar o usuário do banco a cada rota.
+  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, os_refrigeracao_cliente_id: u.os_refrigeracao_cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: {
     ...usuarioPublico(u),
     empresa: await empresaResumo(empresaDoUsuario),
@@ -1341,7 +1362,7 @@ rota('POST', /^\/api\/cadastro$/, async (req, res) => {
     status: 'ativo', convite_token: null, salt, hash,
   });
   db.save(data);
-  const token = gerarToken({ id: admin.id, papel: admin.papel, nome: admin.nome, cliente_id: admin.cliente_id, empresa_id: admin.empresa_id });
+  const token = gerarToken({ id: admin.id, papel: admin.papel, nome: admin.nome, cliente_id: admin.cliente_id, os_refrigeracao_cliente_id: admin.os_refrigeracao_cliente_id, empresa_id: admin.empresa_id });
   enviarJSON(res, 201, { token, usuario: {
     ...usuarioPublico(admin),
     empresa: await empresaResumo(empresa),
@@ -1544,7 +1565,7 @@ rota('POST', /^\/api\/convite\/([a-f0-9]+)\/ativar$/, async (req, res, m) => {
   u.status = 'ativo';
   u.convite_token = null;
   db.save(data);
-  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, empresa_id: u.empresa_id });
+  const token = gerarToken({ id: u.id, papel: u.papel, nome: u.nome, cliente_id: u.cliente_id, os_refrigeracao_cliente_id: u.os_refrigeracao_cliente_id, empresa_id: u.empresa_id });
   enviarJSON(res, 200, { token, usuario: usuarioPublico(u) });
 });
 
@@ -5973,9 +5994,13 @@ rota('POST', /^\/api\/pmoc\/planos$/, async (req, res) => {
   if (responsavelId && !tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', responsavelId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Responsável técnico inválido.' });
   const itensBase = Array.isArray(body.itens) && body.itens.length ? body.itens : garantirModeloChecklistPmoc(data, user.empresa_id);
   const itens = itensBase.map(camposItemPlanoPmoc).filter((i) => i.descricao);
+  // pedido do usuário (item 1.4): "Número da ART/TRT por contrato/local" — por isso mora no plano
+  // (1 por local), não no cadastro do responsável técnico (que pode assinar vários contratos).
+  const laudoArtTrt = body.art_trt_anexo ? await extrairAnexoGenerico(body.art_trt_anexo, user.empresa_id) : null;
   const plano = tenant.criar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id, {
     local_id: localId, responsavel_tecnico_id: responsavelId, data_inicio: body.data_inicio,
     vigencia_meses: Number(body.vigencia_meses) > 0 ? Number(body.vigencia_meses) : 12,
+    art_trt_numero: body.art_trt_numero || '', art_trt_anexo: laudoArtTrt,
     status: 'rascunho', itens, criado_em: new Date().toISOString(),
   });
   db.save(data);
@@ -6011,9 +6036,11 @@ rota('PUT', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
   const responsavelId = body.responsavel_tecnico_id ? Number(body.responsavel_tecnico_id) : null;
   if (responsavelId && !tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', responsavelId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Responsável técnico inválido.' });
   const itens = Array.isArray(body.itens) ? body.itens.map(camposItemPlanoPmoc).filter((i) => i.descricao) : plano.itens;
+  if (body.art_trt_anexo !== undefined) plano.art_trt_anexo = body.art_trt_anexo ? await extrairAnexoGenerico(body.art_trt_anexo, user.empresa_id) : null;
   Object.assign(plano, {
     responsavel_tecnico_id: responsavelId, data_inicio: body.data_inicio,
     vigencia_meses: Number(body.vigencia_meses) > 0 ? Number(body.vigencia_meses) : plano.vigencia_meses,
+    art_trt_numero: body.art_trt_numero !== undefined ? body.art_trt_numero : (plano.art_trt_numero || ''),
     itens,
   });
   if (plano.status === 'ativo') {
@@ -6233,6 +6260,271 @@ rota('POST', /^\/api\/pmoc\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res,
   const empresa = data.empresas.find((e) => e.id === user.empresa_id);
   const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo: `visita-pmoc-${visita.id}.pdf`, nomeEmpresa: empresa ? empresa.nome : undefined });
   enviarJSON(res, 200, { envio: resultado });
+});
+
+// ---------- Pacote "Climatização / PMOC" — Fase 4: Documento PMOC e portal do cliente ----------
+
+// ---- qualidade do ar (por local, item 1.6 do pedido) ----
+function camposQualidadeArPmoc(body) {
+  return {
+    data: /^\d{4}-\d{2}-\d{2}$/.test(body.data || '') ? body.data : '',
+    laboratorio: body.laboratorio || '',
+    temperatura: body.temperatura || '', umidade: body.umidade || '', co2: body.co2 || '',
+    observacoes: body.observacoes || '',
+  };
+}
+// GET /api/pmoc/locais/:localId/qualidade-ar
+rota('GET', /^\/api\/pmoc\/locais\/(\d+)\/qualidade-ar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  const lista = await Promise.all(
+    data.os_refrigeracao_pmoc_qualidade_ar.filter((q) => q.local_id === local.id && q.empresa_id === user.empresa_id)
+      .map(async (q) => ({ ...q, laudo_pdf: await hidratarFotosProfundo(q.laudo_pdf) }))
+  );
+  lista.sort((a, b) => b.data.localeCompare(a.data));
+  enviarJSON(res, 200, { analises: lista });
+});
+// POST /api/pmoc/qualidade-ar { local_id, data, laboratorio, laudo_pdf, temperatura, umidade, co2, observacoes }
+rota('POST', /^\/api\/pmoc\/qualidade-ar$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const localId = Number(body.local_id) || null;
+  if (!localId || !tenant.buscar(data, 'os_refrigeracao_pmoc_locais', localId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Local inválido.' });
+  const campos = camposQualidadeArPmoc(body);
+  if (!campos.data) return enviarJSON(res, 400, { erro: 'Informe a data da análise.' });
+  const laudo_pdf = body.laudo_pdf ? await extrairAnexoGenerico(body.laudo_pdf, user.empresa_id) : null;
+  const analise = tenant.criar(data, 'os_refrigeracao_pmoc_qualidade_ar', user.empresa_id, { ...campos, local_id: localId, laudo_pdf, criado_em: new Date().toISOString() });
+  db.save(data);
+  enviarJSON(res, 201, { analise: { ...analise, laudo_pdf: await hidratarFotosProfundo(analise.laudo_pdf) } });
+});
+// PUT /api/pmoc/qualidade-ar/:id
+rota('PUT', /^\/api\/pmoc\/qualidade-ar\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const analise = tenant.buscar(data, 'os_refrigeracao_pmoc_qualidade_ar', Number(m[1]), user.empresa_id);
+  if (!analise) return enviarJSON(res, 404, { erro: 'Análise não encontrada.' });
+  const body = await lerCorpo(req);
+  const campos = camposQualidadeArPmoc(body);
+  if (!campos.data) return enviarJSON(res, 400, { erro: 'Informe a data da análise.' });
+  if (body.laudo_pdf !== undefined) analise.laudo_pdf = body.laudo_pdf ? await extrairAnexoGenerico(body.laudo_pdf, user.empresa_id) : null;
+  Object.assign(analise, campos);
+  db.save(data);
+  enviarJSON(res, 200, { analise: { ...analise, laudo_pdf: await hidratarFotosProfundo(analise.laudo_pdf) } });
+});
+// DELETE /api/pmoc/qualidade-ar/:id
+rota('DELETE', /^\/api\/pmoc\/qualidade-ar\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const analise = tenant.buscar(data, 'os_refrigeracao_pmoc_qualidade_ar', Number(m[1]), user.empresa_id);
+  if (!analise) return enviarJSON(res, 404, { erro: 'Análise não encontrada.' });
+  data.os_refrigeracao_pmoc_qualidade_ar = data.os_refrigeracao_pmoc_qualidade_ar.filter((q) => q.id !== analise.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- Documento PMOC do local (item 4.1 do pedido) — dados completos pras 8 seções do PDF,
+// montado no cliente (jsPDF), igual todo documento desse perfil. "Gerado a qualquer momento a
+// partir do plano" — funciona mesmo sem plano ainda (seções 4/5/6 saem vazias nesse caso).
+// extraída pra função própria porque o portal do cliente (ver /api/pmoc/portal/locais/:id/documento
+// mais abaixo) monta exatamente o mesmo documento, só com uma checagem de acesso diferente.
+async function montarDocumentoPmocLocal(data, local, empresaId) {
+  const ambientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === local.id)
+    .map((a) => ({ ...a, aparelhos: data.os_refrigeracao_pmoc_aparelhos.filter((p) => p.ambiente_id === a.id) }));
+  const plano = data.os_refrigeracao_pmoc_planos.find((p) => p.local_id === local.id && p.empresa_id === empresaId) || null;
+  let responsavel = null;
+  const cronograma = [];
+  if (plano) {
+    responsavel = data.os_refrigeracao_pmoc_responsaveis_tecnicos.find((r) => r.id === plano.responsavel_tecnico_id && r.empresa_id === empresaId) || null;
+    const [anoInicio, mesInicio] = plano.data_inicio.split('-').map(Number);
+    for (let i = 0; i < 12; i++) {
+      const cursor = new Date(anoInicio, mesInicio - 1 + i, 1);
+      const ano = cursor.getFullYear(), mes = cursor.getMonth() + 1;
+      cronograma.push({ ano, mes, itens: plano.itens.filter((item) => itemDevidoNoMesPmoc(item, plano.data_inicio, ano, mes)).map((item) => item.descricao) });
+    }
+  }
+  const execucoes = data.os_refrigeracao_agendamentos
+    .filter((a) => plano && a.pmoc_plano_id === plano.id && a.empresa_id === empresaId)
+    .map((a) => ({ data: a.data, tecnico_nome: a.tecnico_nome || '', status: a.status }))
+    .sort((a, b) => a.data.localeCompare(b.data));
+  const qualidadeAr = await Promise.all(
+    data.os_refrigeracao_pmoc_qualidade_ar.filter((q) => q.local_id === local.id && q.empresa_id === empresaId)
+      .sort((a, b) => b.data.localeCompare(a.data)).slice(0, 5)
+      .map(async (q) => ({ ...q, laudo_pdf: await hidratarFotosProfundo(q.laudo_pdf) }))
+  );
+  return {
+    local: pmocLocalComDetalhes(data, local),
+    ambientes,
+    plano: plano ? { ...plano, art_trt_anexo: await hidratarFotosProfundo(plano.art_trt_anexo), data_fim: calcularDataFimPlanoPmoc(plano.data_inicio, plano.vigencia_meses) } : null,
+    responsavel_tecnico: responsavel ? { ...responsavel, assinatura_img: await hidratarFotosProfundo(responsavel.assinatura_img) } : null,
+    cronograma, execucoes, qualidade_ar: qualidadeAr,
+  };
+}
+rota('GET', /^\/api\/pmoc\/locais\/(\d+)\/documento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  enviarJSON(res, 200, await montarDocumentoPmocLocal(data, local, user.empresa_id));
+});
+
+// ---- Relatório mensal consolidado (item 4.3 do pedido) — por CLIENTE, agregando todos os
+// locais dele: visitas realizadas no mês, pendências, não conformidades abertas e % no prazo.
+rota('GET', /^\/api\/pmoc\/clientes\/(\d+)\/relatorio-mensal$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const cliente = tenant.buscar(data, 'os_refrigeracao_clientes', Number(m[1]), user.empresa_id);
+  if (!cliente) return enviarJSON(res, 404, { erro: 'Cliente não encontrado.' });
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}$/.test(query.mes || '')) return enviarJSON(res, 400, { erro: 'Informe o mês (AAAA-MM).' });
+  const locaisIds = data.os_refrigeracao_pmoc_locais.filter((l) => l.cliente_id === cliente.id && l.empresa_id === user.empresa_id).map((l) => l.id);
+  const visitasDoMes = data.os_refrigeracao_agendamentos.filter((a) => a.pmoc_local_id && locaisIds.includes(a.pmoc_local_id) && a.empresa_id === user.empresa_id && a.data.startsWith(query.mes));
+  const concluidas = visitasDoMes.filter((v) => v.status === 'concluido');
+  const pendentes = visitasDoMes.filter((v) => v.status === 'pendente_designacao' || v.status === 'agendado');
+  const canceladas = visitasDoMes.filter((v) => v.status === 'cancelado');
+  // "no prazo": concluída até o fim do próprio mês planejado pra visita (toda visita já nasce com
+  // a data certa — ver geração automática — então só fica fora do prazo quem concluiu depois).
+  const fimMes = new Date(Number(query.mes.slice(0, 4)), Number(query.mes.slice(5, 7)), 0).toISOString().slice(0, 10);
+  const noPrazo = concluidas.filter((v) => !v.concluido_em || v.concluido_em.slice(0, 10) <= fimMes);
+  const naoConformidadesAbertas = visitasDoMes.flatMap((v) => (v.pmoc_itens || []).filter((i) => i.resposta === 'nao_conforme' && !i.os_corretiva_id));
+  enviarJSON(res, 200, {
+    cliente: { nome: cliente.nome }, mes: query.mes,
+    total_visitas: visitasDoMes.length, concluidas: concluidas.length, pendentes: pendentes.length, canceladas: canceladas.length,
+    percentual_no_prazo: visitasDoMes.length ? Math.round((noPrazo.length / visitasDoMes.length) * 100) : null,
+    nao_conformidades_abertas: naoConformidadesAbertas.length,
+    visitas: [...visitasDoMes].sort((a, b) => a.data.localeCompare(b.data)).map((v) => ({ id: v.id, data: v.data, status: v.status, cliente_nome: v.cliente_nome, tecnico_nome: v.tecnico_nome || '' })),
+  });
+});
+
+// ---- portal do cliente final (item 5 do pedido) — acesso de quem loga como papel "cliente" com
+// os_refrigeracao_cliente_id setado (ver POST /api/login e o form de usuários em app.js). Só
+// enxerga os próprios locais/ambientes/aparelhos/visitas — nunca os de outro cliente da mesma
+// empresa, e a empresa em si precisa continuar com o perfil + módulo pmoc ativos.
+function exigirClientePortalPmoc(res, user, data) {
+  if (!user || user.papel !== 'cliente' || !user.os_refrigeracao_cliente_id) {
+    enviarJSON(res, 403, { erro: 'Portal exclusivo de clientes do pacote PMOC.' });
+    return null;
+  }
+  if (!empresaPerfilRefrigeracao(data, user.empresa_id) || !db.moduloAtivo(data, user.empresa_id, 'pmoc')) {
+    enviarJSON(res, 403, { erro: 'Portal exclusivo de empresas com o perfil Refrigeração e o pacote PMOC contratado.' });
+    return null;
+  }
+  const cliente = tenant.buscar(data, 'os_refrigeracao_clientes', user.os_refrigeracao_cliente_id, user.empresa_id);
+  if (!cliente) { enviarJSON(res, 404, { erro: 'Cliente não encontrado.' }); return null; }
+  return cliente;
+}
+
+// GET /api/pmoc/portal/locais
+rota('GET', /^\/api\/pmoc\/portal\/locais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const locais = data.os_refrigeracao_pmoc_locais.filter((l) => l.cliente_id === cliente.id && l.empresa_id === user.empresa_id).map((l) => pmocLocalComDetalhes(data, l));
+  enviarJSON(res, 200, { locais });
+});
+// GET /api/pmoc/portal/locais/:id — ambientes + aparelhos com status
+rota('GET', /^\/api\/pmoc\/portal\/locais\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local || local.cliente_id !== cliente.id) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  const ambientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === local.id)
+    .map((a) => ({ ...a, aparelhos: data.os_refrigeracao_pmoc_aparelhos.filter((p) => p.ambiente_id === a.id) }));
+  enviarJSON(res, 200, { local: pmocLocalComDetalhes(data, local), ambientes });
+});
+// GET /api/pmoc/portal/locais/:id/documento — "Baixar PMOC" (documento sempre atualizado)
+rota('GET', /^\/api\/pmoc\/portal\/locais\/(\d+)\/documento$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local || local.cliente_id !== cliente.id) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  enviarJSON(res, 200, await montarDocumentoPmocLocal(data, local, user.empresa_id));
+});
+// GET /api/pmoc/portal/locais/:id/qualidade-ar
+rota('GET', /^\/api\/pmoc\/portal\/locais\/(\d+)\/qualidade-ar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local || local.cliente_id !== cliente.id) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  const lista = await Promise.all(
+    data.os_refrigeracao_pmoc_qualidade_ar.filter((q) => q.local_id === local.id && q.empresa_id === user.empresa_id)
+      .map(async (q) => ({ ...q, laudo_pdf: await hidratarFotosProfundo(q.laudo_pdf) }))
+  );
+  lista.sort((a, b) => b.data.localeCompare(a.data));
+  enviarJSON(res, 200, { analises: lista });
+});
+// GET /api/pmoc/portal/visitas — histórico (todas) + próximas preventivas agendadas, de todos os
+// locais do cliente — mais recente primeiro.
+rota('GET', /^\/api\/pmoc\/portal\/visitas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const locaisIds = data.os_refrigeracao_pmoc_locais.filter((l) => l.cliente_id === cliente.id && l.empresa_id === user.empresa_id).map((l) => l.id);
+  const visitas = data.os_refrigeracao_agendamentos
+    .filter((a) => a.pmoc_local_id && locaisIds.includes(a.pmoc_local_id) && a.empresa_id === user.empresa_id)
+    .map((a) => ({ id: a.id, data: a.data, hora: a.hora, status: a.status, cliente_nome: a.cliente_nome, tecnico_nome: a.tecnico_nome || '', total_itens: (a.pmoc_itens || []).length }))
+    .sort((a, b) => b.data.localeCompare(a.data));
+  enviarJSON(res, 200, { visitas });
+});
+// GET /api/pmoc/portal/visitas/:id — detalhe hidratado, pro cliente ver/baixar o relatório daquela visita.
+rota('GET', /^\/api\/pmoc\/portal\/visitas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita || !visita.pmoc_local_id) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === visita.pmoc_local_id && l.empresa_id === user.empresa_id);
+  if (!local || local.cliente_id !== cliente.id) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  const itens = await Promise.all((visita.pmoc_itens || []).map(async (i) => ({ ...i, foto_antes: await hidratarFotosProfundo(i.foto_antes), foto_depois: await hidratarFotosProfundo(i.foto_depois) })));
+  const assinatura_responsavel_img = await hidratarFotosProfundo(visita.assinatura_responsavel_img);
+  enviarJSON(res, 200, { visita: { ...visita, pmoc_itens: itens, assinatura_responsavel_img } });
+});
+// POST /api/pmoc/portal/aparelhos/:id/chamado { descricao } — pedido do usuário: "abrir chamado
+// (corretiva) pra um aparelho específico". Nasce "pendente", sem técnico (o administrador designa
+// depois — mesmo espírito da preventiva automática, só que essa aqui é avulsa e pedida pelo cliente).
+rota('POST', /^\/api\/pmoc\/portal\/aparelhos\/(\d+)\/chamado$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  const cliente = exigirClientePortalPmoc(res, user, data);
+  if (!cliente) return;
+  const aparelho = tenant.buscar(data, 'os_refrigeracao_pmoc_aparelhos', Number(m[1]), user.empresa_id);
+  if (!aparelho) return enviarJSON(res, 404, { erro: 'Aparelho não encontrado.' });
+  const ambiente = data.os_refrigeracao_pmoc_ambientes.find((a) => a.id === aparelho.ambiente_id && a.empresa_id === user.empresa_id);
+  const local = ambiente ? data.os_refrigeracao_pmoc_locais.find((l) => l.id === ambiente.local_id && l.empresa_id === user.empresa_id) : null;
+  if (!local || local.cliente_id !== cliente.id) return enviarJSON(res, 403, { erro: 'Esse aparelho não é de um local seu.' });
+  const body = await lerCorpo(req);
+  const descricao = String(body.descricao || '').trim();
+  if (!descricao) return enviarJSON(res, 400, { erro: 'Descreva o problema.' });
+  const os = tenant.criar(data, 'os_refrigeracao', user.empresa_id, {
+    cliente_id: cliente.id,
+    equipamento: { tipo: aparelho.tipo, marca: aparelho.marca, modelo: aparelho.modelo, btu: aparelho.capacidade_btu },
+    problema_relatado: descricao, diagnostico: '', servicos: [], materiais: [], mao_de_obra: 0,
+    desconto_tipo: 'valor', desconto_valor: 0, observacoes_servico: '', endereco_servico: local.endereco || '',
+    garantia_dias: 90, observacoes: '', fotos: [],
+    assinatura_tecnico_img: null, assinatura_cliente_img: null, assinado_cliente_em: null,
+    tecnico_id: null, tecnico_nome: '', autor_id: user.id,
+    token_assinatura: gerarTokenConvite(), status: 'pendente', criado_em: new Date().toISOString(),
+    pmoc_origem: { aparelho_id: aparelho.id, local_id: local.id, aberto_pelo_cliente: true },
+  });
+  db.save(data);
+  enviarJSON(res, 201, { os: await osRefrigeracaoComDetalhes(data, os) });
 });
 
 // ---------- Início (Home) — perfil "Refrigeração e Climatização" ----------
@@ -9549,6 +9841,8 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
     nome: body.nome, email: body.email, papel: body.papel,
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', foto_perfil: '', cliente_id: body.cliente_id || null,
+    // portal do cliente final do pacote PMOC (Fase 4) — ver comentário em POST /api/login.
+    os_refrigeracao_cliente_id: body.papel === 'cliente' ? (body.os_refrigeracao_cliente_id || null) : null,
     filial_id: refsFilial.filial_id, setor_id: refsFilial.setor_id,
     acesso_total, menus, departamento,
     status: 'convite_enviado', convite_token,
@@ -9629,6 +9923,7 @@ rota('PUT', /^\/api\/usuarios\/(\d+)$/, async (req, res, m) => {
     cargo: body.cargo || '', setor: body.setor || '',
     celular: body.celular || '', foto_perfil: body.foto_perfil !== undefined ? body.foto_perfil : (alvo.foto_perfil || ''),
     cliente_id: body.papel === 'cliente' ? (body.cliente_id || null) : null,
+    os_refrigeracao_cliente_id: body.papel === 'cliente' ? (body.os_refrigeracao_cliente_id || null) : null,
     filial_id: refsFilial.filial_id, setor_id: refsFilial.setor_id,
     acesso_total, menus, departamento,
   });
