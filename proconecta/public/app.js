@@ -3491,7 +3491,7 @@ function linhaAgendamentoAgendaRef(a) {
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
       <div style="flex:1;">
         <div style="font-size:12px; color:var(--ink-soft);">🕐 ${faixaHorarioAgendaRef(a.hora)}</div>
-        <div style="margin-top:2px;"><strong>${esc(a.cliente_nome)}</strong> ${agendaRefStatusBadgeHtml(a.status)}</div>
+        <div style="margin-top:2px;"><strong>${esc(a.cliente_nome)}</strong> ${agendaRefStatusBadgeHtml(a.status)}${a.pmoc_plano_id ? ' <span class="tag" style="background:none; border:1px solid var(--blue); color:var(--blue);">PMOC</span>' : ''}</div>
         <div style="font-size:12px; color:var(--ink-soft);">${esc(AGENDA_REF_TIPO_SERVICO_LABEL[a.tipo_servico] || 'Outro')}${USER.papel === 'administrador' && window._agendaRefMultiTecnico && a.tecnico_nome ? ' · ' + esc(a.tecnico_nome) : ''}</div>
       </div>
       <div style="font-weight:700; white-space:nowrap;">${a.valor_servico ? fmtMoeda(a.valor_servico) : ''}</div>
@@ -3503,6 +3503,22 @@ function linhaAgendamentoAgendaRef(a) {
 function abrirAgendamentoRefDetalhe(id) {
   const ag = (window._agendaRefAgendamentosDoDia || []).find((a) => a.id === id);
   if (!ag) return;
+  // pedido do usuário: visita PMOC só se conclui pelo checklist (ver abrirPmocVisitaExecucao) —
+  // nunca pelo botão genérico "✓ Concluído" aqui, que pularia a validação de itens respondidos e
+  // a assinatura do responsável no local.
+  if (ag.pmoc_plano_id) {
+    const corpo = `
+      <div style="margin:-6px 0 14px;">
+        ${osRefLinha('Cliente / Local', esc(ag.cliente_nome))}
+        ${osRefLinha('Data', fmtDataIsoAgendaRef(ag.data) + ' às ' + esc(ag.hora))}
+        ${osRefLinha('Itens', String((ag.pmoc_itens || []).length))}
+        ${osRefLinha('Status', ag.status === 'concluido' ? 'Concluída' : 'Agendada')}
+      </div>` +
+      osRefBotaoAcao(ag.status === 'concluido' ? '📋 Ver checklist / relatório' : '📋 Executar checklist PMOC', null, `fecharModalOsRefAcao(); abrirPmocVisitaExecucao(${ag.id});`) +
+      (ag.status !== 'concluido' ? osRefBotaoAcao('✕ Cancelado', null, `alterarStatusAgendamentoRef(${ag.id}, 'cancelado')`) : '');
+    abrirModalOsRefAcao(`<h3>🌡️ Preventiva PMOC — ${esc(ag.hora)}</h3>`, corpo);
+    return;
+  }
   const corpo = `
     <div style="margin:-6px 0 14px;">
       ${osRefLinha('Cliente', esc(ag.cliente_nome))}
@@ -4640,6 +4656,339 @@ async function salvarDesignarTecnicoPmoc() {
     await api(`/api/pmoc/visitas-pendentes/${window._pmocVisitaDesignando.id}/designar-tecnico`, { method: 'PUT', body: { tecnico_id: tecnicoId, hora } });
     document.getElementById('modal-pmoc-designar').classList.remove('show');
     await renderPmocVisitasPendentes();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ===== Pacote "Climatização / PMOC" — Fase 3: Execução e relatórios =====
+// pedido do usuário: o técnico executa a preventiva pelo celular — checklist por aparelho
+// (Conforme/Não conforme/N.A. + observação + fotos antes/depois), item "Não conforme" pode virar
+// O.S. corretiva na hora, e ao concluir (com assinatura do responsável no local) o relatório em
+// PDF é enviado por e-mail de verdade pro cliente e pro administrador (ver POST .../enviar-
+// relatorio em server.js, que reaproveita email.enviarRelatorio — diferente do mailto: usado em
+// outras telas deste perfil, aqui o anexo é enviado pelo próprio servidor).
+const PMOC_RESPOSTA_LABEL = { conforme: 'Conforme', nao_conforme: 'Não conforme', na: 'N.A.' };
+const PMOC_RESPOSTA_COR = { conforme: 'var(--green)', nao_conforme: 'var(--red)', na: 'var(--ink-soft)' };
+function pmocPeriodicidadeLabelExec(chave) { return (PMOC_PERIODICIDADES.find((p) => p.chave === chave) || {}).nome || chave; }
+
+function abrirPmocVisitaExecucao(id) {
+  window._pmocVisitaExecucaoId = id;
+  ir('pmoc-visita-execucao');
+}
+async function renderPmocVisitaExecucao() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = '<div class="empty">Carregando...</div>';
+  const { visita } = await api('/api/pmoc/visitas/' + window._pmocVisitaExecucaoId);
+  window._pmocVisitaExecAtual = visita;
+  let local = null;
+  try { const r = await api('/api/pmoc/locais/' + visita.pmoc_local_id); local = r.local; } catch (e) { /* segue sem o local (só perde o pré-preenchimento do e-mail) */ }
+  window._pmocVisitaExecLocal = local;
+  const concluida = visita.status === 'concluido';
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div><h1>Preventiva PMOC</h1><p>${esc(visita.cliente_nome)} — ${fmtDataIsoAgendaRef(visita.data)}</p></div>
+      <button class="btn-outline-sm" onclick="ir('agenda-refrigeracao-lista')">← Voltar pra Agenda</button>
+    </div>
+    ${concluida ? `<div class="panel" style="border:1.5px solid var(--green);">✅ Visita concluída${visita.assinatura_responsavel_nome ? ' — assinada por ' + esc(visita.assinatura_responsavel_nome) : ''}.</div>` : ''}
+    <div id="pmoc-exec-itens">${pmocExecItensHtml(visita.pmoc_itens)}</div>
+    ${!concluida ? `
+    <div style="display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;">
+      <button class="btn-outline-sm" onclick="salvarProgressoPmocExec()">💾 Salvar progresso</button>
+      <button class="btn btn-primary btn-sm" onclick="abrirModalConcluirPmocExec()">✅ Concluir visita</button>
+    </div>` : `
+    <div style="margin-top:16px;">
+      <button class="btn btn-primary btn-sm" onclick="gerarEEnviarRelatorioPmoc()">📄 Gerar / Enviar relatório</button>
+    </div>`}`;
+}
+function pmocExecItensHtml(itens) {
+  const porAparelho = [];
+  const indicePorAparelho = {};
+  itens.forEach((item, idx) => {
+    if (indicePorAparelho[item.aparelho_id] === undefined) {
+      indicePorAparelho[item.aparelho_id] = porAparelho.length;
+      porAparelho.push({ titulo: `${item.aparelho_tipo}${item.aparelho_identificacao ? ' — ' + item.aparelho_identificacao : ''}`, indices: [] });
+    }
+    porAparelho[indicePorAparelho[item.aparelho_id]].indices.push(idx);
+  });
+  return porAparelho.map((grupo) => `
+    <div class="panel" style="margin-bottom:12px;">
+      <h3 style="margin-top:0;">${esc(grupo.titulo)}</h3>
+      ${grupo.indices.map((idx) => pmocExecItemHtml(idx)).join('')}
+    </div>`).join('');
+}
+function pmocExecItemHtml(idx) {
+  const item = window._pmocVisitaExecAtual.pmoc_itens[idx];
+  const concluida = window._pmocVisitaExecAtual.status === 'concluido';
+  return `
+    <div id="pmoc-exec-item-${idx}" style="padding:10px 0; border-top:1px solid var(--line);">
+      <div style="font-weight:600; font-size:13.5px;">${esc(item.item_descricao)} <span style="font-weight:400; color:var(--ink-soft); font-size:12px;">(${pmocPeriodicidadeLabelExec(item.periodicidade)})</span></div>
+      <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
+        ${['conforme', 'nao_conforme', 'na'].map((r) => `
+          <button type="button" class="${item.resposta === r ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" style="padding:6px 10px; font-size:12px; ${item.resposta === r ? `background:${PMOC_RESPOSTA_COR[r]}; border-color:${PMOC_RESPOSTA_COR[r]};` : ''}" ${concluida ? 'disabled' : ''} onclick="marcarRespostaPmocExec(${idx}, '${r}')">${PMOC_RESPOSTA_LABEL[r]}</button>`).join('')}
+      </div>
+      <textarea style="margin-top:6px; width:100%; min-height:50px;" placeholder="Observação (opcional)" ${concluida ? 'disabled' : ''} oninput="window._pmocVisitaExecAtual.pmoc_itens[${idx}].observacao = this.value">${esc(item.observacao || '')}</textarea>
+      <div style="display:flex; gap:14px; margin-top:6px; flex-wrap:wrap; align-items:flex-start;">
+        ${pmocExecFotoHtml(idx, 'foto_antes', 'Antes')}
+        ${pmocExecFotoHtml(idx, 'foto_depois', 'Depois')}
+      </div>
+      ${item.resposta === 'nao_conforme' ? (item.os_corretiva_id
+        ? `<div style="margin-top:8px; font-size:12.5px; color:var(--green);">✅ O.S. corretiva #${item.os_corretiva_id} gerada.</div>`
+        : (concluida ? '' : `<button type="button" class="btn-outline-sm" style="margin-top:8px; color:var(--red);" onclick="gerarCorretivaPmocExec(${idx})">⚠️ Gerar O.S. corretiva</button>`)) : ''}
+    </div>`;
+}
+function pmocExecFotoHtml(idx, campo, label) {
+  const item = window._pmocVisitaExecAtual.pmoc_itens[idx];
+  const concluida = window._pmocVisitaExecAtual.status === 'concluido';
+  const foto = item[campo];
+  return `
+    <div style="text-align:center;">
+      <div style="font-size:11px; color:var(--ink-soft);">${label}</div>
+      ${foto ? `<img src="${foto}" style="width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--line);">` : `<div style="width:64px; height:64px; border-radius:6px; border:1px dashed var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink-soft); font-size:18px;">📷</div>`}
+      ${!concluida ? `<label class="btn-outline-sm" style="display:block; margin-top:4px; padding:3px 6px; font-size:11px; cursor:pointer;">${foto ? 'Trocar' : 'Adicionar'}<input type="file" accept="image/*" capture="environment" style="display:none;" onchange="trocarFotoPmocExec(${idx}, '${campo}', event)"></label>` : ''}
+    </div>`;
+}
+function marcarRespostaPmocExec(idx, resposta) {
+  window._pmocVisitaExecAtual.pmoc_itens[idx].resposta = resposta;
+  document.getElementById('pmoc-exec-item-' + idx).outerHTML = pmocExecItemHtml(idx);
+}
+async function trocarFotoPmocExec(idx, campo, event) {
+  const arquivos = event.target.files;
+  if (!arquivos || !arquivos.length) return;
+  const [dataUrl] = await lerFotosComoDataUrl(arquivos);
+  window._pmocVisitaExecAtual.pmoc_itens[idx][campo] = dataUrl;
+  document.getElementById('pmoc-exec-item-' + idx).outerHTML = pmocExecItemHtml(idx);
+}
+async function salvarProgressoPmocExec() {
+  try {
+    await api(`/api/pmoc/visitas/${window._pmocVisitaExecAtual.id}/progresso`, { method: 'PUT', body: { itens: window._pmocVisitaExecAtual.pmoc_itens } });
+    mostrarToast('Progresso salvo.');
+  } catch (e) { alert(e.message); }
+}
+async function gerarCorretivaPmocExec(idx) {
+  try {
+    const { os } = await api(`/api/pmoc/visitas/${window._pmocVisitaExecAtual.id}/itens/${idx}/gerar-corretiva`, { method: 'POST' });
+    window._pmocVisitaExecAtual.pmoc_itens[idx].os_corretiva_id = os.id;
+    document.getElementById('pmoc-exec-item-' + idx).outerHTML = pmocExecItemHtml(idx);
+    mostrarToast('O.S. corretiva #' + os.id + ' criada — vinculada a este aparelho.');
+  } catch (e) { alert(e.message); }
+}
+
+// ---- concluir: assinatura do responsável no local (mesma técnica de canvas de
+// montarAssinaturaTecnicoOrcamentoRef) ----
+let _pmocConcluirTemTraco = false;
+function abrirModalConcluirPmocExec() {
+  const itens = window._pmocVisitaExecAtual.pmoc_itens;
+  if (itens.some((i) => !i.resposta)) { alert('Responda todos os itens do checklist (Conforme, Não conforme ou N.A.) antes de concluir.'); return; }
+  const local = window._pmocVisitaExecLocal;
+  let modal = document.getElementById('modal-pmoc-concluir');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-concluir';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px;">
+      <h3>Concluir visita</h3>
+      <div class="field"><label>Nome do responsável no local</label><input id="pmoc-concluir-nome" value="${esc((local && local.responsavel_nome) || '')}"></div>
+      <label style="font-size:12.5px; color:var(--ink-soft);">Assinatura</label>
+      <canvas id="pmoc-concluir-canvas" width="520" height="180" style="width:100%; max-width:520px; height:180px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none; display:block;"></canvas>
+      <div id="pmoc-concluir-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('pmoc-concluir-canvas').getContext('2d').clearRect(0,0,520,180); _pmocConcluirTemTraco = false;">Limpar</button>
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-concluir').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmarConcluirPmocExec()">Confirmar e concluir</button>
+      </div>
+    </div>`;
+  montarCanvasAssinaturaPmocExec();
+}
+function montarCanvasAssinaturaPmocExec() {
+  const canvas = document.getElementById('pmoc-concluir-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  _pmocConcluirTemTraco = false;
+  function pos(e) { const r = canvas.getBoundingClientRect(); const p = e.touches ? e.touches[0] : e; return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) }; }
+  let desenhando = false;
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); _pmocConcluirTemTraco = true; }
+  function parar() { desenhando = false; }
+  canvas.addEventListener('mousedown', iniciar); canvas.addEventListener('mousemove', mover); window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false }); canvas.addEventListener('touchmove', mover, { passive: false }); canvas.addEventListener('touchend', parar);
+}
+async function confirmarConcluirPmocExec() {
+  const erroEl = document.getElementById('pmoc-concluir-erro');
+  erroEl.classList.add('hidden');
+  const nome = document.getElementById('pmoc-concluir-nome').value.trim();
+  if (!nome) { erroEl.textContent = 'Informe o nome do responsável.'; erroEl.classList.remove('hidden'); return; }
+  if (!_pmocConcluirTemTraco) { erroEl.textContent = 'Colete a assinatura antes de confirmar.'; erroEl.classList.remove('hidden'); return; }
+  const canvas = document.getElementById('pmoc-concluir-canvas');
+  try {
+    const { visita } = await api(`/api/pmoc/visitas/${window._pmocVisitaExecAtual.id}/concluir`, { method: 'PUT', body: {
+      itens: window._pmocVisitaExecAtual.pmoc_itens, assinatura_responsavel_img: canvas.toDataURL('image/png'), assinatura_responsavel_nome: nome,
+    } });
+    window._pmocVisitaExecAtual = visita;
+    document.getElementById('modal-pmoc-concluir').classList.remove('show');
+    await renderPmocVisitaExecucao();
+    await gerarEEnviarRelatorioPmoc();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ---- relatório em PDF (mesma convenção visual dos outros PDFs do perfil — PDF_COR,
+// desenharCabecalhoEmpresaPdf, desenharCreditoNexorConnect) + envio por e-mail de verdade ----
+function montarDocPmocVisitaPdf(visita, local, logoCliente, logoNexor) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  doc.setProperties({ title: `Relatório de Visita PMOC ${visita.id}` });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margem = 40;
+  const largura = pageW - margem * 2;
+
+  function cabecalho() {
+    const y0 = margem;
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0);
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Relatório de Visita PMOC', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(fmtDataIsoAgendaRef(visita.data), pageW - margem, y0 + 14, { align: 'right' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem, y);
+    return y + 16;
+  }
+  function campo(x, y, label, valor) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), x, y);
+    doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+  function novaPaginaSeNecessario(y, espaco) {
+    if (y + espaco <= pageH - 60) return y;
+    doc.addPage();
+    return cabecalho();
+  }
+
+  let y = cabecalho();
+  y = secaoTitulo(y, 'DADOS DA VISITA');
+  campo(margem, y, 'Cliente / Local', visita.cliente_nome); campo(margem + largura / 2, y, 'Endereço', visita.endereco); y += 26;
+  campo(margem, y, 'Técnico', visita.tecnico_nome); campo(margem + largura / 2, y, 'Responsável no local', visita.assinatura_responsavel_nome); y += 30;
+
+  y = secaoTitulo(y, 'CHECKLIST');
+  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 18, 'F');
+  doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('APARELHO', margem + 6, y + 12);
+  doc.text('ITEM', margem + largura * 0.3, y + 12);
+  doc.text('PERIOD.', margem + largura * 0.68, y + 12);
+  doc.text('RESULTADO', margem + largura * 0.84, y + 12);
+  y += 18;
+  doc.setFont(undefined, 'normal');
+  (visita.pmoc_itens || []).forEach((item, i) => {
+    y = novaPaginaSeNecessario(y, 16);
+    if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
+    doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(`${item.aparelho_tipo || ''}${item.aparelho_identificacao ? ' ' + item.aparelho_identificacao : ''}`).slice(0, 28), margem + 6, y + 11);
+    doc.text(limparPdf(item.item_descricao || '').slice(0, 46), margem + largura * 0.3, y + 11);
+    doc.text(pmocPeriodicidadeLabelExec(item.periodicidade), margem + largura * 0.68, y + 11);
+    doc.setTextColor(...(item.resposta === 'conforme' ? PDF_COR.green : item.resposta === 'nao_conforme' ? PDF_COR.red : PDF_COR.inkSoft));
+    doc.text(PMOC_RESPOSTA_LABEL[item.resposta] || '—', margem + largura * 0.84, y + 11);
+    y += 16;
+  });
+
+  const comObservacao = (visita.pmoc_itens || []).filter((i) => i.observacao);
+  if (comObservacao.length) {
+    y += 10; y = novaPaginaSeNecessario(y, 16);
+    y = secaoTitulo(y, 'OBSERVAÇÕES');
+    doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    comObservacao.forEach((item) => {
+      y = novaPaginaSeNecessario(y, 14);
+      doc.text(limparPdf(`${item.item_descricao}: ${item.observacao}`).slice(0, 110), margem, y);
+      y += 14;
+    });
+  }
+
+  const comFoto = (visita.pmoc_itens || []).filter((i) => i.foto_antes || i.foto_depois);
+  if (comFoto.length) {
+    y += 14; y = novaPaginaSeNecessario(y, 90);
+    y = secaoTitulo(y, 'FOTOS');
+    comFoto.forEach((item) => {
+      y = novaPaginaSeNecessario(y, 90);
+      doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+      doc.text(limparPdf(`${item.aparelho_tipo || ''} — ${item.item_descricao}`).slice(0, 80), margem, y);
+      let x = margem;
+      if (item.foto_antes) { try { doc.addImage(item.foto_antes, 'JPEG', x, y + 6, 70, 70); doc.setFontSize(7); doc.text('Antes', x, y + 80); } catch (e) {} x += 80; }
+      if (item.foto_depois) { try { doc.addImage(item.foto_depois, 'JPEG', x, y + 6, 70, 70); doc.setFontSize(7); doc.text('Depois', x, y + 80); } catch (e) {} }
+      y += 90;
+    });
+  }
+
+  if (visita.assinatura_responsavel_img) {
+    y += 10; y = novaPaginaSeNecessario(y, 70);
+    y = secaoTitulo(y, 'ASSINATURA DO RESPONSÁVEL NO LOCAL');
+    try { doc.addImage(visita.assinatura_responsavel_img, 'PNG', margem, y, 180, 60); } catch (e) {}
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(visita.assinatura_responsavel_nome || ''), margem, y + 74);
+  }
+
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (p === totalPaginas) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
+  return doc;
+}
+async function gerarEEnviarRelatorioPmoc() {
+  const visita = window._pmocVisitaExecAtual;
+  const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+  window._pmocRelatorioPdfDoc = montarDocPmocVisitaPdf(visita, window._pmocVisitaExecLocal, logoCliente, logoNexor);
+  const corpo =
+    `<p style="color:var(--ink-soft); font-size:13px; margin:-6px 0 14px;">${esc(visita.cliente_nome)} — ${fmtDataIsoAgendaRef(visita.data)}</p>` +
+    osRefBotaoAcao('📄 Baixar PDF', 'Salva no aparelho', `fecharModalOsRefAcao(); window._pmocRelatorioPdfDoc.save('visita-pmoc-${visita.id}.pdf');`) +
+    osRefBotaoAcao('📧 Enviar por e-mail', 'Pro cliente e pro administrador', `fecharModalOsRefAcao(); abrirModalEnviarEmailPmoc();`);
+  abrirModalOsRefAcao('<h3>Relatório da visita</h3>', corpo);
+}
+function abrirModalEnviarEmailPmoc() {
+  const local = window._pmocVisitaExecLocal;
+  const emailsIniciais = [(local && local.responsavel_email) || '', ...empresaEmails()].filter(Boolean).join(', ');
+  let modal = document.getElementById('modal-pmoc-email');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'modal-pmoc-email'; modal.className = 'modal-overlay'; document.body.appendChild(modal); }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:460px;">
+      <h3>Enviar relatório por e-mail</h3>
+      <div class="field"><label>E-mails (separados por vírgula)</label><textarea id="pmoc-email-destinatarios" style="min-height:60px;">${esc(emailsIniciais)}</textarea></div>
+      <div id="pmoc-email-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-email').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmarEnvioEmailPmoc()">Enviar</button>
+      </div>
+    </div>`;
+}
+async function confirmarEnvioEmailPmoc() {
+  const erroEl = document.getElementById('pmoc-email-erro');
+  erroEl.classList.add('hidden');
+  const emails = document.getElementById('pmoc-email-destinatarios').value.split(',').map((e) => e.trim()).filter(Boolean);
+  if (!emails.length) { erroEl.textContent = 'Informe ao menos um e-mail.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const pdfBase64 = window._pmocRelatorioPdfDoc.output('datauristring').split(',')[1];
+    const { envio } = await api(`/api/pmoc/visitas/${window._pmocVisitaExecAtual.id}/enviar-relatorio`, { method: 'POST', body: { pdf_base64: pdfBase64, emails } });
+    document.getElementById('modal-pmoc-email').classList.remove('show');
+    mostrarToast(envio.modo === 'simulado' ? 'Provedor de e-mail não configurado neste ambiente — o envio foi simulado (ver log do servidor).' : 'Relatório enviado por e-mail.');
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
@@ -6170,6 +6519,7 @@ async function ir(pagina) {
     if (pagina === 'pmoc-modelo-checklist') return renderPmocModeloChecklist();
     if (pagina === 'pmoc-planos') return renderPmocPlanos();
     if (pagina === 'pmoc-visitas-pendentes') return renderPmocVisitasPendentes();
+    if (pagina === 'pmoc-visita-execucao') return renderPmocVisitaExecucao();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();

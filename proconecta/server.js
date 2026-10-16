@@ -3636,6 +3636,22 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
         .filter((s) => s.status === 'aguardando_diretoria')
         .map((s) => ({ id: s.id, tipo: 'peca_aguardando_diretoria', texto: `Autorização de compra pendente: ${s.descricao}`, registro_id: s.id }))
     );
+    // pedido do usuário: pacote "Climatização / PMOC" — "atividades atrasadas ou não conformes
+    // geram notificação no sininho". Só pra empresa do perfil Refrigeração com o módulo pmoc
+    // contratado; só o administrador (quem designa técnico e acompanha os locais) recebe.
+    if (empresaPerfilRefrigeracao(data, user.empresa_id) && db.moduloAtivo(data, user.empresa_id, 'pmoc')) {
+      const hojeServidor = new Date().toISOString().slice(0, 10);
+      notificacoes = notificacoes.concat(
+        tenant.listar(data, 'os_refrigeracao_agendamentos', user.empresa_id)
+          .filter((a) => a.pmoc_plano_id && a.data < hojeServidor && !['concluido', 'cancelado'].includes(a.status))
+          .map((a) => ({ id: a.id, tipo: 'pmoc_preventiva_atrasada', texto: `Preventiva PMOC atrasada — ${a.cliente_nome} (${a.data.split('-').reverse().join('/')})`, registro_id: a.id }))
+      );
+      notificacoes = notificacoes.concat(
+        tenant.listar(data, 'os_refrigeracao_agendamentos', user.empresa_id)
+          .filter((a) => a.pmoc_plano_id && a.status === 'concluido' && (a.pmoc_itens || []).some((i) => i.resposta === 'nao_conforme' && !i.os_corretiva_id))
+          .map((a) => ({ id: a.id, tipo: 'pmoc_nao_conformidade', texto: `Não conformidade sem O.S. corretiva — ${a.cliente_nome}`, registro_id: a.id }))
+      );
+    }
   } else if (user.papel === 'gerente_loja' || user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
     // versão Restaurantes/rede multiunidade (Fase 5): os 3 papéis novos não tinham sininho
     // nenhum até aqui (caíam no "nenhum bloco corresponde" = lista sempre vazia) — cada um só
@@ -6082,6 +6098,141 @@ rota('PUT', /^\/api\/pmoc\/visitas-pendentes\/(\d+)\/designar-tecnico$/, async (
   visita.status = 'agendado';
   db.save(data);
   enviarJSON(res, 200, { visita });
+});
+
+// ---------- Pacote "Climatização / PMOC" — Fase 3: Execução e relatórios ----------
+// pedido do usuário: o técnico executa a preventiva pelo celular (checklist por aparelho —
+// Conforme/Não conforme/N.A. + observação + fotos antes/depois), um item "Não conforme" pode virar
+// O.S. corretiva na hora, e ao concluir (com assinatura do responsável no local) o relatório em
+// PDF é enviado por e-mail pro cliente e pro administrador — aqui SIM com envio de e-mail de
+// verdade (ver email.enviarRelatorio, já usado pelos relatórios núcleo), diferente do mailto:
+// usado em outras telas deste perfil (lá o PDF não tem como ser anexado automaticamente; aqui o
+// servidor manda o anexo de verdade, "o cliente recebe o PDF por e-mail").
+const PMOC_RESPOSTAS_VALIDAS = ['conforme', 'nao_conforme', 'na'];
+// só o próprio técnico designado ou o administrador mexem na execução de uma visita.
+function exigirAcessoVisitaPmoc(res, user, visita) {
+  if (visita.tecnico_id === user.id) return true;
+  if (exigirPapel(user, ['administrador'])) return true;
+  enviarJSON(res, 403, { erro: 'Esta visita não é sua.' });
+  return false;
+}
+
+// GET /api/pmoc/visitas/:id
+rota('GET', /^\/api\/pmoc\/visitas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita || !visita.pmoc_plano_id) return enviarJSON(res, 404, { erro: 'Visita PMOC não encontrada.' });
+  if (!exigirAcessoVisitaPmoc(res, user, visita)) return;
+  const itens = await Promise.all((visita.pmoc_itens || []).map(async (i) => ({ ...i, foto_antes: await hidratarFotosProfundo(i.foto_antes), foto_depois: await hidratarFotosProfundo(i.foto_depois) })));
+  const assinatura_responsavel_img = await hidratarFotosProfundo(visita.assinatura_responsavel_img);
+  enviarJSON(res, 200, { visita: { ...visita, pmoc_itens: itens, assinatura_responsavel_img } });
+});
+
+function aplicarItensExecucaoPmoc(itensAtuais, itensNovos) {
+  return itensAtuais.map((item, i) => {
+    const novo = itensNovos[i] || {};
+    return {
+      ...item,
+      resposta: PMOC_RESPOSTAS_VALIDAS.includes(novo.resposta) ? novo.resposta : (item.resposta || null),
+      observacao: novo.observacao !== undefined ? novo.observacao : (item.observacao || ''),
+      foto_antes: novo.foto_antes !== undefined ? novo.foto_antes : (item.foto_antes || null),
+      foto_depois: novo.foto_depois !== undefined ? novo.foto_depois : (item.foto_depois || null),
+    };
+  });
+}
+
+// PUT /api/pmoc/visitas/:id/progresso { itens } — salva rascunho (resposta/observação/fotos), não
+// muda o status; o técnico pode ir e voltar nessa tela à vontade antes de concluir.
+rota('PUT', /^\/api\/pmoc\/visitas\/(\d+)\/progresso$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita || !visita.pmoc_plano_id) return enviarJSON(res, 404, { erro: 'Visita PMOC não encontrada.' });
+  if (!exigirAcessoVisitaPmoc(res, user, visita)) return;
+  if (visita.status === 'concluido' || visita.status === 'cancelado') return enviarJSON(res, 400, { erro: 'Essa visita já foi encerrada.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!Array.isArray(body.itens) || body.itens.length !== (visita.pmoc_itens || []).length) return enviarJSON(res, 400, { erro: 'Lista de itens inválida.' });
+  visita.pmoc_itens = aplicarItensExecucaoPmoc(visita.pmoc_itens, body.itens);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// PUT /api/pmoc/visitas/:id/concluir { itens, assinatura_responsavel_img, assinatura_responsavel_nome }
+rota('PUT', /^\/api\/pmoc\/visitas\/(\d+)\/concluir$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita || !visita.pmoc_plano_id) return enviarJSON(res, 404, { erro: 'Visita PMOC não encontrada.' });
+  if (!exigirAcessoVisitaPmoc(res, user, visita)) return;
+  if (visita.status !== 'agendado') return enviarJSON(res, 400, { erro: 'Só uma visita agendada (com técnico) pode ser concluída.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  if (!Array.isArray(body.itens) || body.itens.length !== (visita.pmoc_itens || []).length) return enviarJSON(res, 400, { erro: 'Lista de itens inválida.' });
+  const itensAtualizados = aplicarItensExecucaoPmoc(visita.pmoc_itens, body.itens);
+  if (itensAtualizados.some((i) => !PMOC_RESPOSTAS_VALIDAS.includes(i.resposta))) return enviarJSON(res, 400, { erro: 'Responda todos os itens do checklist (Conforme, Não conforme ou N.A.) antes de concluir.' });
+  if (!body.assinatura_responsavel_img) return enviarJSON(res, 400, { erro: 'Colete a assinatura do responsável no local antes de concluir.' });
+  visita.pmoc_itens = itensAtualizados;
+  visita.assinatura_responsavel_img = body.assinatura_responsavel_img;
+  visita.assinatura_responsavel_nome = body.assinatura_responsavel_nome || '';
+  visita.status = 'concluido';
+  visita.concluido_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
+// POST /api/pmoc/visitas/:id/itens/:indice/gerar-corretiva — pedido do usuário: "um item 'Não
+// conforme' permite gerar na hora uma O.S. corretiva vinculada ao aparelho". Nasce "pendente" (o
+// serviço ainda não foi feito, diferente da O.S. criada pelo fluxo normal — que já nasce
+// "concluída" porque é registrada DEPOIS do serviço pronto e assinado) e sem assinatura do técnico
+// ainda — isso acontece quando essa O.S. corretiva for executada de verdade, depois, pelo fluxo
+// normal de O.S. (ver PUT /api/os-refrigeracao/:id).
+rota('POST', /^\/api\/pmoc\/visitas\/(\d+)\/itens\/(\d+)\/gerar-corretiva$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita || !visita.pmoc_plano_id) return enviarJSON(res, 404, { erro: 'Visita PMOC não encontrada.' });
+  if (!exigirAcessoVisitaPmoc(res, user, visita)) return;
+  const item = (visita.pmoc_itens || [])[Number(m[2])];
+  if (!item) return enviarJSON(res, 404, { erro: 'Item não encontrado.' });
+  if (item.resposta !== 'nao_conforme') return enviarJSON(res, 400, { erro: 'Só dá pra gerar O.S. corretiva de um item marcado "Não conforme".' });
+  if (item.os_corretiva_id) return enviarJSON(res, 400, { erro: 'Esse item já tem uma O.S. corretiva gerada.' });
+  const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === visita.pmoc_local_id && l.empresa_id === user.empresa_id);
+  const aparelho = data.os_refrigeracao_pmoc_aparelhos.find((a) => a.id === item.aparelho_id && a.empresa_id === user.empresa_id);
+  if (!local || !aparelho) return enviarJSON(res, 400, { erro: 'Local ou aparelho não encontrado.' });
+  const os = tenant.criar(data, 'os_refrigeracao', user.empresa_id, {
+    cliente_id: local.cliente_id,
+    equipamento: { tipo: aparelho.tipo, marca: aparelho.marca, modelo: aparelho.modelo, btu: aparelho.capacidade_btu },
+    problema_relatado: `Não conformidade encontrada na preventiva PMOC — ${item.item_descricao}`,
+    diagnostico: '', servicos: [], materiais: [], mao_de_obra: 0, desconto_tipo: 'valor', desconto_valor: 0,
+    observacoes_servico: item.observacao || '', endereco_servico: local.endereco || '',
+    garantia_dias: 90, observacoes: '', fotos: [item.foto_antes].filter(Boolean),
+    assinatura_tecnico_img: null, assinatura_cliente_img: null, assinado_cliente_em: null,
+    tecnico_id: user.id, tecnico_nome: user.nome, autor_id: user.id,
+    token_assinatura: gerarTokenConvite(), status: 'pendente', criado_em: new Date().toISOString(),
+    pmoc_origem: { visita_id: visita.id, aparelho_id: aparelho.id, local_id: local.id },
+  });
+  item.os_corretiva_id = os.id;
+  db.save(data);
+  enviarJSON(res, 201, { os: await osRefrigeracaoComDetalhes(data, os) });
+});
+
+// POST /api/pmoc/visitas/:id/enviar-relatorio { pdf_base64, emails }
+rota('POST', /^\/api\/pmoc\/visitas\/(\d+)\/enviar-relatorio$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita || !visita.pmoc_plano_id) return enviarJSON(res, 404, { erro: 'Visita PMOC não encontrada.' });
+  if (!exigirAcessoVisitaPmoc(res, user, visita)) return;
+  const body = await lerCorpo(req);
+  if (!body.pdf_base64 || !Array.isArray(body.emails) || !body.emails.length) return enviarJSON(res, 400, { erro: 'PDF e ao menos um e-mail são obrigatórios.' });
+  const empresa = data.empresas.find((e) => e.id === user.empresa_id);
+  const resultado = await email.enviarRelatorio({ emails: body.emails, pdfBase64: body.pdf_base64, nomeArquivo: `visita-pmoc-${visita.id}.pdf`, nomeEmpresa: empresa ? empresa.nome : undefined });
+  enviarJSON(res, 200, { envio: resultado });
 });
 
 // ---------- Início (Home) — perfil "Refrigeração e Climatização" ----------
