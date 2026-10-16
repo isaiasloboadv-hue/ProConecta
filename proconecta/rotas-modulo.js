@@ -85,6 +85,11 @@ const PREFIXO_MODULO = [
   // pedido do usuário (empresa JBPA): registro de atividades diárias pra cliente com contrato
   // mensal — data/descrição/valor do que foi feito, com PDF comparando o entregue com o contrato.
   ['/api/atividades-diarias', 'atividades'],
+  // pacote "Climatização / PMOC" (perfil Refrigeração — ver exigirPerfilRefrigeracao dentro de
+  // cada rota /api/pmoc/*, checado além deste módulo). Um prefixo só (/api/pmoc) cobre todas as
+  // sub-rotas (/api/pmoc/locais, /ambientes, /aparelhos, /responsaveis-tecnicos, ...) porque elas
+  // nascem com barra (bateComPrefixo abaixo exige "/" depois do prefixo).
+  ['/api/pmoc', 'pmoc'],
 ];
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à

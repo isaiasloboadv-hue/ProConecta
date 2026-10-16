@@ -5406,6 +5406,330 @@ rota('DELETE', /^\/api\/os-refrigeracao-agendamentos\/(\d+)$/, async (req, res, 
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- Pacote "Climatização / PMOC" — perfil "Refrigeração e Climatização" ----------
+// pedido do usuário: pacote PMOC (Lei 13.589/2018), Fase 1 — Cadastro: local do cliente final
+// (estabelecimento, um cliente pode ter vários), ambientes de cada local, aparelhos de
+// climatização de cada ambiente, e o responsável técnico (CREA/CFT) da própria empresa de
+// Refrigeração. Pendurado em os_refrigeracao_clientes (mesma base de O.S./Orçamento/Agenda desse
+// perfil) — nunca na coleção `clientes`/`equipamentos` núcleo (ver comentário em
+// os_refrigeracao_clientes, db.js). Além do gate de `perfil` (exigirPerfilRefrigeracao abaixo),
+// estas rotas também exigem o módulo `pmoc` ativo pra empresa — checagem automática central (ver
+// prefixo '/api/pmoc' em rotas-modulo.js), não precisa repetir isso rota a rota.
+
+// ---- locais (estabelecimento do cliente final) ----
+function pmocLocalComDetalhes(data, local) {
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === local.cliente_id && c.empresa_id === local.empresa_id);
+  const ambientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === local.id);
+  const aparelhos = data.os_refrigeracao_pmoc_aparelhos.filter((p) => ambientes.some((a) => a.id === p.ambiente_id));
+  return { ...local, cliente_nome: cliente ? cliente.nome : null, total_ambientes: ambientes.length, total_aparelhos: aparelhos.length };
+}
+// pedido do usuário: "não codificar regras legais fixas... deixar configurável" — tipo de
+// atividade é só um rótulo pra ajudar o técnico a identificar o estabelecimento (igual
+// OS_REF_TIPOS_EQUIPAMENTO no app.js), não trava regra nenhuma de BTU/periodicidade.
+const PMOC_TIPOS_ATIVIDADE_VALIDOS = ['loja', 'clinica', 'escritorio', 'escola', 'orgao_publico', 'outro'];
+function camposPmocLocal(body) {
+  return {
+    cliente_id: Number(body.cliente_id) || null,
+    nome: String(body.nome || '').trim(),
+    endereco: body.endereco || '',
+    tipo_atividade: PMOC_TIPOS_ATIVIDADE_VALIDOS.includes(body.tipo_atividade) ? body.tipo_atividade : 'outro',
+    area_climatizada_m2: Number(body.area_climatizada_m2) || null,
+    ocupantes_fixos: Number.isFinite(Number(body.ocupantes_fixos)) ? Number(body.ocupantes_fixos) : null,
+    ocupantes_flutuantes: Number.isFinite(Number(body.ocupantes_flutuantes)) ? Number(body.ocupantes_flutuantes) : null,
+    responsavel_nome: body.responsavel_nome || '',
+    responsavel_telefone: body.responsavel_telefone || '',
+    responsavel_email: body.responsavel_email || '',
+  };
+}
+
+// GET /api/pmoc/locais?cliente_id=&q=
+rota('GET', /^\/api\/pmoc\/locais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao_pmoc_locais', user.empresa_id);
+  if (query.cliente_id) lista = lista.filter((l) => l.cliente_id === Number(query.cliente_id));
+  let comDetalhes = lista.map((l) => pmocLocalComDetalhes(data, l));
+  if (query.q) {
+    const q = String(query.q).trim().toLowerCase();
+    comDetalhes = comDetalhes.filter((l) => l.nome.toLowerCase().includes(q) || (l.cliente_nome || '').toLowerCase().includes(q));
+  }
+  comDetalhes.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  enviarJSON(res, 200, { locais: comDetalhes });
+});
+
+// POST /api/pmoc/locais
+rota('POST', /^\/api\/pmoc\/locais$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const campos = camposPmocLocal(await lerCorpo(req));
+  if (!campos.cliente_id || !tenant.buscar(data, 'os_refrigeracao_clientes', campos.cliente_id, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Escolha um cliente.' });
+  if (!campos.nome) return enviarJSON(res, 400, { erro: 'Nome do local é obrigatório.' });
+  const local = tenant.criar(data, 'os_refrigeracao_pmoc_locais', user.empresa_id, { ...campos, criado_em: new Date().toISOString() });
+  db.save(data);
+  enviarJSON(res, 201, { local: pmocLocalComDetalhes(data, local) });
+});
+
+// GET /api/pmoc/locais/:id — vem com ambientes (e os aparelhos de cada ambiente) já aninhados,
+// pra tela de detalhe não precisar de mais 2 requisições em cascata.
+rota('GET', /^\/api\/pmoc\/locais\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  const ambientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === local.id)
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+    .map((a) => ({ ...a, aparelhos: data.os_refrigeracao_pmoc_aparelhos.filter((p) => p.ambiente_id === a.id).sort((x, y) => x.id - y.id) }));
+  enviarJSON(res, 200, { local: pmocLocalComDetalhes(data, local), ambientes });
+});
+
+// PUT /api/pmoc/locais/:id
+rota('PUT', /^\/api\/pmoc\/locais\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  const campos = camposPmocLocal(await lerCorpo(req));
+  if (!campos.cliente_id || !tenant.buscar(data, 'os_refrigeracao_clientes', campos.cliente_id, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Escolha um cliente.' });
+  if (!campos.nome) return enviarJSON(res, 400, { erro: 'Nome do local é obrigatório.' });
+  Object.assign(local, campos);
+  db.save(data);
+  enviarJSON(res, 200, { local: pmocLocalComDetalhes(data, local) });
+});
+
+// DELETE /api/pmoc/locais/:id — cascade: remove os ambientes e aparelhos daquele local junto (o
+// plano PMOC ainda não existe nesta fase, então não há mais nada pendurado nele pra arrastar).
+rota('DELETE', /^\/api\/pmoc\/locais\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const local = tenant.buscar(data, 'os_refrigeracao_pmoc_locais', Number(m[1]), user.empresa_id);
+  if (!local) return enviarJSON(res, 404, { erro: 'Local não encontrado.' });
+  const idsAmbientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === local.id).map((a) => a.id);
+  data.os_refrigeracao_pmoc_aparelhos = data.os_refrigeracao_pmoc_aparelhos.filter((p) => !idsAmbientes.includes(p.ambiente_id));
+  data.os_refrigeracao_pmoc_ambientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id !== local.id);
+  data.os_refrigeracao_pmoc_locais = data.os_refrigeracao_pmoc_locais.filter((l) => l.id !== local.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- ambientes (de um local) ----
+function camposPmocAmbiente(body) {
+  return {
+    nome: String(body.nome || '').trim(),
+    andar: body.andar || '',
+    area_m2: Number(body.area_m2) || null,
+    ocupantes: Number.isFinite(Number(body.ocupantes)) ? Number(body.ocupantes) : null,
+  };
+}
+
+// GET /api/pmoc/ambientes?local_id=
+rota('GET', /^\/api\/pmoc\/ambientes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao_pmoc_ambientes', user.empresa_id);
+  if (query.local_id) lista = lista.filter((a) => a.local_id === Number(query.local_id));
+  enviarJSON(res, 200, { ambientes: [...lista].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')) });
+});
+
+// POST /api/pmoc/ambientes { local_id, nome, andar, area_m2, ocupantes }
+rota('POST', /^\/api\/pmoc\/ambientes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const localId = Number(body.local_id) || null;
+  if (!localId || !tenant.buscar(data, 'os_refrigeracao_pmoc_locais', localId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Local inválido.' });
+  const campos = camposPmocAmbiente(body);
+  if (!campos.nome) return enviarJSON(res, 400, { erro: 'Nome do ambiente é obrigatório.' });
+  const ambiente = tenant.criar(data, 'os_refrigeracao_pmoc_ambientes', user.empresa_id, { ...campos, local_id: localId, criado_em: new Date().toISOString() });
+  db.save(data);
+  enviarJSON(res, 201, { ambiente });
+});
+
+// PUT /api/pmoc/ambientes/:id
+rota('PUT', /^\/api\/pmoc\/ambientes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const ambiente = tenant.buscar(data, 'os_refrigeracao_pmoc_ambientes', Number(m[1]), user.empresa_id);
+  if (!ambiente) return enviarJSON(res, 404, { erro: 'Ambiente não encontrado.' });
+  const campos = camposPmocAmbiente(await lerCorpo(req));
+  if (!campos.nome) return enviarJSON(res, 400, { erro: 'Nome do ambiente é obrigatório.' });
+  Object.assign(ambiente, campos);
+  db.save(data);
+  enviarJSON(res, 200, { ambiente });
+});
+
+// DELETE /api/pmoc/ambientes/:id — cascade: remove os aparelhos daquele ambiente junto.
+rota('DELETE', /^\/api\/pmoc\/ambientes\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const ambiente = tenant.buscar(data, 'os_refrigeracao_pmoc_ambientes', Number(m[1]), user.empresa_id);
+  if (!ambiente) return enviarJSON(res, 404, { erro: 'Ambiente não encontrado.' });
+  data.os_refrigeracao_pmoc_aparelhos = data.os_refrigeracao_pmoc_aparelhos.filter((p) => p.ambiente_id !== ambiente.id);
+  data.os_refrigeracao_pmoc_ambientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.id !== ambiente.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- aparelhos de climatização (de um ambiente) ----
+const PMOC_STATUS_APARELHO_VALIDOS = ['ativo', 'parado', 'aguardando_peca', 'desativado'];
+function camposPmocAparelho(body) {
+  return {
+    tipo: String(body.tipo || '').trim(),
+    marca: body.marca || '',
+    modelo: body.modelo || '',
+    numero_serie: body.numero_serie || '',
+    capacidade_btu: body.capacidade_btu || '',
+    fluido_refrigerante: body.fluido_refrigerante || '',
+    tensao: body.tensao || '',
+    data_instalacao: body.data_instalacao || '',
+    garantia_ate: body.garantia_ate || '',
+    codigo_patrimonio: body.codigo_patrimonio || '',
+  };
+}
+
+// GET /api/pmoc/aparelhos?ambiente_id=&local_id=
+rota('GET', /^\/api\/pmoc\/aparelhos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao_pmoc_aparelhos', user.empresa_id);
+  if (query.ambiente_id) lista = lista.filter((p) => p.ambiente_id === Number(query.ambiente_id));
+  if (query.local_id) {
+    const idsAmbientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === Number(query.local_id)).map((a) => a.id);
+    lista = lista.filter((p) => idsAmbientes.includes(p.ambiente_id));
+  }
+  enviarJSON(res, 200, { aparelhos: [...lista].sort((a, b) => a.id - b.id) });
+});
+
+// POST /api/pmoc/aparelhos — nasce com QR próprio (mesmo gerador já usado em "Redes e Filiais",
+// ver db.gerarQrToken), pra fase 5 (etiquetas/scan) não precisar de migração nenhuma depois.
+rota('POST', /^\/api\/pmoc\/aparelhos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const ambienteId = Number(body.ambiente_id) || null;
+  if (!ambienteId || !tenant.buscar(data, 'os_refrigeracao_pmoc_ambientes', ambienteId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Ambiente inválido.' });
+  const campos = camposPmocAparelho(body);
+  if (!campos.tipo) return enviarJSON(res, 400, { erro: 'Informe o tipo do aparelho.' });
+  const aparelho = tenant.criar(data, 'os_refrigeracao_pmoc_aparelhos', user.empresa_id, {
+    ...campos, ambiente_id: ambienteId, status: 'ativo', qr_token: db.gerarQrToken(), criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { aparelho });
+});
+
+// PUT /api/pmoc/aparelhos/:id
+rota('PUT', /^\/api\/pmoc\/aparelhos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const aparelho = tenant.buscar(data, 'os_refrigeracao_pmoc_aparelhos', Number(m[1]), user.empresa_id);
+  if (!aparelho) return enviarJSON(res, 404, { erro: 'Aparelho não encontrado.' });
+  const campos = camposPmocAparelho(await lerCorpo(req));
+  if (!campos.tipo) return enviarJSON(res, 400, { erro: 'Informe o tipo do aparelho.' });
+  Object.assign(aparelho, campos);
+  db.save(data);
+  enviarJSON(res, 200, { aparelho });
+});
+
+// PUT /api/pmoc/aparelhos/:id/status — mesmo padrão de PUT /api/os-refrigeracao/:id/status acima:
+// troca rápida de status sem reenviar o cadastro inteiro.
+rota('PUT', /^\/api\/pmoc\/aparelhos\/(\d+)\/status$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const aparelho = tenant.buscar(data, 'os_refrigeracao_pmoc_aparelhos', Number(m[1]), user.empresa_id);
+  if (!aparelho) return enviarJSON(res, 404, { erro: 'Aparelho não encontrado.' });
+  const body = await lerCorpo(req);
+  if (!PMOC_STATUS_APARELHO_VALIDOS.includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
+  aparelho.status = body.status;
+  db.save(data);
+  enviarJSON(res, 200, { aparelho });
+});
+
+// DELETE /api/pmoc/aparelhos/:id
+rota('DELETE', /^\/api\/pmoc\/aparelhos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const aparelho = tenant.buscar(data, 'os_refrigeracao_pmoc_aparelhos', Number(m[1]), user.empresa_id);
+  if (!aparelho) return enviarJSON(res, 404, { erro: 'Aparelho não encontrado.' });
+  data.os_refrigeracao_pmoc_aparelhos = data.os_refrigeracao_pmoc_aparelhos.filter((p) => p.id !== aparelho.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- responsáveis técnicos (CREA/CFT, cadastrados pela própria empresa de Refrigeração) ----
+rota('GET', /^\/api\/pmoc\/responsaveis-tecnicos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const lista = tenant.listar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', user.empresa_id);
+  const comFoto = await Promise.all(lista.map(async (r) => ({ ...r, assinatura_img: await hidratarFotosProfundo(r.assinatura_img) })));
+  comFoto.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  enviarJSON(res, 200, { responsaveis: comFoto });
+});
+
+// POST /api/pmoc/responsaveis-tecnicos { nome, formacao, registro_profissional, email, telefone, assinatura_img }
+rota('POST', /^\/api\/pmoc\/responsaveis-tecnicos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const nome = String(body.nome || '').trim();
+  if (!nome) return enviarJSON(res, 400, { erro: 'Nome é obrigatório.' });
+  const responsavel = tenant.criar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', user.empresa_id, {
+    nome, formacao: body.formacao || '', registro_profissional: body.registro_profissional || '',
+    email: body.email || '', telefone: body.telefone || '', assinatura_img: body.assinatura_img || null,
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { responsavel: { ...responsavel, assinatura_img: await hidratarFotosProfundo(responsavel.assinatura_img) } });
+});
+
+// PUT /api/pmoc/responsaveis-tecnicos/:id
+rota('PUT', /^\/api\/pmoc\/responsaveis-tecnicos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const responsavel = tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', Number(m[1]), user.empresa_id);
+  if (!responsavel) return enviarJSON(res, 404, { erro: 'Responsável técnico não encontrado.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), user.empresa_id);
+  const nome = String(body.nome || '').trim();
+  if (!nome) return enviarJSON(res, 400, { erro: 'Nome é obrigatório.' });
+  Object.assign(responsavel, {
+    nome, formacao: body.formacao || '', registro_profissional: body.registro_profissional || '',
+    email: body.email || '', telefone: body.telefone || '',
+    assinatura_img: body.assinatura_img || responsavel.assinatura_img,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { responsavel: { ...responsavel, assinatura_img: await hidratarFotosProfundo(responsavel.assinatura_img) } });
+});
+
+// DELETE /api/pmoc/responsaveis-tecnicos/:id
+rota('DELETE', /^\/api\/pmoc\/responsaveis-tecnicos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const responsavel = tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', Number(m[1]), user.empresa_id);
+  if (!responsavel) return enviarJSON(res, 404, { erro: 'Responsável técnico não encontrado.' });
+  data.os_refrigeracao_pmoc_responsaveis_tecnicos = data.os_refrigeracao_pmoc_responsaveis_tecnicos.filter((r) => r.id !== responsavel.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // ---------- Início (Home) — perfil "Refrigeração e Climatização" ----------
 // pedido do usuário (referência: app concorrente iClima): painel de controle no topo do menu, com
 // os números do PRÓPRIO usuário logado — hoje/semana/ocupação do mês vêm da Agenda já construída

@@ -163,8 +163,10 @@ test('migrar cria automaticamente os 4 planos em cascata: Básico, Intermediári
   for (const chave of intermediario.modulos) assert.ok(profissional.modulos.includes(chave));
   assert.ok(profissional.modulos.includes('equipe_avancado'));
 
-  // Completo libera o catálogo inteiro — "até o plano em que todas as funções é liberada"
-  assert.deepEqual([...completo.modulos].sort(), [...db.CHAVES_MODULOS].sort());
+  // Completo libera o catálogo inteiro — "até o plano em que todas as funções é liberada" — menos
+  // os módulos perfil-exclusivos fora da cascata padrão (ex. "pmoc", contratado à parte só por
+  // empresas do perfil Refrigeração — ver CHAVES_MODULOS_CASCATA_PADRAO em db.js).
+  assert.deepEqual([...completo.modulos].sort(), [...db.CHAVES_MODULOS_CASCATA_PADRAO].sort());
 });
 
 test('migrar dos planos automáticos é idempotente: rodar de novo não duplica nem recria o que foi apagado', () => {

@@ -66,8 +66,25 @@ const MODULOS_DISPONIVEIS = [
   // o que foi entregue no período e comparando com o valor do contrato ("ver que valeu a pena").
   // Reaproveitável por qualquer empresa com contrato recorrente, não é exclusivo da JBPA.
   { chave: 'atividades', nome: 'Registro de Atividades' },
+  // pedido do usuário: pacote "Climatização / PMOC" — exclusivo de empresas com
+  // `perfil: 'refrigeracao'` (ver PERFIS_DISPONIVEIS acima e exigirPerfilRefrigeracao em
+  // server.js): cadastro de locais/ambientes/aparelhos do cliente final e, nas próximas fases,
+  // plano PMOC com preventivas automáticas (Lei 13.589/2018). É módulo (ativável por empresa,
+  // "flag/versão", ver moduloAtivo abaixo) ALÉM do gate de perfil — nem toda empresa de
+  // Refrigeração contrata o pacote PMOC, mas só empresa de Refrigeração pode contratá-lo (o NAV
+  // combina `perfil` + `modulo` no mesmo item — ver navDoUsuario em app.js).
+  // `foraDaCascataPadrao`: nunca entra sozinho em "Completo"/plano de topo nem é candidato das
+  // heurísticas de resgate de módulo esquecido (ver desbloquearModuloNosPlanosCompletos em
+  // migrar() — compara "o plano já libera TODO o resto do catálogo" pra achar o plano de topo;
+  // sem essa flag, "pmoc" entraria nessa comparação e QUEBRARIA a detecção de plano de topo pra
+  // outros módulos, já que nenhum plano da cascata padrão tem "pmoc" de propósito — ver comentário
+  // acima). Continua ativável normalmente por empresa (Super Admin > Cadastros > Módulos ativos).
+  { chave: 'pmoc', nome: 'Climatização / PMOC', foraDaCascataPadrao: true },
 ];
 const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
+// subconjunto de CHAVES_MODULOS elegível pra fazer parte da cascata de planos padrão (Básico →
+// Completo) — exclui módulos perfil-exclusivos como "pmoc" (ver `foraDaCascataPadrao` acima).
+const CHAVES_MODULOS_CASCATA_PADRAO = MODULOS_DISPONIVEIS.filter((m) => !m.foraDaCascataPadrao).map((m) => m.chave);
 
 // Perfil/Segmento (Etapa 8): escolhido uma vez no cadastro da empresa, só serve de atalho pra
 // pré-preencher terminologia/tipos ativos — nunca trava nada, tudo editável depois pelo Super
@@ -362,6 +379,16 @@ function seed() {
     // padrão do "Novo Agendamento Manual" do app de referência iClima).
     os_refrigeracao_agenda_config: [],
     os_refrigeracao_agendamentos: [],
+    // Pacote "Climatização / PMOC" (módulo `pmoc`, ver MODULOS_DISPONIVEIS acima) — Fase 1
+    // (Cadastro): local do cliente final (estabelecimento, 1 cliente pode ter vários — ver Lei
+    // 13.589/2018), ambientes de cada local, aparelhos de climatização de cada ambiente, e o
+    // responsável técnico (CREA/CFT) cadastrado pela empresa de Refrigeração. Pendurado em
+    // os_refrigeracao_clientes (não na coleção `clientes` núcleo), mesma base de cliente já usada
+    // por O.S./Orçamento/Agenda desse perfil.
+    os_refrigeracao_pmoc_locais: [],
+    os_refrigeracao_pmoc_ambientes: [],
+    os_refrigeracao_pmoc_aparelhos: [],
+    os_refrigeracao_pmoc_responsaveis_tecnicos: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -371,7 +398,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, os_refrigeracao_pmoc_locais: 1, os_refrigeracao_pmoc_ambientes: 1, os_refrigeracao_pmoc_aparelhos: 1, os_refrigeracao_pmoc_responsaveis_tecnicos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -738,7 +765,7 @@ function migrar(data) {
   // que já liberam TODO o resto do catálogo, a marca inequívoca de "era o plano completo, só
   // faltou um módulo que não existia ainda".
   function desbloquearModuloNosPlanosCompletos(chaveModulo) {
-    const outrosModulos = CHAVES_MODULOS.filter((chave) => chave !== chaveModulo);
+    const outrosModulos = CHAVES_MODULOS_CASCATA_PADRAO.filter((chave) => chave !== chaveModulo);
     for (const versao of data.versoes) {
       const jaLiberaTudoMenosEsse = Array.isArray(versao.modulos) && outrosModulos.every((chave) => versao.modulos.includes(chave));
       if (!jaLiberaTudoMenosEsse) continue;
@@ -1179,6 +1206,16 @@ function migrar(data) {
   if (!Array.isArray(data.os_refrigeracao_agendamentos)) data.os_refrigeracao_agendamentos = [];
   if (!data._seq.os_refrigeracao_agendamentos) data._seq.os_refrigeracao_agendamentos = 1;
   for (const a of data.os_refrigeracao_agendamentos) { if (a.status === undefined) a.status = 'agendado'; }
+  // Pacote "Climatização / PMOC" (módulo `pmoc`, ver comentário acima em MODULOS_DISPONIVEIS) —
+  // Fase 1 (Cadastro): local → ambiente → aparelho, mais o responsável técnico.
+  if (!Array.isArray(data.os_refrigeracao_pmoc_locais)) data.os_refrigeracao_pmoc_locais = [];
+  if (!data._seq.os_refrigeracao_pmoc_locais) data._seq.os_refrigeracao_pmoc_locais = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_ambientes)) data.os_refrigeracao_pmoc_ambientes = [];
+  if (!data._seq.os_refrigeracao_pmoc_ambientes) data._seq.os_refrigeracao_pmoc_ambientes = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_aparelhos)) data.os_refrigeracao_pmoc_aparelhos = [];
+  if (!data._seq.os_refrigeracao_pmoc_aparelhos) data._seq.os_refrigeracao_pmoc_aparelhos = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_responsaveis_tecnicos)) data.os_refrigeracao_pmoc_responsaveis_tecnicos = [];
+  if (!data._seq.os_refrigeracao_pmoc_responsaveis_tecnicos) data._seq.os_refrigeracao_pmoc_responsaveis_tecnicos = 1;
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }
@@ -1678,7 +1715,7 @@ module.exports = {
   supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga, empresaIdDaFoto,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
-  MODULOS_DISPONIVEIS, CHAVES_MODULOS, moduloAtivo, migrar, recalcularModulosVersoes,
+  MODULOS_DISPONIVEIS, CHAVES_MODULOS, CHAVES_MODULOS_CASCATA_PADRAO, moduloAtivo, migrar, recalcularModulosVersoes,
   PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento, PRESETS_PERFIL_SEGMENTO,
   gerarQrToken,
   obterPool, COLECOES_EM_TABELA,

@@ -712,6 +712,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
     'agenda-refrigeracao': 'Agenda',
+    'pmoc': 'PMOC',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
@@ -737,6 +738,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
     'agenda-refrigeracao': 'Agenda geral',
+    'pmoc': 'PMOC',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda geral',
     'chat-admin': 'Chat',
@@ -812,6 +814,15 @@ const NAV = {
     // — por isso o item núcleo usa `ocultoNoPerfil: 'refrigeracao'` (ver navDoUsuario), senão o
     // menu mostraria "Agenda" duas vezes com conteúdos completamente diferentes.
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda', page: 'agenda-refrigeracao-lista' },
+    // pedido do usuário: pacote "Climatização / PMOC" (Lei 13.589/2018) — ALÉM do `perfil`
+    // Refrigeração, exige o módulo `pmoc` contratado à parte (nem toda empresa do perfil usa
+    // PMOC); por isso é o único item deste perfil com os dois gates juntos (ver navDoUsuario, que
+    // já faz moduloAtivoNoMenu(node.modulo) && perfilAtivoNoMenu(node.perfil)). Fase 1 (Cadastro):
+    // Locais/Ambientes/Aparelhos e Responsáveis técnicos — ver renderPmocLocais/renderPmocLocalDetalhe/renderPmocResponsaveis.
+    { key: 'pmoc', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
+      { key: 'pmoc-locais', label: 'Locais', page: 'pmoc-locais' },
+      { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
+    ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda', page: 'agenda' },
     // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
     // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
@@ -880,6 +891,10 @@ const NAV = {
     { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
     { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', page: 'ferramentas-hub' },
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda-refrigeracao-lista' },
+    { key: 'pmoc', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
+      { key: 'pmoc-locais', label: 'Locais', page: 'pmoc-locais' },
+      { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
+    ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
@@ -1124,6 +1139,7 @@ const ICONE_MENU = {
   'os-refrigeracao': '🧾',
   'orcamentos-refrigeracao': '📋',
   'agenda-refrigeracao': '📅',
+  'pmoc': '🌡️',
   'ferramentas': '🧰',
 };
 
@@ -3765,6 +3781,498 @@ async function salvarNovoAgendamentoRef() {
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
+// ===== Pacote "Climatização / PMOC" — perfil "Refrigeração e Climatização" =====
+// pedido do usuário: pacote PMOC (Lei 13.589/2018), Fase 1 — Cadastro. Além do `perfil`
+// Refrigeração, exige o módulo `pmoc` contratado à parte (ver item 'pmoc' no NAV, db.js
+// MODULOS_DISPONIVEIS e rotas-modulo.js) — nem toda empresa do perfil usa o pacote PMOC.
+function pmocPacoteAtivo() {
+  return perfilRefrigeracaoAtivo() && moduloAtivoNoMenu('pmoc');
+}
+const PMOC_TIPOS_ATIVIDADE = [
+  { valor: 'loja', label: 'Loja' }, { valor: 'clinica', label: 'Clínica' },
+  { valor: 'escritorio', label: 'Escritório' }, { valor: 'escola', label: 'Escola' },
+  { valor: 'orgao_publico', label: 'Órgão público' }, { valor: 'outro', label: 'Outro' },
+];
+function pmocTipoAtividadeLabel(valor) {
+  return (PMOC_TIPOS_ATIVIDADE.find((t) => t.valor === valor) || {}).label || 'Outro';
+}
+const PMOC_TIPOS_APARELHO = ['Split hi-wall', 'Piso-teto', 'Cassete', 'Janela', 'Multi-split', 'VRF', 'Self-contained', 'Chiller', 'Fan-coil', 'Outro'];
+const PMOC_STATUS_APARELHO = { ativo: { label: 'Ativo', cor: 'var(--green)' }, parado: { label: 'Parado', cor: 'var(--amber, #b45309)' }, aguardando_peca: { label: 'Aguardando peça', cor: 'var(--amber, #b45309)' }, desativado: { label: 'Desativado', cor: 'var(--ink-soft)' } };
+function pmocStatusBadgeHtml(status) {
+  const s = PMOC_STATUS_APARELHO[status] || PMOC_STATUS_APARELHO.ativo;
+  return `<span class="tag" style="background:none; border:1px solid ${s.cor}; color:${s.cor};">${esc(s.label)}</span>`;
+}
+
+// ---- lista de locais ----
+async function renderPmocLocais() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <h1>PMOC — Locais</h1>
+      <button class="btn btn-primary btn-sm" onclick="abrirModalPmocLocal()">+ Novo local</button>
+    </div>
+    <div class="filtros-row">
+      <div class="field"><input id="pmoc-locais-busca" placeholder="Buscar por local ou cliente" oninput="buscarPmocLocais()"></div>
+    </div>
+    <div id="pmoc-locais-lista" style="margin-top:12px;"><div class="empty">Carregando...</div></div>`;
+  await carregarPmocLocais();
+}
+let _pmocLocaisBuscaTimer = null;
+function buscarPmocLocais() {
+  clearTimeout(_pmocLocaisBuscaTimer);
+  _pmocLocaisBuscaTimer = setTimeout(carregarPmocLocais, 300);
+}
+async function carregarPmocLocais() {
+  const buscaEl = document.getElementById('pmoc-locais-busca');
+  const params = new URLSearchParams();
+  if (buscaEl && buscaEl.value) params.set('q', buscaEl.value);
+  const { locais } = await api('/api/pmoc/locais?' + params.toString());
+  const alvo = document.getElementById('pmoc-locais-lista');
+  if (!alvo) return;
+  alvo.innerHTML = locais.length ? locais.map((l) => `
+    <div class="panel" style="cursor:pointer; margin-bottom:10px;" onclick="abrirPmocLocalDetalhe(${l.id})">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <strong>${esc(l.nome)}</strong>
+          <span class="tag" style="margin-left:6px;">${esc(pmocTipoAtividadeLabel(l.tipo_atividade))}</span>
+          <div style="font-size:13px; color:var(--ink-soft); margin-top:2px;">${esc(l.cliente_nome || '—')}</div>
+          ${l.endereco ? `<div style="font-size:12.5px; color:var(--ink-soft);">${esc(l.endereco)}</div>` : ''}
+        </div>
+        <div style="text-align:right; font-size:12.5px; color:var(--ink-soft); white-space:nowrap;">${l.total_ambientes} ambiente${l.total_ambientes === 1 ? '' : 's'}<br>${l.total_aparelhos} aparelho${l.total_aparelhos === 1 ? '' : 's'}</div>
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhum local cadastrado ainda.</div>';
+}
+
+// ---- modal novo/editar local ----
+window._pmocClientesCache = [];
+async function abrirModalPmocLocal(local) {
+  const { clientes } = await api('/api/os-refrigeracao-clientes');
+  window._pmocClientesCache = clientes;
+  window._pmocLocalEditando = local || null;
+  let modal = document.getElementById('modal-pmoc-local');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-local';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalPmocLocal(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:520px; max-height:88vh; overflow:auto;">
+      <h3>${local ? 'Editar local' : 'Novo local'}</h3>
+      <div class="field"><label>Cliente *</label>
+        <div style="display:flex; gap:6px;">
+          <select id="pmoc-local-cliente" style="flex:1;">
+            <option value="">Selecione...</option>
+            ${clientes.map((c) => `<option value="${c.id}" ${local && local.cliente_id === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn-outline-sm" onclick="mostrarModalNovoClientePmoc()">+ Novo</button>
+        </div>
+      </div>
+      <div class="field"><label>Nome do local *</label><input id="pmoc-local-nome" value="${esc((local && local.nome) || '')}" placeholder="Ex: Matriz, Filial Centro"></div>
+      <div class="field"><label>Tipo de atividade</label>
+        <select id="pmoc-local-tipo-atividade">${PMOC_TIPOS_ATIVIDADE.map((t) => `<option value="${t.valor}" ${local && local.tipo_atividade === t.valor ? 'selected' : ''}>${t.label}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Endereço</label><input id="pmoc-local-endereco" value="${esc((local && local.endereco) || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Área climatizada (m²)</label><input id="pmoc-local-area" type="number" min="0" value="${(local && local.area_climatizada_m2) || ''}"></div>
+        <div class="field" style="flex:1;"><label>Ocupantes fixos</label><input id="pmoc-local-ocup-fixos" type="number" min="0" value="${(local && local.ocupantes_fixos) ?? ''}"></div>
+        <div class="field" style="flex:1;"><label>Ocupantes flutuantes</label><input id="pmoc-local-ocup-flutuantes" type="number" min="0" value="${(local && local.ocupantes_flutuantes) ?? ''}"></div>
+      </div>
+      <h3 style="margin-top:14px;">Responsável no local</h3>
+      <div class="field"><label>Nome</label><input id="pmoc-local-resp-nome" value="${esc((local && local.responsavel_nome) || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Telefone</label><input id="pmoc-local-resp-telefone" value="${esc((local && local.responsavel_telefone) || '')}"></div>
+        <div class="field" style="flex:1;"><label>E-mail</label><input id="pmoc-local-resp-email" type="email" value="${esc((local && local.responsavel_email) || '')}"></div>
+      </div>
+      <div id="pmoc-local-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="fecharModalPmocLocal()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocLocal()">Salvar</button>
+      </div>
+    </div>`;
+}
+function fecharModalPmocLocal() {
+  const modal = document.getElementById('modal-pmoc-local');
+  if (modal) modal.classList.remove('show');
+}
+// quick-create de cliente de dentro do modal de local — mesma técnica de mostrarModalNovoClienteOsRef,
+// só que devolve pro <select> do modal de local em vez de preencher um wizard.
+function mostrarModalNovoClientePmoc() {
+  let modal = document.getElementById('modal-pmoc-cliente');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-cliente';
+    modal.className = 'modal-overlay';
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Novo cliente</h3>
+      <div class="field"><label>Nome *</label><input id="pmoc-nc-nome"></div>
+      <div class="field"><label>Telefone</label><input id="pmoc-nc-telefone"></div>
+      <div class="field"><label>Email</label><input id="pmoc-nc-email" type="email"></div>
+      <div class="field"><label>CPF/CNPJ</label><input id="pmoc-nc-cpf"></div>
+      <div class="field"><label>Endereço</label><input id="pmoc-nc-endereco"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-cliente').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarNovoClientePmoc()">Criar cliente</button>
+      </div>
+    </div>`;
+}
+async function salvarNovoClientePmoc() {
+  const nome = document.getElementById('pmoc-nc-nome').value.trim();
+  if (!nome) return alert('Informe o nome do cliente.');
+  try {
+    const { cliente } = await api('/api/os-refrigeracao-clientes', { method: 'POST', body: {
+      nome, telefone: document.getElementById('pmoc-nc-telefone').value,
+      email: document.getElementById('pmoc-nc-email').value,
+      cpf_cnpj: document.getElementById('pmoc-nc-cpf').value,
+      endereco: document.getElementById('pmoc-nc-endereco').value,
+    } });
+    document.getElementById('modal-pmoc-cliente').classList.remove('show');
+    window._pmocClientesCache.push(cliente);
+    const sel = document.getElementById('pmoc-local-cliente');
+    sel.innerHTML = `<option value="">Selecione...</option>` + window._pmocClientesCache.map((c) => `<option value="${c.id}">${esc(c.nome)}</option>`).join('');
+    sel.value = cliente.id;
+  } catch (e) { alert(e.message); }
+}
+async function salvarPmocLocal() {
+  const erroEl = document.getElementById('pmoc-local-erro');
+  erroEl.classList.add('hidden');
+  const body = {
+    cliente_id: document.getElementById('pmoc-local-cliente').value,
+    nome: document.getElementById('pmoc-local-nome').value.trim(),
+    tipo_atividade: document.getElementById('pmoc-local-tipo-atividade').value,
+    endereco: document.getElementById('pmoc-local-endereco').value,
+    area_climatizada_m2: document.getElementById('pmoc-local-area').value,
+    ocupantes_fixos: document.getElementById('pmoc-local-ocup-fixos').value,
+    ocupantes_flutuantes: document.getElementById('pmoc-local-ocup-flutuantes').value,
+    responsavel_nome: document.getElementById('pmoc-local-resp-nome').value,
+    responsavel_telefone: document.getElementById('pmoc-local-resp-telefone').value,
+    responsavel_email: document.getElementById('pmoc-local-resp-email').value,
+  };
+  try {
+    const editando = window._pmocLocalEditando;
+    if (editando) await api('/api/pmoc/locais/' + editando.id, { method: 'PUT', body });
+    else await api('/api/pmoc/locais', { method: 'POST', body });
+    fecharModalPmocLocal();
+    if (editando && window._pmocLocalDetalheId === editando.id) renderPmocLocalDetalhe();
+    else await carregarPmocLocais();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function excluirPmocLocal(id) {
+  const ok = await mostrarConfirmacao('Excluir este local? Os ambientes e aparelhos cadastrados nele também serão excluídos. Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/pmoc/locais/' + id, { method: 'DELETE' });
+    ir('pmoc-locais');
+  } catch (e) { alert(e.message); }
+}
+
+// ---- detalhe do local: ambientes + aparelhos ----
+function abrirPmocLocalDetalhe(id) {
+  window._pmocLocalDetalheId = id;
+  ir('pmoc-local-detalhe');
+}
+async function renderPmocLocalDetalhe() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  const { local, ambientes } = await api('/api/pmoc/locais/' + window._pmocLocalDetalheId);
+  window._pmocLocalAtual = local;
+  window._pmocAmbientesAtual = ambientes;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(local.nome)}</h1><span class="tag">${esc(pmocTipoAtividadeLabel(local.tipo_atividade))}</span></div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="abrirModalPmocLocal(window._pmocLocalAtual)">✏️ Editar</button>
+        <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocLocal(${local.id})">🗑️ Excluir</button>
+        <button class="btn-outline-sm" onclick="ir('pmoc-locais')">← Voltar</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Estabelecimento</h3>
+      ${osRefLinha('Cliente', esc(local.cliente_nome || '—'))}
+      ${osRefLinha('Endereço', esc(local.endereco || '—'))}
+      ${osRefLinha('Área climatizada', local.area_climatizada_m2 ? local.area_climatizada_m2 + ' m²' : '—')}
+      ${osRefLinha('Ocupantes', `${local.ocupantes_fixos ?? '—'} fixos · ${local.ocupantes_flutuantes ?? '—'} flutuantes`)}
+      ${local.responsavel_nome ? osRefLinha('Responsável no local', `${esc(local.responsavel_nome)}${local.responsavel_telefone ? ' — ' + esc(local.responsavel_telefone) : ''}${local.responsavel_email ? ' — ' + esc(local.responsavel_email) : ''}`) : ''}
+    </div>
+    <div class="page-head" style="margin-top:18px;">
+      <h2>Ambientes</h2>
+      <button class="btn btn-primary btn-sm" onclick="abrirModalPmocAmbiente()">+ Novo ambiente</button>
+    </div>
+    <div id="pmoc-ambientes-lista">${pmocAmbientesHtml(ambientes)}</div>`;
+}
+function pmocAmbientesHtml(ambientes) {
+  if (!ambientes.length) return '<div class="empty">Nenhum ambiente cadastrado ainda.</div>';
+  return ambientes.map((a) => `
+    <div class="panel" style="margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <strong>${esc(a.nome)}</strong>
+          ${a.andar ? `<span style="color:var(--ink-soft); font-size:12.5px;"> — ${esc(a.andar)}</span>` : ''}
+          <div style="font-size:12.5px; color:var(--ink-soft);">${a.area_m2 ? a.area_m2 + ' m² · ' : ''}${a.ocupantes != null ? a.ocupantes + ' ocupantes' : ''}</div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn-outline-sm" onclick="abrirModalPmocAmbiente(window._pmocAmbientesAtual.find((x)=>x.id===${a.id}))">✏️</button>
+          <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocAmbiente(${a.id})">🗑️</button>
+        </div>
+      </div>
+      <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--line);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong style="font-size:13px; color:var(--ink-soft);">APARELHOS</strong>
+          <button class="btn-outline-sm" onclick="abrirModalPmocAparelho(${a.id})">+ Novo aparelho</button>
+        </div>
+        ${pmocAparelhosHtml(a.aparelhos)}
+      </div>
+    </div>`).join('');
+}
+function pmocAparelhosHtml(aparelhos) {
+  if (!aparelhos.length) return '<div class="empty" style="padding:10px;">Nenhum aparelho cadastrado ainda.</div>';
+  return aparelhos.map((p) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);">
+      <div>
+        <strong>${esc(p.tipo)}</strong> ${pmocStatusBadgeHtml(p.status)}
+        <div style="font-size:12.5px; color:var(--ink-soft);">${[p.marca, p.modelo].filter(Boolean).map(esc).join(' ')}${p.capacidade_btu ? ` — ${esc(String(p.capacidade_btu))} BTU` : ''}${p.numero_serie ? ` — Série ${esc(p.numero_serie)}` : ''}</div>
+      </div>
+      <button class="btn-outline-sm" onclick="abrirModalPmocAparelho(${p.ambiente_id}, window._pmocAmbientesAtual.flatMap((x)=>x.aparelhos).find((x)=>x.id===${p.id}))">✏️</button>
+    </div>`).join('');
+}
+
+// ---- modal novo/editar ambiente ----
+function abrirModalPmocAmbiente(ambiente) {
+  window._pmocAmbienteEditando = ambiente || null;
+  let modal = document.getElementById('modal-pmoc-ambiente');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-ambiente';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) document.getElementById('modal-pmoc-ambiente').classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>${ambiente ? 'Editar ambiente' : 'Novo ambiente'}</h3>
+      <div class="field"><label>Nome *</label><input id="pmoc-amb-nome" value="${esc((ambiente && ambiente.nome) || '')}" placeholder="Ex: Recepção, Sala 1, CPD"></div>
+      <div class="field"><label>Andar</label><input id="pmoc-amb-andar" value="${esc((ambiente && ambiente.andar) || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Área (m²)</label><input id="pmoc-amb-area" type="number" min="0" value="${(ambiente && ambiente.area_m2) || ''}"></div>
+        <div class="field" style="flex:1;"><label>Ocupantes</label><input id="pmoc-amb-ocupantes" type="number" min="0" value="${(ambiente && ambiente.ocupantes) ?? ''}"></div>
+      </div>
+      <div id="pmoc-amb-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-ambiente').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocAmbiente()">Salvar</button>
+      </div>
+    </div>`;
+}
+async function salvarPmocAmbiente() {
+  const erroEl = document.getElementById('pmoc-amb-erro');
+  erroEl.classList.add('hidden');
+  const body = {
+    local_id: window._pmocLocalDetalheId,
+    nome: document.getElementById('pmoc-amb-nome').value.trim(),
+    andar: document.getElementById('pmoc-amb-andar').value,
+    area_m2: document.getElementById('pmoc-amb-area').value,
+    ocupantes: document.getElementById('pmoc-amb-ocupantes').value,
+  };
+  try {
+    const editando = window._pmocAmbienteEditando;
+    if (editando) await api('/api/pmoc/ambientes/' + editando.id, { method: 'PUT', body });
+    else await api('/api/pmoc/ambientes', { method: 'POST', body });
+    document.getElementById('modal-pmoc-ambiente').classList.remove('show');
+    await renderPmocLocalDetalhe();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function excluirPmocAmbiente(id) {
+  const ok = await mostrarConfirmacao('Excluir este ambiente? Os aparelhos cadastrados nele também serão excluídos. Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/pmoc/ambientes/' + id, { method: 'DELETE' });
+    await renderPmocLocalDetalhe();
+  } catch (e) { alert(e.message); }
+}
+
+// ---- modal novo/editar aparelho ----
+function abrirModalPmocAparelho(ambienteId, aparelho) {
+  window._pmocAparelhoEditando = aparelho || null;
+  window._pmocAparelhoAmbienteId = ambienteId;
+  let modal = document.getElementById('modal-pmoc-aparelho');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-aparelho';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) document.getElementById('modal-pmoc-aparelho').classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  const p = aparelho || {};
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:480px; max-height:88vh; overflow:auto;">
+      <h3>${aparelho ? 'Editar aparelho' : 'Novo aparelho'}</h3>
+      <div class="field"><label>Tipo *</label>
+        <select id="pmoc-ap-tipo">${PMOC_TIPOS_APARELHO.map((t) => `<option value="${esc(t)}" ${p.tipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Marca</label><input id="pmoc-ap-marca" list="os-ref-marcas-list" value="${esc(p.marca || '')}"></div>
+        <div class="field" style="flex:1;"><label>Modelo</label><input id="pmoc-ap-modelo" value="${esc(p.modelo || '')}"></div>
+      </div>
+      <div class="field"><label>Número de série</label><input id="pmoc-ap-serie" value="${esc(p.numero_serie || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Capacidade (BTU/h)</label><input id="pmoc-ap-btu" list="os-ref-btu-list" value="${esc(p.capacidade_btu || '')}"></div>
+        <div class="field" style="flex:1;"><label>Fluido refrigerante</label><input id="pmoc-ap-fluido" value="${esc(p.fluido_refrigerante || '')}" placeholder="Ex: R-410A"></div>
+        <div class="field" style="flex:1;"><label>Tensão</label><input id="pmoc-ap-tensao" value="${esc(p.tensao || '')}" placeholder="Ex: 220V"></div>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Data de instalação</label><input id="pmoc-ap-data-instalacao" type="date" value="${esc(p.data_instalacao || '')}"></div>
+        <div class="field" style="flex:1;"><label>Garantia até</label><input id="pmoc-ap-garantia" type="date" value="${esc(p.garantia_ate || '')}"></div>
+      </div>
+      <div class="field"><label>Código de patrimônio</label><input id="pmoc-ap-patrimonio" value="${esc(p.codigo_patrimonio || '')}"></div>
+      ${aparelho ? `<div class="field"><label>Status</label>
+        <select id="pmoc-ap-status">${Object.entries(PMOC_STATUS_APARELHO).map(([v, s]) => `<option value="${v}" ${p.status === v ? 'selected' : ''}>${s.label}</option>`).join('')}</select>
+      </div>` : ''}
+      <div id="pmoc-ap-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-aparelho').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocAparelho()">Salvar</button>
+      </div>
+    </div>`;
+}
+async function salvarPmocAparelho() {
+  const erroEl = document.getElementById('pmoc-ap-erro');
+  erroEl.classList.add('hidden');
+  const body = {
+    ambiente_id: window._pmocAparelhoAmbienteId,
+    tipo: document.getElementById('pmoc-ap-tipo').value,
+    marca: document.getElementById('pmoc-ap-marca').value,
+    modelo: document.getElementById('pmoc-ap-modelo').value,
+    numero_serie: document.getElementById('pmoc-ap-serie').value,
+    capacidade_btu: document.getElementById('pmoc-ap-btu').value,
+    fluido_refrigerante: document.getElementById('pmoc-ap-fluido').value,
+    tensao: document.getElementById('pmoc-ap-tensao').value,
+    data_instalacao: document.getElementById('pmoc-ap-data-instalacao').value,
+    garantia_ate: document.getElementById('pmoc-ap-garantia').value,
+    codigo_patrimonio: document.getElementById('pmoc-ap-patrimonio').value,
+  };
+  try {
+    const editando = window._pmocAparelhoEditando;
+    if (editando) {
+      await api('/api/pmoc/aparelhos/' + editando.id, { method: 'PUT', body });
+      const statusEl = document.getElementById('pmoc-ap-status');
+      if (statusEl && statusEl.value !== editando.status) await api('/api/pmoc/aparelhos/' + editando.id + '/status', { method: 'PUT', body: { status: statusEl.value } });
+    } else {
+      await api('/api/pmoc/aparelhos', { method: 'POST', body });
+    }
+    document.getElementById('modal-pmoc-aparelho').classList.remove('show');
+    await renderPmocLocalDetalhe();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ---- responsáveis técnicos ----
+async function renderPmocResponsaveis() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <h1>Responsáveis técnicos</h1>
+      <button class="btn btn-primary btn-sm" onclick="abrirModalPmocResponsavel()">+ Novo responsável</button>
+    </div>
+    <div id="pmoc-responsaveis-lista" style="margin-top:12px;"><div class="empty">Carregando...</div></div>`;
+  const { responsaveis } = await api('/api/pmoc/responsaveis-tecnicos');
+  window._pmocResponsaveisCache = responsaveis;
+  const alvo = document.getElementById('pmoc-responsaveis-lista');
+  alvo.innerHTML = responsaveis.length ? responsaveis.map((r) => `
+    <div class="panel" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <strong>${esc(r.nome)}</strong>
+          ${r.registro_profissional ? `<span class="tag" style="margin-left:6px;">${esc(r.registro_profissional)}</span>` : ''}
+          <div style="font-size:12.5px; color:var(--ink-soft);">${[r.formacao, r.telefone, r.email].filter(Boolean).map(esc).join(' · ')}</div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn-outline-sm" onclick="abrirModalPmocResponsavel(window._pmocResponsaveisCache.find((x)=>x.id===${r.id}))">✏️ Editar</button>
+          <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocResponsavel(${r.id})">🗑️</button>
+        </div>
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhum responsável técnico cadastrado ainda.</div>';
+}
+function abrirModalPmocResponsavel(responsavel) {
+  window._pmocResponsavelEditando = responsavel || null;
+  window._pmocResponsavelAssinatura = (responsavel && responsavel.assinatura_img) || null;
+  let modal = document.getElementById('modal-pmoc-responsavel');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-responsavel';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) document.getElementById('modal-pmoc-responsavel').classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  const r = responsavel || {};
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:460px; max-height:88vh; overflow:auto;">
+      <h3>${responsavel ? 'Editar responsável técnico' : 'Novo responsável técnico'}</h3>
+      <div class="field"><label>Nome *</label><input id="pmoc-rt-nome" value="${esc(r.nome || '')}"></div>
+      <div class="field"><label>Formação</label><input id="pmoc-rt-formacao" value="${esc(r.formacao || '')}" placeholder="Ex: Técnico em Refrigeração"></div>
+      <div class="field"><label>Registro profissional (CREA/CFT)</label><input id="pmoc-rt-registro" value="${esc(r.registro_profissional || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Telefone</label><input id="pmoc-rt-telefone" value="${esc(r.telefone || '')}"></div>
+        <div class="field" style="flex:1;"><label>E-mail</label><input id="pmoc-rt-email" type="email" value="${esc(r.email || '')}"></div>
+      </div>
+      <div class="field"><label>Assinatura digitalizada</label>
+        <input id="pmoc-rt-assinatura-arquivo" type="file" accept="image/*" onchange="carregarAssinaturaPmocResponsavel(this)">
+        <div id="pmoc-rt-assinatura-preview" style="margin-top:8px;">${window._pmocResponsavelAssinatura ? `<img src="${window._pmocResponsavelAssinatura}" style="max-height:60px; border:1px solid var(--line); border-radius:6px; background:#fff; padding:4px;">` : ''}</div>
+      </div>
+      <div id="pmoc-rt-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-responsavel').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocResponsavel()">Salvar</button>
+      </div>
+    </div>`;
+}
+function carregarAssinaturaPmocResponsavel(input) {
+  const arquivo = input.files && input.files[0];
+  if (!arquivo) return;
+  const leitor = new FileReader();
+  leitor.onload = () => {
+    window._pmocResponsavelAssinatura = leitor.result;
+    document.getElementById('pmoc-rt-assinatura-preview').innerHTML = `<img src="${leitor.result}" style="max-height:60px; border:1px solid var(--line); border-radius:6px; background:#fff; padding:4px;">`;
+  };
+  leitor.readAsDataURL(arquivo);
+}
+async function salvarPmocResponsavel() {
+  const erroEl = document.getElementById('pmoc-rt-erro');
+  erroEl.classList.add('hidden');
+  const body = {
+    nome: document.getElementById('pmoc-rt-nome').value.trim(),
+    formacao: document.getElementById('pmoc-rt-formacao').value,
+    registro_profissional: document.getElementById('pmoc-rt-registro').value,
+    telefone: document.getElementById('pmoc-rt-telefone').value,
+    email: document.getElementById('pmoc-rt-email').value,
+    assinatura_img: window._pmocResponsavelAssinatura,
+  };
+  try {
+    const editando = window._pmocResponsavelEditando;
+    if (editando) await api('/api/pmoc/responsaveis-tecnicos/' + editando.id, { method: 'PUT', body });
+    else await api('/api/pmoc/responsaveis-tecnicos', { method: 'POST', body });
+    document.getElementById('modal-pmoc-responsavel').classList.remove('show');
+    await renderPmocResponsaveis();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function excluirPmocResponsavel(id) {
+  const ok = await mostrarConfirmacao('Excluir este responsável técnico? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/pmoc/responsaveis-tecnicos/' + id, { method: 'DELETE' });
+    await renderPmocResponsaveis();
+  } catch (e) { alert(e.message); }
+}
+
 // ===== Início (Home) — perfil "Refrigeração e Climatização" =====
 // pedido do usuário (referência: app concorrente iClima): painel de controle no topo do menu —
 // números do PRÓPRIO usuário (hoje/semana/ocupação do mês, reaproveita a Agenda já construída) +
@@ -5286,6 +5794,9 @@ async function ir(pagina) {
     if (pagina === 'orcamentos-refrigeracao-nova') return renderOrcamentoRefrigeracaoNova();
     if (pagina === 'orcamentos-refrigeracao-detalhe') return renderOrcamentoRefrigeracaoDetalhe();
     if (pagina === 'agenda-refrigeracao-lista') return renderAgendaRefrigeracaoLista();
+    if (pagina === 'pmoc-locais') return renderPmocLocais();
+    if (pagina === 'pmoc-local-detalhe') return renderPmocLocalDetalhe();
+    if (pagina === 'pmoc-responsaveis') return renderPmocResponsaveis();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();

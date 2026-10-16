@@ -199,3 +199,29 @@ test('"Ferramentas" (hub de widgets) só aparece quando a empresa é do perfil r
   assert.ok(ferramentas);
   assert.equal(ferramentas.page, 'ferramentas-hub');
 });
+
+// pedido do usuário: pacote "Climatização / PMOC" — ÚNICO item do perfil Refrigeração que
+// combina os dois gates no mesmo node (`perfil: 'refrigeracao'` + `modulo: 'pmoc'`, ver
+// os-refrigeracao-pmoc.e2e.test.js em server.js): só aparece pra empresa que É do perfil
+// Refrigeração E tem o módulo `pmoc` contratado — qualquer um dos dois faltando, o item some.
+test('"PMOC" só aparece quando a empresa é do perfil refrigeração E tem o módulo `pmoc` ativo — um sem o outro não basta', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  // perfil certo, sem o módulo `pmoc` contratado: não aparece.
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc'));
+  // módulo `pmoc` contratado, mas empresa de outro perfil: também não aparece.
+  ctx.USER.modulos_ativos = ['pmoc'];
+  ctx.window._empresa = { perfil: 'autonomo' };
+  assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc'));
+  // os dois juntos: aparece, com os dois submenus da Fase 1 (Locais / Responsáveis técnicos).
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  const pmoc = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(pmoc);
+  const paginasFilhas = pmoc.children.map((c) => c.page);
+  assert.ok(paginasFilhas.includes('pmoc-locais'));
+  assert.ok(paginasFilhas.includes('pmoc-responsaveis'));
+  // vale pro papel "suporte" também (técnico), não só administrador.
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['pmoc'] };
+  assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc'));
+});
