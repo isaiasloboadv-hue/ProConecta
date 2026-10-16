@@ -362,6 +362,17 @@ function sair() {
 }
 
 async function tentarSessaoExistente() {
+  // pedido do usuário (pacote "Climatização / PMOC", Fase 5, item 6): "Sem login: página pública
+  // mínima com a data da última manutenção e o nome da empresa" — diferente do QR de equipamento
+  // núcleo (que sempre exige login), esse aqui precisa funcionar SEM sessão nenhuma, então é
+  // tratado antes até de decidir se mostra a tela de login. Com sessão já aberta, o parâmetro
+  // continua na URL e é tratado dentro de entrarNoApp() (mesmo padrão do `?qr=` ali).
+  const pmocQrToken = new URLSearchParams(window.location.search).get('pmoc_qr');
+  if (pmocQrToken && !TOKEN) {
+    try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+    mostrarPaginaPublicaPmocQr(pmocQrToken);
+    return;
+  }
   // sem token salvo, nem vale a pena esperar: mostra o login na hora, em vez de deixar a tela
   // de "carregando..." parada à toa.
   if (!TOKEN) { mostrarTelaLogin(); return; }
@@ -373,6 +384,38 @@ async function tentarSessaoExistente() {
   } catch (e) {
     TOKEN = null; localStorage.removeItem('pc_token');
     mostrarTelaLogin();
+  }
+}
+
+// página pública mínima do QR de um aparelho PMOC, pra quem escaneia sem estar logado (ver
+// tentarSessaoExistente acima) — respeita o toggle configurável da empresa (ver PUT /api/pmoc/config).
+async function mostrarPaginaPublicaPmocQr(token) {
+  const splash = document.getElementById('splashView');
+  if (splash) splash.style.display = 'none';
+  document.getElementById('authView').style.display = 'none';
+  document.getElementById('appView').style.display = 'none';
+  let view = document.getElementById('pmocQrPublicoView');
+  if (!view) {
+    view = document.createElement('div');
+    view.id = 'pmocQrPublicoView';
+    view.style.cssText = 'min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center;';
+    document.body.appendChild(view);
+  }
+  view.innerHTML = '<p>Carregando...</p>';
+  try {
+    const resposta = await fetch('/api/pmoc/qr/' + token + '/publico');
+    const dados = await resposta.json();
+    if (!resposta.ok || !dados.exibir) {
+      view.innerHTML = '<div><h2>Informação não disponível</h2><p style="color:#888;">Esse QR Code não está habilitado para exibição pública.</p></div>';
+      return;
+    }
+    view.innerHTML = `
+      <div>
+        <h2>${esc(dados.empresa_nome || 'Manutenção de climatização')}</h2>
+        <p>${dados.ultima_manutencao ? 'Última manutenção registrada: <b>' + esc(fmtDataIsoAgendaRef(dados.ultima_manutencao)) + '</b>' : 'Nenhuma manutenção registrada ainda.'}</p>
+      </div>`;
+  } catch (e) {
+    view.innerHTML = '<p>Não foi possível carregar essas informações agora.</p>';
   }
 }
 
@@ -581,6 +624,15 @@ function entrarNoApp() {
   if (qrToken) {
     try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
     abrirEquipamentoPorQr(qrToken);
+    return;
+  }
+  // QR de aparelho do pacote PMOC (Fase 5, item 6) — mesma ideia do `?qr=` acima, só que já
+  // logado: quem escaneou SEM login caiu em mostrarPaginaPublicaPmocQr antes de chegar aqui (ver
+  // tentarSessaoExistente), então se o código chegou até este ponto é porque TOKEN já existe.
+  const pmocQrTokenLogado = paramsUrl.get('pmoc_qr');
+  if (pmocQrTokenLogado) {
+    try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+    abrirAparelhoPorQrPmoc(pmocQrTokenLogado);
     return;
   }
   ir(paginaAoAbrir);
@@ -895,6 +947,9 @@ const NAV = {
     { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', page: 'ferramentas-hub' },
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda-refrigeracao-lista' },
     { key: 'pmoc', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
+      // pedido do usuário (item 8 — Painel/dashboard do pacote): visão gerencial, primeiro item
+      // do menu PMOC do administrador (ver GET /api/pmoc/painel no servidor).
+      { key: 'pmoc-painel', label: 'Painel PMOC', page: 'pmoc-painel' },
       { key: 'pmoc-locais', label: 'Locais', page: 'pmoc-locais' },
       { key: 'pmoc-planos', label: 'Planos PMOC', page: 'pmoc-planos' },
       { key: 'pmoc-checklist', label: 'Modelo de Checklist', page: 'pmoc-modelo-checklist' },
@@ -4036,6 +4091,7 @@ async function renderPmocLocalDetalhe() {
       <div><h1>${esc(local.nome)}</h1><span class="tag">${esc(pmocTipoAtividadeLabel(local.tipo_atividade))}</span></div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-primary btn-sm" onclick="baixarDocumentoPmoc(${local.id})">📄 Baixar PMOC</button>
+        <button class="btn-outline-sm" onclick="imprimirEtiquetasPmoc()">🏷️ Imprimir etiquetas</button>
         <button class="btn-outline-sm" onclick="abrirModalPmocLocal(window._pmocLocalAtual)">✏️ Editar</button>
         <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocLocal(${local.id})">🗑️ Excluir</button>
         <button class="btn-outline-sm" onclick="ir('pmoc-locais')">← Voltar</button>
@@ -4604,6 +4660,7 @@ function pmocSecaoPlanoHtml(plano, visitas) {
       ${osRefLinha('Vigência', `${plano.vigencia_meses} meses (até ${fmtDataIsoAgendaRef(plano.data_fim)})`)}
       ${osRefLinha('Itens de manutenção', String(plano.itens.length))}
       ${plano.art_trt_numero ? osRefLinha('ART/TRT', esc(plano.art_trt_numero)) : ''}
+      ${plano.art_trt_validade ? osRefLinha('ART/TRT válida até', fmtDataIsoAgendaRef(plano.art_trt_validade)) : ''}
     </div>
     <h3 style="margin-top:14px;">Visitas geradas</h3>
     <div class="panel">${visitasHtml}</div>`;
@@ -4644,7 +4701,10 @@ async function abrirModalPmocPlano(planoExistente) {
         <div class="field" style="flex:1;"><label>Data de início</label><input id="pmoc-plano-inicio" type="date" value="${esc((planoExistente && planoExistente.data_inicio) || hojeIsoAgendaRef())}"></div>
         <div class="field" style="flex:1;"><label>Vigência (meses)</label><input id="pmoc-plano-vigencia" type="number" min="1" value="${(planoExistente && planoExistente.vigencia_meses) || 12}"></div>
       </div>
-      <div class="field"><label>Número da ART/TRT</label><input id="pmoc-plano-art-trt-numero" value="${esc((planoExistente && planoExistente.art_trt_numero) || '')}"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Número da ART/TRT</label><input id="pmoc-plano-art-trt-numero" value="${esc((planoExistente && planoExistente.art_trt_numero) || '')}"></div>
+        <div class="field" style="flex:1;"><label>Validade da ART/TRT (opcional)</label><input id="pmoc-plano-art-trt-validade" type="date" value="${esc((planoExistente && planoExistente.art_trt_validade) || '')}"></div>
+      </div>
       <div class="field"><label>Anexo da ART/TRT (PDF ou imagem)</label>
         <input id="pmoc-plano-art-trt-arquivo" type="file" accept="application/pdf,image/*" onchange="carregarAnexoArtTrtPmoc(this)">
         <div id="pmoc-plano-art-trt-preview" style="margin-top:4px; font-size:12px; color:var(--ink-soft);">${planoExistente && planoExistente.art_trt_anexo ? 'Já tem um anexo — escolha outro arquivo pra substituir.' : ''}</div>
@@ -4691,6 +4751,7 @@ async function salvarPmocPlano() {
     data_inicio: document.getElementById('pmoc-plano-inicio').value,
     vigencia_meses: document.getElementById('pmoc-plano-vigencia').value,
     art_trt_numero: document.getElementById('pmoc-plano-art-trt-numero').value,
+    art_trt_validade: document.getElementById('pmoc-plano-art-trt-validade').value || null,
     itens,
   };
   if (window._pmocPlanoArtTrtAnexo) body.art_trt_anexo = window._pmocPlanoArtTrtAnexo;
@@ -5411,6 +5472,94 @@ async function baixarRelatorioMensalPmoc() {
   doc.save(`relatorio-mensal-pmoc-${relatorio.cliente.nome.replace(/[^a-zA-Z0-9]+/g, '-')}-${relatorio.mes}.pdf`);
 }
 
+// ===== Pacote "Climatização / PMOC" — Fase 5: Painel/dashboard (item 8 do pedido) =====
+async function renderPmocPainel() {
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="page-head"><h1>Painel PMOC</h1>
+      <button class="btn-outline-sm" onclick="abrirModalConfigPmoc()">⚙️ Configurações de alerta</button>
+    </div>
+    <div id="pmoc-painel-corpo"><div class="empty">Carregando...</div></div>`;
+  const [painel] = await Promise.all([api('/api/pmoc/painel?hoje=' + hojeIsoAgendaRef())]);
+  window._pmocPainelAtual = painel;
+  const alvo = document.getElementById('pmoc-painel-corpo');
+  const maiorMes = Math.max(1, ...painel.percentual_no_prazo.ultimos_6_meses.map((m) => m.percentual || 0));
+  alvo.innerHTML = `
+    <div class="panel" style="display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
+      ${pmocStatBox('% no prazo este mês', painel.percentual_no_prazo.mes_atual == null ? '—' : painel.percentual_no_prazo.mes_atual + '%')}
+      ${pmocStatBox('Não conformidades abertas', painel.nao_conformidades_abertas)}
+      ${pmocStatBox('Preventivas atrasadas', painel.atrasadas_por_cliente.reduce((s, c) => s + c.qtd, 0))}
+    </div>
+    <div class="panel">
+      <h3>% de preventivas no prazo — últimos 6 meses</h3>
+      <div style="display:flex; align-items:flex-end; gap:10px; height:120px; padding-top:10px;">
+        ${painel.percentual_no_prazo.ultimos_6_meses.map((m) => `
+          <div style="flex:1; text-align:center;">
+            <div style="background:var(--blue); border-radius:4px 4px 0 0; height:${m.percentual == null ? 2 : Math.max(4, (m.percentual / maiorMes) * 100)}px;" title="${m.percentual == null ? 'sem visitas' : m.percentual + '%'}"></div>
+            <div style="font-size:11px; color:var(--ink-soft); margin-top:4px;">${pmocMesLabel(m.mes)}</div>
+            <div style="font-size:11px; font-weight:700;">${m.percentual == null ? '—' : m.percentual + '%'}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Preventivas atrasadas por técnico</h3>
+      ${painel.atrasadas_por_tecnico.length ? painel.atrasadas_por_tecnico.map((t) => osRefLinha(esc(t.nome), t.qtd)).join('') : '<div class="empty">Nenhuma atrasada.</div>'}
+    </div>
+    <div class="panel">
+      <h3>Preventivas atrasadas por cliente</h3>
+      ${painel.atrasadas_por_cliente.length ? painel.atrasadas_por_cliente.map((c) => osRefLinha(esc(c.nome), c.qtd)).join('') : '<div class="empty">Nenhuma atrasada.</div>'}
+    </div>
+    <div class="panel">
+      <h3>Aparelhos com mais corretivas (top 10)</h3>
+      ${painel.aparelhos_mais_corretivas.length ? painel.aparelhos_mais_corretivas.map((a) => osRefLinha(`${esc(a.aparelho_tipo)} — ${esc(a.local_nome)}`, a.qtd)).join('') : '<div class="empty">Nenhuma corretiva vinculada a aparelho PMOC ainda.</div>'}
+    </div>
+    <div class="panel">
+      <h3>Clientes com plano vencido ou sem ART/TRT</h3>
+      ${painel.clientes_problema.length ? painel.clientes_problema.map((c) => `
+        <div style="padding:6px 0; border-bottom:1px solid var(--line);">
+          <strong>${esc(c.cliente_nome)}</strong>
+          <div style="font-size:12px; color:var(--ink-soft);">${[c.plano_vencido && 'Plano vencido', c.sem_art && 'ART/TRT ausente ou vencida'].filter(Boolean).join(' · ')}</div>
+        </div>`).join('') : '<div class="empty">Nenhum cliente nessa situação.</div>'}
+    </div>`;
+}
+async function abrirModalConfigPmoc() {
+  const { config } = await api('/api/pmoc/config');
+  let modal = document.getElementById('modal-pmoc-config');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-config';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Configurações de alerta — PMOC</h3>
+      <div class="field"><label>Alertar qualidade do ar sem análise há mais de (meses)</label>
+        <input type="number" min="1" id="pmoc-config-meses-qa" value="${esc(String(config.qualidade_ar_meses_alerta))}"></div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+        <input type="checkbox" id="pmoc-config-qr-publico" ${config.qr_publico_ativo ? 'checked' : ''}>
+        Mostrar página pública ao escanear o QR sem login
+      </label>
+      <div id="pmoc-config-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-config').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarConfigPmoc()">Salvar</button>
+      </div>
+    </div>`;
+}
+async function salvarConfigPmoc() {
+  const erroEl = document.getElementById('pmoc-config-erro');
+  erroEl.classList.add('hidden');
+  const meses = Number(document.getElementById('pmoc-config-meses-qa').value);
+  if (!(meses > 0)) { erroEl.textContent = 'Informe um número de meses válido.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    await api('/api/pmoc/config', { method: 'PUT', body: { qualidade_ar_meses_alerta: meses, qr_publico_ativo: document.getElementById('pmoc-config-qr-publico').checked } });
+    document.getElementById('modal-pmoc-config').classList.remove('show');
+    mostrarToast('Configurações salvas.');
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
 // ===== Pacote "Climatização / PMOC" — Fase 4: portal do cliente final (item 5 do pedido) =====
 // pedido do usuário: cliente loga (papel 'cliente', ligado a um os_refrigeracao_clientes — ver
 // campo-cliente-pmoc no form de usuários) e vê só os próprios locais/ambientes/aparelhos/visitas.
@@ -5533,6 +5682,105 @@ async function baixarRelatorioVisitaPmocPortal(id) {
     const doc = montarDocPmocVisitaPdf(visita, null, logoCliente, logoNexor);
     doc.save(`visita-pmoc-${visita.id}.pdf`);
   } catch (e) { alert(e.message); }
+}
+
+// ===== Pacote "Climatização / PMOC" — Fase 5: tela aberta pelo QR do aparelho (já logado) =====
+// pedido do usuário (item 6): "técnico logado: abre o aparelho com histórico e botão pra executar
+// a preventiva do dia ou abrir corretiva. Cliente logado: abre o histórico e o botão 'abrir
+// chamado'" — ver GET /api/pmoc/aparelhos/por-qr/:token (devolve `modo` conforme o papel) e
+// mostrarPaginaPublicaPmocQr (o caso "sem login", tratado bem antes do login, lá no boot).
+async function abrirAparelhoPorQrPmoc(token) {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="empty">Carregando...</div>';
+  try {
+    const resp = await api('/api/pmoc/aparelhos/por-qr/' + token);
+    if (resp.modo === 'cliente') return renderPmocQrAparelhoCliente(resp);
+    return renderPmocQrAparelhoTecnico(resp);
+  } catch (e) {
+    main.innerHTML = `<div class="empty">${esc(e.message || 'Aparelho não encontrado ou sem permissão pra vê-lo.')}</div>
+      <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
+  }
+}
+function pmocQrHistoricoHtml(historico) {
+  if (!historico.length) return '<div class="empty">Nenhum checklist registrado ainda pra este aparelho.</div>';
+  return historico.map((h) => `
+    <div style="padding:8px 0; border-bottom:1px solid var(--line);">
+      <div style="display:flex; justify-content:space-between; gap:10px;">
+        <strong>${esc(h.item_descricao)}</strong>
+        <span style="font-size:12px; color:var(--ink-soft);">${fmtDataIsoAgendaRef(h.data)}</span>
+      </div>
+      <div style="font-size:12.5px; color:${h.resposta === 'nao_conforme' ? 'var(--red)' : 'var(--ink-soft)'};">${{ conforme: 'Conforme', nao_conforme: 'Não conforme', na: 'N.A.' }[h.resposta] || '—'}${h.observacao ? ' — ' + esc(h.observacao) : ''}</div>
+    </div>`).join('');
+}
+function renderPmocQrAparelhoTecnico(resp) {
+  const { aparelho, ambiente, local, historico, visita_pendente } = resp;
+  window._pmocQrAparelhoAtual = aparelho;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${esc(aparelho.tipo)}${aparelho.marca ? ' — ' + esc(aparelho.marca) : ''}</h1>
+      <p>${esc(local.nome)} — ${esc(ambiente.nome)}${aparelho.codigo_patrimonio ? ' · Código ' + esc(aparelho.codigo_patrimonio) : ''}</p></div>
+    <div class="panel"><div class="form-grid">
+      <div><label>Status</label><div>${pmocStatusBadgeHtml(aparelho.status)}</div></div>
+      <div><label>Modelo</label><div>${esc(aparelho.modelo || '—')}</div></div>
+      <div><label>Capacidade</label><div>${esc(aparelho.capacidade_btu || '—')}</div></div>
+      <div><label>Nº de série</label><div>${esc(aparelho.numero_serie || '—')}</div></div>
+    </div></div>
+    <div class="panel" style="display:flex; gap:10px; flex-wrap:wrap;">
+      ${visita_pendente ? `<button class="btn btn-primary btn-sm" onclick="abrirPmocVisitaExecucao(${visita_pendente.id})">📋 Ir para a preventiva (${fmtDataIsoAgendaRef(visita_pendente.data)})</button>` : ''}
+      <button class="btn-outline-sm" onclick="abrirModalCorretivaQrPmoc(${aparelho.id}, '${esc(`${aparelho.tipo} — ${ambiente.nome}`)}')">🔧 Abrir corretiva</button>
+    </div>
+    <div class="panel"><div class="panel-head">Histórico de checklists deste aparelho</div>${pmocQrHistoricoHtml(historico)}</div>
+    <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
+}
+function renderPmocQrAparelhoCliente(resp) {
+  const { aparelho, ambiente, local, historico } = resp;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="page-head"><h1>${esc(aparelho.tipo)}${aparelho.marca ? ' — ' + esc(aparelho.marca) : ''}</h1>
+      <p>${esc(local.nome)} — ${esc(ambiente.nome)}</p></div>
+    <div class="panel">${pmocStatusBadgeHtml(aparelho.status)}</div>
+    <div class="panel">
+      <button class="btn btn-primary btn-sm" onclick="abrirModalChamadoPmocPortal(${aparelho.id}, '${esc(`${aparelho.tipo} — ${ambiente.nome}`)}')">Abrir chamado</button>
+    </div>
+    <div class="panel"><div class="panel-head">Histórico de manutenções</div>${pmocQrHistoricoHtml(historico)}</div>
+    <button class="btn-outline-sm" onclick="location.reload()">‹ Ir para o painel</button>`;
+}
+// "abrir corretiva" a partir do QR, do lado do técnico/administrador (ver POST
+// /api/pmoc/aparelhos/:id/abrir-corretiva) — mesmo modal de ação genérico usado em outras partes
+// deste perfil (abrirModalOsRefAcao).
+function abrirModalCorretivaQrPmoc(aparelhoId, aparelhoLabel) {
+  window._pmocQrCorretivaAparelhoId = aparelhoId;
+  let modal = document.getElementById('modal-pmoc-qr-corretiva');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-qr-corretiva';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Abrir corretiva</h3>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">${esc(aparelhoLabel)}</p>
+      <div class="field"><label>Descreva o problema</label><textarea id="pmoc-qr-corretiva-descricao" style="min-height:70px;"></textarea></div>
+      <div id="pmoc-qr-corretiva-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-qr-corretiva').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmarCorretivaQrPmoc()">Enviar</button>
+      </div>
+    </div>`;
+}
+async function confirmarCorretivaQrPmoc() {
+  const erroEl = document.getElementById('pmoc-qr-corretiva-erro');
+  erroEl.classList.add('hidden');
+  const descricao = document.getElementById('pmoc-qr-corretiva-descricao').value.trim();
+  if (!descricao) { erroEl.textContent = 'Descreva o problema.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    await api(`/api/pmoc/aparelhos/${window._pmocQrCorretivaAparelhoId}/abrir-corretiva`, { method: 'POST', body: { descricao } });
+    document.getElementById('modal-pmoc-qr-corretiva').classList.remove('show');
+    mostrarToast('O.S. corretiva aberta.');
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
 // ===== Início (Home) — perfil "Refrigeração e Climatização" =====
@@ -7064,6 +7312,7 @@ async function ir(pagina) {
     if (pagina === 'pmoc-visitas-pendentes') return renderPmocVisitasPendentes();
     if (pagina === 'pmoc-visita-execucao') return renderPmocVisitaExecucao();
     if (pagina === 'pmoc-relatorio-mensal') return renderPmocRelatorioMensal();
+    if (pagina === 'pmoc-painel') return renderPmocPainel();
     if (pagina === 'pmoc-portal-locais') return renderPmocPortalLocais();
     if (pagina === 'pmoc-portal-local-detalhe') return renderPmocPortalLocalDetalhe();
     if (pagina === 'pmoc-portal-visitas') return renderPmocPortalVisitas();
@@ -23978,6 +24227,37 @@ async function imprimirEtiquetasFilial(filialId) {
     if (eq.codigo_interno) doc.text(String(eq.codigo_interno), x + cel / 2, y + 136, { align: 'center' });
   });
   doc.save(`etiquetas-${filial.nome.replace(/\s+/g, '-')}.pdf`);
+}
+
+// pedido do usuário (pacote "Climatização / PMOC", Fase 5, item 6): "Gerar etiqueta imprimível
+// (PDF com várias etiquetas por folha) com QR, nome do cliente, ambiente e código do aparelho" —
+// mesmo padrão/layout de imprimirEtiquetasFilial acima, só que varrendo os ambientes/aparelhos já
+// carregados na tela de detalhe do local (window._pmocAmbientesAtual), sem precisar buscar de novo.
+async function imprimirEtiquetasPmoc() {
+  const local = window._pmocLocalAtual;
+  const ambientes = window._pmocAmbientesAtual || [];
+  const itens = ambientes.flatMap((amb) => (amb.aparelhos || []).filter((ap) => ap.qr_token).map((ap) => ({ ap, ambienteNome: amb.nome })));
+  if (!itens.length) return alert('Nenhum aparelho com QR neste local ainda.');
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const porLinha = 3, porColuna = 4, margem = 36;
+  const pagW = doc.internal.pageSize.getWidth();
+  const cel = (pagW - margem * 2) / porLinha;
+  const alturaCel = 170;
+  itens.forEach(({ ap, ambienteNome }, i) => {
+    const porPagina = porLinha * porColuna;
+    if (i > 0 && i % porPagina === 0) doc.addPage();
+    const pos = i % porPagina;
+    const col = pos % porLinha, lin = Math.floor(pos / porLinha);
+    const x = margem + col * cel, y = margem + lin * alturaCel;
+    const dataUrl = gerarQrDataUrl(`${location.origin}${location.pathname}?pmoc_qr=${ap.qr_token}`, 300);
+    if (dataUrl) doc.addImage(dataUrl, 'PNG', x + cel / 2 - 50, y, 100, 100);
+    doc.setFontSize(9);
+    doc.text(limparPdf(local.cliente_nome || '—'), x + cel / 2, y + 112, { align: 'center' });
+    doc.text(limparPdf(ambienteNome), x + cel / 2, y + 124, { align: 'center' });
+    doc.text(limparPdf(`${ap.tipo}${ap.codigo_patrimonio ? ' — ' + ap.codigo_patrimonio : ''}`), x + cel / 2, y + 136, { align: 'center' });
+  });
+  doc.save(`etiquetas-pmoc-${(local.nome || 'local').replace(/\s+/g, '-')}.pdf`);
 }
 
 // página do equipamento aberta pelo QR Code (ver GET /api/equipamentos/por-qr/:token) — exige

@@ -439,6 +439,11 @@ function seed() {
     // observações. Pedido do usuário: "não codificar regras legais fixas" — não compara contra
     // nenhum valor de referência fixo no código (RE nº 9/2003 da Anvisa), só registra.
     os_refrigeracao_pmoc_qualidade_ar: [],
+    // Fase 5 (QR, alertas e painel) — config do pacote por empresa, hoje só o limiar (em meses)
+    // pra alertar qualidade do ar desatualizada (item 7 do pedido, "configurável"); 1 linha por
+    // empresa, criada sob demanda (ver garantirConfigPmoc em server.js, mesmo padrão lazy-seed do
+    // Modelo de Checklist).
+    os_refrigeracao_pmoc_config: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -448,7 +453,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, os_refrigeracao_pmoc_locais: 1, os_refrigeracao_pmoc_ambientes: 1, os_refrigeracao_pmoc_aparelhos: 1, os_refrigeracao_pmoc_responsaveis_tecnicos: 1, os_refrigeracao_pmoc_modelo_checklist: 1, os_refrigeracao_pmoc_planos: 1, os_refrigeracao_pmoc_qualidade_ar: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, os_refrigeracao_pmoc_locais: 1, os_refrigeracao_pmoc_ambientes: 1, os_refrigeracao_pmoc_aparelhos: 1, os_refrigeracao_pmoc_responsaveis_tecnicos: 1, os_refrigeracao_pmoc_modelo_checklist: 1, os_refrigeracao_pmoc_planos: 1, os_refrigeracao_pmoc_qualidade_ar: 1, os_refrigeracao_pmoc_config: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -1277,6 +1282,11 @@ function migrar(data) {
   if (!data._seq.os_refrigeracao_pmoc_planos) data._seq.os_refrigeracao_pmoc_planos = 1;
   if (!Array.isArray(data.os_refrigeracao_pmoc_qualidade_ar)) data.os_refrigeracao_pmoc_qualidade_ar = [];
   if (!data._seq.os_refrigeracao_pmoc_qualidade_ar) data._seq.os_refrigeracao_pmoc_qualidade_ar = 1;
+  // Fase 5 (QR, alertas e painel). Campos novos de alerta (dedup de e-mail, validade da ART/TRT)
+  // ficam ausentes em registros antigos de propósito — tratados como "nunca avisado"/"sem
+  // validade definida" em qualquer leitura (`|| null`), então não precisam de backfill aqui.
+  if (!Array.isArray(data.os_refrigeracao_pmoc_config)) data.os_refrigeracao_pmoc_config = [];
+  if (!data._seq.os_refrigeracao_pmoc_config) data._seq.os_refrigeracao_pmoc_config = 1;
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }

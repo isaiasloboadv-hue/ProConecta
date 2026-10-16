@@ -244,6 +244,19 @@ test('"Preventivas pendentes" (fila de designação de técnico) só existe no m
   assert.ok(!pmocSuporte.children.map((c) => c.page).includes('pmoc-visitas-pendentes'));
 });
 
+// pedido do usuário: Fase 5, item 8 — Painel/dashboard do pacote, mesma regra do item acima
+// (GET /api/pmoc/painel exige papel administrador no server).
+test('"Painel PMOC" (dashboard) só existe no menu do administrador', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['pmoc'] };
+  const pmocAdmin = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(pmocAdmin.children.map((c) => c.page).includes('pmoc-painel'));
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['pmoc'] };
+  const pmocSuporte = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(!pmocSuporte.children.map((c) => c.page).includes('pmoc-painel'));
+});
+
 // pedido do usuário: Fase 4, item 5 — portal do cliente final do pacote PMOC. Igual ao item
 // "pmoc" do administrador/suporte, combina os dois gates (`perfil: 'refrigeracao'` + `modulo:
 // 'pmoc'`), só que no menu do papel "cliente" (ver GET /api/pmoc/portal/* em server.js).

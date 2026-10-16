@@ -195,4 +195,15 @@ async function enviarRelatorio({ emails, pdfBase64, nomeArquivo, nomeEmpresa }) 
   return { ...resultado, destinatarios: emails };
 }
 
-module.exports = { enviarConvite, enviarRelatorio };
+// pedido do usuário (pacote "Climatização / PMOC", Fase 5, item 7): "alerta: sininho + e-mail" —
+// genérico porque os 4 tipos de alerta (preventiva atrasada, plano perto do vencimento, ART/TRT
+// vencida/ausente, qualidade do ar desatualizada) só diferem no texto, nunca no envio em si.
+async function enviarAlerta({ emails, assunto, corpoHtml, nomeEmpresa }) {
+  const resultado = await enviar({
+    to: emails, assunto, corpoHtml, nomeEmpresa,
+    logSimulado: () => console.log(`[email] Alerta "${assunto}" seria enviado para: ${emails.join(', ')}\n`),
+  });
+  return { ...resultado, destinatarios: emails };
+}
+
+module.exports = { enviarConvite, enviarRelatorio, enviarAlerta };

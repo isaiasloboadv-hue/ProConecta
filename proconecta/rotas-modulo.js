@@ -25,7 +25,11 @@
 // propósito) NÃO entram aqui — continuam exigindo login normal, caem em "núcleo" por omissão
 // (não há módulo de plano pra isso: o acesso é por `perfil` da empresa, checado nos próprios
 // handlers em server.js — ver PAPEIS_OS_REFRIGERACAO/empresaPerfilRefrigeracao).
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro'];
+// pedido do usuário (pacote "Climatização / PMOC", Fase 5, item 6): "Sem login: página pública
+// mínima com a data da última manutenção e o nome da empresa". Só esse prefixo específico
+// (/api/pmoc/qr/...) é público — o resto de /api/pmoc continua exigindo login + módulo 'pmoc'
+// normalmente (ver PREFIXO_MODULO abaixo e moduloDaRota).
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],
