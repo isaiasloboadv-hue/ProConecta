@@ -5406,6 +5406,71 @@ rota('DELETE', /^\/api\/os-refrigeracao-agendamentos\/(\d+)$/, async (req, res, 
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- Início (Home) — perfil "Refrigeração e Climatização" ----------
+// pedido do usuário (referência: app concorrente iClima): painel de controle no topo do menu, com
+// os números do PRÓPRIO usuário logado — hoje/semana/ocupação do mês vêm da Agenda já construída
+// (mesmo default "a própria agenda" que ela já usa, ver resolverTecnicoIdAgendaRef) — e
+// solicitações pendentes da empresa inteira (orçamentos ainda em rascunho, aguardando ação; não é
+// por técnico porque Orçamento não pertence a um técnico específico, qualquer um da empresa edita).
+// `hoje` vem do cliente (não do relógio do servidor) pelo mesmo motivo de `data`/`mes` nas rotas de
+// Agenda acima: "hoje" é o dia local de quem está vendo a tela, não o fuso do servidor.
+function inicioSemanaIsoAgendaRef(dataIso) {
+  const d = new Date(dataIso + 'T12:00:00');
+  d.setDate(d.getDate() - d.getDay());
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function somarDiasIsoAgendaRefServer(dataIso, dias) {
+  const d = new Date(dataIso + 'T12:00:00');
+  d.setDate(d.getDate() + dias);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// GET /api/os-refrigeracao-home/resumo?hoje=YYYY-MM-DD
+rota('GET', /^\/api\/os-refrigeracao-home\/resumo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
+  const hojeIso = query.hoje;
+  const tecnicoId = user.id;
+
+  const agendamentosHoje = data.os_refrigeracao_agendamentos
+    .filter((a) => a.tecnico_id === tecnicoId && a.empresa_id === user.empresa_id && a.data === hojeIso && a.status !== 'cancelado')
+    .sort((a, b) => a.hora.localeCompare(b.hora));
+  const proximo = agendamentosHoje[0] ? { hora: agendamentosHoje[0].hora, cliente_nome: agendamentosHoje[0].cliente_nome } : null;
+
+  const inicioSemana = inicioSemanaIsoAgendaRef(hojeIso);
+  const fimSemana = somarDiasIsoAgendaRefServer(inicioSemana, 6);
+  const agendamentosSemana = data.os_refrigeracao_agendamentos.filter((a) => a.tecnico_id === tecnicoId && a.empresa_id === user.empresa_id && a.data >= inicioSemana && a.data <= fimSemana && a.status !== 'cancelado');
+  const valorSemana = agendamentosSemana.reduce((s, a) => s + (Number(a.valor_servico) || 0), 0);
+
+  const solicitacoes = data.os_refrigeracao_orcamentos.filter((o) => o.empresa_id === user.empresa_id && o.status === 'rascunho').length;
+
+  const config = data.os_refrigeracao_agenda_config.find((c) => c.tecnico_id === tecnicoId && c.empresa_id === user.empresa_id) || null;
+  let ocupacao = 0;
+  if (config) {
+    const [ano, mes] = hojeIso.split('-').map(Number);
+    const diasNoMes = new Date(ano, mes, 0).getDate();
+    let totalMes = 0, agendadosMes = 0;
+    for (let dia = 1; dia <= diasNoMes; dia++) {
+      const dataIso = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+      const total = totalOferecivelDoDiaAgendaRef(config, dataIso);
+      if (total > 0) {
+        totalMes += total;
+        agendadosMes += data.os_refrigeracao_agendamentos.filter((a) => a.tecnico_id === tecnicoId && a.empresa_id === user.empresa_id && a.data === dataIso && a.status !== 'cancelado').length;
+      }
+    }
+    ocupacao = totalMes > 0 ? Math.round((agendadosMes / totalMes) * 100) : 0;
+  }
+
+  enviarJSON(res, 200, {
+    hoje: { total: agendamentosHoje.length, proximo },
+    semana: { total: agendamentosSemana.length, valor_total: valorSemana },
+    solicitacoes: { total: solicitacoes },
+    ocupacao: { percentual: ocupacao },
+  });
+});
+
 // GET /api/clientes/:id/historico — Histórico Unificado (CRM nativo, passo 4): agrega tudo que já
 // existe espalhado (agenda, relatórios, chamados, equipamentos, oportunidades, propostas) numa
 // timeline só, na própria tela de Clientes. relatorios_manutencao não tem cliente_id nenhum — só

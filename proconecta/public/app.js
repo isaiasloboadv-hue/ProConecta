@@ -707,6 +707,7 @@ function sincronizarApp() {
 // escolhe se libera tudo ou só alguns desses itens.
 const MENUS_LABEL_POR_PAPEL = {
   suporte: {
+    'home-refrigeracao': 'Início',
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
@@ -731,6 +732,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'atividades-diarias': 'Registro de Atividades',
   },
   administrador: {
+    'home-refrigeracao': 'Início',
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
@@ -775,6 +777,11 @@ const MENUS_LABEL_POR_PAPEL = {
 
 const NAV = {
   suporte: [
+    // pedido do usuário (referência: app concorrente iClima): painel "Início" no topo do menu,
+    // com os números do próprio usuário (hoje/semana/ocupação do mês, reaproveitando a Agenda já
+    // construída) + solicitações pendentes da empresa (orçamentos em rascunho) + atalhos rápidos
+    // pros outros menus do perfil — ver renderHomeRefrigeracao.
+    { key: 'home-refrigeracao', perfil: 'refrigeracao', label: 'Início', page: 'home-refrigeracao' },
     // pedido do usuário: perfil "Refrigeração e Climatização" (ver PERFIS_DISPONIVEIS em db.js) —
     // menu construído do zero, específico pra esse perfil, sem reaproveitar nenhuma tela/dado já
     // existente no sistema (Agenda/Relatório/Equipamentos/Biblioteca etc). Guia de referência
@@ -867,6 +874,7 @@ const NAV = {
     // dashboard de KPIs é recurso de equipe maior ("quando a equipe aumenta, precisa de
     // dashboards" — pedido do usuário), não do O.S. básico.
     { key: 'kpis', modulo: 'equipe_avancado', label: 'Home', page: 'kpis-dashboard' },
+    { key: 'home-refrigeracao', perfil: 'refrigeracao', label: 'Início', page: 'home-refrigeracao' },
     { key: 'guia-diagnostico-rapido', perfil: 'refrigeracao', label: 'Guia de Diagnóstico Rápido', page: 'guia-diagnostico-rapido' },
     { key: 'os-refrigeracao', perfil: 'refrigeracao', label: 'Ordens de Serviço', page: 'os-refrigeracao-lista' },
     { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
@@ -1114,6 +1122,7 @@ const ICONE_MENU = {
   'mensagens-canal': '🗨️',
   'atividades-diarias': '📋',
   'guia-diagnostico-rapido': '🧊',
+  'home-refrigeracao': '🏠',
   'os-refrigeracao': '🧾',
   'orcamentos-refrigeracao': '📋',
   'agenda-refrigeracao': '📅',
@@ -3746,6 +3755,61 @@ async function salvarNovoAgendamentoRef() {
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
+// ===== Início (Home) — perfil "Refrigeração e Climatização" =====
+// pedido do usuário (referência: app concorrente iClima): painel de controle no topo do menu —
+// números do PRÓPRIO usuário (hoje/semana/ocupação do mês, reaproveita a Agenda já construída) +
+// solicitações pendentes da empresa (orçamentos em rascunho) + atalhos rápidos pros menus já
+// existentes do perfil (não replica o "Assistente IA"/Lojinha/Comunidade do app de referência —
+// são recursos do funil comercial deles, sem equivalente aqui).
+async function renderHomeRefrigeracao() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Início é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head"><h1>Olá, ${esc(String(USER.nome || '').trim().split(' ')[0] || '')}</h1><p>Painel de controle</p></div>
+    <div id="home-ref-widgets" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      ${homeRefWidgetCarregando('📅', 'Hoje')}
+      ${homeRefWidgetCarregando('💲', 'Semana')}
+      ${homeRefWidgetCarregando('📥', 'Solicitações')}
+      ${homeRefWidgetCarregando('📈', 'Ocupação')}
+    </div>
+    <h3 style="margin:22px 0 10px;">Atalhos Rápidos</h3>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      ${homeRefAtalho('🧾', 'Ordens de Serviço', 'os-refrigeracao-lista')}
+      ${homeRefAtalho('📋', 'Orçamentos', 'orcamentos-refrigeracao-lista')}
+      ${homeRefAtalho('📅', 'Agenda', 'agenda-refrigeracao-lista')}
+      ${homeRefAtalho('🧠', 'Guia de Diagnóstico', 'guia-diagnostico-rapido')}
+    </div>`;
+  await carregarWidgetsHomeRefrigeracao();
+}
+function homeRefWidgetCarregando(icone, titulo) {
+  return `<div class="panel"><div style="font-size:13px; color:var(--ink-soft); display:flex; align-items:center; gap:6px;"><span>${icone}</span>${esc(titulo)}</div><div style="font-size:26px; font-weight:800; margin-top:6px;">…</div></div>`;
+}
+function homeRefWidgetCard(icone, titulo, valor, subtitulo, fundo) {
+  return `<div class="panel" style="background:${fundo};">
+    <div style="font-size:13px; color:var(--ink-soft); display:flex; align-items:center; gap:6px;"><span>${icone}</span>${esc(titulo)}</div>
+    <div style="font-size:26px; font-weight:800; margin-top:6px;">${esc(valor)}</div>
+    <div style="font-size:12px; color:var(--ink-soft); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(subtitulo)}</div>
+  </div>`;
+}
+function homeRefAtalho(icone, label, pagina) {
+  return `<div class="panel" style="cursor:pointer; text-align:center; padding:18px 10px;" onclick="ir('${pagina}')">
+    <div style="font-size:24px;">${icone}</div>
+    <div style="margin-top:6px; font-weight:600; font-size:13px;">${esc(label)}</div>
+  </div>`;
+}
+async function carregarWidgetsHomeRefrigeracao() {
+  const alvo = document.getElementById('home-ref-widgets');
+  if (!alvo) return;
+  try {
+    const resumo = await api('/api/os-refrigeracao-home/resumo?hoje=' + hojeIsoAgendaRef());
+    alvo.innerHTML =
+      homeRefWidgetCard('📅', 'Hoje', String(resumo.hoje.total), resumo.hoje.proximo ? `Próximo: ${resumo.hoje.proximo.hora} · ${resumo.hoje.proximo.cliente_nome}` : 'Nenhum agendamento hoje', 'var(--blue-pale)') +
+      homeRefWidgetCard('💲', 'Semana', String(resumo.semana.total), fmtMoeda(resumo.semana.valor_total), 'var(--amber-pale,#FEF3C7)') +
+      homeRefWidgetCard('📥', 'Solicitações', String(resumo.solicitacoes.total), resumo.solicitacoes.total ? `${resumo.solicitacoes.total} orçamento(s) em rascunho` : 'Tudo em dia', 'var(--green-pale,#DEF7EC)') +
+      homeRefWidgetCard('📈', 'Ocupação', resumo.ocupacao.percentual + '%', 'do mês', 'var(--gray-50,#F4F6FA)');
+  } catch (e) { alvo.innerHTML = `<div class="empty" style="grid-column:1/-1;">${esc(e.message)}</div>`; }
+}
+
 // ===== Gerador de Etiquetas (Ferramentas, perfil "Refrigeração e Climatização") =====
 // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — etiqueta pra colar
 // no equipamento depois do serviço (técnico, equipamento, data, QR Code opcional abrindo o
@@ -4304,6 +4368,7 @@ async function ir(pagina) {
     if (pagina === 'avisos') return renderAvisos();
     if (pagina === 'mensagens-canal') return renderMensagensCanal();
     if (pagina === 'atividades-diarias') return renderAtividadesDiarias();
+    if (pagina === 'home-refrigeracao') return renderHomeRefrigeracao();
     if (pagina === 'guia-diagnostico-rapido') return renderGuiaDiagnosticoRapido();
     if (pagina === 'guia-diagnostico-marca') return renderGuiaDiagnosticoMarca();
     if (pagina === 'guia-diagnostico-pulo-do-gato') return renderGuiaDiagnosticoPuloDoGato();
