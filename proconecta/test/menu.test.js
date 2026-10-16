@@ -214,14 +214,32 @@ test('"PMOC" só aparece quando a empresa é do perfil refrigeração E tem o m�
   ctx.USER.modulos_ativos = ['pmoc'];
   ctx.window._empresa = { perfil: 'autonomo' };
   assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc'));
-  // os dois juntos: aparece, com os dois submenus da Fase 1 (Locais / Responsáveis técnicos).
+  // os dois juntos: aparece, com os submenus das Fases 1 e 2 (Locais, Planos, Modelo de
+  // Checklist, Responsáveis técnicos) — "Preventivas pendentes" é só do administrador (ver teste
+  // dedicado abaixo).
   ctx.window._empresa = { perfil: 'refrigeracao' };
   const pmoc = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
   assert.ok(pmoc);
   const paginasFilhas = pmoc.children.map((c) => c.page);
   assert.ok(paginasFilhas.includes('pmoc-locais'));
+  assert.ok(paginasFilhas.includes('pmoc-planos'));
+  assert.ok(paginasFilhas.includes('pmoc-modelo-checklist'));
   assert.ok(paginasFilhas.includes('pmoc-responsaveis'));
   // vale pro papel "suporte" também (técnico), não só administrador.
   ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['pmoc'] };
   assert.ok(Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('pmoc'));
+});
+
+// pedido do usuário: "o administrador designa o técnico" — a fila de visitas PMOC sem técnico
+// (ver os-refrigeracao-pmoc-planos.e2e.test.js, PUT .../designar-tecnico exige papel
+// administrador no server) só entra no menu do administrador, nunca no do técnico (suporte).
+test('"Preventivas pendentes" (fila de designação de técnico) só existe no menu do administrador', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['pmoc'] };
+  const pmocAdmin = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(pmocAdmin.children.map((c) => c.page).includes('pmoc-visitas-pendentes'));
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['pmoc'] };
+  const pmocSuporte = Array.from(ctx.navDoUsuario.call(ctx)).find((n) => n.key === 'pmoc');
+  assert.ok(!pmocSuporte.children.map((c) => c.page).includes('pmoc-visitas-pendentes'));
 });

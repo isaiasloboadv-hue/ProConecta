@@ -5730,6 +5730,360 @@ rota('DELETE', /^\/api\/pmoc\/responsaveis-tecnicos\/(\d+)$/, async (req, res, m
   enviarJSON(res, 200, { ok: true });
 });
 
+// ---------- Pacote "Climatização / PMOC" — Fase 2: Plano e preventivas ----------
+// pedido do usuário: Modelo de Checklist (editável por empresa) + Plano PMOC (por local, status
+// rascunho/ativo/vencido) + geração automática das visitas de preventiva, sempre os PRÓXIMOS 3
+// MESES, "mantida em rotina diária". O projeto não tem infraestrutura de cron (processo Node
+// único, sem fila de jobs) — a geração roda de forma preguiçosa e idempotente (confere se o mês já
+// foi gerado antes de criar) a cada consulta que naturalmente passa por ali (listar planos, ver o
+// detalhe de um, ou abrir a lista de visitas pendentes de técnico), mesmo padrão já usado pra
+// expirar trial (ver STATUS_EMPRESA_VALIDOS/checagem central) — sem precisar de um processo
+// separado rodando em segundo plano. As rotas que precisam de "hoje" recebem via query string
+// (?hoje=AAAA-MM-DD, nunca `new Date()` direto no servidor) — mesmo padrão de
+// GET /api/os-refrigeracao-home/resumo, pra dar pra testar com datas fixas.
+
+// ---- modelo de checklist (por empresa, item 1.6 do pedido) ----
+function ordenarItensChecklistPmoc(itens) {
+  const ordem = db.CHAVES_PMOC_PERIODICIDADES;
+  return [...itens].sort((a, b) => ordem.indexOf(a.periodicidade) - ordem.indexOf(b.periodicidade) || a.descricao.localeCompare(b.descricao, 'pt-BR'));
+}
+function camposItemChecklistPmoc(body) {
+  return {
+    descricao: String((body && body.descricao) || '').trim(),
+    periodicidade: db.CHAVES_PMOC_PERIODICIDADES.includes(body && body.periodicidade) ? body.periodicidade : 'mensal',
+    tipos_aparelho: Array.isArray(body && body.tipos_aparelho) ? body.tipos_aparelho.filter((t) => typeof t === 'string') : [],
+  };
+}
+// popula o Modelo de Checklist da empresa com os itens sugeridos da Lei (ver PMOC_CHECKLIST_PADRAO
+// em db.js) na primeira vez que ela é acessada (lista ainda vazia) — dali em diante 100% editável,
+// nunca mais mexido por código (pedido do usuário: "modelo padrão editável pela empresa").
+function garantirModeloChecklistPmoc(data, empresaId) {
+  let itens = tenant.listar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId);
+  if (itens.length) return itens;
+  for (const padrao of db.PMOC_CHECKLIST_PADRAO) {
+    tenant.criar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId, { ...padrao, criado_em: new Date().toISOString() });
+  }
+  return tenant.listar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId);
+}
+
+// GET /api/pmoc/modelo-checklist
+rota('GET', /^\/api\/pmoc\/modelo-checklist$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const itens = garantirModeloChecklistPmoc(data, user.empresa_id);
+  db.save(data);
+  enviarJSON(res, 200, { itens: ordenarItensChecklistPmoc(itens) });
+});
+
+// POST /api/pmoc/modelo-checklist { descricao, periodicidade, tipos_aparelho }
+rota('POST', /^\/api\/pmoc\/modelo-checklist$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const campos = camposItemChecklistPmoc(await lerCorpo(req));
+  if (!campos.descricao) return enviarJSON(res, 400, { erro: 'Descrição é obrigatória.' });
+  const item = tenant.criar(data, 'os_refrigeracao_pmoc_modelo_checklist', user.empresa_id, { ...campos, criado_em: new Date().toISOString() });
+  db.save(data);
+  enviarJSON(res, 201, { item });
+});
+
+// PUT /api/pmoc/modelo-checklist/:id
+rota('PUT', /^\/api\/pmoc\/modelo-checklist\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const item = tenant.buscar(data, 'os_refrigeracao_pmoc_modelo_checklist', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Item não encontrado.' });
+  const campos = camposItemChecklistPmoc(await lerCorpo(req));
+  if (!campos.descricao) return enviarJSON(res, 400, { erro: 'Descrição é obrigatória.' });
+  Object.assign(item, campos);
+  db.save(data);
+  enviarJSON(res, 200, { item });
+});
+
+// DELETE /api/pmoc/modelo-checklist/:id
+rota('DELETE', /^\/api\/pmoc\/modelo-checklist\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const item = tenant.buscar(data, 'os_refrigeracao_pmoc_modelo_checklist', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Item não encontrado.' });
+  data.os_refrigeracao_pmoc_modelo_checklist = data.os_refrigeracao_pmoc_modelo_checklist.filter((i) => i.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- plano PMOC (1 por local, item 1.5 do pedido) ----
+function camposItemPlanoPmoc(item) { return camposItemChecklistPmoc(item); }
+function calcularDataFimPlanoPmoc(dataInicioIso, vigenciaMeses) {
+  const d = new Date(dataInicioIso + 'T12:00:00');
+  d.setMonth(d.getMonth() + (Number(vigenciaMeses) || 12));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+// lazy-check (mesmo padrão do trial expirado): plano "ativo" cuja vigência já passou vira
+// "vencido" na primeira consulta depois da data de fim — nunca mexe num plano "rascunho".
+function atualizarStatusVencidoPlanoPmoc(plano, hojeIso) {
+  if (plano.status === 'ativo' && hojeIso > calcularDataFimPlanoPmoc(plano.data_inicio, plano.vigencia_meses)) plano.status = 'vencido';
+}
+function pmocPlanoComDetalhes(data, plano) {
+  const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === plano.local_id && l.empresa_id === plano.empresa_id);
+  const cliente = local ? data.os_refrigeracao_clientes.find((c) => c.id === local.cliente_id && c.empresa_id === plano.empresa_id) : null;
+  const responsavel = data.os_refrigeracao_pmoc_responsaveis_tecnicos.find((r) => r.id === plano.responsavel_tecnico_id && r.empresa_id === plano.empresa_id);
+  return {
+    ...plano,
+    local_nome: local ? local.nome : null,
+    cliente_nome: cliente ? cliente.nome : null,
+    responsavel_tecnico_nome: responsavel ? responsavel.nome : null,
+    data_fim: calcularDataFimPlanoPmoc(plano.data_inicio, plano.vigencia_meses),
+  };
+}
+
+// ---- geração automática de preventivas (item 2 do pedido) ----
+// diferença em meses entre (anoA,mesA) e (anoB,mesB) — positiva se B é depois de A.
+function diferencaMesesPmoc(anoA, mesA, anoB, mesB) { return (anoB - anoA) * 12 + (mesB - mesA); }
+function itemDevidoNoMesPmoc(item, dataInicioIso, ano, mes) {
+  const periodo = db.PMOC_PERIODICIDADES.find((p) => p.chave === item.periodicidade);
+  const intervalo = periodo ? periodo.meses : 1;
+  const [anoInicio, mesInicio] = dataInicioIso.split('-').map(Number);
+  const diff = diferencaMesesPmoc(anoInicio, mesInicio, ano, mes);
+  return diff >= 0 && diff % intervalo === 0;
+}
+// dia da visita naquele mês = o dia da data de início do plano, "clampado" pro tamanho do mês
+// (plano começado dia 31 vira dia 28/30 num mês mais curto, nunca estoura pro mês seguinte).
+function diaVisitaNoMesPmoc(dataInicioIso, ano, mes) {
+  const diaInicio = Number(dataInicioIso.split('-')[2]);
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  return Math.min(diaInicio, diasNoMes);
+}
+function aparelhosDoLocalPmoc(data, localId, empresaId) {
+  const idsAmbientes = data.os_refrigeracao_pmoc_ambientes.filter((a) => a.local_id === localId && a.empresa_id === empresaId).map((a) => a.id);
+  return data.os_refrigeracao_pmoc_aparelhos.filter((p) => idsAmbientes.includes(p.ambiente_id) && p.empresa_id === empresaId && p.status !== 'desativado');
+}
+// pedido do usuário: "gerar O.S. de preventiva pra cada aparelho conforme a periodicidade,
+// agrupando por visita (uma O.S. por local por data, contendo todos os aparelhos e itens daquele
+// mês)" — por isso NÃO nasce uma coleção própria de "O.S. PMOC": cada visita vira um registro em
+// os_refrigeracao_agendamentos (a Agenda do atalho #4, já construída), com tecnico_id null e
+// status 'pendente_designacao' ("entram na agenda geral sem técnico definido") até o administrador
+// designar alguém (ver PUT .../designar-tecnico abaixo). Idempotente: confere se já existe visita
+// pra aquele mês antes de criar, então pode ser chamada a vontade (ver comentário no topo da seção
+// sobre a "rotina diária" sem cron de verdade). Devolve true se criou alguma visita nova.
+function gerarVisitasPmocPlano(data, plano, hojeIso) {
+  const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === plano.local_id && l.empresa_id === plano.empresa_id);
+  if (!local) return false;
+  const cliente = data.os_refrigeracao_clientes.find((c) => c.id === local.cliente_id && c.empresa_id === plano.empresa_id);
+  const aparelhos = aparelhosDoLocalPmoc(data, local.id, plano.empresa_id);
+  const [anoHoje, mesHoje] = hojeIso.split('-').map(Number);
+  const [anoInicio, mesInicio] = plano.data_inicio.split('-').map(Number);
+  let criouAlgo = false;
+  for (let offset = 0; offset < 3; offset++) {
+    const cursor = new Date(anoHoje, mesHoje - 1 + offset, 1);
+    const ano = cursor.getFullYear(), mes = cursor.getMonth() + 1;
+    if (diferencaMesesPmoc(anoInicio, mesInicio, ano, mes) < 0) continue; // plano ainda não começou nesse mês
+    const mesChave = `${ano}-${String(mes).padStart(2, '0')}`;
+    const jaExiste = data.os_refrigeracao_agendamentos.some((a) => a.pmoc_plano_id === plano.id && a.empresa_id === plano.empresa_id && a.data.startsWith(mesChave));
+    if (jaExiste) continue;
+    const itensDevidos = plano.itens.filter((item) => itemDevidoNoMesPmoc(item, plano.data_inicio, ano, mes));
+    if (!itensDevidos.length) continue;
+    const pmocItens = [];
+    for (const item of itensDevidos) {
+      const aplicaveis = item.tipos_aparelho && item.tipos_aparelho.length ? aparelhos.filter((ap) => item.tipos_aparelho.includes(ap.tipo)) : aparelhos;
+      for (const ap of aplicaveis) {
+        pmocItens.push({ aparelho_id: ap.id, aparelho_tipo: ap.tipo, aparelho_identificacao: [ap.marca, ap.modelo].filter(Boolean).join(' '), item_descricao: item.descricao, periodicidade: item.periodicidade });
+      }
+    }
+    if (!pmocItens.length) continue; // item venceu, mas nenhum aparelho do local é do tipo que ele se aplica
+    const dia = diaVisitaNoMesPmoc(plano.data_inicio, ano, mes);
+    const dataVisita = `${mesChave}-${String(dia).padStart(2, '0')}`;
+    tenant.criar(data, 'os_refrigeracao_agendamentos', plano.empresa_id, {
+      cliente_nome: `${cliente ? cliente.nome : '—'} — ${local.nome}`,
+      telefone: local.responsavel_telefone || (cliente ? cliente.telefone : '') || '',
+      endereco: local.endereco || '',
+      tipo_servico: 'manutencao_preventiva', data: dataVisita, hora: '', valor_servico: 0,
+      observacoes: `Visita PMOC gerada automaticamente — ${pmocItens.length} item(ns) de manutenção em ${new Set(pmocItens.map((i) => i.aparelho_id)).size} aparelho(s).`,
+      tecnico_id: null, tecnico_nome: '', autor_id: null, status: 'pendente_designacao', criado_em: new Date().toISOString(),
+      pmoc_plano_id: plano.id, pmoc_local_id: local.id, pmoc_itens: pmocItens,
+    });
+    criouAlgo = true;
+  }
+  return criouAlgo;
+}
+// "Se o plano for alterado, recalcular apenas as O.S. futuras ainda não iniciadas" — apaga as
+// visitas geradas por este plano que ainda não começaram (pendente de técnico, ou já agendada mas
+// numa data futura) e gera de novo a partir dos itens/datas atualizados; nunca mexe numa visita já
+// concluída/cancelada nem numa data já passada (é histórico real do que aconteceu).
+function recalcularVisitasFuturasPlanoPmoc(data, plano, hojeIso) {
+  data.os_refrigeracao_agendamentos = data.os_refrigeracao_agendamentos.filter((a) => {
+    if (a.pmoc_plano_id !== plano.id || a.empresa_id !== plano.empresa_id) return true;
+    const aindaNaoIniciada = a.status === 'pendente_designacao' || (a.status === 'agendado' && a.data >= hojeIso);
+    return !aindaNaoIniciada;
+  });
+  gerarVisitasPmocPlano(data, plano, hojeIso);
+}
+
+// GET /api/pmoc/planos?hoje=AAAA-MM-DD
+rota('GET', /^\/api\/pmoc\/planos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
+  const planos = tenant.listar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id);
+  for (const plano of planos) {
+    atualizarStatusVencidoPlanoPmoc(plano, query.hoje);
+    if (plano.status === 'ativo') gerarVisitasPmocPlano(data, plano, query.hoje);
+  }
+  db.save(data);
+  const comDetalhes = planos.map((p) => pmocPlanoComDetalhes(data, p)).sort((a, b) => (a.local_nome || '').localeCompare(b.local_nome || '', 'pt-BR'));
+  enviarJSON(res, 200, { planos: comDetalhes });
+});
+
+// POST /api/pmoc/planos { local_id, responsavel_tecnico_id, data_inicio, vigencia_meses, itens? }
+// — sem `itens`, copia o Modelo de Checklist da empresa (ver garantirModeloChecklistPmoc acima);
+// nasce sempre em "rascunho" (ativação é ação separada, ver PUT .../ativar).
+rota('POST', /^\/api\/pmoc\/planos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const localId = Number(body.local_id) || null;
+  const local = localId ? tenant.buscar(data, 'os_refrigeracao_pmoc_locais', localId, user.empresa_id) : null;
+  if (!local) return enviarJSON(res, 400, { erro: 'Local inválido.' });
+  if (data.os_refrigeracao_pmoc_planos.some((p) => p.local_id === localId && p.empresa_id === user.empresa_id)) {
+    return enviarJSON(res, 409, { erro: 'Esse local já tem um plano PMOC — edite o plano existente em vez de criar outro.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data_inicio || '')) return enviarJSON(res, 400, { erro: 'Informe a data de início do plano.' });
+  const responsavelId = body.responsavel_tecnico_id ? Number(body.responsavel_tecnico_id) : null;
+  if (responsavelId && !tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', responsavelId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Responsável técnico inválido.' });
+  const itensBase = Array.isArray(body.itens) && body.itens.length ? body.itens : garantirModeloChecklistPmoc(data, user.empresa_id);
+  const itens = itensBase.map(camposItemPlanoPmoc).filter((i) => i.descricao);
+  const plano = tenant.criar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id, {
+    local_id: localId, responsavel_tecnico_id: responsavelId, data_inicio: body.data_inicio,
+    vigencia_meses: Number(body.vigencia_meses) > 0 ? Number(body.vigencia_meses) : 12,
+    status: 'rascunho', itens, criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { plano: pmocPlanoComDetalhes(data, plano) });
+});
+
+// GET /api/pmoc/planos/:id?hoje= — vem com as visitas já geradas (ver os_refrigeracao_agendamentos)
+rota('GET', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
+  const plano = tenant.buscar(data, 'os_refrigeracao_pmoc_planos', Number(m[1]), user.empresa_id);
+  if (!plano) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  atualizarStatusVencidoPlanoPmoc(plano, query.hoje);
+  if (plano.status === 'ativo') gerarVisitasPmocPlano(data, plano, query.hoje);
+  db.save(data);
+  const visitas = data.os_refrigeracao_agendamentos.filter((a) => a.pmoc_plano_id === plano.id && a.empresa_id === user.empresa_id).sort((a, b) => a.data.localeCompare(b.data));
+  enviarJSON(res, 200, { plano: pmocPlanoComDetalhes(data, plano), visitas });
+});
+
+// PUT /api/pmoc/planos/:id — edita itens/responsável/data de início/vigência; se o plano estiver
+// ativo, recalcula as visitas futuras ainda não iniciadas (exige ?hoje= só nesse caso).
+rota('PUT', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const plano = tenant.buscar(data, 'os_refrigeracao_pmoc_planos', Number(m[1]), user.empresa_id);
+  if (!plano) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  const body = await lerCorpo(req);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data_inicio || '')) return enviarJSON(res, 400, { erro: 'Informe a data de início do plano.' });
+  const responsavelId = body.responsavel_tecnico_id ? Number(body.responsavel_tecnico_id) : null;
+  if (responsavelId && !tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', responsavelId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Responsável técnico inválido.' });
+  const itens = Array.isArray(body.itens) ? body.itens.map(camposItemPlanoPmoc).filter((i) => i.descricao) : plano.itens;
+  Object.assign(plano, {
+    responsavel_tecnico_id: responsavelId, data_inicio: body.data_inicio,
+    vigencia_meses: Number(body.vigencia_meses) > 0 ? Number(body.vigencia_meses) : plano.vigencia_meses,
+    itens,
+  });
+  if (plano.status === 'ativo') {
+    const { query } = url.parse(req.url, true);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD) pra recalcular as preventivas.' });
+    recalcularVisitasFuturasPlanoPmoc(data, plano, query.hoje);
+  }
+  db.save(data);
+  enviarJSON(res, 200, { plano: pmocPlanoComDetalhes(data, plano) });
+});
+
+// PUT /api/pmoc/planos/:id/ativar?hoje= — gera de cara as visitas dos próximos 3 meses.
+rota('PUT', /^\/api\/pmoc\/planos\/(\d+)\/ativar$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const plano = tenant.buscar(data, 'os_refrigeracao_pmoc_planos', Number(m[1]), user.empresa_id);
+  if (!plano) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  if (plano.status !== 'rascunho') return enviarJSON(res, 400, { erro: 'Só um plano em rascunho pode ser ativado.' });
+  if (!plano.itens.length) return enviarJSON(res, 400, { erro: 'O plano precisa ter pelo menos um item de manutenção antes de ser ativado.' });
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
+  plano.status = 'ativo';
+  gerarVisitasPmocPlano(data, plano, query.hoje);
+  db.save(data);
+  enviarJSON(res, 200, { plano: pmocPlanoComDetalhes(data, plano) });
+});
+
+// DELETE /api/pmoc/planos/:id — só em rascunho (ativo/vencido ficam como histórico).
+rota('DELETE', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const plano = tenant.buscar(data, 'os_refrigeracao_pmoc_planos', Number(m[1]), user.empresa_id);
+  if (!plano) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  if (plano.status !== 'rascunho') return enviarJSON(res, 400, { erro: 'Só um plano em rascunho pode ser excluído.' });
+  data.os_refrigeracao_pmoc_planos = data.os_refrigeracao_pmoc_planos.filter((p) => p.id !== plano.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ---- visitas pendentes de designação de técnico (geradas pelo PMOC) ----
+// pedido do usuário: "o administrador designa o técnico" — só administrador vê/mexe nessa fila.
+// GET /api/pmoc/visitas-pendentes?hoje=
+rota('GET', /^\/api\/pmoc\/visitas-pendentes$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador designa técnico nas preventivas.' });
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
+  const planosAtivos = tenant.listar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id).filter((p) => p.status === 'ativo');
+  for (const plano of planosAtivos) gerarVisitasPmocPlano(data, plano, query.hoje);
+  db.save(data);
+  const pendentes = tenant.listar(data, 'os_refrigeracao_agendamentos', user.empresa_id)
+    .filter((a) => a.status === 'pendente_designacao')
+    .sort((a, b) => a.data.localeCompare(b.data));
+  enviarJSON(res, 200, { visitas: pendentes });
+});
+
+// PUT /api/pmoc/visitas-pendentes/:id/designar-tecnico { tecnico_id, hora } — mesma validação de
+// grade/cota do técnico (ver slotsAgendaRefrigeracao) usada no agendamento manual.
+rota('PUT', /^\/api\/pmoc\/visitas-pendentes\/(\d+)\/designar-tecnico$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador designa técnico nas preventivas.' });
+  const visita = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!visita) return enviarJSON(res, 404, { erro: 'Visita não encontrada.' });
+  if (visita.status !== 'pendente_designacao') return enviarJSON(res, 400, { erro: 'Essa visita já tem técnico designado.' });
+  const body = await lerCorpo(req);
+  const tecnicoId = Number(body.tecnico_id) || null;
+  const tecnico = tecnicoId ? tenant.buscar(data, 'usuarios', tecnicoId, user.empresa_id) : null;
+  if (!tecnico) return enviarJSON(res, 400, { erro: 'Escolha um técnico.' });
+  const { config_existe, slots } = slotsAgendaRefrigeracao(data, tecnicoId, user.empresa_id, visita.data);
+  if (!config_existe) return enviarJSON(res, 400, { erro: 'Configure a disponibilidade desse técnico antes de designar.' });
+  const slotEscolhido = slots.find((s) => s.hora === body.hora);
+  if (!slotEscolhido || !slotEscolhido.disponivel) return enviarJSON(res, 400, { erro: 'Esse horário não está disponível pra esse técnico nesse dia.' });
+  visita.tecnico_id = tecnicoId;
+  visita.tecnico_nome = tecnico.nome;
+  visita.hora = body.hora;
+  visita.status = 'agendado';
+  db.save(data);
+  enviarJSON(res, 200, { visita });
+});
+
 // ---------- Início (Home) — perfil "Refrigeração e Climatização" ----------
 // pedido do usuário (referência: app concorrente iClima): painel de controle no topo do menu, com
 // os números do PRÓPRIO usuário logado — hoje/semana/ocupação do mês vêm da Agenda já construída

@@ -821,6 +821,8 @@ const NAV = {
     // Locais/Ambientes/Aparelhos e Responsáveis técnicos — ver renderPmocLocais/renderPmocLocalDetalhe/renderPmocResponsaveis.
     { key: 'pmoc', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
       { key: 'pmoc-locais', label: 'Locais', page: 'pmoc-locais' },
+      { key: 'pmoc-planos', label: 'Planos PMOC', page: 'pmoc-planos' },
+      { key: 'pmoc-checklist', label: 'Modelo de Checklist', page: 'pmoc-modelo-checklist' },
       { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
     ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda', page: 'agenda' },
@@ -893,6 +895,11 @@ const NAV = {
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda-refrigeracao-lista' },
     { key: 'pmoc', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
       { key: 'pmoc-locais', label: 'Locais', page: 'pmoc-locais' },
+      { key: 'pmoc-planos', label: 'Planos PMOC', page: 'pmoc-planos' },
+      { key: 'pmoc-checklist', label: 'Modelo de Checklist', page: 'pmoc-modelo-checklist' },
+      // pedido do usuário: "o administrador designa o técnico" — fila de visitas PMOC geradas
+      // automaticamente ainda sem técnico, só no menu do administrador (ver exigirPapel no server).
+      { key: 'pmoc-pendentes', label: 'Preventivas pendentes', page: 'pmoc-visitas-pendentes' },
       { key: 'pmoc-responsaveis', label: 'Responsáveis técnicos', page: 'pmoc-responsaveis' },
     ]},
     { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
@@ -3981,9 +3988,20 @@ function abrirPmocLocalDetalhe(id) {
 async function renderPmocLocalDetalhe() {
   const main = document.getElementById('main');
   if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
-  const { local, ambientes } = await api('/api/pmoc/locais/' + window._pmocLocalDetalheId);
+  const [{ local, ambientes }, { planos }] = await Promise.all([
+    api('/api/pmoc/locais/' + window._pmocLocalDetalheId),
+    api('/api/pmoc/planos?hoje=' + hojeIsoAgendaRef()),
+  ]);
   window._pmocLocalAtual = local;
   window._pmocAmbientesAtual = ambientes;
+  const planoResumo = planos.find((p) => p.local_id === local.id) || null;
+  let plano = null, visitasPlano = [];
+  if (planoResumo) {
+    const detalhe = await api(`/api/pmoc/planos/${planoResumo.id}?hoje=${hojeIsoAgendaRef()}`);
+    plano = detalhe.plano;
+    visitasPlano = detalhe.visitas;
+  }
+  window._pmocPlanoAtual = plano;
   main.innerHTML = `
     <div class="page-head" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
       <div><h1>${esc(local.nome)}</h1><span class="tag">${esc(pmocTipoAtividadeLabel(local.tipo_atividade))}</span></div>
@@ -4005,7 +4023,8 @@ async function renderPmocLocalDetalhe() {
       <h2>Ambientes</h2>
       <button class="btn btn-primary btn-sm" onclick="abrirModalPmocAmbiente()">+ Novo ambiente</button>
     </div>
-    <div id="pmoc-ambientes-lista">${pmocAmbientesHtml(ambientes)}</div>`;
+    <div id="pmoc-ambientes-lista">${pmocAmbientesHtml(ambientes)}</div>
+    ${pmocSecaoPlanoHtml(plano, visitasPlano)}`;
 }
 function pmocAmbientesHtml(ambientes) {
   if (!ambientes.length) return '<div class="empty">Nenhum ambiente cadastrado ainda.</div>';
@@ -4271,6 +4290,357 @@ async function excluirPmocResponsavel(id) {
     await api('/api/pmoc/responsaveis-tecnicos/' + id, { method: 'DELETE' });
     await renderPmocResponsaveis();
   } catch (e) { alert(e.message); }
+}
+
+// ===== Pacote "Climatização / PMOC" — Fase 2: Plano e preventivas =====
+// pedido do usuário: Modelo de Checklist (editável pela empresa), Plano PMOC por local (com os
+// itens de manutenção e a periodicidade de cada um) e a fila de visitas geradas automaticamente
+// que ainda não têm técnico designado — ver geração/recálculo em server.js.
+const PMOC_PERIODICIDADES = [
+  { chave: 'mensal', nome: 'Mensal' }, { chave: 'bimestral', nome: 'Bimestral' },
+  { chave: 'trimestral', nome: 'Trimestral' }, { chave: 'semestral', nome: 'Semestral' },
+  { chave: 'anual', nome: 'Anual' },
+];
+const PMOC_PLANO_STATUS = {
+  rascunho: { label: 'Rascunho', cor: 'var(--ink-soft)' }, ativo: { label: 'Ativo', cor: 'var(--green)' }, vencido: { label: 'Vencido', cor: 'var(--red)' },
+};
+function pmocPlanoStatusBadgeHtml(status) {
+  const s = PMOC_PLANO_STATUS[status] || PMOC_PLANO_STATUS.rascunho;
+  return `<span class="tag" style="background:none; border:1px solid ${s.cor}; color:${s.cor};">${esc(s.label)}</span>`;
+}
+
+// ---- modelo de checklist (por empresa) ----
+async function renderPmocModeloChecklist() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <div><h1>Modelo de Checklist</h1><p>Itens padrão usados ao criar um Plano PMOC novo — edite à vontade.</p></div>
+      <button class="btn btn-primary btn-sm" onclick="abrirModalPmocItemChecklist('modelo')">+ Novo item</button>
+    </div>
+    <div id="pmoc-checklist-lista"><div class="empty">Carregando...</div></div>`;
+  const { itens } = await api('/api/pmoc/modelo-checklist');
+  window._pmocModeloChecklistCache = itens;
+  document.getElementById('pmoc-checklist-lista').innerHTML = pmocChecklistAgrupadoHtml(itens, 'modelo');
+}
+function pmocChecklistAgrupadoHtml(itens, origem) {
+  if (!itens.length) return '<div class="empty">Nenhum item cadastrado ainda.</div>';
+  return PMOC_PERIODICIDADES.map((p) => {
+    const doGrupo = itens.filter((i) => i.periodicidade === p.chave);
+    if (!doGrupo.length) return '';
+    return `
+      <h3 style="margin-top:18px;">${p.nome}</h3>
+      ${doGrupo.map((item) => `
+        <div class="panel" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <div>
+            ${esc(item.descricao)}
+            ${item.tipos_aparelho && item.tipos_aparelho.length ? `<div style="font-size:12px; color:var(--ink-soft);">Só: ${item.tipos_aparelho.map(esc).join(', ')}</div>` : `<div style="font-size:12px; color:var(--ink-soft);">Todos os tipos de aparelho</div>`}
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn-outline-sm" onclick="abrirModalPmocItemChecklist('${origem}', '${esc(String(item.id))}')">✏️</button>
+            <button class="btn-outline-sm" style="color:var(--red);" onclick="excluirPmocItemChecklist('${origem}', '${esc(String(item.id))}')">🗑️</button>
+          </div>
+        </div>`).join('')}`;
+  }).join('');
+}
+// `origem` = 'modelo' (Modelo de Checklist da empresa) ou 'plano' (itens de um Plano PMOC
+// específico, editados dentro do modal de plano — ver abrirModalPmocPlano) — mesmo componente,
+// endpoints diferentes.
+function abrirModalPmocItemChecklist(origem, itemId) {
+  const lista = origem === 'modelo' ? (window._pmocModeloChecklistCache || []) : (window._pmocPlanoItensEditando || []);
+  const item = itemId ? lista.find((i) => String(i.id) === String(itemId)) : null;
+  window._pmocItemChecklistEditando = item || null;
+  window._pmocItemChecklistOrigem = origem;
+  let modal = document.getElementById('modal-pmoc-item-checklist');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-item-checklist';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalPmocItemChecklist(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>${item ? 'Editar item' : 'Novo item'}</h3>
+      <div class="field"><label>Descrição *</label><input id="pmoc-ic-descricao" value="${esc((item && item.descricao) || '')}" placeholder="Ex: Limpeza dos filtros de ar"></div>
+      <div class="field"><label>Periodicidade</label>
+        <select id="pmoc-ic-periodicidade">${PMOC_PERIODICIDADES.map((p) => `<option value="${p.chave}" ${item && item.periodicidade === p.chave ? 'selected' : ''}>${p.nome}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>Se aplica só a estes tipos de aparelho (vazio = todos)</label>
+        <select id="pmoc-ic-tipos" multiple size="6">${PMOC_TIPOS_APARELHO.map((t) => `<option value="${esc(t)}" ${item && item.tipos_aparelho && item.tipos_aparelho.includes(t) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      </div>
+      <div id="pmoc-ic-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="fecharModalPmocItemChecklist()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocItemChecklist()">Salvar</button>
+      </div>
+    </div>`;
+}
+function fecharModalPmocItemChecklist() {
+  const modal = document.getElementById('modal-pmoc-item-checklist');
+  if (modal) modal.classList.remove('show');
+}
+function lerFormPmocItemChecklist() {
+  const tiposEl = document.getElementById('pmoc-ic-tipos');
+  return {
+    descricao: document.getElementById('pmoc-ic-descricao').value.trim(),
+    periodicidade: document.getElementById('pmoc-ic-periodicidade').value,
+    tipos_aparelho: Array.from(tiposEl.selectedOptions).map((o) => o.value),
+  };
+}
+async function salvarPmocItemChecklist() {
+  const erroEl = document.getElementById('pmoc-ic-erro');
+  erroEl.classList.add('hidden');
+  const campos = lerFormPmocItemChecklist();
+  if (!campos.descricao) { erroEl.textContent = 'Informe a descrição.'; erroEl.classList.remove('hidden'); return; }
+  const origem = window._pmocItemChecklistOrigem;
+  const editando = window._pmocItemChecklistEditando;
+  if (origem === 'modelo') {
+    try {
+      if (editando) await api('/api/pmoc/modelo-checklist/' + editando.id, { method: 'PUT', body: campos });
+      else await api('/api/pmoc/modelo-checklist', { method: 'POST', body: campos });
+      fecharModalPmocItemChecklist();
+      await renderPmocModeloChecklist();
+    } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+    return;
+  }
+  // origem 'plano': só mexe na lista em memória do modal de plano — some pro servidor junto com o
+  // resto do plano quando "Salvar" (ver salvarPmocPlano).
+  const lista = window._pmocPlanoItensEditando || [];
+  if (editando) Object.assign(editando, campos);
+  else lista.push({ id: `novo-${Date.now()}`, ...campos });
+  window._pmocPlanoItensEditando = lista;
+  fecharModalPmocItemChecklist();
+  desenharItensPmocPlanoNoModal();
+}
+async function excluirPmocItemChecklist(origem, itemId) {
+  if (origem === 'modelo') {
+    const ok = await mostrarConfirmacao('Excluir este item do Modelo de Checklist? Essa ação não pode ser desfeita.');
+    if (!ok) return;
+    try {
+      await api('/api/pmoc/modelo-checklist/' + itemId, { method: 'DELETE' });
+      await renderPmocModeloChecklist();
+    } catch (e) { alert(e.message); }
+    return;
+  }
+  window._pmocPlanoItensEditando = (window._pmocPlanoItensEditando || []).filter((i) => String(i.id) !== String(itemId));
+  desenharItensPmocPlanoNoModal();
+}
+
+// ---- planos PMOC (lista geral) ----
+async function renderPmocPlanos() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `<div class="page-head"><h1>Planos PMOC</h1></div><div id="pmoc-planos-lista"><div class="empty">Carregando...</div></div>`;
+  const { planos } = await api('/api/pmoc/planos?hoje=' + hojeIsoAgendaRef());
+  const alvo = document.getElementById('pmoc-planos-lista');
+  alvo.innerHTML = planos.length ? planos.map((p) => `
+    <div class="panel" style="cursor:pointer; margin-bottom:10px;" onclick="abrirPmocLocalDetalhe(${p.local_id})">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <strong>${esc(p.local_nome || '—')}</strong> ${pmocPlanoStatusBadgeHtml(p.status)}
+          <div style="font-size:12.5px; color:var(--ink-soft);">${esc(p.cliente_nome || '—')}</div>
+          <div style="font-size:12.5px; color:var(--ink-soft);">Início ${fmtDataIsoAgendaRef(p.data_inicio)} · até ${fmtDataIsoAgendaRef(p.data_fim)}${p.responsavel_tecnico_nome ? ' · Resp.: ' + esc(p.responsavel_tecnico_nome) : ''}</div>
+        </div>
+        <div style="font-size:12.5px; color:var(--ink-soft); white-space:nowrap;">${p.itens.length} item${p.itens.length === 1 ? '' : 'ns'}</div>
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhum plano PMOC criado ainda — crie um a partir do detalhe de um local.</div>';
+}
+
+// ---- plano PMOC de um local específico (seção dentro de renderPmocLocalDetalhe) ----
+function pmocSecaoPlanoHtml(plano, visitas) {
+  if (!plano) {
+    return `
+      <div class="page-head" style="margin-top:18px;"><h2>Plano PMOC</h2></div>
+      <div class="panel"><div class="empty">Nenhum plano PMOC criado ainda pra este local.</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="abrirModalPmocPlano()">+ Criar Plano PMOC</button>
+      </div>`;
+  }
+  const visitasHtml = (visitas || []).length ? visitas.map((v) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
+      <span>${fmtDataIsoAgendaRef(v.data)}</span>
+      <span>${v.status === 'pendente_designacao' ? '<span class="tag tag-amber">Sem técnico</span>' : v.status === 'concluido' ? '<span class="tag" style="background:none; border:1px solid var(--green); color:var(--green);">Concluída</span>' : v.status === 'cancelado' ? '<span class="tag" style="background:none; border:1px solid var(--red); color:var(--red);">Cancelada</span>' : `<span class="tag">Agendada — ${esc(v.tecnico_nome || '')}</span>`}</span>
+    </div>`).join('') : '<div class="empty">Nenhuma visita gerada ainda.</div>';
+  return `
+    <div class="page-head" style="margin-top:18px;">
+      <h2>Plano PMOC</h2>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="abrirModalPmocPlano(window._pmocPlanoAtual)">✏️ Editar</button>
+        ${plano.status === 'rascunho' ? `<button class="btn btn-primary btn-sm" onclick="ativarPmocPlano(${plano.id})">Ativar plano</button>` : ''}
+      </div>
+    </div>
+    <div class="panel">
+      ${pmocPlanoStatusBadgeHtml(plano.status)}
+      ${osRefLinha('Responsável técnico', esc(plano.responsavel_tecnico_nome || '—'))}
+      ${osRefLinha('Início', fmtDataIsoAgendaRef(plano.data_inicio))}
+      ${osRefLinha('Vigência', `${plano.vigencia_meses} meses (até ${fmtDataIsoAgendaRef(plano.data_fim)})`)}
+      ${osRefLinha('Itens de manutenção', String(plano.itens.length))}
+    </div>
+    <h3 style="margin-top:14px;">Visitas geradas</h3>
+    <div class="panel">${visitasHtml}</div>`;
+}
+async function abrirModalPmocPlano(planoExistente) {
+  const local = window._pmocLocalAtual;
+  const { responsaveis } = await api('/api/pmoc/responsaveis-tecnicos');
+  window._pmocResponsaveisParaPlano = responsaveis;
+  let itensIniciais;
+  if (planoExistente) {
+    itensIniciais = planoExistente.itens.map((i, idx) => ({ id: i.id ?? `existente-${idx}`, ...i }));
+  } else {
+    const { itens } = await api('/api/pmoc/modelo-checklist');
+    itensIniciais = itens.map((i) => ({ id: `novo-${i.id}`, descricao: i.descricao, periodicidade: i.periodicidade, tipos_aparelho: i.tipos_aparelho }));
+  }
+  window._pmocPlanoItensEditando = itensIniciais;
+  window._pmocPlanoEditando = planoExistente || null;
+  let modal = document.getElementById('modal-pmoc-plano');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-plano';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalPmocPlano(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:560px; max-height:88vh; overflow:auto;">
+      <h3>${planoExistente ? 'Editar Plano PMOC' : 'Novo Plano PMOC'} — ${esc(local.nome)}</h3>
+      <div class="field"><label>Responsável técnico</label>
+        <select id="pmoc-plano-responsavel">
+          <option value="">Selecione...</option>
+          ${responsaveis.map((r) => `<option value="${r.id}" ${planoExistente && planoExistente.responsavel_tecnico_id === r.id ? 'selected' : ''}>${esc(r.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1;"><label>Data de início</label><input id="pmoc-plano-inicio" type="date" value="${esc((planoExistente && planoExistente.data_inicio) || hojeIsoAgendaRef())}"></div>
+        <div class="field" style="flex:1;"><label>Vigência (meses)</label><input id="pmoc-plano-vigencia" type="number" min="1" value="${(planoExistente && planoExistente.vigencia_meses) || 12}"></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+        <h3 style="margin:0;">Itens de manutenção</h3>
+        <button type="button" class="btn-outline-sm" onclick="abrirModalPmocItemChecklist('plano')">+ Item</button>
+      </div>
+      <div id="pmoc-plano-itens-lista"></div>
+      <div id="pmoc-plano-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="fecharModalPmocPlano()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarPmocPlano()">Salvar</button>
+      </div>
+    </div>`;
+  desenharItensPmocPlanoNoModal();
+}
+function desenharItensPmocPlanoNoModal() {
+  const alvo = document.getElementById('pmoc-plano-itens-lista');
+  if (!alvo) return;
+  alvo.innerHTML = pmocChecklistAgrupadoHtml(window._pmocPlanoItensEditando || [], 'plano');
+}
+function fecharModalPmocPlano() {
+  const modal = document.getElementById('modal-pmoc-plano');
+  if (modal) modal.classList.remove('show');
+}
+async function salvarPmocPlano() {
+  const erroEl = document.getElementById('pmoc-plano-erro');
+  erroEl.classList.add('hidden');
+  const itens = (window._pmocPlanoItensEditando || []).map((i) => ({ descricao: i.descricao, periodicidade: i.periodicidade, tipos_aparelho: i.tipos_aparelho }));
+  const body = {
+    local_id: window._pmocLocalDetalheId,
+    responsavel_tecnico_id: document.getElementById('pmoc-plano-responsavel').value,
+    data_inicio: document.getElementById('pmoc-plano-inicio').value,
+    vigencia_meses: document.getElementById('pmoc-plano-vigencia').value,
+    itens,
+  };
+  const editando = window._pmocPlanoEditando;
+  try {
+    if (editando) await api(`/api/pmoc/planos/${editando.id}?hoje=${hojeIsoAgendaRef()}`, { method: 'PUT', body });
+    else await api('/api/pmoc/planos', { method: 'POST', body });
+    fecharModalPmocPlano();
+    await renderPmocLocalDetalhe();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function ativarPmocPlano(id) {
+  const ok = await mostrarConfirmacao('Ativar este plano? As visitas de preventiva dos próximos 3 meses serão geradas automaticamente na Agenda, pendentes de técnico.');
+  if (!ok) return;
+  try {
+    await api(`/api/pmoc/planos/${id}/ativar?hoje=${hojeIsoAgendaRef()}`, { method: 'PUT' });
+    await renderPmocLocalDetalhe();
+  } catch (e) { alert(e.message); }
+}
+
+// ---- visitas pendentes de designação de técnico (administrador) ----
+async function renderPmocVisitasPendentes() {
+  const main = document.getElementById('main');
+  if (!pmocPacoteAtivo()) { main.innerHTML = '<div class="empty">PMOC é exclusivo de empresas com o perfil Refrigeração e Climatização e o pacote PMOC contratado.</div>'; return; }
+  main.innerHTML = `<div class="page-head"><h1>Preventivas pendentes</h1><p>Visitas geradas automaticamente pelo PMOC que ainda precisam de um técnico.</p></div><div id="pmoc-pendentes-lista"><div class="empty">Carregando...</div></div>`;
+  const { visitas } = await api('/api/pmoc/visitas-pendentes?hoje=' + hojeIsoAgendaRef());
+  window._pmocVisitasPendentesCache = visitas;
+  const alvo = document.getElementById('pmoc-pendentes-lista');
+  alvo.innerHTML = visitas.length ? visitas.map((v) => `
+    <div class="panel" style="margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+        <div>
+          <strong>${fmtDataIsoAgendaRef(v.data)}</strong>
+          <div style="font-size:13px; color:var(--ink-soft);">${esc(v.cliente_nome)}</div>
+          <div style="font-size:12.5px; color:var(--ink-soft);">${v.pmoc_itens.length} item(ns) de manutenção em ${new Set(v.pmoc_itens.map((i) => i.aparelho_id)).size} aparelho(s)</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="abrirModalDesignarTecnicoPmoc(${v.id})">Designar técnico</button>
+      </div>
+    </div>`).join('') : '<div class="empty">Nenhuma visita pendente de técnico no momento.</div>';
+}
+async function abrirModalDesignarTecnicoPmoc(visitaId) {
+  const visita = (window._pmocVisitasPendentesCache || []).find((v) => v.id === visitaId);
+  if (!visita) return;
+  window._pmocVisitaDesignando = visita;
+  if (!window._agendaRefTecnicosCache) {
+    try { const { usuarios } = await api('/api/usuarios'); window._agendaRefTecnicosCache = usuarios.filter((u) => ['administrador', 'suporte'].includes(u.papel)); }
+    catch (e) { window._agendaRefTecnicosCache = []; }
+  }
+  let modal = document.getElementById('modal-pmoc-designar');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-pmoc-designar';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) document.getElementById('modal-pmoc-designar').classList.remove('show'); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:420px;">
+      <h3>Designar técnico</h3>
+      <p style="color:var(--ink-soft); font-size:13px; margin-top:-6px;">${esc(visita.cliente_nome)} — ${fmtDataIsoAgendaRef(visita.data)}</p>
+      <div class="field"><label>Técnico</label>
+        <select id="pmoc-designar-tecnico" onchange="carregarHorariosDesignarPmoc()">
+          <option value="">Selecione...</option>
+          ${window._agendaRefTecnicosCache.map((u) => `<option value="${u.id}">${esc(u.nome)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Horário</label><select id="pmoc-designar-hora"><option value="">Escolha o técnico primeiro</option></select></div>
+      <div id="pmoc-designar-erro" class="erro hidden" style="margin-top:6px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-outline-sm" onclick="document.getElementById('modal-pmoc-designar').classList.remove('show')">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="salvarDesignarTecnicoPmoc()">Designar</button>
+      </div>
+    </div>`;
+}
+async function carregarHorariosDesignarPmoc() {
+  const tecnicoId = document.getElementById('pmoc-designar-tecnico').value;
+  const horaEl = document.getElementById('pmoc-designar-hora');
+  if (!tecnicoId) { horaEl.innerHTML = '<option value="">Escolha o técnico primeiro</option>'; return; }
+  const visita = window._pmocVisitaDesignando;
+  const { config_existe, slots } = await api(`/api/os-refrigeracao-agenda/slots?data=${visita.data}&tecnico_id=${tecnicoId}`);
+  if (!config_existe) { horaEl.innerHTML = '<option value="">Técnico sem agenda configurada</option>'; return; }
+  const disponiveis = slots.filter((s) => s.disponivel);
+  horaEl.innerHTML = disponiveis.length ? disponiveis.map((s) => `<option value="${s.hora}">${s.hora}</option>`).join('') : '<option value="">Sem horário livre nesse dia</option>';
+}
+async function salvarDesignarTecnicoPmoc() {
+  const erroEl = document.getElementById('pmoc-designar-erro');
+  erroEl.classList.add('hidden');
+  const tecnicoId = document.getElementById('pmoc-designar-tecnico').value;
+  const hora = document.getElementById('pmoc-designar-hora').value;
+  if (!tecnicoId || !hora) { erroEl.textContent = 'Escolha o técnico e o horário.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    await api(`/api/pmoc/visitas-pendentes/${window._pmocVisitaDesignando.id}/designar-tecnico`, { method: 'PUT', body: { tecnico_id: tecnicoId, hora } });
+    document.getElementById('modal-pmoc-designar').classList.remove('show');
+    await renderPmocVisitasPendentes();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
 // ===== Início (Home) — perfil "Refrigeração e Climatização" =====
@@ -5797,6 +6167,9 @@ async function ir(pagina) {
     if (pagina === 'pmoc-locais') return renderPmocLocais();
     if (pagina === 'pmoc-local-detalhe') return renderPmocLocalDetalhe();
     if (pagina === 'pmoc-responsaveis') return renderPmocResponsaveis();
+    if (pagina === 'pmoc-modelo-checklist') return renderPmocModeloChecklist();
+    if (pagina === 'pmoc-planos') return renderPmocPlanos();
+    if (pagina === 'pmoc-visitas-pendentes') return renderPmocVisitasPendentes();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();

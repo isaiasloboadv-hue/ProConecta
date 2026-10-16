@@ -86,6 +86,40 @@ const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
 // Completo) — exclui módulos perfil-exclusivos como "pmoc" (ver `foraDaCascataPadrao` acima).
 const CHAVES_MODULOS_CASCATA_PADRAO = MODULOS_DISPONIVEIS.filter((m) => !m.foraDaCascataPadrao).map((m) => m.chave);
 
+// Pacote "Climatização / PMOC" (Lei 13.589/2018), Fase 2 — Plano e preventivas. Periodicidade de
+// cada item do checklist, em meses (usado pra calcular em que mês cada item "vence" de novo a
+// partir da data de início do plano — ver geração automática de visitas em server.js).
+const PMOC_PERIODICIDADES = [
+  { chave: 'mensal', nome: 'Mensal', meses: 1 },
+  { chave: 'bimestral', nome: 'Bimestral', meses: 2 },
+  { chave: 'trimestral', nome: 'Trimestral', meses: 3 },
+  { chave: 'semestral', nome: 'Semestral', meses: 6 },
+  { chave: 'anual', nome: 'Anual', meses: 12 },
+];
+const CHAVES_PMOC_PERIODICIDADES = PMOC_PERIODICIDADES.map((p) => p.chave);
+// pedido do usuário (item 1.6): "modelo padrão editável pela empresa" — itens sugeridos, usados
+// pra popular o Modelo de Checklist da empresa na primeira vez que ela acessa (ver
+// GET /api/pmoc/modelo-checklist em server.js). `tipos_aparelho: []` = aplica a qualquer tipo de
+// aparelho (nenhuma das sugestões da Lei restringe por tipo).
+const PMOC_CHECKLIST_PADRAO = [
+  { descricao: 'Limpeza ou troca dos filtros de ar', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Limpeza da bandeja de condensado', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Verificação e desobstrução do dreno', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Verificação de ruídos e vibrações anormais', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Limpeza externa do gabinete', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Verificação do controle remoto e do display', periodicidade: 'mensal', tipos_aparelho: [] },
+  { descricao: 'Limpeza da serpentina da evaporadora', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Verificação do isolamento térmico das tubulações', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Medição de temperatura de insuflamento e de retorno', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Verificação da fixação e dos suportes', periodicidade: 'trimestral', tipos_aparelho: [] },
+  { descricao: 'Limpeza da condensadora e da serpentina externa', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Medição de tensão e corrente do compressor', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Verificação de pressão do fluido refrigerante e de vazamentos', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Reaperto das conexões elétricas', periodicidade: 'semestral', tipos_aparelho: [] },
+  { descricao: 'Limpeza completa (higienização) do conjunto', periodicidade: 'anual', tipos_aparelho: [] },
+  { descricao: 'Verificação geral do estado do equipamento e recomendação de troca, se for o caso', periodicidade: 'anual', tipos_aparelho: [] },
+];
+
 // Perfil/Segmento (Etapa 8): escolhido uma vez no cadastro da empresa, só serve de atalho pra
 // pré-preencher terminologia/tipos ativos — nunca trava nada, tudo editável depois pelo Super
 // Admin. "Genérico" sempre disponível em qualquer perfil, pra quando nada específico encaixa.
@@ -389,6 +423,17 @@ function seed() {
     os_refrigeracao_pmoc_ambientes: [],
     os_refrigeracao_pmoc_aparelhos: [],
     os_refrigeracao_pmoc_responsaveis_tecnicos: [],
+    // Fase 2 (Plano e preventivas): Modelo de Checklist (lista editável por empresa — nasce vazia
+    // e é populada com PMOC_CHECKLIST_PADRAO na primeira vez que a empresa acessa, ver
+    // GET /api/pmoc/modelo-checklist) e Plano PMOC (1 por local — status rascunho/ativo/vencido,
+    // com os itens de manutenção que esse local específico usa, que podem divergir do modelo da
+    // empresa depois de criado). As visitas de preventiva GERADAS a partir do plano não ganham
+    // coleção própria — entram em os_refrigeracao_agendamentos (a Agenda já construída no atalho
+    // #4), com tecnico_id null e status 'pendente_designacao' até o administrador designar um
+    // técnico (ver geração automática em server.js) — "entram na agenda geral sem técnico
+    // definido" (pedido do usuário), reaproveitando a mesma grade/cota por técnico que já existe.
+    os_refrigeracao_pmoc_modelo_checklist: [],
+    os_refrigeracao_pmoc_planos: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -398,7 +443,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, os_refrigeracao_pmoc_locais: 1, os_refrigeracao_pmoc_ambientes: 1, os_refrigeracao_pmoc_aparelhos: 1, os_refrigeracao_pmoc_responsaveis_tecnicos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, os_refrigeracao_pmoc_locais: 1, os_refrigeracao_pmoc_ambientes: 1, os_refrigeracao_pmoc_aparelhos: 1, os_refrigeracao_pmoc_responsaveis_tecnicos: 1, os_refrigeracao_pmoc_modelo_checklist: 1, os_refrigeracao_pmoc_planos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -1216,6 +1261,11 @@ function migrar(data) {
   if (!data._seq.os_refrigeracao_pmoc_aparelhos) data._seq.os_refrigeracao_pmoc_aparelhos = 1;
   if (!Array.isArray(data.os_refrigeracao_pmoc_responsaveis_tecnicos)) data.os_refrigeracao_pmoc_responsaveis_tecnicos = [];
   if (!data._seq.os_refrigeracao_pmoc_responsaveis_tecnicos) data._seq.os_refrigeracao_pmoc_responsaveis_tecnicos = 1;
+  // Fase 2 (Plano e preventivas) — Modelo de Checklist (por empresa) e Plano PMOC (por local).
+  if (!Array.isArray(data.os_refrigeracao_pmoc_modelo_checklist)) data.os_refrigeracao_pmoc_modelo_checklist = [];
+  if (!data._seq.os_refrigeracao_pmoc_modelo_checklist) data._seq.os_refrigeracao_pmoc_modelo_checklist = 1;
+  if (!Array.isArray(data.os_refrigeracao_pmoc_planos)) data.os_refrigeracao_pmoc_planos = [];
+  if (!data._seq.os_refrigeracao_pmoc_planos) data._seq.os_refrigeracao_pmoc_planos = 1;
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }
@@ -1716,6 +1766,7 @@ module.exports = {
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,
   MODULOS_DISPONIVEIS, CHAVES_MODULOS, CHAVES_MODULOS_CASCATA_PADRAO, moduloAtivo, migrar, recalcularModulosVersoes,
+  PMOC_PERIODICIDADES, CHAVES_PMOC_PERIODICIDADES, PMOC_CHECKLIST_PADRAO,
   PERFIS_DISPONIVEIS, CHAVES_PERFIS, TIPOS_OS_DISPONIVEIS, TIPOS_RELATORIO_DISPONIVEIS, presetPerfilSegmento, PRESETS_PERFIL_SEGMENTO,
   gerarQrToken,
   obterPool, COLECOES_EM_TABELA,
