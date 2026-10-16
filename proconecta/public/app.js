@@ -6108,7 +6108,7 @@ async function renderHomeRefrigeracao() {
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Início é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
   main.innerHTML = `
     <div class="page-head"><h1>Olá, ${esc(String(USER.nome || '').trim().split(' ')[0] || '')}</h1><p>Painel de controle</p></div>
-    <div id="home-ref-widgets" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+    <div id="home-ref-widgets" style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px;">
       ${homeRefWidgetCarregando('📅', 'Hoje')}
       ${homeRefWidgetCarregando('💲', 'Semana')}
       ${homeRefWidgetCarregando('📥', 'Solicitações')}
