@@ -3824,29 +3824,87 @@ async function carregarWidgetsHomeRefrigeracao() {
 
 // ===== Ferramentas (hub de widgets) — perfil "Refrigeração e Climatização" =====
 // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): um menu único, com
-// vários widgets/utilitários dentro — não mais um grupo com children no sidebar (ver NAV acima).
-// Cada entrada aqui é um cartão na tela; o usuário manda um print por vez das ferramentas que
-// faltam, então essa lista só cresce — nunca reaproveitar isso pra outra coisa. Um widget pode
-// virar um submenu (vários cartões levando a páginas diferentes dentro da mesma ferramenta) sem
-// mudar esse hub: FERRAMENTAS_REF_WIDGETS só precisa da página de entrada daquela ferramenta.
-const FERRAMENTAS_REF_WIDGETS = [
-  { icone: '🏷️', label: 'Gerador de Etiquetas', descricao: 'Etiqueta pra colar no equipamento, com QR Code opcional', page: 'etiquetas-gerador' },
+// vários widgets/utilitários dentro, agrupados por categoria (mesma organização do app de
+// referência: Calculadoras/Referência/Guias/Utilidades) — não mais um grupo com children no
+// sidebar (ver NAV acima). O catálogo completo (nomes/ícones/descrições) já veio todo de uma vez;
+// cada ferramenta de verdade (fórmula, tabela, conteúdo técnico) é construída depois, uma a uma,
+// quando o usuário manda o print de como ela funciona — até lá, o cartão abre um placeholder "Em
+// construção" (ver renderFerramentaEmBreve), nunca uma calculadora com fórmula inventada: cabo,
+// capacitor, carga de gás e pressão de gás são dado de engenharia — errar aqui é perigoso de
+// verdade, não só feio. "Cód. Erro" é a única exceção: já existe de verdade (Guia de Diagnóstico
+// Rápido, primeiro atalho construído), só ganhou uma entrada aqui também.
+function slugFerramentaRef(texto) {
+  return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '');
+}
+const FERRAMENTAS_REF_CATEGORIAS = [
+  { chave: 'calculadoras', titulo: 'Calculadoras', cor: 'var(--blue)', corIconeBg: 'var(--blue-pale)', itens: [
+    { icone: '🧮', label: 'Calculadora Blindada', descricao: 'Orçamento com mensagens prontas' },
+    { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC' },
+    { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores' },
+    { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária' },
+    { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro' },
+  ]},
+  { chave: 'referencia', titulo: 'Referência', cor: '#0D9488', corIconeBg: '#E6F7F5', itens: [
+    { icone: '🧭', label: 'Tab. Pressão', descricao: 'Gases refrigerantes' },
+    { icone: '⚠️', label: 'Cód. Erro', descricao: 'Diagnóstico por marca', page: 'guia-diagnostico-rapido' },
+    { icone: '📘', label: 'Manuais Técnicos', descricao: 'Instalação e manutenção' },
+    { icone: '📏', label: 'Tubulação & Torque', descricao: 'Diâmetros e especificações' },
+  ]},
+  { chave: 'guias', titulo: 'Guias', cor: 'var(--amber,#B45309)', corIconeBg: 'var(--amber-pale,#FEF3C7)', itens: [
+    { icone: '🩺', label: 'Diagnóstico', descricao: 'Troubleshooting interativo' },
+    { icone: '✅', label: 'Checklists', descricao: 'Instalação e manutenção' },
+  ]},
+  { chave: 'utilidades', titulo: 'Utilidades', cor: '#7C3AED', corIconeBg: '#F1E8FD', itens: [
+    { icone: '↔️', label: 'Conversor', descricao: 'PSI, bar, BTU, W, TR...' },
+    { icone: '🏷️', label: 'Etiquetas', descricao: 'Gerar etiquetas', page: 'etiquetas-gerador' },
+  ]},
 ];
+FERRAMENTAS_REF_CATEGORIAS.forEach((cat) => cat.itens.forEach((it) => {
+  if (!it.page) it.page = 'ferramenta-em-breve-' + slugFerramentaRef(it.label);
+}));
+
 async function renderFerramentasRefrigeracao() {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
   main.innerHTML = `
     <div class="page-head"><h1>Ferramentas</h1><p>Utilitários do dia a dia do técnico</p></div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-      ${FERRAMENTAS_REF_WIDGETS.map((w) => ferramentaRefWidgetHtml(w)).join('')}
-    </div>`;
+    ${FERRAMENTAS_REF_CATEGORIAS.map((cat, i) => `
+      <div style="display:flex; align-items:center; gap:8px; margin:${i === 0 ? '0' : '24px'} 0 10px;">
+        <span style="width:4px; height:18px; border-radius:2px; background:${cat.cor}; display:inline-block;"></span>
+        <h3 style="margin:0; text-transform:uppercase; font-size:13px; letter-spacing:.4px; color:var(--ink-soft);">${esc(cat.titulo)}</h3>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        ${cat.itens.map((w) => ferramentaRefWidgetHtml(w, cat)).join('')}
+      </div>`).join('')}`;
 }
-function ferramentaRefWidgetHtml(w) {
-  return `<div class="panel" style="cursor:pointer; padding:18px 14px;" onclick="ir('${w.page}')">
-    <div style="font-size:26px;">${w.icone}</div>
-    <div style="margin-top:8px; font-weight:700; font-size:14px;">${esc(w.label)}</div>
+function ferramentaRefWidgetHtml(w, cat) {
+  return `<div class="panel" style="cursor:pointer; padding:18px 14px; text-align:center;" onclick="ir('${w.page}')">
+    <div style="width:44px; height:44px; border-radius:12px; background:${cat.corIconeBg}; display:flex; align-items:center; justify-content:center; font-size:20px; margin:0 auto;">${w.icone}</div>
+    <div style="margin-top:10px; font-weight:700; font-size:14px;">${esc(w.label)}</div>
     <div style="font-size:12px; color:var(--ink-soft); margin-top:2px;">${esc(w.descricao)}</div>
   </div>`;
+}
+// placeholder pras ferramentas do catálogo que ainda não têm a funcionalidade de verdade
+// construída (ver comentário acima) — identifica qual card foi clicado pelo slug na própria
+// página (ver slugFerramentaRef), sem precisar de uma página dedicada pra cada uma ainda.
+async function renderFerramentaEmBreve(pagina) {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  let item = null;
+  for (const cat of FERRAMENTAS_REF_CATEGORIAS) {
+    const achado = cat.itens.find((i) => i.page === pagina);
+    if (achado) { item = achado; break; }
+  }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(item ? item.label : 'Ferramenta')}</h1><p>${esc(item ? item.descricao : '')}</p></div>
+      <button class="btn-outline-sm" onclick="ir('ferramentas-hub')">← Ferramentas</button>
+    </div>
+    <div class="panel" style="text-align:center; padding:40px 20px;">
+      <div style="font-size:40px;">${item ? item.icone : '🧰'}</div>
+      <h3 style="margin-top:10px;">Em construção</h3>
+      <p style="color:var(--ink-soft);">Essa ferramenta ainda vai ganhar a funcionalidade de verdade.</p>
+    </div>`;
 }
 
 // ===== Gerador de Etiquetas (Ferramentas, perfil "Refrigeração e Climatização") =====
@@ -4424,6 +4482,7 @@ async function ir(pagina) {
     if (pagina === 'orcamentos-refrigeracao-detalhe') return renderOrcamentoRefrigeracaoDetalhe();
     if (pagina === 'agenda-refrigeracao-lista') return renderAgendaRefrigeracaoLista();
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
+    if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
