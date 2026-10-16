@@ -2108,8 +2108,7 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
 
   function cabecalho() {
     const y0 = margem;
-    if (logoCliente) doc.addImage(logoCliente, 'PNG', margem, y0 - 8, 90, 32);
-    else { doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 8); }
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0);
     doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
     doc.text('Ordem de Serviço', pageW - margem, y0, { align: 'right' });
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -2925,8 +2924,7 @@ function montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor) {
 
   function cabecalho() {
     const y0 = margem;
-    if (logoCliente) doc.addImage(logoCliente, 'PNG', margem, y0 - 8, 90, 32);
-    else { doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 8); }
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0);
     doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
     doc.text('Orçamento', pageW - margem, y0, { align: 'right' });
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -4220,12 +4218,7 @@ function montarDocCalcBlindadaPdf(f, totais, ajustes, logoCliente, logoNexor) {
 
   function cabecalho() {
     const y0 = margem;
-    if (logoCliente) doc.addImage(logoCliente, 'PNG', margem, y0 - 8, 90, 32);
-    else { doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text(limparPdf(empresaNome()), margem, y0 + 8); }
-    if (ajustes.cnpj_cpf) {
-      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text('CNPJ/CPF: ' + limparPdf(ajustes.cnpj_cpf), margem, y0 + (logoCliente ? 38 : 22));
-    }
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0, ajustes.cnpj_cpf && ('CNPJ/CPF: ' + ajustes.cnpj_cpf));
     doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
     doc.text('Orçamento', pageW - margem, y0, { align: 'right' });
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -10990,6 +10983,29 @@ function logoClienteFlatHeader() {
     leitor.onerror = reject;
     leitor.readAsDataURL(blob);
   })).then(pronto).catch(() => null);
+}
+
+// pedido do usuário: "do lado do logo precisa ter os dados da empresa usuária do sistema. O nome
+// da empresa precisa está em destaque em negrito e um pouco maior que os demais dados" — cabeçalho
+// compartilhado entre os PDFs do perfil Refrigeração (O.S., Orçamento, Calculadora Blindada):
+// logo à esquerda (quando a empresa configurou uma) e, ao lado dela, o nome em negrito/maior e,
+// numa segunda linha menor, WhatsApp/telefone + e-mail. Sem logo configurada, o nome ocupa o
+// lugar dela (mesmo x), mantendo o destaque. `extra` é um dado a mais específico de cada PDF
+// (ex.: CNPJ/CPF da Calculadora Blindada) que entra na mesma segunda linha.
+function desenharCabecalhoEmpresaPdf(doc, logoCliente, x, y0, extra) {
+  const dadosX = logoCliente ? x + 78 : x;
+  if (logoCliente) doc.addImage(logoCliente, 'PNG', x, y0 - 8, 68, 28);
+  doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+  doc.text(limparPdf(empresaNome()), dadosX, y0 + 2);
+  const linha2 = [
+    (empresaWhatsapp() || empresaTelefone()) && (empresaWhatsapp() ? `WhatsApp: ${empresaWhatsapp()}` : `Tel: ${empresaTelefone()}`),
+    empresaEmails()[0],
+    extra,
+  ].filter(Boolean).join('  ·  ');
+  if (linha2) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(linha2), dadosX, y0 + 15);
+  }
 }
 
 // a própria logo da Nexor Connect (/logo.png, sempre a mesma — ver ícone do login em index.html),
