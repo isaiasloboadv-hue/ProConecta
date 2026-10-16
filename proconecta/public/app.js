@@ -3355,14 +3355,28 @@ async function carregarGradeMesAgendaRef() {
   while (celulas.length % 7 !== 0) { celulas.push({ numero: proximoContador++, foraDoMes: true }); }
   alvo.innerHTML = celulas.map((c) => celulaMesAgendaRef(c)).join('');
 }
+// pedido do usuário (referência: app concorrente iClima): a ocupação do dia é uma BOLINHA colorida
+// embaixo do "X/Y", igual a legenda abaixo do calendário — não o próprio número colorido. A
+// bolinha só aparece quando já tem pelo menos 1 agendamento (dia zerado não precisa de selo).
+function corOcupacaoAgendaRef(agendados, total) {
+  const pct = total ? agendados / total : 0;
+  if (pct >= 1) return 'var(--blue)';
+  if (pct > 0.8) return 'var(--red,#B3453A)';
+  if (pct >= 0.5) return 'var(--amber,#B45309)';
+  return 'var(--green,#1E8A4C)';
+}
 function celulaMesAgendaRef(c) {
   if (c.foraDoMes) return `<div style="aspect-ratio:1; display:flex; align-items:center; justify-content:center; color:var(--line); font-size:13px;">${c.numero}</div>`;
   const estiloFundo = c.hoje ? 'background:var(--blue); color:#fff;' : 'background:var(--gray-50,#F4F6FA); color:var(--ink);';
   let rodape = '';
   if (c.resumo) {
-    const pct = c.resumo.total ? c.resumo.agendados / c.resumo.total : 0;
-    const cor = pct >= 1 ? 'var(--blue)' : pct > 0.8 ? 'var(--red,#B3453A)' : pct >= 0.5 ? 'var(--amber,#B45309)' : 'var(--green,#1E8A4C)';
-    rodape = `<div style="font-size:11px; font-weight:600; ${c.hoje ? 'color:#fff;' : `color:${cor};`}">${c.resumo.agendados}/${c.resumo.total}</div>`;
+    const bolinha = c.resumo.agendados > 0
+      ? `<span style="display:inline-block; width:6px; height:6px; border-radius:50%; margin-top:3px; background:${corOcupacaoAgendaRef(c.resumo.agendados, c.resumo.total)};"></span>`
+      : '';
+    rodape = `<div style="display:flex; flex-direction:column; align-items:center;">
+      <div style="font-size:11px; font-weight:600; ${c.hoje ? 'color:#fff;' : 'color:var(--ink-soft);'}">${c.resumo.agendados}/${c.resumo.total}</div>
+      ${bolinha}
+    </div>`;
   }
   return `<div style="aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:10px; cursor:pointer; ${estiloFundo}" onclick="abrirDiaAgendaRef('${c.dataIso}')">
     <div style="font-weight:700; font-size:14px;">${c.numero}</div>
