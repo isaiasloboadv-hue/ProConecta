@@ -353,6 +353,15 @@ function seed() {
     // detalhe, não obrigatória na criação) e o status vira Aprovado quando o CLIENTE assina pelo
     // link público, não quando o técnico cria.
     os_refrigeracao_orcamentos: [],
+    // Agenda do mesmo perfil (atalho #4) — uma config de disponibilidade POR TÉCNICO (dias de
+    // atendimento, horário, pausa, duração do atendimento, máx por dia, datas bloqueadas — ver
+    // POST/PUT /api/os-refrigeracao-agenda/config em server.js) e os agendamentos propriamente
+    // ditos, feitos manualmente pelo técnico/administrador dentro dos horários livres gerados a
+    // partir dessa config (ver gerarSlotsAgendaRefrigeracao). Diferente da O.S./Orçamento, não tem
+    // cadastro de cliente vinculado — o agendamento guarda nome/telefone/endereço direto (mesmo
+    // padrão do "Novo Agendamento Manual" do app de referência iClima).
+    os_refrigeracao_agenda_config: [],
+    os_refrigeracao_agendamentos: [],
     // "versões" = pacotes prontos de módulos, escolhidos ao cadastrar uma empresa (ver
     // sincronizarEmpresaPadrao) — depois disso, módulo avulso pode ser ligado/desligado por
     // empresa independente da versão original (empresa.modulos_ativos).
@@ -362,7 +371,7 @@ function seed() {
     versoes: [{ id: 1, nome: 'Manutenção', ordem: 1, modulos_proprios: MODULOS_VERSAO_MANUTENCAO, modulos: MODULOS_VERSAO_MANUTENCAO, preco_mensal: null }],
     // empresas começa em 2: o id 1 é sempre a empresa dona da instalação (ver sincronizarEmpresaPadrao),
     // carimbado direto, nunca através de nextId — a plataforma só usa esse contador a partir da 2ª.
-    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, versoes: 2, empresas: 2 },
+    _seq: { usuarios: 1, clientes: 1, equipamentos: 1, agenda: 1, visitas: 1, registros: 1, chamados: 1, relatorios_manutencao: 1, mensagens_internas: 1, solicitacoes_rh: 1, feriados: 1, escala_folgas: 1, prestacoes_contas: 1, despesas_justificadas: 1, leads: 1, oportunidades: 1, propostas: 1, fmea_componentes: 1, fmea_modos_falha: 1, fmea_causas: 1, fmea_efeitos: 1, setores: 1, filiais: 1, areas: 1, vistorias: 1, vistoria_itens: 1, apoios: 1, pecas_catalogo: 1, solicitacoes_peca: 1, pedidos_compra: 1, pedido_itens: 1, estoque_central: 1, estoque_loja: 1, transferencias: 1, avisos: 1, mensagens_canal: 1, rascunhos: 1, atividades_diarias: 1, os_refrigeracao_clientes: 1, os_refrigeracao: 1, os_refrigeracao_orcamentos: 1, os_refrigeracao_agenda_config: 1, os_refrigeracao_agendamentos: 1, versoes: 2, empresas: 2 },
   };
 }
 
@@ -1164,6 +1173,12 @@ function migrar(data) {
   if (!Array.isArray(data.os_refrigeracao_orcamentos)) data.os_refrigeracao_orcamentos = [];
   if (!data._seq.os_refrigeracao_orcamentos) data._seq.os_refrigeracao_orcamentos = 1;
   for (const o of data.os_refrigeracao_orcamentos) { if (o.status === undefined) o.status = 'rascunho'; }
+  // Agenda do mesmo perfil (atalho #4) — config de disponibilidade por técnico + agendamentos.
+  if (!Array.isArray(data.os_refrigeracao_agenda_config)) data.os_refrigeracao_agenda_config = [];
+  if (!data._seq.os_refrigeracao_agenda_config) data._seq.os_refrigeracao_agenda_config = 1;
+  if (!Array.isArray(data.os_refrigeracao_agendamentos)) data.os_refrigeracao_agendamentos = [];
+  if (!data._seq.os_refrigeracao_agendamentos) data._seq.os_refrigeracao_agendamentos = 1;
+  for (const a of data.os_refrigeracao_agendamentos) { if (a.status === undefined) a.status = 'agendado'; }
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }

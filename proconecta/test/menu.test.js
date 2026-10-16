@@ -150,6 +150,29 @@ test('administrador e suporte só veem "Orçamentos" (Refrigeração) quando a e
   assert.ok(!Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key).includes('orcamentos-refrigeracao'));
 });
 
+// pedido do usuário (referência: app concorrente iClima): 4º atalho do perfil Refrigeração —
+// "Agenda" (ver os-refrigeracao-agenda.e2e.test.js em server.js). Mesmo rótulo do item núcleo
+// "agenda"/"Agenda geral" — por isso o item núcleo usa `ocultoNoPerfil: 'refrigeracao'` e some
+// pra não duplicar "Agenda" no menu com dois conteúdos diferentes (ver navDoUsuario).
+test('administrador e suporte só veem "Agenda" (Refrigeração) quando a empresa é do perfil refrigeração, e o "Agenda" do núcleo some nesse perfil', () => {
+  const ctx = carregarLogicaDeMenu();
+  ctx.window._empresa = { perfil: 'refrigeracao' };
+  ctx.USER = { papel: 'suporte', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  let chaves = Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key);
+  assert.ok(chaves.includes('agenda-refrigeracao'));
+  assert.ok(!chaves.includes('agenda')); // núcleo escondido nesse perfil
+  ctx.USER = { papel: 'administrador', acesso_total: true, modulos_ativos: ['os_chamados'] };
+  chaves = Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key);
+  assert.ok(chaves.includes('agenda-refrigeracao'));
+  assert.ok(!chaves.includes('agenda'));
+  // empresa de outro perfil: some o item do perfil, volta o item núcleo (continua tendo o módulo
+  // os_chamados contratado)
+  ctx.window._empresa = { perfil: 'autonomo' };
+  chaves = Array.from(ctx.navDoUsuario.call(ctx), (n) => n.key);
+  assert.ok(!chaves.includes('agenda-refrigeracao'));
+  assert.ok(chaves.includes('agenda'));
+});
+
 // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas"): grupo com
 // children (mesmo padrão de Biblioteca/Comercial) — gate fica só no node pai, os filhos
 // (ex.: "gerador-etiquetas") não têm `perfil`/`modulo` próprio, igual os outros grupos com filhos.

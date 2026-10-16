@@ -5141,6 +5141,233 @@ rota('POST', /^\/api\/os-refrigeracao-orcamentos-assinar\/([a-f0-9]+)$/, async (
   enviarJSON(res, 200, { orcamento: await orcamentoRefrigeracaoResumoPublico(data, orc) });
 });
 
+// ---------- Agenda — perfil "Refrigeração e Climatização" ----------
+// pedido do usuário (referência: app concorrente iClima, 4º atalho): uma configuração de
+// disponibilidade POR TÉCNICO (dias de atendimento, horário de trabalho, pausa, duração do
+// atendimento, máx. por dia, datas bloqueadas) gera a "grade" de horários do dia; o agendamento
+// manual só pode ser criado num horário que a grade devolve como disponível. Diferente da
+// O.S./Orçamento, não usa o cadastro os_refrigeracao_clientes — o agendamento guarda nome/
+// telefone/endereço direto (mesmo padrão do "Novo Agendamento Manual" do app de referência).
+// Técnico (suporte) só mexe na própria agenda; administrador vê/agenda em nome de qualquer
+// técnico da empresa (rótulo "Agenda geral" no menu).
+const AGENDA_REF_DIAS_VALIDOS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+const AGENDA_REF_DURACOES_VALIDAS = [30, 45, 60, 90, 120, 180];
+function diaSemanaChaveAgendaRef(dataIso) {
+  // meio-dia fixo evita o fuso horário local empurrar a data pro dia anterior/seguinte e bater o
+  // dia da semana errado perto da meia-noite.
+  return AGENDA_REF_DIAS_VALIDOS[new Date(dataIso + 'T12:00:00').getDay()];
+}
+function paraMinutosAgendaRef(hhmm) {
+  const [h, m] = String(hhmm || '00:00').split(':').map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+function paraHorarioAgendaRef(minutos) {
+  const h = Math.floor(minutos / 60), m = minutos % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+// grade "crua" do dia (todo slot gerado pela duração, do início ao fim, marcando os que caem
+// dentro da pausa) — espelha o "Preview do dia" da tela de configuração, que mostra a grade
+// inteira (inclusive o slot da pausa, só marcado) independente do máx. por dia.
+function gerarGradeAgendaRefrigeracao(config, dataIso) {
+  if (!config) return [];
+  if (!Array.isArray(config.dias_semana) || !config.dias_semana.includes(diaSemanaChaveAgendaRef(dataIso))) return [];
+  if (Array.isArray(config.datas_bloqueadas) && config.datas_bloqueadas.includes(dataIso)) return [];
+  const duracao = AGENDA_REF_DURACOES_VALIDAS.includes(Number(config.duracao_min)) ? Number(config.duracao_min) : 60;
+  const inicio = paraMinutosAgendaRef(config.hora_inicio), fim = paraMinutosAgendaRef(config.hora_fim);
+  const pausaInicio = config.pausa_ativa ? paraMinutosAgendaRef(config.pausa_inicio) : null;
+  const pausaFim = config.pausa_ativa ? paraMinutosAgendaRef(config.pausa_fim) : null;
+  const grade = [];
+  for (let cursor = inicio; cursor + duracao <= fim; cursor += duracao) {
+    const pausa = pausaInicio !== null && cursor < pausaFim && cursor + duracao > pausaInicio;
+    grade.push({ hora: paraHorarioAgendaRef(cursor), pausa });
+  }
+  return grade;
+}
+// grade "real" de agendamento: aplica o máx. por dia (só nos slots que não são pausa, na ordem) e
+// marca os que já têm agendamento (status != cancelado) — é o que a tela de Novo Agendamento usa
+// pra oferecer só horário de verdade disponível.
+function slotsAgendaRefrigeracao(data, tecnicoId, empresaId, dataIso) {
+  const config = data.os_refrigeracao_agenda_config.find((c) => c.tecnico_id === tecnicoId && c.empresa_id === empresaId);
+  if (!config) return { config_existe: false, slots: [] };
+  const grade = gerarGradeAgendaRefrigeracao(config, dataIso);
+  const maxPorDia = Number(config.max_por_dia) > 0 ? Number(config.max_por_dia) : grade.length;
+  const ocupados = new Set(
+    data.os_refrigeracao_agendamentos
+      .filter((a) => a.tecnico_id === tecnicoId && a.empresa_id === empresaId && a.data === dataIso && a.status !== 'cancelado')
+      .map((a) => a.hora)
+  );
+  let contador = 0;
+  const slots = grade.map((s) => {
+    if (s.pausa) return { hora: s.hora, pausa: true, ocupado: false, disponivel: false };
+    contador += 1;
+    const ocupado = ocupados.has(s.hora);
+    return { hora: s.hora, pausa: false, ocupado, disponivel: !ocupado && contador <= maxPorDia };
+  });
+  return { config_existe: true, slots };
+}
+
+function validarConfigAgendaRefrigeracao(body) {
+  if (!Array.isArray(body.dias_semana) || !body.dias_semana.some((d) => AGENDA_REF_DIAS_VALIDOS.includes(d))) return 'Escolha ao menos um dia de atendimento.';
+  if (!/^\d{2}:\d{2}$/.test(body.hora_inicio || '') || !/^\d{2}:\d{2}$/.test(body.hora_fim || '')) return 'Informe o horário de início e fim.';
+  if (paraMinutosAgendaRef(body.hora_inicio) >= paraMinutosAgendaRef(body.hora_fim)) return 'O horário de início precisa ser antes do horário de fim.';
+  if (!AGENDA_REF_DURACOES_VALIDAS.includes(Number(body.duracao_min))) return 'Escolha uma duração de atendimento válida.';
+  if (body.pausa_ativa && (!/^\d{2}:\d{2}$/.test(body.pausa_inicio || '') || !/^\d{2}:\d{2}$/.test(body.pausa_fim || ''))) return 'Informe o início e o fim da pausa.';
+  return null;
+}
+// resolve de quem é a agenda sendo pedida/editada: o próprio usuário por padrão, ou — só pro
+// administrador — outro técnico da empresa via `tecnico_id`. Devolve null (e já respondeu o
+// erro) quando o chamador deve parar ali.
+function resolverTecnicoIdAgendaRef(res, user, data, tecnicoIdPedido) {
+  if (!tecnicoIdPedido) return user.id;
+  const id = Number(tecnicoIdPedido);
+  if (id === user.id) return id;
+  if (!exigirPapel(user, ['administrador'])) { enviarJSON(res, 403, { erro: 'Só o administrador mexe na agenda de outro técnico.' }); return null; }
+  if (!tenant.buscar(data, 'usuarios', id, user.empresa_id)) { enviarJSON(res, 404, { erro: 'Técnico não encontrado.' }); return null; }
+  return id;
+}
+
+// GET /api/os-refrigeracao-agenda/config?tecnico_id=
+rota('GET', /^\/api\/os-refrigeracao-agenda\/config$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  const tecnicoId = resolverTecnicoIdAgendaRef(res, user, data, query.tecnico_id);
+  if (tecnicoId === null) return;
+  const config = data.os_refrigeracao_agenda_config.find((c) => c.tecnico_id === tecnicoId && c.empresa_id === user.empresa_id) || null;
+  enviarJSON(res, 200, { config });
+});
+
+// PUT /api/os-refrigeracao-agenda/config — cria ou atualiza (upsert), uma por técnico
+rota('PUT', /^\/api\/os-refrigeracao-agenda\/config$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const tecnicoId = resolverTecnicoIdAgendaRef(res, user, data, body.tecnico_id);
+  if (tecnicoId === null) return;
+  const erro = validarConfigAgendaRefrigeracao(body);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const camposConfig = {
+    dias_semana: body.dias_semana.filter((d) => AGENDA_REF_DIAS_VALIDOS.includes(d)),
+    hora_inicio: body.hora_inicio, hora_fim: body.hora_fim,
+    pausa_ativa: !!body.pausa_ativa,
+    pausa_inicio: body.pausa_inicio || '12:00', pausa_fim: body.pausa_fim || '13:00',
+    duracao_min: Number(body.duracao_min),
+    max_por_dia: Number(body.max_por_dia) > 0 ? Number(body.max_por_dia) : 8,
+    datas_bloqueadas: Array.isArray(body.datas_bloqueadas) ? body.datas_bloqueadas.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)) : [],
+  };
+  let config = data.os_refrigeracao_agenda_config.find((c) => c.tecnico_id === tecnicoId && c.empresa_id === user.empresa_id);
+  if (config) Object.assign(config, camposConfig);
+  else config = tenant.criar(data, 'os_refrigeracao_agenda_config', user.empresa_id, { tecnico_id: tecnicoId, ...camposConfig });
+  db.save(data);
+  enviarJSON(res, 200, { config });
+});
+
+// GET /api/os-refrigeracao-agenda/slots?data=YYYY-MM-DD&tecnico_id= — grade de horários do dia
+rota('GET', /^\/api\/os-refrigeracao-agenda\/slots$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(query.data || '')) return enviarJSON(res, 400, { erro: 'Informe a data (AAAA-MM-DD).' });
+  const tecnicoId = resolverTecnicoIdAgendaRef(res, user, data, query.tecnico_id);
+  if (tecnicoId === null) return;
+  enviarJSON(res, 200, slotsAgendaRefrigeracao(data, tecnicoId, user.empresa_id, query.data));
+});
+
+// ---- agendamentos ----
+const AGENDA_REF_TIPOS_SERVICO_VALIDOS = ['instalacao', 'manutencao_preventiva', 'manutencao_corretiva', 'higienizacao', 'desinstalacao', 'visita_tecnica', 'orcamento', 'outro'];
+const AGENDA_REF_STATUS_VALIDOS = ['agendado', 'concluido', 'cancelado'];
+function camposAgendamentoRefrigeracao(body) {
+  return {
+    cliente_nome: String(body.cliente_nome || '').trim(),
+    telefone: String(body.telefone || '').trim(),
+    endereco: body.endereco || '',
+    tipo_servico: AGENDA_REF_TIPOS_SERVICO_VALIDOS.includes(body.tipo_servico) ? body.tipo_servico : 'outro',
+    data: body.data || '', hora: body.hora || '',
+    valor_servico: Number(body.valor_servico) || 0,
+    observacoes: body.observacoes || '',
+  };
+}
+function validarAgendamentoRefrigeracao(campos) {
+  if (!campos.cliente_nome) return 'Informe o nome do cliente.';
+  if (!campos.telefone) return 'Informe o telefone do cliente.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(campos.data)) return 'Informe uma data válida.';
+  if (!/^\d{2}:\d{2}$/.test(campos.hora)) return 'Escolha um horário.';
+  return null;
+}
+
+// GET /api/os-refrigeracao-agendamentos?data=&tecnico_id=&status=
+rota('GET', /^\/api\/os-refrigeracao-agendamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const { query } = url.parse(req.url, true);
+  let lista = tenant.listar(data, 'os_refrigeracao_agendamentos', user.empresa_id);
+  // suporte só vê os próprios agendamentos; administrador vê de todos (e pode filtrar por técnico).
+  if (!exigirPapel(user, ['administrador'])) lista = lista.filter((a) => a.tecnico_id === user.id);
+  else if (query.tecnico_id) lista = lista.filter((a) => a.tecnico_id === Number(query.tecnico_id));
+  if (query.data) lista = lista.filter((a) => a.data === query.data);
+  if (query.status) lista = lista.filter((a) => a.status === query.status);
+  lista = [...lista].sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
+  enviarJSON(res, 200, { agendamentos: lista });
+});
+
+// POST /api/os-refrigeracao-agendamentos — só cria num horário que a grade (ver slotsAgendaRefrigeracao
+// acima) devolve como disponível: dentro do dia/horário configurado, fora da pausa, dentro do
+// máx. por dia e ainda não ocupado.
+rota('POST', /^\/api\/os-refrigeracao-agendamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const tecnicoId = resolverTecnicoIdAgendaRef(res, user, data, body.tecnico_id);
+  if (tecnicoId === null) return;
+  const tecnico = tenant.buscar(data, 'usuarios', tecnicoId, user.empresa_id);
+  const campos = camposAgendamentoRefrigeracao(body);
+  const erro = validarAgendamentoRefrigeracao(campos);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const { config_existe, slots } = slotsAgendaRefrigeracao(data, tecnicoId, user.empresa_id, campos.data);
+  if (!config_existe) return enviarJSON(res, 400, { erro: 'Configure a disponibilidade do técnico antes de agendar.' });
+  const slotEscolhido = slots.find((s) => s.hora === campos.hora);
+  if (!slotEscolhido || !slotEscolhido.disponivel) return enviarJSON(res, 400, { erro: 'Esse horário não está disponível.' });
+  const agendamento = tenant.criar(data, 'os_refrigeracao_agendamentos', user.empresa_id, {
+    ...campos, tecnico_id: tecnicoId, tecnico_nome: tecnico ? tecnico.nome : '',
+    autor_id: user.id, status: 'agendado', criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { agendamento });
+});
+
+// PUT /api/os-refrigeracao-agendamentos/:id/status — menu "⋮" (Concluído/Cancelado)
+rota('PUT', /^\/api\/os-refrigeracao-agendamentos\/(\d+)\/status$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const agendamento = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!agendamento) return enviarJSON(res, 404, { erro: 'Agendamento não encontrado.' });
+  if (agendamento.tecnico_id !== user.id && !exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso a este agendamento.' });
+  const body = await lerCorpo(req);
+  if (!AGENDA_REF_STATUS_VALIDOS.includes(body.status)) return enviarJSON(res, 400, { erro: 'Status inválido.' });
+  agendamento.status = body.status;
+  db.save(data);
+  enviarJSON(res, 200, { agendamento });
+});
+
+// DELETE /api/os-refrigeracao-agendamentos/:id
+rota('DELETE', /^\/api\/os-refrigeracao-agendamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const agendamento = tenant.buscar(data, 'os_refrigeracao_agendamentos', Number(m[1]), user.empresa_id);
+  if (!agendamento) return enviarJSON(res, 404, { erro: 'Agendamento não encontrado.' });
+  if (agendamento.tecnico_id !== user.id && !exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Sem acesso a este agendamento.' });
+  data.os_refrigeracao_agendamentos = data.os_refrigeracao_agendamentos.filter((a) => a.id !== agendamento.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
 // GET /api/clientes/:id/historico — Histórico Unificado (CRM nativo, passo 4): agrega tudo que já
 // existe espalhado (agenda, relatórios, chamados, equipamentos, oportunidades, propostas) numa
 // timeline só, na própria tela de Clientes. relatorios_manutencao não tem cliente_id nenhum — só

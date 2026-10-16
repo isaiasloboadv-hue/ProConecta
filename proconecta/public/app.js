@@ -710,6 +710,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
+    'agenda-refrigeracao': 'Agenda',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda',
     'minha-loja': 'Minha loja',
@@ -733,6 +734,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'guia-diagnostico-rapido': 'Guia de Diagnóstico Rápido',
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
+    'agenda-refrigeracao': 'Agenda geral',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda geral',
     'chat-admin': 'Chat',
@@ -796,7 +798,14 @@ const NAV = {
     { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
       { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
     ]},
-    { key: 'agenda', modulo: 'os_chamados', label: 'Agenda', page: 'agenda' },
+    // pedido do usuário (referência: app concorrente iClima): quarto atalho do perfil Refrigeração
+    // — Agenda, com configuração de disponibilidade própria por técnico (dias/horário/pausa/
+    // duração/máx. por dia/datas bloqueadas) e agendamento manual dentro da grade gerada por ela
+    // (ver /api/os-refrigeracao-agenda* em server.js). Mesmo rótulo "Agenda" do núcleo logo abaixo
+    // — por isso o item núcleo usa `ocultoNoPerfil: 'refrigeracao'` (ver navDoUsuario), senão o
+    // menu mostraria "Agenda" duas vezes com conteúdos completamente diferentes.
+    { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda', page: 'agenda-refrigeracao-lista' },
+    { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda', page: 'agenda' },
     // versão Restaurantes/rede multiunidade — Fase 2 (Operação): O.S. de loja (SLA, vistoria,
     // apoio) tem tela própria, separada da Agenda de O.S. de cliente externo.
     { key: 'minha-loja', modulo: 'filiais', label: 'Minha loja', page: 'minha-loja-tecnico' },
@@ -864,7 +873,8 @@ const NAV = {
     { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', children: [
       { key: 'gerador-etiquetas', label: 'Gerador de Etiquetas', page: 'etiquetas-gerador' },
     ]},
-    { key: 'agenda', modulo: 'os_chamados', label: 'Agenda geral', page: 'agenda' },
+    { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda-refrigeracao-lista' },
+    { key: 'agenda', modulo: 'os_chamados', ocultoNoPerfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda' },
     // "Chat" unifica o que antes eram dois itens separados (Atendimentos e Solicitação de
     // Atendimento) — os dois vêm do mesmo chat por trás (ver renderChatAdmin).
     { key: 'chat-admin', modulo: 'os_chamados', label: 'Chat', page: 'chat-admin' },
@@ -1106,6 +1116,7 @@ const ICONE_MENU = {
   'guia-diagnostico-rapido': '🧊',
   'os-refrigeracao': '🧾',
   'orcamentos-refrigeracao': '📋',
+  'agenda-refrigeracao': '📅',
   'ferramentas': '🧰',
 };
 
@@ -3129,6 +3140,482 @@ async function enviarOrcamentoRefImagem(id) {
   } catch (e) { alert('Erro ao preparar a imagem: ' + e.message); }
 }
 
+// ===== Agenda (perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima): quarto atalho — configuração de
+// disponibilidade por técnico (dias de atendimento, horário, pausa, duração do atendimento, máx.
+// por dia, datas bloqueadas) gera a grade de horários do dia; o agendamento manual só pode ser
+// criado num horário que a grade (ver /api/os-refrigeracao-agenda/slots) devolve como disponível.
+// Diferente da O.S./Orçamento, não usa cadastro de cliente (os_refrigeracao_clientes) — o
+// agendamento guarda nome/telefone/endereço direto, mesmo padrão do "Novo Agendamento Manual" do
+// app de referência. Técnico (suporte) só mexe na própria agenda; administrador ("Agenda geral")
+// escolhe o técnico num seletor e agenda em nome dele.
+const AGENDA_REF_DIAS = [
+  { chave: 'dom', label: 'Dom' }, { chave: 'seg', label: 'Seg' }, { chave: 'ter', label: 'Ter' },
+  { chave: 'qua', label: 'Qua' }, { chave: 'qui', label: 'Qui' }, { chave: 'sex', label: 'Sex' }, { chave: 'sab', label: 'Sáb' },
+];
+const AGENDA_REF_DURACOES = [
+  { valor: 30, label: '30 minutos' }, { valor: 45, label: '45 minutos' }, { valor: 60, label: '1 hora' },
+  { valor: 90, label: '1h30' }, { valor: 120, label: '2 horas' }, { valor: 180, label: '3 horas' },
+];
+const AGENDA_REF_TIPOS_SERVICO = [
+  { chave: 'instalacao', label: 'Instalação' },
+  { chave: 'manutencao_preventiva', label: 'Manutenção Preventiva' },
+  { chave: 'manutencao_corretiva', label: 'Manutenção Corretiva' },
+  { chave: 'higienizacao', label: 'Higienização' },
+  { chave: 'desinstalacao', label: 'Desinstalação' },
+  { chave: 'visita_tecnica', label: 'Visita Técnica' },
+  { chave: 'orcamento', label: 'Orçamento' },
+  { chave: 'outro', label: 'Outro' },
+];
+const AGENDA_REF_TIPO_SERVICO_LABEL = Object.fromEntries(AGENDA_REF_TIPOS_SERVICO.map((t) => [t.chave, t.label]));
+const AGENDA_REF_STATUS_LABEL = { agendado: 'Agendado', concluido: 'Concluído', cancelado: 'Cancelado' };
+const AGENDA_REF_STATUS_ESTILO = {
+  agendado: 'background:var(--blue-pale); color:var(--blue);',
+  concluido: 'background:var(--green-pale, #DEF7EC); color:var(--green);',
+  cancelado: 'background:var(--red-pale, #FBE1E1); color:var(--red, #B3453A);',
+};
+function agendaRefStatusBadgeHtml(status) {
+  return `<span class="tag" style="${AGENDA_REF_STATUS_ESTILO[status] || AGENDA_REF_STATUS_ESTILO.agendado}">${AGENDA_REF_STATUS_LABEL[status] || 'Agendado'}</span>`;
+}
+
+function hojeIsoAgendaRef() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function fmtDataIsoAgendaRef(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+function diaSemanaLabelAgendaRef(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'][d.getDay()];
+}
+function somarDiasIsoAgendaRef(iso, dias) {
+  const d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() + dias);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ---- tela principal: seletor de técnico (admin), navegador de dia, grade de horários ----
+async function renderAgendaRefrigeracaoLista() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Agenda (Refrigeração) é exclusiva de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._agendaRefData) window._agendaRefData = hojeIsoAgendaRef();
+  if (!window._agendaRefTecnicoId) window._agendaRefTecnicoId = USER.id;
+  main.innerHTML = '<div class="empty">Carregando...</div>';
+  if (USER.papel === 'administrador' && !window._agendaRefTecnicosCache) {
+    try {
+      const { usuarios } = await api('/api/usuarios');
+      window._agendaRefTecnicosCache = usuarios.filter((u) => ['administrador', 'suporte'].includes(u.papel));
+    } catch (e) { window._agendaRefTecnicosCache = []; }
+  }
+  await carregarAgendaRefrigeracaoLista();
+}
+function trocarTecnicoAgendaRef(id) {
+  window._agendaRefTecnicoId = Number(id);
+  carregarAgendaRefrigeracaoLista();
+}
+async function carregarAgendaRefrigeracaoLista() {
+  const main = document.getElementById('main');
+  const tecnicoId = window._agendaRefTecnicoId;
+  const params = new URLSearchParams();
+  if (USER.papel === 'administrador' && tecnicoId !== USER.id) params.set('tecnico_id', tecnicoId);
+  let config = null;
+  try {
+    const resp = await api('/api/os-refrigeracao-agenda/config' + (params.toString() ? '?' + params.toString() : ''));
+    config = resp.config;
+  } catch (e) { main.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  window._agendaRefConfig = config;
+
+  const seletorTecnico = USER.papel === 'administrador' ? `
+    <div class="field" style="max-width:280px;">
+      <label>Técnico</label>
+      <select onchange="trocarTecnicoAgendaRef(this.value)">
+        ${(window._agendaRefTecnicosCache || []).map((u) => `<option value="${u.id}" ${Number(tecnicoId) === u.id ? 'selected' : ''}>${esc(u.nome)}${u.id === USER.id ? ' (eu)' : ''}</option>`).join('')}
+      </select>
+    </div>` : '';
+
+  const cabecalho = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:10px;">
+      <h1>${USER.papel === 'administrador' ? 'Agenda geral' : 'Agenda'}</h1>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-outline-sm" onclick="abrirModalConfigAgendaRef()">⚙️ Config</button>
+        <button class="btn btn-primary btn-sm" onclick="abrirModalNovoAgendamentoRef()">+ Novo</button>
+      </div>
+    </div>
+    ${seletorTecnico}`;
+
+  if (!config) {
+    main.innerHTML = cabecalho + `
+      <div class="panel" style="text-align:center; padding:40px 20px;">
+        <div style="font-size:40px;">⚙️</div>
+        <h3 style="margin-top:10px;">Configure sua agenda</h3>
+        <p style="color:var(--ink-soft);">Defina seus dias de trabalho, horários e duração dos atendimentos</p>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="abrirModalConfigAgendaRef()">⚙️ Configurar agora</button>
+      </div>`;
+    return;
+  }
+
+  main.innerHTML = cabecalho + `
+    <div class="panel" style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <button class="btn-outline-sm" onclick="navegarDiaAgendaRef(-1)">← Anterior</button>
+      <div id="agenda-ref-data-label" style="text-align:center;">${htmlDataLabelAgendaRef()}</div>
+      <button class="btn-outline-sm" onclick="navegarDiaAgendaRef(1)">Próximo →</button>
+    </div>
+    <div style="text-align:center; margin:4px 0 12px;"><button class="btn-outline-sm" style="padding:4px 14px; font-size:12px;" onclick="irParaHojeAgendaRef()">Hoje</button></div>
+    <div id="agenda-ref-dia-lista"><div class="empty">Carregando...</div></div>`;
+
+  await carregarSlotsAgendaRef();
+}
+function htmlDataLabelAgendaRef() {
+  return `<strong>${fmtDataIsoAgendaRef(window._agendaRefData)}</strong><div style="font-size:12px; color:var(--ink-soft);">${diaSemanaLabelAgendaRef(window._agendaRefData)}</div>`;
+}
+function navegarDiaAgendaRef(delta) {
+  window._agendaRefData = somarDiasIsoAgendaRef(window._agendaRefData, delta);
+  atualizarCabecalhoDataAgendaRef();
+}
+function irParaHojeAgendaRef() {
+  window._agendaRefData = hojeIsoAgendaRef();
+  atualizarCabecalhoDataAgendaRef();
+}
+function atualizarCabecalhoDataAgendaRef() {
+  const label = document.getElementById('agenda-ref-data-label');
+  if (label) label.innerHTML = htmlDataLabelAgendaRef();
+  const lista = document.getElementById('agenda-ref-dia-lista');
+  if (lista) lista.innerHTML = '<div class="empty">Carregando...</div>';
+  carregarSlotsAgendaRef();
+}
+async function carregarSlotsAgendaRef() {
+  const alvo = document.getElementById('agenda-ref-dia-lista');
+  if (!alvo) return;
+  const tecnicoId = window._agendaRefTecnicoId;
+  const params = new URLSearchParams({ data: window._agendaRefData });
+  if (USER.papel === 'administrador' && tecnicoId !== USER.id) params.set('tecnico_id', tecnicoId);
+  let slots, agendamentos;
+  try {
+    [{ slots }, { agendamentos }] = await Promise.all([
+      api('/api/os-refrigeracao-agenda/slots?' + params.toString()),
+      api('/api/os-refrigeracao-agendamentos?' + params.toString()),
+    ]);
+  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  window._agendaRefAgendamentosDoDia = agendamentos;
+  if (!slots.length) { alvo.innerHTML = '<div class="empty">Sem atendimento configurado para este dia.</div>'; return; }
+  const porHora = {};
+  agendamentos.forEach((a) => { if (a.status !== 'cancelado') porHora[a.hora] = a; });
+  alvo.innerHTML = slots.map((s) => {
+    if (s.pausa) return linhaSlotAgendaRef(s.hora, '<span style="color:var(--ink-soft);">☕ Pausa</span>', null);
+    const ag = porHora[s.hora];
+    if (ag) return linhaAgendamentoAgendaRef(ag);
+    if (s.disponivel) return linhaSlotAgendaRef(s.hora, '<span style="color:var(--green);">Disponível</span>', `abrirModalNovoAgendamentoRef('${s.hora}')`);
+    return linhaSlotAgendaRef(s.hora, '<span style="color:var(--ink-soft);">Indisponível</span>', null);
+  }).join('');
+}
+function linhaSlotAgendaRef(hora, conteudoHtml, onclick) {
+  return `<div class="panel" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; margin-bottom:6px; ${onclick ? 'cursor:pointer;' : ''}" ${onclick ? `onclick="${onclick}"` : ''}>
+    <strong style="width:60px;">${esc(hora)}</strong>
+    <div style="flex:1; text-align:right;">${conteudoHtml}</div>
+  </div>`;
+}
+function linhaAgendamentoAgendaRef(a) {
+  return `<div class="panel" style="padding:10px 14px; margin-bottom:6px; cursor:pointer;" onclick="abrirAgendamentoRefDetalhe(${a.id})">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+      <strong style="width:60px;">${esc(a.hora)}</strong>
+      <div style="flex:1;">
+        <div><strong>${esc(a.cliente_nome)}</strong> ${agendaRefStatusBadgeHtml(a.status)}</div>
+        <div style="font-size:12px; color:var(--ink-soft);">${esc(AGENDA_REF_TIPO_SERVICO_LABEL[a.tipo_servico] || 'Outro')}${USER.papel === 'administrador' && a.tecnico_nome ? ' · ' + esc(a.tecnico_nome) : ''}</div>
+      </div>
+      <div style="font-weight:700; white-space:nowrap;">${a.valor_servico ? fmtMoeda(a.valor_servico) : ''}</div>
+    </div>
+  </div>`;
+}
+
+// ---- detalhe/opções do agendamento (reaproveita o modal de ação da O.S., abrirModalOsRefAcao) ----
+function abrirAgendamentoRefDetalhe(id) {
+  const ag = (window._agendaRefAgendamentosDoDia || []).find((a) => a.id === id);
+  if (!ag) return;
+  const corpo = `
+    <div style="margin:-6px 0 14px;">
+      ${osRefLinha('Cliente', esc(ag.cliente_nome))}
+      ${osRefLinha('Telefone', esc(ag.telefone || '—'))}
+      ${ag.endereco ? osRefLinha('Endereço', esc(ag.endereco)) : ''}
+      ${osRefLinha('Serviço', esc(AGENDA_REF_TIPO_SERVICO_LABEL[ag.tipo_servico] || 'Outro'))}
+      ${osRefLinha('Data', fmtDataIsoAgendaRef(ag.data) + ' às ' + esc(ag.hora))}
+      ${ag.valor_servico ? osRefLinha('Valor', fmtMoeda(ag.valor_servico)) : ''}
+      ${ag.observacoes ? `<div style="margin-top:8px;"><strong>Observações</strong><p style="margin:4px 0;">${esc(ag.observacoes)}</p></div>` : ''}
+    </div>` +
+    (ag.status !== 'concluido' ? osRefBotaoAcao('✓ Concluído', null, `alterarStatusAgendamentoRef(${ag.id}, 'concluido')`) : '') +
+    (ag.status !== 'cancelado' ? osRefBotaoAcao('✕ Cancelado', null, `alterarStatusAgendamentoRef(${ag.id}, 'cancelado')`) : '') +
+    (ag.status !== 'agendado' ? osRefBotaoAcao('↩️ Reabrir (Agendado)', null, `alterarStatusAgendamentoRef(${ag.id}, 'agendado')`) : '') +
+    osRefBotaoAcao('🗑️ Excluir', null, `fecharModalOsRefAcao(); excluirAgendamentoRef(${ag.id});`, 'var(--red, #B3453A)');
+  abrirModalOsRefAcao(`<h3>${esc(ag.cliente_nome)} — ${esc(ag.hora)}</h3>`, corpo);
+}
+async function alterarStatusAgendamentoRef(id, status) {
+  try {
+    await api(`/api/os-refrigeracao-agendamentos/${id}/status`, { method: 'PUT', body: { status } });
+    fecharModalOsRefAcao();
+    await carregarSlotsAgendaRef();
+  } catch (e) { alert(e.message); }
+}
+async function excluirAgendamentoRef(id) {
+  const ok = await mostrarConfirmacao('Excluir este agendamento? Essa ação não pode ser desfeita.');
+  if (!ok) return;
+  try {
+    await api('/api/os-refrigeracao-agendamentos/' + id, { method: 'DELETE' });
+    await carregarSlotsAgendaRef();
+  } catch (e) { alert(e.message); }
+}
+
+// ---- modal "Configurar disponibilidade" ----
+function agendaRefConfigFormVazio() {
+  return {
+    dias_semana: ['seg', 'ter', 'qua', 'qui', 'sex'],
+    hora_inicio: '08:00', hora_fim: '18:00',
+    pausa_ativa: true, pausa_inicio: '12:00', pausa_fim: '13:00',
+    duracao_min: 60, max_por_dia: 8,
+    datas_bloqueadas: [],
+  };
+}
+function abrirModalConfigAgendaRef() {
+  const config = window._agendaRefConfig;
+  window._agendaRefConfigForm = config ? {
+    dias_semana: [...(config.dias_semana || [])],
+    hora_inicio: config.hora_inicio, hora_fim: config.hora_fim,
+    pausa_ativa: !!config.pausa_ativa, pausa_inicio: config.pausa_inicio || '12:00', pausa_fim: config.pausa_fim || '13:00',
+    duracao_min: config.duracao_min, max_por_dia: config.max_por_dia,
+    datas_bloqueadas: [...(config.datas_bloqueadas || [])],
+  } : agendaRefConfigFormVazio();
+  let modal = document.getElementById('modal-agenda-ref-config');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-agenda-ref-config';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalConfigAgendaRef(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `<div class="modal-card" style="max-width:520px; max-height:88vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">Configurar disponibilidade</h3>
+      <button class="btn-outline-sm" style="padding:4px 10px;" onclick="fecharModalConfigAgendaRef()">✕</button>
+    </div>
+    <div id="agenda-ref-config-corpo">${desenharCorpoConfigAgendaRef()}</div>
+  </div>`;
+}
+function fecharModalConfigAgendaRef() {
+  const modal = document.getElementById('modal-agenda-ref-config');
+  if (modal) modal.classList.remove('show');
+}
+// preview genérico (não depende de dia da semana/datas bloqueadas) — só pra dar um retrato visual
+// de "como fica a grade com esses horários", mesma lógica de geração do servidor (ver
+// gerarGradeAgendaRefrigeracao), simplificada pro cliente.
+function previewSlotsConfigAgendaRef(f) {
+  const paraMin = (hhmm) => { const [h, m] = String(hhmm || '00:00').split(':').map(Number); return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0); };
+  const duracao = Number(f.duracao_min) || 60;
+  const inicio = paraMin(f.hora_inicio), fim = paraMin(f.hora_fim);
+  const pausaInicio = f.pausa_ativa ? paraMin(f.pausa_inicio) : null;
+  const pausaFim = f.pausa_ativa ? paraMin(f.pausa_fim) : null;
+  const fmt = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+  const slots = [];
+  for (let cursor = inicio; cursor + duracao <= fim; cursor += duracao) {
+    const pausa = pausaInicio !== null && cursor < pausaFim && cursor + duracao > pausaInicio;
+    slots.push({ label: `${fmt(cursor)} - ${fmt(cursor + duracao)}`, pausa });
+  }
+  return slots;
+}
+function desenharCorpoConfigAgendaRef() {
+  const f = window._agendaRefConfigForm;
+  const slots = previewSlotsConfigAgendaRef(f);
+  const naoPausa = slots.filter((s) => !s.pausa).length;
+  const previewHtml = slots.length ? slots.map((s) => `<span class="tag" style="${s.pausa ? 'background:var(--gray-50,#F4F6FA); color:var(--ink-soft);' : 'background:var(--blue-pale); color:var(--blue);'}">${esc(s.label)}${s.pausa ? ' ☕' : ''}</span>`).join('') : '<div class="empty" style="padding:8px 0;">Nenhum horário gerado com essa configuração.</div>';
+  return `
+    <h4 style="margin:14px 0 6px;">Dias de atendimento</h4>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      ${AGENDA_REF_DIAS.map((d) => `<button type="button" class="${f.dias_semana.includes(d.chave) ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" style="padding:6px 14px; border-radius:20px;" onclick="alternarDiaAgendaRef('${d.chave}')">${d.label}</button>`).join('')}
+    </div>
+    <h4 style="margin:16px 0 6px;">Horário de trabalho</h4>
+    <div style="display:flex; gap:10px;">
+      <div class="field" style="flex:1;"><label>Início</label><input type="time" value="${f.hora_inicio}" onchange="atualizarCampoConfigAgendaRef('hora_inicio', this.value)"></div>
+      <div class="field" style="flex:1;"><label>Fim</label><input type="time" value="${f.hora_fim}" onchange="atualizarCampoConfigAgendaRef('hora_fim', this.value)"></div>
+    </div>
+    <div style="display:flex; align-items:center; gap:8px; margin-top:16px;">
+      <input type="checkbox" id="agenda-ref-pausa-ativa" ${f.pausa_ativa ? 'checked' : ''} onchange="atualizarCampoConfigAgendaRef('pausa_ativa', this.checked)" style="width:auto;">
+      <label for="agenda-ref-pausa-ativa" style="margin:0;"><strong>Intervalo / Pausa</strong></label>
+    </div>
+    ${f.pausa_ativa ? `
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <div class="field" style="flex:1;"><label>Início pausa</label><input type="time" value="${f.pausa_inicio}" onchange="atualizarCampoConfigAgendaRef('pausa_inicio', this.value)"></div>
+        <div class="field" style="flex:1;"><label>Fim pausa</label><input type="time" value="${f.pausa_fim}" onchange="atualizarCampoConfigAgendaRef('pausa_fim', this.value)"></div>
+      </div>` : ''}
+    <div style="display:flex; gap:10px; margin-top:16px;">
+      <div class="field" style="flex:1;"><label>Duração do atendimento</label>
+        <select onchange="atualizarCampoConfigAgendaRef('duracao_min', Number(this.value))">
+          ${AGENDA_REF_DURACOES.map((d) => `<option value="${d.valor}" ${Number(f.duracao_min) === d.valor ? 'selected' : ''}>${d.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field" style="flex:1;"><label>Máx. por dia</label><input type="number" min="1" value="${f.max_por_dia}" onchange="atualizarCampoConfigAgendaRef('max_por_dia', Number(this.value))"></div>
+    </div>
+    <h4 style="margin:16px 0 6px;">Preview do dia <span style="font-weight:400; font-size:12px; color:var(--ink-soft);">${naoPausa} slots</span></h4>
+    <div style="display:flex; gap:6px; flex-wrap:wrap;">${previewHtml}</div>
+    <h4 style="margin:16px 0 6px;">Datas bloqueadas</h4>
+    <div style="display:flex; gap:8px;">
+      <input type="date" id="agenda-ref-nova-data-bloqueada" style="flex:1;">
+      <button class="btn-outline-sm" onclick="adicionarDataBloqueadaAgendaRef()">+</button>
+    </div>
+    <div id="agenda-ref-datas-bloqueadas-lista" style="margin-top:8px;">${desenharDatasBloqueadasAgendaRef()}</div>
+    <div id="agenda-ref-config-erro" class="auth-error hidden" style="margin-top:10px;"></div>
+    <button class="btn btn-primary btn-sm" style="width:100%; margin-top:16px;" onclick="salvarConfigAgendaRef()">💾 Salvar configuração</button>`;
+}
+function atualizarCampoConfigAgendaRef(campo, valor) {
+  window._agendaRefConfigForm[campo] = valor;
+  const corpo = document.getElementById('agenda-ref-config-corpo');
+  if (corpo) corpo.innerHTML = desenharCorpoConfigAgendaRef();
+}
+function alternarDiaAgendaRef(chave) {
+  const f = window._agendaRefConfigForm;
+  const i = f.dias_semana.indexOf(chave);
+  if (i === -1) f.dias_semana.push(chave); else f.dias_semana.splice(i, 1);
+  const corpo = document.getElementById('agenda-ref-config-corpo');
+  if (corpo) corpo.innerHTML = desenharCorpoConfigAgendaRef();
+}
+function desenharDatasBloqueadasAgendaRef() {
+  const f = window._agendaRefConfigForm;
+  if (!f.datas_bloqueadas.length) return '<div class="empty" style="padding:6px 0;">Nenhuma data bloqueada.</div>';
+  return [...f.datas_bloqueadas].sort().map((d) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--line);">
+      <span>${fmtDataIsoAgendaRef(d)}</span>
+      <button class="btn-outline-sm" style="padding:2px 8px; font-size:11px; color:var(--red, #B3453A); border-color:var(--red, #B3453A);" onclick="removerDataBloqueadaAgendaRef('${d}')">🗑️</button>
+    </div>`).join('');
+}
+function adicionarDataBloqueadaAgendaRef() {
+  const input = document.getElementById('agenda-ref-nova-data-bloqueada');
+  const valor = input.value;
+  if (!valor) return;
+  const f = window._agendaRefConfigForm;
+  if (!f.datas_bloqueadas.includes(valor)) f.datas_bloqueadas.push(valor);
+  input.value = '';
+  document.getElementById('agenda-ref-datas-bloqueadas-lista').innerHTML = desenharDatasBloqueadasAgendaRef();
+  mostrarToast('Data bloqueada!');
+}
+function removerDataBloqueadaAgendaRef(d) {
+  const f = window._agendaRefConfigForm;
+  f.datas_bloqueadas = f.datas_bloqueadas.filter((x) => x !== d);
+  document.getElementById('agenda-ref-datas-bloqueadas-lista').innerHTML = desenharDatasBloqueadasAgendaRef();
+}
+async function salvarConfigAgendaRef() {
+  const f = window._agendaRefConfigForm;
+  const erroEl = document.getElementById('agenda-ref-config-erro');
+  erroEl.classList.add('hidden');
+  if (!f.dias_semana.length) { erroEl.textContent = 'Escolha ao menos um dia de atendimento.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const body = { ...f };
+    if (USER.papel === 'administrador' && window._agendaRefTecnicoId !== USER.id) body.tecnico_id = window._agendaRefTecnicoId;
+    await api('/api/os-refrigeracao-agenda/config', { method: 'PUT', body });
+    fecharModalConfigAgendaRef();
+    await carregarAgendaRefrigeracaoLista();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ---- modal "Novo Agendamento Manual" ----
+function agendaRefAgendamentoFormVazio(dataPreenchida, horaPreenchida) {
+  return {
+    cliente_nome: '', telefone: '', endereco: '',
+    tipo_servico: 'instalacao',
+    data: dataPreenchida || window._agendaRefData || hojeIsoAgendaRef(),
+    hora: horaPreenchida || '',
+    valor_servico: 0, observacoes: '',
+  };
+}
+function abrirModalNovoAgendamentoRef(horaPreenchida) {
+  if (!window._agendaRefConfig) { alert('Configure a disponibilidade antes de criar um agendamento.'); return; }
+  window._agendaRefForm = agendaRefAgendamentoFormVazio(window._agendaRefData, horaPreenchida);
+  let modal = document.getElementById('modal-agenda-ref-novo');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-agenda-ref-novo';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalNovoAgendamentoRef(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `<div class="modal-card" style="max-width:480px; max-height:88vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">Novo Agendamento Manual</h3>
+      <button class="btn-outline-sm" style="padding:4px 10px;" onclick="fecharModalNovoAgendamentoRef()">✕</button>
+    </div>
+    <div id="agenda-ref-novo-corpo">${desenharCorpoNovoAgendamentoRef()}</div>
+  </div>`;
+  carregarHorariosNovoAgendamentoRef();
+}
+function fecharModalNovoAgendamentoRef() {
+  const modal = document.getElementById('modal-agenda-ref-novo');
+  if (modal) modal.classList.remove('show');
+}
+function desenharCorpoNovoAgendamentoRef() {
+  const f = window._agendaRefForm;
+  return `
+    <div class="field"><label>Nome do cliente *</label><input id="agenda-ref-nc-nome" value="${esc(f.cliente_nome)}" placeholder="João Silva"></div>
+    <div class="field"><label>Telefone *</label><input id="agenda-ref-nc-telefone" value="${esc(f.telefone)}" placeholder="(00) 00000-0000"></div>
+    <div class="field"><label>Endereço</label><input id="agenda-ref-nc-endereco" value="${esc(f.endereco)}" placeholder="Rua, número, bairro"></div>
+    <div class="field"><label>Tipo de serviço *</label>
+      <select id="agenda-ref-nc-tipo">${AGENDA_REF_TIPOS_SERVICO.map((t) => `<option value="${t.chave}" ${f.tipo_servico === t.chave ? 'selected' : ''}>${t.label}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>Data *</label><input type="date" id="agenda-ref-nc-data" value="${f.data}" onchange="trocarDataNovoAgendamentoRef(this.value)"></div>
+    <div class="field"><label>Horário *</label><div id="agenda-ref-nc-horarios"><div class="empty" style="padding:6px 0;">Carregando horários...</div></div></div>
+    <div class="field"><label>Valor do serviço (R$)</label><input id="agenda-ref-nc-valor" type="number" step="0.01" value="${f.valor_servico || ''}" placeholder="0,00"></div>
+    <div class="field"><label>Observações</label><textarea id="agenda-ref-nc-observacoes" rows="2" placeholder="Informações adicionais...">${esc(f.observacoes)}</textarea></div>
+    <div id="agenda-ref-novo-erro" class="auth-error hidden"></div>
+    <button class="btn btn-primary btn-sm" style="width:100%; margin-top:10px;" onclick="salvarNovoAgendamentoRef()">+ Criar agendamento</button>`;
+}
+function trocarDataNovoAgendamentoRef(valor) {
+  window._agendaRefForm.data = valor;
+  window._agendaRefForm.hora = '';
+  carregarHorariosNovoAgendamentoRef();
+}
+async function carregarHorariosNovoAgendamentoRef() {
+  const alvo = document.getElementById('agenda-ref-nc-horarios');
+  if (!alvo) return;
+  const f = window._agendaRefForm;
+  if (!f.data) { alvo.innerHTML = '<div class="empty" style="padding:6px 0;">Escolha uma data.</div>'; return; }
+  alvo.innerHTML = '<div class="empty" style="padding:6px 0;">Carregando horários...</div>';
+  try {
+    const params = new URLSearchParams({ data: f.data });
+    if (USER.papel === 'administrador' && window._agendaRefTecnicoId !== USER.id) params.set('tecnico_id', window._agendaRefTecnicoId);
+    const { slots } = await api('/api/os-refrigeracao-agenda/slots?' + params.toString());
+    const disponiveis = slots.filter((s) => s.disponivel);
+    alvo.innerHTML = disponiveis.length
+      ? `<div style="display:flex; gap:6px; flex-wrap:wrap;">${disponiveis.map((s) => `<button type="button" class="${f.hora === s.hora ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" style="padding:6px 12px;" onclick="selecionarHorarioNovoAgendamentoRef('${s.hora}')">${s.hora}</button>`).join('')}</div>`
+      : '<div class="empty" style="padding:6px 0;">Nenhum horário disponível nesse dia.</div>';
+  } catch (e) { alvo.innerHTML = `<div class="empty" style="padding:6px 0;">${esc(e.message)}</div>`; }
+}
+function selecionarHorarioNovoAgendamentoRef(hora) {
+  window._agendaRefForm.hora = hora;
+  carregarHorariosNovoAgendamentoRef();
+}
+async function salvarNovoAgendamentoRef() {
+  const f = window._agendaRefForm;
+  const erroEl = document.getElementById('agenda-ref-novo-erro');
+  erroEl.classList.add('hidden');
+  f.cliente_nome = document.getElementById('agenda-ref-nc-nome').value.trim();
+  f.telefone = document.getElementById('agenda-ref-nc-telefone').value.trim();
+  f.endereco = document.getElementById('agenda-ref-nc-endereco').value;
+  f.tipo_servico = document.getElementById('agenda-ref-nc-tipo').value;
+  f.data = document.getElementById('agenda-ref-nc-data').value;
+  f.valor_servico = Number(document.getElementById('agenda-ref-nc-valor').value) || 0;
+  f.observacoes = document.getElementById('agenda-ref-nc-observacoes').value;
+  if (!f.cliente_nome) { erroEl.textContent = 'Informe o nome do cliente.'; erroEl.classList.remove('hidden'); return; }
+  if (!f.telefone) { erroEl.textContent = 'Informe o telefone do cliente.'; erroEl.classList.remove('hidden'); return; }
+  if (!f.hora) { erroEl.textContent = 'Escolha um horário disponível.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const body = { ...f };
+    if (USER.papel === 'administrador' && window._agendaRefTecnicoId !== USER.id) body.tecnico_id = window._agendaRefTecnicoId;
+    await api('/api/os-refrigeracao-agendamentos', { method: 'POST', body });
+    fecharModalNovoAgendamentoRef();
+    window._agendaRefData = f.data;
+    await carregarAgendaRefrigeracaoLista();
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
 // ===== Gerador de Etiquetas (Ferramentas, perfil "Refrigeração e Climatização") =====
 // pedido do usuário (referência: app concorrente iClima, aba "Ferramentas") — etiqueta pra colar
 // no equipamento depois do serviço (técnico, equipamento, data, QR Code opcional abrindo o
@@ -3550,8 +4037,17 @@ function perfilAtivoNoMenu(perfilExigido) {
   return !!(window._empresa && window._empresa.perfil === perfilExigido);
 }
 
+// gate inverso ao `perfil` acima: alguns itens do núcleo precisam DESAPARECER quando a empresa é
+// de um Perfil que já tem a própria versão construída do zero com o mesmo rótulo (ex.: "Agenda" do
+// núcleo some no perfil Refrigeração, que tem seu próprio menu "Agenda" — ver agenda-refrigeracao
+// no NAV) — sem isso, o sidebar mostraria "Agenda" duas vezes com conteúdos diferentes.
+function ocultoNoPerfilAtual(perfilOculto) {
+  if (!perfilOculto) return false;
+  return !!(window._empresa && window._empresa.perfil === perfilOculto);
+}
+
 function navDoUsuario() {
-  const nav = (NAV[USER.papel] || []).filter((node) => moduloAtivoNoMenu(node.modulo) && perfilAtivoNoMenu(node.perfil));
+  const nav = (NAV[USER.papel] || []).filter((node) => moduloAtivoNoMenu(node.modulo) && perfilAtivoNoMenu(node.perfil) && !ocultoNoPerfilAtual(node.ocultoNoPerfil));
   if (USER.acesso_total !== false) return nav;
   const menus = Array.isArray(USER.menus) ? USER.menus : [];
   return nav.filter((node) => menus.includes(node.key));
@@ -3687,6 +4183,7 @@ async function ir(pagina) {
     if (pagina === 'orcamentos-refrigeracao-lista') return renderOrcamentoRefrigeracaoLista();
     if (pagina === 'orcamentos-refrigeracao-nova') return renderOrcamentoRefrigeracaoNova();
     if (pagina === 'orcamentos-refrigeracao-detalhe') return renderOrcamentoRefrigeracaoDetalhe();
+    if (pagina === 'agenda-refrigeracao-lista') return renderAgendaRefrigeracaoLista();
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
     if (pagina === 'fmea-relatorios') return renderFmeaRelatorios();
