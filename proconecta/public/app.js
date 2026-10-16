@@ -2046,7 +2046,7 @@ function nomeArquivoOsRef(os) {
 // nome — nunca o logo da Nexor); o rodapé da última página é que leva o crédito "Nexor Connect ·
 // Tecnologia" (ver logoClienteFlatHeader e creditoNexorConnect). `logoCliente` já vem pronto
 // (data: URI achatada em branco) ou null — ver chamadores (baixarOsRefPdf/enviarOsRefPdf).
-function montarDocOsRefrigeracaoPdf(os, logoCliente) {
+function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   doc.setProperties({ title: `Ordem de Serviço ${os.id}` });
@@ -2073,27 +2073,37 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
-  // monograma "N" + "NexorConnect"/"Tecnologia" — mesmo desenho do cabeçalho de gerarPdfProposta,
-  // só que em miniatura e só no rodapé da ÚLTIMA página ("no final da fila", pedido do usuário).
-  function creditoNexorConnect(x, y) {
-    doc.setFillColor(...PDF_COR.navy); doc.roundedRect(x, y, 16, 16, 3, 3, 'F');
-    doc.setFillColor(...PDF_COR.orange); doc.triangle(x + 8, y + 16, x + 16, y + 8, x + 16, y + 16, 'F');
-    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-    doc.text('N', x + 4.5, y + 11.5);
-    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text('NexorConnect', x + 22, y + 7.5);
-    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-    doc.text('Tecnologia', x + 22, y + 15);
+  // pedido do usuário: "o logo da Nexor tem que ficar no meio centralizado desse espaço em
+  // branco, igual o logo na página de login" — mesmo lockup do login (ver #authView em
+  // index.html: ícone /logo.png em cima, "NEXOR"/"CONNECT" empilhados embaixo, mesmas cores de
+  // .wordmark.stacked .pro/.conecta em style.css), só que com "Tecnologia" embaixo também, e
+  // centralizado no espaço que sobra no fim da ÚLTIMA página ("no final da fila").
+  function creditoNexorConnect(centroX, centroY) {
+    if (logoNexor) {
+      const tam = 44;
+      doc.addImage(logoNexor, 'PNG', centroX - tam / 2, centroY - tam - 14, tam, tam);
+    }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(15); doc.setTextColor(...PDF_COR.blueBright);
+    doc.text('NEXOR', centroX, centroY + 8, { align: 'center' });
+    doc.setTextColor(...PDF_COR.navy);
+    doc.text('CONNECT', centroX, centroY + 23, { align: 'center' });
+    doc.setFont(undefined, 'normal'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text('Tecnologia', centroX, centroY + 36, { align: 'center' });
   }
-  function rodape(pagina, total) {
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, pageH - 44, pageW - margem, pageH - 44);
+  function rodape(pagina, total, yConteudoFinal) {
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
     if (pagina === total) {
-      creditoNexorConnect(margem, pageH - 38);
       doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW - margem, pageH - 24, { align: 'right' });
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
+      // centraliza no meio do espaço em branco que sobra entre o fim do conteúdo e essa linha —
+      // com limites (nunca cola no conteúdo nem na linha) pra OS com pouco ou muito conteúdo.
+      const topo = yConteudoFinal || margem;
+      const centroY = Math.min(yLinha - 56, Math.max(topo + 70, topo + (yLinha - topo) / 2));
+      creditoNexorConnect(pageW / 2, centroY);
     } else {
       doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 24, { align: 'center' });
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
     }
   }
   function secaoTitulo(y, texto) {
@@ -2182,7 +2192,7 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente) {
   doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
   doc.text('TÉCNICO RESPONSÁVEL', margem, y + 86);
   doc.text('CLIENTE', margem + largAssin + 20, y + 86);
-  rodape(2, 2);
+  rodape(2, 2, y + 96);
 
   return doc;
 }
@@ -2190,8 +2200,8 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente) {
 async function baixarOsRefPdf(id) {
   try {
     const { os } = await api('/api/os-refrigeracao/' + id);
-    const logoCliente = await logoClienteFlatHeader();
-    montarDocOsRefrigeracaoPdf(os, logoCliente).save(nomeArquivoOsRef(os) + '.pdf');
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor).save(nomeArquivoOsRef(os) + '.pdf');
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 // mesmo mecanismo de compartilhamento nativo (Web Share API com arquivo anexado, fallback pra
@@ -2199,8 +2209,8 @@ async function baixarOsRefPdf(id) {
 async function enviarOsRefPdf(id) {
   try {
     const { os } = await api('/api/os-refrigeracao/' + id);
-    const logoCliente = await logoClienteFlatHeader();
-    const blob = montarDocOsRefrigeracaoPdf(os, logoCliente).output('blob');
+    const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+    const blob = montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor).output('blob');
     const nomeArquivo = nomeArquivoOsRef(os) + '.pdf';
     const texto = `Ordem de Serviço #${os.id} — ${os.cliente_nome || ''}.`;
     const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
@@ -8526,6 +8536,23 @@ function logoClienteFlatHeader() {
     leitor.onerror = reject;
     leitor.readAsDataURL(blob);
   })).then(pronto).catch(() => null);
+}
+
+// a própria logo da Nexor Connect (/logo.png, sempre a mesma — ver ícone do login em index.html),
+// achatada em branco pra usar no crédito centralizado do rodapé do PDF da O.S. (ver
+// creditoNexorConnect). Nunca a da empresa cliente — diferente de logoClienteFlatHeader acima.
+// Memoizada: é sempre o mesmo arquivo estático, não precisa buscar de novo a cada PDF.
+let _logoNexorFlatPromise = null;
+function logoNexorFlatHeader() {
+  if (!_logoNexorFlatPromise) {
+    _logoNexorFlatPromise = fetch('/logo.png').then((r) => r.blob()).then((blob) => new Promise((resolve, reject) => {
+      const leitor = new FileReader();
+      leitor.onload = () => resolve(leitor.result);
+      leitor.onerror = reject;
+      leitor.readAsDataURL(blob);
+    })).then((dataUri) => flatarLogoSobreCor(dataUri, PDF_COR.white)).catch(() => null);
+  }
+  return _logoNexorFlatPromise;
 }
 
 async function abrirPdfBiblioteca(tipo, i) {
