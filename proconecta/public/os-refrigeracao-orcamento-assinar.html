@@ -82,7 +82,13 @@ async function carregar() {
 // o total, escondendo o que está sendo cobrado), este resumo SEMPRE detalha serviços, materiais,
 // mão de obra, desconto e condições de pagamento — nunca só o total.
 function blocoResumo() {
-  const badge = `<span class="osa-badge ${esc(orcamento.status)}">${orcamento.status === 'aprovado' ? 'Aprovado' : orcamento.status === 'cancelado' ? 'Cancelado' : 'Rascunho'}</span>`;
+  // pedido do usuário: "Rascunho" é rótulo interno da empresa (ver ORCAMENTO_REF_STATUS_LABEL em
+  // app.js) — pro cliente, que só vê este link pra aprovar, não faz sentido nenhum aparecer
+  // "Rascunho" (passa a impressão de documento inacabado). Só mostra selo quando já é um status
+  // final (Aprovado/Cancelado); enquanto está pendente de aprovação, não mostra selo nenhum — o
+  // próprio formulário de assinatura abaixo já deixa claro que ainda não foi aprovado.
+  const badge = orcamento.status === 'aprovado' ? '<span class="osa-badge aprovado">Aprovado</span>'
+    : orcamento.status === 'cancelado' ? '<span class="osa-badge cancelado">Cancelado</span>' : '';
   return `
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
