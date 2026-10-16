@@ -3693,7 +3693,7 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       notificacoes = notificacoes.concat(
         planosArtProblema.map(({ plano, nomeLocal, artAusente }) => ({ id: plano.id, tipo: 'pmoc_art_trt_problema', texto: `ART/TRT ${artAusente ? 'ausente' : 'vencida'} — ${nomeLocal}`, registro_id: plano.id }))
       );
-      const config = garantirConfigPmoc(data, user.empresa_id);
+      const [config, configCriada] = garantirConfigPmoc(data, user.empresa_id);
       const limiteQualidadeAr = dataMenosMesesPmoc(hojeServidor, config.qualidade_ar_meses_alerta);
       const locaisQualidadeArDesatualizada = [];
       for (const local of tenant.listar(data, 'os_refrigeracao_pmoc_locais', user.empresa_id)) {
@@ -3708,34 +3708,42 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       // situação muda de fato — ver as edições de plano/qualidade do ar acima) — sem
       // infraestrutura de cron (mesmo motivo de gerarVisitasPmocPlano), aproveita a própria
       // consulta que o sininho do administrador já faz com frequência.
-      let precisaSalvarAlertas = false;
+      // IMPORTANTE (varredura de desempenho): essa consulta é a mais chamada do sistema (o
+      // sininho pergunta sem parar) — NUNCA espera o e-mail de verdade sair (rede/SMTP pode
+      // demorar segundos ou travar), senão toda consulta de notificações do administrador
+      // ficaria lenta à toa na primeira vez que uma ocorrência nova aparece. O dedup já era
+      // "otimista" antes disso (marca enviado mesmo sem confirmar entrega), então só tirar o
+      // `await` (deixar o envio rodando em paralelo, sem bloquear a resposta) não muda esse
+      // comportamento — só para de travar a resposta por causa dele.
+      let precisaSalvarAlertas = configCriada;
       const emailsAdmins = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador' && u.email).map((u) => u.email);
       const nomeEmpresaAlerta = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
-      if (emailsAdmins.length) {
-        for (const a of visitasAtrasadas) {
-          if (a.alerta_atraso_email_enviado_em) continue;
-          await email.enviarAlerta({ emails: emailsAdmins, assunto: 'PMOC: preventiva atrasada', corpoHtml: `<p>A preventiva PMOC de <b>${a.cliente_nome}</b> marcada para ${a.data.split('-').reverse().join('/')} ainda não foi concluída.</p>`, nomeEmpresa: nomeEmpresaAlerta });
-          a.alerta_atraso_email_enviado_em = new Date().toISOString();
-          precisaSalvarAlertas = true;
-        }
-        for (const { plano, nomeLocal, dataFim } of planosVencendo) {
-          if (plano.alerta_vencimento_email_enviado_em) continue;
-          await email.enviarAlerta({ emails: emailsAdmins, assunto: 'PMOC: plano perto do vencimento', corpoHtml: `<p>O plano PMOC de <b>${nomeLocal}</b> vence em ${dataFim.split('-').reverse().join('/')}.</p>`, nomeEmpresa: nomeEmpresaAlerta });
-          plano.alerta_vencimento_email_enviado_em = new Date().toISOString();
-          precisaSalvarAlertas = true;
-        }
-        for (const { plano, nomeLocal, artAusente } of planosArtProblema) {
-          if (plano.alerta_art_email_enviado_em) continue;
-          await email.enviarAlerta({ emails: emailsAdmins, assunto: 'PMOC: ART/TRT pendente', corpoHtml: `<p>A ART/TRT do plano PMOC de <b>${nomeLocal}</b> está ${artAusente ? 'ausente' : 'vencida'}.</p>`, nomeEmpresa: nomeEmpresaAlerta });
-          plano.alerta_art_email_enviado_em = new Date().toISOString();
-          precisaSalvarAlertas = true;
-        }
-        for (const { local, ultima } of locaisQualidadeArDesatualizada) {
-          if (local.alerta_qualidade_ar_email_enviado_em) continue;
-          await email.enviarAlerta({ emails: emailsAdmins, assunto: 'PMOC: qualidade do ar desatualizada', corpoHtml: `<p>O local <b>${local.nome}</b> está sem análise de qualidade do ar recente${ultima ? ` (última em ${ultima.data.split('-').reverse().join('/')})` : ''}.</p>`, nomeEmpresa: nomeEmpresaAlerta });
-          local.alerta_qualidade_ar_email_enviado_em = new Date().toISOString();
-          precisaSalvarAlertas = true;
-        }
+      const dispararAlertaPmoc = (assunto, corpoHtml) => {
+        if (emailsAdmins.length) email.enviarAlerta({ emails: emailsAdmins, assunto, corpoHtml, nomeEmpresa: nomeEmpresaAlerta }).catch((e) => console.error('[pmoc] falha ao enviar alerta por e-mail:', e.message));
+      };
+      for (const a of visitasAtrasadas) {
+        if (a.alerta_atraso_email_enviado_em) continue;
+        dispararAlertaPmoc('PMOC: preventiva atrasada', `<p>A preventiva PMOC de <b>${a.cliente_nome}</b> marcada para ${a.data.split('-').reverse().join('/')} ainda não foi concluída.</p>`);
+        a.alerta_atraso_email_enviado_em = new Date().toISOString();
+        precisaSalvarAlertas = true;
+      }
+      for (const { plano, nomeLocal, dataFim } of planosVencendo) {
+        if (plano.alerta_vencimento_email_enviado_em) continue;
+        dispararAlertaPmoc('PMOC: plano perto do vencimento', `<p>O plano PMOC de <b>${nomeLocal}</b> vence em ${dataFim.split('-').reverse().join('/')}.</p>`);
+        plano.alerta_vencimento_email_enviado_em = new Date().toISOString();
+        precisaSalvarAlertas = true;
+      }
+      for (const { plano, nomeLocal, artAusente } of planosArtProblema) {
+        if (plano.alerta_art_email_enviado_em) continue;
+        dispararAlertaPmoc('PMOC: ART/TRT pendente', `<p>A ART/TRT do plano PMOC de <b>${nomeLocal}</b> está ${artAusente ? 'ausente' : 'vencida'}.</p>`);
+        plano.alerta_art_email_enviado_em = new Date().toISOString();
+        precisaSalvarAlertas = true;
+      }
+      for (const { local, ultima } of locaisQualidadeArDesatualizada) {
+        if (local.alerta_qualidade_ar_email_enviado_em) continue;
+        dispararAlertaPmoc('PMOC: qualidade do ar desatualizada', `<p>O local <b>${local.nome}</b> está sem análise de qualidade do ar recente${ultima ? ` (última em ${ultima.data.split('-').reverse().join('/')})` : ''}.</p>`);
+        local.alerta_qualidade_ar_email_enviado_em = new Date().toISOString();
+        precisaSalvarAlertas = true;
       }
       if (precisaSalvarAlertas) db.save(data);
     }
@@ -5860,13 +5868,16 @@ function camposItemChecklistPmoc(body) {
 // popula o Modelo de Checklist da empresa com os itens sugeridos da Lei (ver PMOC_CHECKLIST_PADRAO
 // em db.js) na primeira vez que ela é acessada (lista ainda vazia) — dali em diante 100% editável,
 // nunca mais mexido por código (pedido do usuário: "modelo padrão editável pela empresa").
+// devolve os itens já prontos pra usar — quem só precisa da lista (POST /api/pmoc/planos, que já
+// salva por outro motivo) ignora o 2º valor; o GET abaixo usa pra não escrever o arquivo inteiro
+// no disco numa simples leitura (varredura de desempenho).
 function garantirModeloChecklistPmoc(data, empresaId) {
   let itens = tenant.listar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId);
-  if (itens.length) return itens;
+  if (itens.length) return [itens, false];
   for (const padrao of db.PMOC_CHECKLIST_PADRAO) {
     tenant.criar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId, { ...padrao, criado_em: new Date().toISOString() });
   }
-  return tenant.listar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId);
+  return [tenant.listar(data, 'os_refrigeracao_pmoc_modelo_checklist', empresaId), true];
 }
 
 // GET /api/pmoc/modelo-checklist
@@ -5874,8 +5885,8 @@ rota('GET', /^\/api\/pmoc\/modelo-checklist$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   const data = db.load();
   if (!exigirPerfilRefrigeracao(res, user, data)) return;
-  const itens = garantirModeloChecklistPmoc(data, user.empresa_id);
-  db.save(data);
+  const [itens, criado] = garantirModeloChecklistPmoc(data, user.empresa_id);
+  if (criado) db.save(data);
   enviarJSON(res, 200, { itens: ordenarItensChecklistPmoc(itens) });
 });
 
@@ -6032,11 +6043,18 @@ rota('GET', /^\/api\/pmoc\/planos$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
   const planos = tenant.listar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id);
+  // varredura de desempenho: essa é a tela de lista do PMOC (provavelmente a mais aberta pelo
+  // administrador) — gerarVisitasPmocPlano já é idempotente (não cria de novo o que já existe) e
+  // já devolve se criou algo; só grava o arquivo inteiro quando essa consulta de fato mudou algo
+  // (status virou vencido, ou nasceu visita nova), nunca à toa numa simples listagem.
+  let precisaSalvar = false;
   for (const plano of planos) {
+    const statusAntes = plano.status;
     atualizarStatusVencidoPlanoPmoc(plano, query.hoje);
-    if (plano.status === 'ativo') gerarVisitasPmocPlano(data, plano, query.hoje);
+    if (plano.status !== statusAntes) precisaSalvar = true;
+    if (plano.status === 'ativo' && gerarVisitasPmocPlano(data, plano, query.hoje)) precisaSalvar = true;
   }
-  db.save(data);
+  if (precisaSalvar) db.save(data);
   const comDetalhes = planos.map((p) => pmocPlanoComDetalhes(data, p)).sort((a, b) => (a.local_nome || '').localeCompare(b.local_nome || '', 'pt-BR'));
   enviarJSON(res, 200, { planos: comDetalhes });
 });
@@ -6058,7 +6076,7 @@ rota('POST', /^\/api\/pmoc\/planos$/, async (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(body.data_inicio || '')) return enviarJSON(res, 400, { erro: 'Informe a data de início do plano.' });
   const responsavelId = body.responsavel_tecnico_id ? Number(body.responsavel_tecnico_id) : null;
   if (responsavelId && !tenant.buscar(data, 'os_refrigeracao_pmoc_responsaveis_tecnicos', responsavelId, user.empresa_id)) return enviarJSON(res, 400, { erro: 'Responsável técnico inválido.' });
-  const itensBase = Array.isArray(body.itens) && body.itens.length ? body.itens : garantirModeloChecklistPmoc(data, user.empresa_id);
+  const itensBase = Array.isArray(body.itens) && body.itens.length ? body.itens : garantirModeloChecklistPmoc(data, user.empresa_id)[0];
   const itens = itensBase.map(camposItemPlanoPmoc).filter((i) => i.descricao);
   // pedido do usuário (item 1.4): "Número da ART/TRT por contrato/local" — por isso mora no plano
   // (1 por local), não no cadastro do responsável técnico (que pode assinar vários contratos).
@@ -6085,9 +6103,13 @@ rota('GET', /^\/api\/pmoc\/planos\/(\d+)$/, async (req, res, m) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
   const plano = tenant.buscar(data, 'os_refrigeracao_pmoc_planos', Number(m[1]), user.empresa_id);
   if (!plano) return enviarJSON(res, 404, { erro: 'Plano não encontrado.' });
+  // varredura de desempenho: esse é o fetch do plano feito TODA VEZ que o administrador abre o
+  // detalhe de um local (a tela mais usada do pacote) — só grava o arquivo quando algo de fato
+  // mudou (mesmo raciocínio de GET /api/pmoc/planos, ver comentário lá).
+  const statusAntesDetalhe = plano.status;
   atualizarStatusVencidoPlanoPmoc(plano, query.hoje);
-  if (plano.status === 'ativo') gerarVisitasPmocPlano(data, plano, query.hoje);
-  db.save(data);
+  const criouVisitaNova = plano.status === 'ativo' && gerarVisitasPmocPlano(data, plano, query.hoje);
+  if (plano.status !== statusAntesDetalhe || criouVisitaNova) db.save(data);
   const visitas = data.os_refrigeracao_agendamentos.filter((a) => a.pmoc_plano_id === plano.id && a.empresa_id === user.empresa_id).sort((a, b) => a.data.localeCompare(b.data));
   enviarJSON(res, 200, { plano: pmocPlanoComDetalhes(data, plano), visitas });
 });
@@ -6169,8 +6191,11 @@ rota('GET', /^\/api\/pmoc\/visitas-pendentes$/, async (req, res) => {
   const { query } = url.parse(req.url, true);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(query.hoje || '')) return enviarJSON(res, 400, { erro: 'Informe a data de hoje (AAAA-MM-DD).' });
   const planosAtivos = tenant.listar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id).filter((p) => p.status === 'ativo');
-  for (const plano of planosAtivos) gerarVisitasPmocPlano(data, plano, query.hoje);
-  db.save(data);
+  // varredura de desempenho: mesmo raciocínio das outras rotas de "listar" do PMOC — só grava
+  // quando gerarVisitasPmocPlano de fato criou uma visita nova.
+  let precisaSalvarPendentes = false;
+  for (const plano of planosAtivos) { if (gerarVisitasPmocPlano(data, plano, query.hoje)) precisaSalvarPendentes = true; }
+  if (precisaSalvarPendentes) db.save(data);
   const pendentes = tenant.listar(data, 'os_refrigeracao_agendamentos', user.empresa_id)
     .filter((a) => a.status === 'pendente_designacao')
     .sort((a, b) => a.data.localeCompare(b.data));
@@ -6617,18 +6642,21 @@ function dataMenosMesesPmoc(dataIso, meses) {
   d.setMonth(d.getMonth() - (Number(meses) || 6));
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
+// devolve [config, criadoAgora] — "criadoAgora" deixa quem chamou decidir se precisa salvar
+// (ver varredura de desempenho: um GET de leitura não deve gravar o arquivo inteiro no disco
+// toda vez só porque passou por aqui — só na primeira vez que a config de verdade nasce).
 function garantirConfigPmoc(data, empresaId) {
   let config = tenant.listar(data, 'os_refrigeracao_pmoc_config', empresaId)[0];
-  if (config) return config;
+  if (config) return [config, false];
   config = tenant.criar(data, 'os_refrigeracao_pmoc_config', empresaId, { qualidade_ar_meses_alerta: 6, qr_publico_ativo: true });
-  return config;
+  return [config, true];
 }
 rota('GET', /^\/api\/pmoc\/config$/, async (req, res) => {
   const user = usuarioAutenticado(req);
   const data = db.load();
   if (!exigirPerfilRefrigeracao(res, user, data)) return;
-  const config = garantirConfigPmoc(data, user.empresa_id);
-  db.save(data);
+  const [config, criado] = garantirConfigPmoc(data, user.empresa_id);
+  if (criado) db.save(data);
   enviarJSON(res, 200, { config });
 });
 rota('PUT', /^\/api\/pmoc\/config$/, async (req, res) => {
@@ -6636,7 +6664,7 @@ rota('PUT', /^\/api\/pmoc\/config$/, async (req, res) => {
   if (!exigirPapel(user, ['administrador'])) return enviarJSON(res, 403, { erro: 'Só o administrador altera a configuração do pacote PMOC.' });
   const data = db.load();
   if (!exigirPerfilRefrigeracao(res, user, data)) return;
-  const config = garantirConfigPmoc(data, user.empresa_id);
+  const [config] = garantirConfigPmoc(data, user.empresa_id);
   const body = await lerCorpo(req);
   const meses = Number(body.qualidade_ar_meses_alerta);
   if (!(meses > 0)) return enviarJSON(res, 400, { erro: 'Informe um número de meses válido.' });
@@ -6702,14 +6730,14 @@ rota('GET', /^\/api\/pmoc\/aparelhos\/por-qr\/([a-f0-9]+)$/, async (req, res, m)
 // empresa de climatização") e respeita o toggle configurável de ligar/desligar essa página.
 rota('GET', /^\/api\/pmoc\/qr\/([a-f0-9]+)\/publico$/, async (req, res, m) => {
   const data = db.load();
-  let aparelho = null, empresaId = null;
-  for (const emp of data.empresas) {
-    const achado = data.os_refrigeracao_pmoc_aparelhos.find((a) => a.qr_token === m[1] && a.empresa_id === emp.id);
-    if (achado) { aparelho = achado; empresaId = emp.id; break; }
-  }
+  // qr_token é um valor único de verdade (32 hex aleatórios, ver db.gerarQrToken) — acha o
+  // aparelho numa única varredura, sem precisar iterar empresa por empresa (varredura de
+  // desempenho: essa rota é pública e pode ser escaneada em campo com frequência).
+  const aparelho = data.os_refrigeracao_pmoc_aparelhos.find((a) => a.qr_token === m[1]);
   if (!aparelho) return enviarJSON(res, 404, { erro: 'QR inválido.' });
-  const config = garantirConfigPmoc(data, empresaId);
-  db.save(data);
+  const empresaId = aparelho.empresa_id;
+  const [config, criado] = garantirConfigPmoc(data, empresaId);
+  if (criado) db.save(data);
   if (!config.qr_publico_ativo) return enviarJSON(res, 200, { exibir: false });
   const ambiente = data.os_refrigeracao_pmoc_ambientes.find((a) => a.id === aparelho.ambiente_id && a.empresa_id === empresaId);
   const local = ambiente ? data.os_refrigeracao_pmoc_locais.find((l) => l.id === ambiente.local_id && l.empresa_id === empresaId) : null;
@@ -6817,12 +6845,15 @@ rota('GET', /^\/api\/pmoc\/painel$/, async (req, res) => {
     .sort((a, b) => b.qtd - a.qtd).slice(0, 10);
   // clientes com plano PMOC vencido ou sem ART (ausente/vencida) — qualquer local do cliente.
   const clientesProblema = new Map();
+  let precisaSalvarPainel = false; // só grava o arquivo se algum plano realmente virou "vencido" agora.
   for (const plano of tenant.listar(data, 'os_refrigeracao_pmoc_planos', user.empresa_id)) {
     const local = data.os_refrigeracao_pmoc_locais.find((l) => l.id === plano.local_id && l.empresa_id === user.empresa_id);
     if (!local) continue;
     const cliente = data.os_refrigeracao_clientes.find((c) => c.id === local.cliente_id && c.empresa_id === user.empresa_id);
     if (!cliente) continue;
+    const statusAntes = plano.status;
     atualizarStatusVencidoPlanoPmoc(plano, hoje);
+    if (plano.status !== statusAntes) precisaSalvarPainel = true;
     const vencido = plano.status === 'vencido';
     const semArt = plano.status !== 'rascunho' && (!plano.art_trt_numero || (plano.art_trt_validade && plano.art_trt_validade < hoje));
     if (!vencido && !semArt) continue;
@@ -6831,7 +6862,7 @@ rota('GET', /^\/api\/pmoc\/painel$/, async (req, res) => {
     motivos.sem_art = motivos.sem_art || semArt;
     clientesProblema.set(cliente.id, motivos);
   }
-  db.save(data); // atualizarStatusVencidoPlanoPmoc pode ter virado algum plano pra "vencido".
+  if (precisaSalvarPainel) db.save(data); // só grava o arquivo inteiro quando algo de fato mudou.
   enviarJSON(res, 200, {
     percentual_no_prazo: percentualNoPrazo,
     atrasadas_por_tecnico: atrasadasPorTecnico,
