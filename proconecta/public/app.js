@@ -7233,16 +7233,14 @@ async function compartilharBtuWhatsapp() {
 //      print (0,87%)
 //   4. disjuntor = corrente corrigida arredondada pro disjuntor comercial acima → 10A
 // Todos os 4 números bateram exatos com o print, então a fórmula está confirmada.
-// DIFERENÇA proposital em relação ao app de referência: não tem seletor BTU/W pra potência. No
-// print deles, mesmo com "BTU" selecionado o campo foi usado direto como watts na fórmula (users
-// digitou 1200 e o passo 1 saiu "1200W ÷ 220V", sem nenhuma conversão) — ou é uma limitação do
-// app de referência, ou o seletor ali não faz nada de verdade. De todo jeito, BTU é capacidade de
-// refrigeração, não potência elétrica, e não existe uma razão de conversão BTU→W confiável sem o
-// EER/COP real do aparelho (varia por eficiência/modelo) — inventar uma aqui teria efeito direto
-// e perigoso no dimensionamento (cabo/disjuntor subdimensionado), o mesmo cuidado já descrito no
-// comentário no topo de FERRAMENTAS_REF_CATEGORIAS pras ferramentas elétricas/de gás ainda não
-// construídas. Por isso o campo pede direto a potência elétrica (W) da etiqueta/manual do
-// aparelho, com uma dica visível explicando o porquê.
+// Seletor W/BTU pra potência: a 1ª leva (print com "1200" + unidade BTU ainda selecionada,
+// sem conversão nenhuma — "1200W ÷ 220V") tinha deixado dúvida se o app de referência realmente
+// converte BTU→W. O usuário mandou um 2º print, dessa vez com o passo extra "Conversão BTU →
+// Watts" aparecendo de fato: BTU ÷ 3.412 = W (ex.: 1200 ÷ 3.412 = 352W), com a dica "1 BTU/h ≈
+// 0.293 W" — é a equivalência física padrão (térmico→elétrico, não depende de COP/EER do
+// aparelho), então dá pra reproduzir com confiança. Reproduzido abaixo (CALC_CABOS_BTU_POR_WATT)
+// como o 1º passo do cálculo quando a unidade é BTU, antes do resto (que já estava confirmado).
+const CALC_CABOS_BTU_POR_WATT = 3.412; // 1 W ≈ 3.412 BTU/h
 const CALC_CABOS_TENSAO_LABEL = { 127: '127V', 220: '220V', 380: '380V (trifásico)' };
 const CALC_CABOS_RESISTIVIDADE_COBRE = 0.0175; // Ω·mm²/m (cobre, NBR 5410)
 const CALC_CABOS_QUEDA_MAX_PCT = 0.04; // 4% — limite de queda de tensão p/ circuito terminal (NBR 5410)
@@ -7265,13 +7263,14 @@ const CALC_CABOS_TABELA_REFERENCIA = [
 ];
 function fmtCabosNum(n) { return Math.round(n).toLocaleString('pt-BR'); }
 function calcCabosFormVazio() {
-  return { potencia_w: '', tensao: 220, distancia_m: 10, tipo_instalacao: 'embutida' };
+  return { potencia_w: '', unidade_potencia: 'w', tensao: 220, distancia_m: 10, tipo_instalacao: 'embutida' };
 }
 function calcCabosProximoComercial(lista, valor) {
   return lista.find((v) => v >= valor) || lista[lista.length - 1];
 }
 function calcularCabosResultado(f) {
-  const potencia = Number(f.potencia_w) || 0;
+  const potenciaInformada = Number(f.potencia_w) || 0;
+  const potencia = f.unidade_potencia === 'btu' ? potenciaInformada / CALC_CABOS_BTU_POR_WATT : potenciaInformada;
   const tensao = Number(f.tensao) || 220;
   const distancia = Number(f.distancia_m) || 0;
   const corrente = tensao > 0 ? potencia / tensao : 0;
@@ -7283,16 +7282,21 @@ function calcularCabosResultado(f) {
     ? 'Cabo flexível anti-chama 750V (indicado para canaleta/fixação aparente)'
     : 'Cabo flexível anti-chama 750V';
   const quedaTensaoPct = secaoComercial > 0 ? ((2 * distancia * corrente * CALC_CABOS_RESISTIVIDADE_COBRE) / (secaoComercial * tensao)) * 100 : 0;
-  return { potencia, tensao, distancia, corrente, correnteCorrigida, secaoCalculada, secaoComercial, disjuntor, tipoCabo, quedaTensaoPct };
+  return { potenciaInformada, potencia, tensao, distancia, corrente, correnteCorrigida, secaoCalculada, secaoComercial, disjuntor, tipoCabo, quedaTensaoPct };
 }
 function calcularPassosCabos(f, r) {
-  return [
+  const passos = [];
+  if (f.unidade_potencia === 'btu') {
+    passos.push({ titulo: 'Conversão BTU → Watts', formula: 'BTU ÷ 3.412', substituicao: `${fmtCabosNum(r.potenciaInformada)} ÷ 3.412`, resultado: `${fmtCabosNum(r.potencia)} W`, dica: '1 BTU/h ≈ 0.293 W' });
+  }
+  passos.push(
     { titulo: 'Corrente do equipamento', formula: 'Potência ÷ Tensão', substituicao: `${fmtCabosNum(r.potencia)}W ÷ ${r.tensao}V`, resultado: `${r.corrente.toFixed(2)} A` },
     { titulo: 'Corrente corrigida (margem 25%)', formula: 'Corrente × 1.25', substituicao: `${r.corrente.toFixed(2)}A × 1.25`, resultado: `${r.correnteCorrigida.toFixed(2)} A`, dica: 'NBR 5410 exige margem de 25% sobre a corrente nominal' },
     { titulo: 'Seção do cabo (NBR 5410)', formula: 'S = (2 × L × I × ρ) ÷ (V × ΔV%)', substituicao: `(2 × ${r.distancia}m × ${r.corrente.toFixed(2)}A × ${CALC_CABOS_RESISTIVIDADE_COBRE}) ÷ (${r.tensao}V × 4%)`, resultado: `${r.secaoComercial} mm²`, dica: `Queda de tensão: ${r.quedaTensaoPct.toFixed(2)}% (máx. 4%)` },
     { titulo: 'Disjuntor recomendado', formula: 'Corrente corrigida → disjuntor comercial ≥', substituicao: `${r.correnteCorrigida.toFixed(2)}A → próximo padrão`, resultado: `${r.disjuntor} A` },
     { titulo: 'Tipo de cabo', formula: f.tipo_instalacao === 'aparente' ? 'Instalação aparente → flexível' : 'Instalação embutida → flexível', substituicao: `Instalação: ${CALC_CABOS_TIPO_INSTALACAO_LABEL[f.tipo_instalacao]}`, resultado: r.tipoCabo },
-  ];
+  );
+  return passos;
 }
 
 async function renderCalculadoraCabos() {
@@ -7313,8 +7317,16 @@ function desenharCalculadoraCabos() {
       <h1 style="margin:0;">Calculadora de Cabos</h1>
     </div>
     <div style="max-width:560px;">
-      <div class="field"><label>Potência elétrica do equipamento (W) *</label><input id="cabos-potencia" type="number" step="1" min="0" value="${esc(f.potencia_w)}" placeholder="Ex: 1200"></div>
-      <div style="font-size:12px; color:var(--ink-soft); margin:-10px 0 14px;">💡 Use a potência elétrica (W) da etiqueta/manual do aparelho — BTU é capacidade de refrigeração, não equivale à potência elétrica.</div>
+      <div class="field"><label>Potência *</label>
+        <div style="display:flex; gap:8px;">
+          <input id="cabos-potencia" type="number" step="1" min="0" value="${esc(f.potencia_w)}" placeholder="Ex: 1200" style="flex:1;">
+          <select id="cabos-potencia-unidade" style="width:92px; flex-shrink:0;">
+            <option value="w" ${f.unidade_potencia === 'w' ? 'selected' : ''}>W</option>
+            <option value="btu" ${f.unidade_potencia === 'btu' ? 'selected' : ''}>BTU</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-size:12px; color:var(--ink-soft); margin:-10px 0 14px;">💡 Em BTU, convertemos pra watts (BTU ÷ 3.412) antes do cálculo — pra maior precisão, use a potência elétrica (W) da etiqueta/manual do aparelho.</div>
       <div class="field"><label>Tensão</label>
         <select id="cabos-tensao">
           ${Object.entries(CALC_CABOS_TENSAO_LABEL).map(([k, label]) => `<option value="${k}" ${Number(f.tensao) === Number(k) ? 'selected' : ''}>${label}</option>`).join('')}
@@ -7335,6 +7347,7 @@ function desenharCalculadoraCabos() {
 function sincronizarCamposCabos() {
   const f = window._calcCabosForm;
   f.potencia_w = document.getElementById('cabos-potencia').value;
+  f.unidade_potencia = document.getElementById('cabos-potencia-unidade').value;
   f.tensao = Number(document.getElementById('cabos-tensao').value) || 220;
   f.distancia_m = document.getElementById('cabos-distancia').value;
   f.tipo_instalacao = document.getElementById('cabos-tipo').value;
@@ -7342,7 +7355,7 @@ function sincronizarCamposCabos() {
 function calcularCabos() {
   sincronizarCamposCabos();
   const f = window._calcCabosForm;
-  if (!(Number(f.potencia_w) > 0)) { alert('Informe a potência do equipamento em Watts.'); return; }
+  if (!(Number(f.potencia_w) > 0)) { alert('Informe a potência do equipamento.'); return; }
   if (!(Number(f.distancia_m) >= 0)) { alert('Informe a distância do quadro.'); return; }
   const r = calcularCabosResultado(f);
   window._calcCabosResultado = r;
