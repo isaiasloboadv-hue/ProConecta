@@ -595,13 +595,23 @@ function entrarNoApp() {
   // pedido do usuário: "coloque como menu inicial ao logar vai abrir sempre nele" — Home (o antigo
   // "Indicadores (KPIs)") é a página de entrada de administrador/supervisor, os dois papéis que têm
   // acesso a ela (ver exigirPapel em GET /api/kpis no servidor).
-  const paginaInicial = { administrador: 'kpis-dashboard', supervisor: 'kpis-dashboard', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', estoque: 'fila-estoque' }[USER.papel] || primeiraPaginaPermitida || 'agenda';
+  // pedido do usuário: "toda vez que loga abre o menu home [kpis-dashboard, que] é do acesso
+  // PRO Marking [...] coloque pra abrir o início da própria empresa logada" — kpis-dashboard é a
+  // Home do núcleo normal (indicadores/equipe), mas numa empresa do perfil Refrigeração essa não é
+  // nem a página de entrada esperada (lá quem abre é "Início", ver home-refrigeracao) nem
+  // necessariamente uma página que a empresa tem acesso (kpis-dashboard também exige o módulo
+  // equipe_avancado — ver NAV.administrador acima). Pra administrador/supervisor dessas empresas,
+  // usa Início no lugar de Home.
+  const paginaInicial = (perfilRefrigeracaoAtivo() && (USER.papel === 'administrador' || USER.papel === 'supervisor'))
+    ? 'home-refrigeracao'
+    : { administrador: 'kpis-dashboard', supervisor: 'kpis-dashboard', cliente: 'biblioteca-defeitos', producao: 'biblioteca-defeitos', pos_venda: 'fila-pos-venda', estoque: 'fila-estoque' }[USER.papel] || primeiraPaginaPermitida || 'agenda';
   // ao recarregar/sincronizar a página (location.reload), volta pro menu onde o usuário estava
   // em vez de sempre abrir a página inicial do papel — só usa a última página salva se ela
   // ainda existir no menu deste usuário (evita cair numa página que um menu removido apagou).
-  // Home é exceção: "sempre" abre nela, por isso não entra nessa restauração.
+  // Home/Início são exceção: "sempre" abrem nela, por isso não entram nessa restauração (home-
+  // refrigeracao é o "Início" equivalente do perfil Refrigeração — ver paginaInicial acima).
   let paginaAoAbrir = paginaInicial;
-  if (paginaInicial !== 'kpis-dashboard') {
+  if (paginaInicial !== 'kpis-dashboard' && paginaInicial !== 'home-refrigeracao') {
     try {
       const ultima = localStorage.getItem('pc_ultima_pagina');
       if (ultima && buscarCaminho(navDoUsuario(), ultima, [])) paginaAoAbrir = ultima;
@@ -7724,7 +7734,7 @@ window._onbRefForm = { especialidades: [], anos_experiencia: '', foto_perfil: ''
 
 function renderOnboardingRefrigeracao() {
   const main = document.getElementById('main');
-  if (!onboardingRefrigeracaoPendente()) { ir('kpis-dashboard'); return; }
+  if (!onboardingRefrigeracaoPendente()) { ir('home-refrigeracao'); return; }
   const etapa = window._onbRefEtapa || 1;
   main.innerHTML = `
     <div class="page-head"><h1>Complete seu perfil</h1><p>Só mais alguns passos antes de começar.</p></div>
@@ -7857,7 +7867,7 @@ async function concluirOnboardingRefrigeracao() {
     window._onbRefForm = { especialidades: [], anos_experiencia: '', foto_perfil: '' };
     window._onbRefEtapa = 1;
     mostrarToast('Perfil completo!');
-    ir('kpis-dashboard');
+    ir('home-refrigeracao');
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
 }
 
