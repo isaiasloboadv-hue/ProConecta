@@ -6378,8 +6378,7 @@ const FERRAMENTAS_REF_CATEGORIAS = [
   ]},
   { chave: 'referencia', titulo: 'Referência', cor: '#0D9488', corIconeBg: '#E6F7F5', itens: [
     { icone: '🧭', label: 'Tab. Pressão', descricao: 'Gases refrigerantes', page: 'tabela-pressao' },
-    { icone: '⚠️', label: 'Cód. Erro', descricao: 'Diagnóstico por marca', page: 'guia-diagnostico-rapido' },
-    { icone: '📋', label: 'Códigos de Erro', descricao: 'Catálogo completo por marca', page: 'central-codigos-erro' },
+    { icone: '⚠️', label: 'Cód. Erro', descricao: 'Catálogo completo por marca', page: 'central-codigos-erro' },
     { icone: '📘', label: 'Manuais Técnicos', descricao: 'Instalação e manutenção' },
     { icone: '📏', label: 'Tubulação & Torque', descricao: 'Diâmetros e especificações' },
   ]},
