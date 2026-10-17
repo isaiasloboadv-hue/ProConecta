@@ -2215,32 +2215,36 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
-  function rodape(pagina, total, yConteudoFinal) {
-    const yLinha = pageH - 40;
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
-    if (pagina === total) {
-      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
-      // centraliza no meio do espaço em branco que sobra entre o fim do conteúdo e essa linha —
-      // com limites (nunca cola no conteúdo nem na linha) pra pouco ou muito conteúdo.
-      const topo = yConteudoFinal || margem;
-      const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
-      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, centroY);
-    } else {
-      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
-    }
-  }
+  // pedido do usuário: "fuçar bem mais com cara de profissional" — mesmo motivo visual do
+  // "<div class='panel h2::before'>" da UI (barrinha colorida antes do título da seção),
+  // trazido pro PDF pra dar mais hierarquia que um texto simples em caixa alta.
   function secaoTitulo(y, texto) {
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(texto, margem, y);
-    return y + 16;
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
   }
   function campo(x, y, label, valor) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text(label.toUpperCase(), x, y);
     doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+  // pedido do usuário (correção): "Problema relatado"/"Diagnóstico" são texto livre do técnico —
+  // sem quebra de linha, um relato mais longo saía reto pra fora da margem da página. Mesma
+  // técnica de splitTextToSize já usada no relatório de manutenção (gerarPdfRelatorioInterno).
+  function campoLongo(y, label, valor, larguraCampo) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), margem, y);
+    doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(String(valor || '—')), larguraCampo || largura);
+    doc.text(linhas, margem, y + 13);
+    return y + 13 + linhas.length * 12 + 12;
+  }
+  function novaPaginaSeNecessario(y, espaco) {
+    if (y + espaco <= pageH - 60) return y;
+    doc.addPage();
+    return cabecalho();
   }
 
   // ---- página 1 ----
@@ -2249,39 +2253,77 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
   campo(margem, y, 'Cliente', os.cliente_nome); campo(margem + largura / 2, y, 'Técnico', os.tecnico_nome); y += 26;
   campo(margem, y, 'Abertura', fmtDataOsRef(os.criado_em)); campo(margem + largura / 2, y, 'Conclusão', os.assinado_cliente_em ? fmtDataOsRef(os.assinado_cliente_em) : '—'); y += 30;
 
+  y = novaPaginaSeNecessario(y, 60);
   y = secaoTitulo(y, 'EQUIPAMENTO');
   campo(margem, y, 'Tipo', eq.tipo); campo(margem + largura / 2, y, 'Marca', eq.marca); y += 26;
   campo(margem, y, 'Modelo', eq.modelo); campo(margem + largura / 2, y, 'BTU', eq.btu); y += 30;
 
-  y = secaoTitulo(y, 'SERVIÇOS REALIZADOS');
-  if (os.problema_relatado) { campo(margem, y, 'Problema relatado', os.problema_relatado); y += 26; }
-  if (os.diagnostico) { campo(margem, y, 'Diagnóstico', os.diagnostico); y += 26; }
-  if ((os.servicos || []).length) { campo(margem, y, 'Serviços executados', os.servicos.map((s) => s.descricao).join(', ')); y += 30; }
+  if (os.problema_relatado || os.diagnostico) {
+    y = novaPaginaSeNecessario(y, 50);
+    y = secaoTitulo(y, 'SERVIÇOS REALIZADOS');
+    if (os.problema_relatado) { y = novaPaginaSeNecessario(y, 40); y = campoLongo(y, 'Problema relatado', os.problema_relatado); }
+    if (os.diagnostico) { y = novaPaginaSeNecessario(y, 40); y = campoLongo(y, 'Diagnóstico', os.diagnostico); }
+  }
 
-  if ((os.materiais || []).length) {
-    y = secaoTitulo(y, 'MATERIAIS');
+  // pedido do usuário (referência visual de um concorrente): uma única tabela de itens, com
+  // coluna TIPO (Serviço/Material) — igual à proposta de referência — em vez de serviços
+  // resumidos numa linha de texto corrida separada da tabela de materiais.
+  const itensTabela = [
+    ...(os.servicos || []).map((s) => ({ tipo: 'Serviço', nome: s.descricao, qtd: 1, valorUnit: s.valor })),
+    ...(os.materiais || []).map((m) => ({ tipo: 'Material', nome: m.nome, qtd: m.quantidade, valorUnit: m.valor_unitario })),
+  ];
+  if (itensTabela.length) {
+    y = novaPaginaSeNecessario(y, 50);
+    y = secaoTitulo(y, 'ITENS');
     doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 18, 'F');
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-    doc.text('ITEM', margem + 8, y + 12);
-    doc.text('QTD', margem + largura * 0.55, y + 12);
-    doc.text('VALOR UNIT.', margem + largura * 0.68, y + 12);
-    doc.text('SUBTOTAL', margem + largura * 0.86, y + 12);
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('TIPO', margem + 8, y + 12);
+    doc.text('ITEM / DESCRIÇÃO', margem + largura * 0.17, y + 12);
+    doc.text('QTD', margem + largura * 0.62, y + 12);
+    doc.text('VALOR UNIT.', margem + largura * 0.73, y + 12);
+    doc.text('SUBTOTAL', margem + largura * 0.88, y + 12);
     y += 18;
-    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); doc.setFontSize(8.5);
-    os.materiais.forEach((m, i) => {
+    doc.setFont(undefined, 'normal'); doc.setFontSize(8.5);
+    itensTabela.forEach((it, i) => {
+      y = novaPaginaSeNecessario(y, 16);
       if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
-      doc.text(limparPdf(m.nome), margem + 8, y + 11);
-      doc.text(String(m.quantidade), margem + largura * 0.55, y + 11);
-      doc.text(fmtMoeda(m.valor_unitario), margem + largura * 0.68, y + 11);
-      doc.text(fmtMoeda(m.quantidade * m.valor_unitario), margem + largura * 0.86, y + 11);
+      doc.setTextColor(...(it.tipo === 'Serviço' ? PDF_COR.blue : PDF_COR.inkSoft));
+      doc.text(it.tipo, margem + 8, y + 11);
+      doc.setTextColor(...PDF_COR.ink);
+      doc.text(limparPdf(it.nome).slice(0, 48), margem + largura * 0.17, y + 11);
+      doc.text(String(it.qtd), margem + largura * 0.62, y + 11);
+      doc.text(fmtMoeda(it.valorUnit), margem + largura * 0.73, y + 11);
+      doc.text(fmtMoeda(it.qtd * it.valorUnit), margem + largura * 0.88, y + 11);
       y += 16;
     });
+    y += 10;
   }
-  rodape(1, 2);
 
-  // ---- página 2 ----
-  doc.addPage();
-  y = cabecalho();
+  // pedido do usuário (correção): as fotos anexadas na O.S. existiam no cadastro (os.fotos) mas
+  // nunca eram desenhadas no PDF — o relatório ficava sem nenhum registro fotográfico.
+  if ((os.fotos || []).length) {
+    y = novaPaginaSeNecessario(y, 60);
+    y = secaoTitulo(y, 'FOTOS DO SERVIÇO');
+    const wImg = (largura - 24) / 3, hImg = 110;
+    let x = margem;
+    os.fotos.forEach((f, i) => {
+      if (i > 0 && i % 3 === 0) { x = margem; y += hImg + 14; }
+      y = novaPaginaSeNecessario(y, hImg + 14);
+      try {
+        const formato = /^data:image\/(\w+);/.exec(f);
+        doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+        doc.roundedRect(x - 1, y - 1, wImg + 2, hImg + 2, 4, 4, 'S');
+        doc.addImage(f, formato ? formato[1].toUpperCase().replace('JPG', 'JPEG') : 'JPEG', x, y, wImg, hImg);
+      } catch (e) {}
+      x += wImg + 12;
+    });
+    y += hImg + 14;
+  }
+
+  // ---- resumo financeiro + assinaturas (sempre em bloco próprio — nunca parte do fluxo acima
+  // em cima de uma O.S. curta, sempre em página nova se o que já foi desenhado não deixar espaço
+  // decente, mesmo padrão de novaPaginaSeNecessario usado no resto do documento) ----
+  y = novaPaginaSeNecessario(y, 220);
   y = secaoTitulo(y, 'RESUMO FINANCEIRO');
   [['Materiais', os.total_materiais], ['Serviços', os.total_servicos], ['Mão de obra', os.mao_de_obra], os.desconto_aplicado ? ['Desconto', -os.desconto_aplicado] : null]
     .filter(Boolean)
@@ -2293,31 +2335,56 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
       y += 16;
     });
   y += 6;
-  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 28, 'F');
+  doc.setFillColor(...PDF_COR.navy); doc.roundedRect(margem, y, largura, 28, 4, 4, 'F');
   doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
   doc.text('TOTAL', margem + 10, y + 19);
   doc.text(fmtMoeda(os.total), pageW - margem - 10, y + 19, { align: 'right' });
   y += 46;
 
   if (os.garantia_dias) {
-    doc.setFillColor(...PDF_COR.greenBg); doc.rect(margem, y, largura, 22, 'F');
+    doc.setFillColor(...PDF_COR.greenBg); doc.roundedRect(margem, y, largura, 22, 4, 4, 'F');
     doc.setFontSize(9.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.green);
     doc.text(`Garantia válida até ${garantiaAteOsRef(os.criado_em, os.garantia_dias)}`, margem + 10, y + 15);
     y += 38;
   }
 
+  y = novaPaginaSeNecessario(y, 110);
   y = secaoTitulo(y, 'ASSINATURAS');
-  y += 4;
+  y += 6;
   const largAssin = (largura - 20) / 2;
-  if (os.assinatura_tecnico_img) doc.addImage(os.assinatura_tecnico_img, 'PNG', margem, y, largAssin, 70);
-  if (os.assinatura_cliente_img) doc.addImage(os.assinatura_cliente_img, 'PNG', margem + largAssin + 20, y, largAssin, 70);
+  // molduras arredondadas em volta de cada assinatura — mesmo acabamento de "cartão" da
+  // referência visual do usuário (RESPONSÁVEL TÉCNICO / APROVAÇÃO DO CLIENTE emolduradas).
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+  doc.roundedRect(margem, y, largAssin, 96, 5, 5, 'S');
+  doc.roundedRect(margem + largAssin + 20, y, largAssin, 96, 5, 5, 'S');
+  if (os.assinatura_tecnico_img) { try { doc.addImage(os.assinatura_tecnico_img, 'PNG', margem + 8, y + 6, largAssin - 16, 62); } catch (e) {} }
+  if (os.assinatura_cliente_img) { try { doc.addImage(os.assinatura_cliente_img, 'PNG', margem + largAssin + 28, y + 6, largAssin - 16, 62); } catch (e) {} }
   doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
-  doc.line(margem, y + 74, margem + largAssin, y + 74);
-  doc.line(margem + largAssin + 20, y + 74, margem + largAssin * 2 + 20, y + 74);
+  doc.line(margem + 8, y + 74, margem + largAssin - 8, y + 74);
+  doc.line(margem + largAssin + 28, y + 74, margem + largAssin * 2 + 12, y + 74);
   doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text('TÉCNICO RESPONSÁVEL', margem, y + 86);
-  doc.text('CLIENTE', margem + largAssin + 20, y + 86);
-  rodape(2, 2, y + 96);
+  doc.text('TÉCNICO RESPONSÁVEL', margem + 8, y + 86);
+  doc.text('CLIENTE', margem + largAssin + 28, y + 86);
+  y += 96;
+
+  // ---- rodapé em todas as páginas, com o total de páginas já sabido (conteúdo dinâmico: texto
+  // longo e quantidade de fotos variam o nº de páginas) — mesmo padrão de montarDocPmocVisitaPdf.
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (p === totalPaginas) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+      const topo = p === totalPaginas ? Math.max(y, margem) : margem;
+      const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, centroY);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
 
   return doc;
 }
