@@ -6377,7 +6377,7 @@ const FERRAMENTAS_REF_CATEGORIAS = [
     { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro', page: 'calculadora-carga-gas' },
   ]},
   { chave: 'referencia', titulo: 'Referência', cor: '#0D9488', corIconeBg: '#E6F7F5', itens: [
-    { icone: '🧭', label: 'Tab. Pressão', descricao: 'Gases refrigerantes' },
+    { icone: '🧭', label: 'Tab. Pressão', descricao: 'Gases refrigerantes', page: 'tabela-pressao' },
     { icone: '⚠️', label: 'Cód. Erro', descricao: 'Diagnóstico por marca', page: 'guia-diagnostico-rapido' },
     { icone: '📘', label: 'Manuais Técnicos', descricao: 'Instalação e manutenção' },
     { icone: '📏', label: 'Tubulação & Torque', descricao: 'Diâmetros e especificações' },
@@ -7777,6 +7777,126 @@ async function compartilharCargaGasWhatsapp() {
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
 }
 
+// ===== Tabela de Pressão (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, prints completos de 8 gases
+// refrigerantes × 15 temperaturas cada) — tabela pressão-temperatura de referência rápida, com
+// toggle PSI/bar e campo opcional "Temperatura ambiente" que só destaca a linha mais próxima
+// (não filtra nem recalcula nada, é só atalho visual).
+// Diferente das outras calculadoras do hub, aqui não tem fórmula pra conferir: tabela P-T de
+// cada gás é dado termodinâmico de fabricante/tabela técnica, não algo que eu calcule ou derive
+// (não equivale a uma fórmula de física simples como a conversão BTU→W ou a trigonometria do
+// capacitor) — então os valores abaixo (8 gases × 15 temperaturas × sucção/descarga = 240
+// números) são exatamente os mostrados nos prints, conferidos um a um, igual às tabelas de
+// referência de Cabos/Carga de Gás. bar = PSI ÷ 14,5038 (conversão de unidade padrão, confirmada
+// batendo todos os valores em bar mostrados nos prints) — não precisa de uma segunda tabela.
+// Os indicadores "Baixa/Normal/Alta" por linha também vêm direto dos prints: são fixos por
+// gás/coluna (independem da "Temperatura ambiente" digitada) e a faixa "normal" varia bastante
+// por gás — às vezes é só um ponto (sucção do R-22: só 10°C), às vezes uma faixa larga (descarga
+// do R-134a: 0°C a 20°C). Reproduzido como está, sem tentar generalizar uma regra única.
+const CALC_PRESSAO_TEMPS = [-10, -5, 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+const CALC_PRESSAO_PSI_POR_BAR = 14.5038;
+const CALC_PRESSAO_DADOS = {
+  'R-22': { sucaoPsi: [28.2, 35.5, 43.8, 53.4, 64.3, 76.7, 90.7, 106.0, 123.0, 142.0, 163.0, 186.0, 212.0, 240.0, 271.0], descargaPsi: [226.0, 260.0, 297.0, 337.0, 381.0, 429.0, 480.0, 535.0, 595.0, 659.0, 728.0, 801.0, 880.0, 965.0, 1056.0], sucaoNormal: [10, 10], descargaNormal: [-5, 10] },
+  'R-410A': { sucaoPsi: [67.0, 80.0, 95.0, 112.0, 131.0, 152.0, 175.0, 200.0, 228.0, 259.0, 293.0, 330.0, 371.0, 416.0, 465.0], descargaPsi: [401.0, 452.0, 508.0, 568.0, 633.0, 703.0, 778.0, 859.0, 946.0, 1039.0, 1139.0, 1246.0, 1361.0, 1484.0, 1616.0], sucaoNormal: [5, 10], descargaNormal: [-10, 10] },
+  'R-32': { sucaoPsi: [52.0, 63.0, 75.0, 89.0, 105.0, 123.0, 143.0, 165.0, 190.0, 218.0, 249.0, 283.0, 321.0, 362.0, 407.0], descargaPsi: [345.0, 393.0, 445.0, 501.0, 562.0, 628.0, 700.0, 777.0, 861.0, 951.0, 1048.0, 1153.0, 1266.0, 1388.0, 1519.0], sucaoNormal: [5, 10], descargaNormal: [-5, 10] },
+  'R-134a': { sucaoPsi: [12.5, 16.5, 21.2, 26.6, 32.9, 40.1, 48.3, 57.6, 68.2, 80.1, 93.4, 108.0, 124.0, 142.0, 162.0], descargaPsi: [116.0, 136.0, 159.0, 183.0, 210.0, 240.0, 273.0, 309.0, 348.0, 391.0, 437.0, 488.0, 543.0, 602.0, 666.0], sucaoNormal: [5, 10], descargaNormal: [0, 20] },
+  'R-404A': { sucaoPsi: [37.0, 45.0, 54.0, 64.0, 76.0, 89.0, 104.0, 121.0, 139.0, 160.0, 183.0, 209.0, 237.0, 268.0, 302.0], descargaPsi: [272.0, 310.0, 351.0, 396.0, 444.0, 497.0, 554.0, 615.0, 682.0, 754.0, 831.0, 914.0, 1003.0, 1098.0, 1200.0], sucaoNormal: [5, 10], descargaNormal: [-5, 15] },
+  'R-407C': { sucaoPsi: [27.0, 34.0, 42.0, 51.0, 62.0, 74.0, 88.0, 104.0, 121.0, 141.0, 163.0, 187.0, 214.0, 244.0, 277.0], descargaPsi: [218.0, 252.0, 289.0, 329.0, 373.0, 421.0, 473.0, 529.0, 590.0, 656.0, 727.0, 804.0, 887.0, 976.0, 1072.0], sucaoNormal: [5, 10], descargaNormal: [0, 15] },
+  'R-290': { sucaoPsi: [29.0, 36.0, 44.0, 53.0, 63.0, 75.0, 88.0, 103.0, 120.0, 138.0, 159.0, 182.0, 207.0, 234.0, 264.0], descargaPsi: [200.0, 232.0, 267.0, 305.0, 347.0, 392.0, 441.0, 494.0, 551.0, 613.0, 679.0, 751.0, 828.0, 911.0, 1000.0], sucaoNormal: [5, 10], descargaNormal: [5, 20] },
+  'R-600a': { sucaoPsi: [7.3, 9.5, 12.2, 15.3, 19.0, 23.4, 28.4, 34.2, 40.8, 48.4, 56.9, 66.6, 77.4, 89.5, 103.0], descargaPsi: [72.0, 85.0, 100.0, 117.0, 136.0, 157.0, 181.0, 207.0, 236.0, 268.0, 303.0, 341.0, 383.0, 429.0, 479.0], sucaoNormal: [5, 10], descargaNormal: [0, 15] },
+};
+function calcPressaoStatus(temp, faixaNormal) {
+  if (temp < faixaNormal[0]) return { simbolo: '↓', cor: 'var(--blue)' };
+  if (temp > faixaNormal[1]) return { simbolo: '↑', cor: 'var(--red)' };
+  return { simbolo: '✓', cor: 'var(--green)' };
+}
+function fmtPressaoValor(psi, unidade) {
+  return unidade === 'bar' ? (psi / CALC_PRESSAO_PSI_POR_BAR).toFixed(2) : psi.toFixed(1);
+}
+function calcPressaoFormVazio() {
+  return { gas: 'R-22', unidade: 'psi', temp_ambiente: '' };
+}
+
+async function renderTabelaPressao() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._pressaoForm) window._pressaoForm = calcPressaoFormVazio();
+  desenharTabelaPressao();
+}
+function desenharTabelaPressao() {
+  const main = document.getElementById('main');
+  const f = window._pressaoForm;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; align-items:center; gap:10px;">
+      <button class="btn-outline-sm" style="padding:6px 10px;" onclick="ir('ferramentas-hub')">←</button>
+      <h1 style="margin:0;">Tabela de Pressão</h1>
+    </div>
+    <div style="max-width:620px;">
+      <div style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:14px;">
+        <div class="field" style="flex:1; min-width:160px; margin-bottom:0;"><label>Gás refrigerante</label>
+          <select id="pressao-gas" onchange="sincronizarPressao()">
+            ${Object.keys(CALC_PRESSAO_DADOS).map((g) => `<option value="${esc(g)}" ${f.gas === g ? 'selected' : ''}>${esc(g)}</option>`).join('')}
+          </select>
+        </div>
+        <div onclick="alternarUnidadePressao()" style="display:flex; align-items:center; gap:8px; padding-bottom:10px; cursor:pointer; user-select:none;">
+          <span style="font-size:13px; color:${f.unidade === 'psi' ? 'var(--ink)' : 'var(--ink-soft)'}; font-weight:${f.unidade === 'psi' ? '700' : '400'};">PSI</span>
+          <span style="width:38px; height:22px; border-radius:11px; background:${f.unidade === 'bar' ? 'var(--blue)' : 'var(--line)'}; position:relative; display:inline-block; transition:.15s; flex-shrink:0;">
+            <span style="position:absolute; top:2px; left:${f.unidade === 'bar' ? '18px' : '2px'}; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:.15s;"></span>
+          </span>
+          <span style="font-size:13px; color:${f.unidade === 'bar' ? 'var(--ink)' : 'var(--ink-soft)'}; font-weight:${f.unidade === 'bar' ? '700' : '400'};">bar</span>
+        </div>
+      </div>
+      <div class="field"><label>Temperatura ambiente (°C)</label><input id="pressao-temp" type="number" step="1" value="${esc(f.temp_ambiente)}" placeholder="Opcional — destaca a linha mais próxima" oninput="sincronizarPressao()"></div>
+      <div style="display:flex; gap:14px; font-size:12px; margin:-6px 0 14px;">
+        <span style="color:var(--blue);">↓ Baixa</span>
+        <span style="color:var(--green);">✓ Normal</span>
+        <span style="color:var(--red);">↑ Alta</span>
+      </div>
+      <div id="pressao-tabela"></div>
+    </div>`;
+  desenharTabelaPressaoGrid();
+}
+function sincronizarPressao() {
+  const f = window._pressaoForm;
+  f.gas = document.getElementById('pressao-gas').value;
+  f.temp_ambiente = document.getElementById('pressao-temp').value;
+  desenharTabelaPressaoGrid();
+}
+function alternarUnidadePressao() {
+  window._pressaoForm.unidade = window._pressaoForm.unidade === 'psi' ? 'bar' : 'psi';
+  desenharTabelaPressao();
+}
+function desenharTabelaPressaoGrid() {
+  const el = document.getElementById('pressao-tabela');
+  if (!el) return;
+  const f = window._pressaoForm;
+  const dados = CALC_PRESSAO_DADOS[f.gas];
+  const unidadeLabel = f.unidade === 'bar' ? 'bar' : 'PSI';
+  // destaca a temperatura da tabela mais próxima da "temperatura ambiente" digitada — só visual,
+  // não filtra nem recalcula nada.
+  let tempDestacada = null;
+  if (f.temp_ambiente !== '' && !isNaN(Number(f.temp_ambiente))) {
+    const alvo = Number(f.temp_ambiente);
+    tempDestacada = CALC_PRESSAO_TEMPS.reduce((maisProxima, t) => (Math.abs(t - alvo) < Math.abs(maisProxima - alvo) ? t : maisProxima), CALC_PRESSAO_TEMPS[0]);
+  }
+  const col = (texto, extra) => `<div style="padding:8px 6px; border-bottom:1px solid var(--line); ${extra || ''}">${texto}</div>`;
+  const cabecalho = ['°C', `Sucção (${unidadeLabel})`, `Descarga (${unidadeLabel})`].map((t) => col(`<span style="font-size:10.5px; text-transform:uppercase; color:var(--ink-soft); font-weight:700;">${esc(t)}</span>`)).join('');
+  const linhas = CALC_PRESSAO_TEMPS.map((t, i) => {
+    const destacada = t === tempDestacada;
+    const fundo = destacada ? 'background:var(--blue-pale);' : '';
+    const sucao = calcPressaoStatus(t, dados.sucaoNormal);
+    const descarga = calcPressaoStatus(t, dados.descargaNormal);
+    return [
+      col(`${destacada ? '▶ ' : ''}${t}°C`, `${fundo} font-weight:${destacada ? '700' : '400'};`),
+      col(`<span style="color:${sucao.cor}; font-weight:600;">${fmtPressaoValor(dados.sucaoPsi[i], f.unidade)} ${sucao.simbolo}</span>`, fundo),
+      col(`<span style="color:${descarga.cor}; font-weight:600;">${fmtPressaoValor(dados.descargaPsi[i], f.unidade)} ${descarga.simbolo}</span>`, fundo),
+    ].join('');
+  }).join('');
+  el.innerHTML = `<div class="panel" style="overflow-x:auto;">
+    <div style="display:grid; grid-template-columns:70px 1fr 1fr; gap:0 6px; font-size:13px; min-width:280px;">${cabecalho}${linhas}</div>
+  </div>`;
+}
+
 async function renderFerramentaEmBreve(pagina) {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
@@ -8391,6 +8511,7 @@ async function ir(pagina) {
     if (pagina === 'calculadora-cabos') return renderCalculadoraCabos();
     if (pagina === 'calculadora-capacitor') return renderCalculadoraCapacitor();
     if (pagina === 'calculadora-carga-gas') return renderCalculadoraCargaGas();
+    if (pagina === 'tabela-pressao') return renderTabelaPressao();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
