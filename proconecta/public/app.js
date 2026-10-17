@@ -2317,7 +2317,10 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
       } catch (e) {}
       x += wImg + 12;
     });
-    y += hImg + 14;
+    // pedido do usuário: espaço maior entre as fotos e o resumo financeiro logo abaixo — antes
+    // ficava justo demais (mesmo respiro de uma linha de foto, 14pt), agora um respiro de seção
+    // de verdade (28pt), igual ao que separa as outras seções do documento.
+    y += hImg + 28;
   }
 
   // ---- resumo financeiro + assinaturas (sempre em bloco próprio — nunca parte do fluxo acima
@@ -13405,9 +13408,26 @@ function logoClienteFlatHeader() {
 // numa segunda linha menor, WhatsApp/telefone + e-mail. Sem logo configurada, o nome ocupa o
 // lugar dela (mesmo x), mantendo o destaque. `extra` é um dado a mais específico de cada PDF
 // (ex.: CNPJ/CPF da Calculadora Blindada) que entra na mesma segunda linha.
+// pedido do usuário: "dimensione o logo" — antes esticava qualquer logo pra caber exatamente
+// numa caixa 68×28 fixa, distorcendo logo que não fosse nessa proporção (uma logo mais quadrada/
+// vertical, por exemplo, saía achatada). Agora encaixa mantendo a proporção original da imagem
+// (mesmo raciocínio de "object-fit: contain" do CSS) dentro de uma caixa de até 68×40 — largura e
+// altura nunca passam do box, e a logo nunca mais sai esticada ou espremida.
+function dimensoesLogoContidaPdf(doc, logoCliente, larguraMax, alturaMax) {
+  try {
+    const { width, height } = doc.getImageProperties(logoCliente);
+    const escala = Math.min(larguraMax / width, alturaMax / height);
+    return { w: width * escala, h: height * escala };
+  } catch (e) {
+    return { w: larguraMax, h: alturaMax };
+  }
+}
 function desenharCabecalhoEmpresaPdf(doc, logoCliente, x, y0, extra) {
   const dadosX = logoCliente ? x + 78 : x;
-  if (logoCliente) doc.addImage(logoCliente, 'PNG', x, y0 - 8, 68, 28);
+  if (logoCliente) {
+    const { w, h } = dimensoesLogoContidaPdf(doc, logoCliente, 68, 40);
+    doc.addImage(logoCliente, 'PNG', x, y0 - 8 + (28 - h) / 2, w, h);
+  }
   doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(limparPdf(empresaNome()), dadosX, y0 + 2);
   const linha2 = [
