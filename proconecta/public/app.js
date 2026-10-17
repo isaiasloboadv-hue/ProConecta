@@ -6379,6 +6379,7 @@ const FERRAMENTAS_REF_CATEGORIAS = [
   { chave: 'referencia', titulo: 'Referência', cor: '#0D9488', corIconeBg: '#E6F7F5', itens: [
     { icone: '🧭', label: 'Tab. Pressão', descricao: 'Gases refrigerantes', page: 'tabela-pressao' },
     { icone: '⚠️', label: 'Cód. Erro', descricao: 'Diagnóstico por marca', page: 'guia-diagnostico-rapido' },
+    { icone: '📋', label: 'Códigos de Erro', descricao: 'Catálogo completo por marca', page: 'central-codigos-erro' },
     { icone: '📘', label: 'Manuais Técnicos', descricao: 'Instalação e manutenção' },
     { icone: '📏', label: 'Tubulação & Torque', descricao: 'Diâmetros e especificações' },
   ]},
@@ -7897,6 +7898,4071 @@ function desenharTabelaPressaoGrid() {
   </div>`;
 }
 
+// ===== Central de Códigos de Erro (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, Ferramentas -> "Códigos de Erro") —
+// catálogo completo de códigos por marca, com busca e abas por categoria de equipamento
+// (Split/Cassete/VRF/Piso-Teto/Chiller/Compressor conforme a marca). Dados transcritos das
+// capturas de tela do app de referência enviadas pelo usuário (592 códigos, 22 marcas). É um
+// catálogo independente do "Guia de Diagnóstico Rápido" já existente (ver GUIA_DIAGNOSTICO_MARCAS
+// acima) — aquele tem dicas de "ação imediata" pra poucos códigos por marca; este é o catálogo
+// completo, fiel ao app de referência, sem inventar instrução de reparo que não veio da fonte.
+const CATALOGO_ERRO_MARCAS = [
+  {
+    "chave": "samsung",
+    "nome": "Samsung",
+    "totalCodigos": 78,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor de temperatura interna",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor da serpentina evaporadora",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor de temperatura externa / Falha motor ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Erro no sensor de descarga / Degelo forçado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Médio",
+            "descricao": "Erro sensor trocador de calor interno (aberto/curto)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Médio",
+            "descricao": "Erro sensor trocador de calor externo (aberto/curto)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura do aquecedor (aberto/curto)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "C2",
+            "severidade": "Médio",
+            "descricao": "Falha sensor de tubo interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CL",
+            "severidade": "Baixo",
+            "descricao": "Indicador de auto-limpeza",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "FQ",
+            "severidade": "Baixo",
+            "descricao": "Lembrete de limpeza/reset do filtro",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "DF",
+            "severidade": "Baixo",
+            "descricao": "Auto degelo em andamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EL",
+            "severidade": "Alto",
+            "descricao": "Superaquecimento do aquecedor elétrico",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E101",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação (não recebe dados) / evap-cond (indoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E102",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação (unidade externa não comunica) / (outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E121",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E122",
+            "severidade": "Médio",
+            "descricao": "Erro sensor trocador de calor interno / temperatura de tubo interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E123",
+            "severidade": "Médio",
+            "descricao": "Erro sensor trocador de calor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E128",
+            "severidade": "Médio",
+            "descricao": "Sensor trocador de calor interno desconectado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E129",
+            "severidade": "Médio",
+            "descricao": "Sensor trocador de calor externo desconectado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E130",
+            "severidade": "Médio",
+            "descricao": "Ambos sensores de trocador desconectados",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E154",
+            "severidade": "Alto",
+            "descricao": "Falha motor ventilador interno / Capacitor defeituoso",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E161",
+            "severidade": "Médio",
+            "descricao": "Mais de duas unidades internas em modos opostos",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E162",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM (indoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E163",
+            "severidade": "Médio",
+            "descricao": "Erro de configuração de opção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E185",
+            "severidade": "Alto",
+            "descricao": "Fiação incorreta",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E201",
+            "severidade": "Alto",
+            "descricao": "Número incorreto de unidades internas pareadas",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E154",
+            "severidade": "Alto",
+            "descricao": "Erro do ventilador (indoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E162",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM (indoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E163",
+            "severidade": "Médio",
+            "descricao": "Erro de opção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E201",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre indoor e outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E203",
+            "severidade": "Alto",
+            "descricao": "Timeout comunicação (Main Micom e Inverter Micom)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E221",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura externa (outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E231",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura do condensador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E251",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E416",
+            "severidade": "Alto",
+            "descricao": "Superaquecimento do sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E422",
+            "severidade": "Alto",
+            "descricao": "Erro EEV (válvula de expansão) / Válvula fechada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E440",
+            "severidade": "Médio",
+            "descricao": "Condição de proibição (aquecimento)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E441",
+            "severidade": "Médio",
+            "descricao": "Condição de proibição (refrigeração)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E458",
+            "severidade": "Alto",
+            "descricao": "Erro ventilador (outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E461",
+            "severidade": "Crítico",
+            "descricao": "Erro de partida do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E462",
+            "severidade": "Crítico",
+            "descricao": "Erro limite de corrente AC de entrada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E464",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente IPM (módulo de potência)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E465",
+            "severidade": "Crítico",
+            "descricao": "Erro limite de tensão/corrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E466",
+            "severidade": "Crítico",
+            "descricao": "Erro tensão DC-Link (baixa/alta)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E467",
+            "severidade": "Crítico",
+            "descricao": "Erro cabo do compressor ausente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E468",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de corrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E469",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de tensão DC-Link",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E470",
+            "severidade": "Alto",
+            "descricao": "Erro dados EEPROM (sem dados)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E471",
+            "severidade": "Alto",
+            "descricao": "Erro dados EEPROM (Main Micom e Inverter Micom)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E474",
+            "severidade": "Alto",
+            "descricao": "Erro sensor do dissipador de calor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E483",
+            "severidade": "Crítico",
+            "descricao": "Erro proteção de sobretensão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E484",
+            "severidade": "Crítico",
+            "descricao": "Erro sobrecarga PFC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E485",
+            "severidade": "Alto",
+            "descricao": "Erro sensor corrente de entrada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E488",
+            "severidade": "Alto",
+            "descricao": "Erro sensor tensão AC de entrada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E500",
+            "severidade": "Alto",
+            "descricao": "Superaquecimento do dissipador de calor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E554",
+            "severidade": "Crítico",
+            "descricao": "Erro de vazamento de gás",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E559",
+            "severidade": "Alto",
+            "descricao": "Erro unidade externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor de temperatura ambiente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor da serpentina",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor externo",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED7",
+            "severidade": "Crítico",
+            "descricao": "Erro no compressor",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED9",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente aberto/curto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Sensor serpentina aberto/curto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro motor do ventilador",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "VRF (DVM)",
+        "codigos": [
+          {
+            "codigo": "E101",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre módulos",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E121",
+            "severidade": "Alto",
+            "descricao": "Sobrecarga total do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E154",
+            "severidade": "Alto",
+            "descricao": "Erro no ventilador da condensadora",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E202",
+            "severidade": "Crítico",
+            "descricao": "Proteção de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E416",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E461",
+            "severidade": "Crítico",
+            "descricao": "Erro de partida do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E464",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor (IPM)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E466",
+            "severidade": "Crítico",
+            "descricao": "Erro tensão DC-Link",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E554",
+            "severidade": "Crítico",
+            "descricao": "Vazamento de gás",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "lg",
+    "nome": "LG",
+    "totalCodigos": 56,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "CH01",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de retorno de ar",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH02",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina interna",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH03",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH04",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de sucção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH05",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação interna/externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH06",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de corrente do compressor (indoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH07",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de corrente do compressor (outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH08",
+            "severidade": "Alto",
+            "descricao": "Sensor de vibração do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH09",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH10",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga (alta temperatura)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH12",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH21",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente no compressor DC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH22",
+            "severidade": "Crítico",
+            "descricao": "Módulo IPM com sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH23",
+            "severidade": "Crítico",
+            "descricao": "Tensão DC do barramento anormal",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH24",
+            "severidade": "Crítico",
+            "descricao": "Erro PFC (correção fator de potência)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH25",
+            "severidade": "Crítico",
+            "descricao": "Erro tensão de saída do PFC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH26",
+            "severidade": "Crítico",
+            "descricao": "Erro no módulo do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH27",
+            "severidade": "Crítico",
+            "descricao": "Erro PSC (correção fator de potência)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH29",
+            "severidade": "Alto",
+            "descricao": "Erro ventilador outdoor (motor DC)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH32",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH33",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de sucção do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH34",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH35",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão detectada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH38",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura do condensador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH39",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura do sub-resfriador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH40",
+            "severidade": "Alto",
+            "descricao": "Erro sensor CT (transformador de corrente)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH41",
+            "severidade": "Crítico",
+            "descricao": "Erro sensor de posição do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH43",
+            "severidade": "Alto",
+            "descricao": "Proteção de baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH44",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura de sucção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH45",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH46",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador indoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH47",
+            "severidade": "Médio",
+            "descricao": "Erro no swing (aleta)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH48",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina do condensador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH53",
+            "severidade": "Alto",
+            "descricao": "Erro válvula de expansão eletrônica (EEV)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH60",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH61",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura do tubo CT",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH62",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de alta pressão (transdutor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH65",
+            "severidade": "Alto",
+            "descricao": "Erro sensor do dissipador de calor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH67",
+            "severidade": "Alto",
+            "descricao": "Erro no ventilador externo (BLDC)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Médio",
+            "descricao": "Erro no sensor ambiente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED4",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro no ventilador",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "CH01",
+            "severidade": "Médio",
+            "descricao": "Sensor retorno aberto/curto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH02",
+            "severidade": "Médio",
+            "descricao": "Sensor serpentina aberto/curto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH05",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH21",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH46",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "Multi V (VRF)",
+        "codigos": [
+          {
+            "codigo": "CH05",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre unidades",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH21",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH22",
+            "severidade": "Crítico",
+            "descricao": "Módulo IPM com defeito",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH35",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH53",
+            "severidade": "Alto",
+            "descricao": "Erro válvula de expansão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH62",
+            "severidade": "Alto",
+            "descricao": "Erro no sensor de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CH67",
+            "severidade": "Alto",
+            "descricao": "Erro no ventilador externo",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "fujitsu",
+    "nome": "Fujitsu",
+    "totalCodigos": 28,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E0:00",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação serial",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E1:00",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de retorno (TA)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2:00",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina interna (TC)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3:00",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura externa (TO)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4:00",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga (TD)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5:00",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de sucção (TS)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6:00",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7:00",
+            "severidade": "Alto",
+            "descricao": "Erro no motor DC do ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8:00",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente total / Proteção AC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9:00",
+            "severidade": "Médio",
+            "descricao": "Erro na bomba de dreno / boia",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EA:00",
+            "severidade": "Alto",
+            "descricao": "Erro na válvula de 4 vias",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EB:00",
+            "severidade": "Médio",
+            "descricao": "Erro sensor trocador de calor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EC:00",
+            "severidade": "Crítico",
+            "descricao": "Erro no inverter (módulo IPM)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "ED:00",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EE:00",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EF:00",
+            "severidade": "Crítico",
+            "descricao": "Erro sensor de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Sensor serpentina com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Médio",
+            "descricao": "Sensor externo com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Crítico",
+            "descricao": "Compressor com sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED7",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED9",
+            "severidade": "Médio",
+            "descricao": "Erro na bomba de dreno",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "E0:00",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E1:00",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente aberto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2:00",
+            "severidade": "Médio",
+            "descricao": "Sensor serpentina aberto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9:00",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EA:00",
+            "severidade": "Alto",
+            "descricao": "Erro válvula 4 vias",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "daikin",
+    "nome": "Daikin",
+    "totalCodigos": 58,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "A1",
+            "severidade": "Alto",
+            "descricao": "Defeito na placa interna (PCB)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A3",
+            "severidade": "Médio",
+            "descricao": "Nível de água alto na bandeja",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A5",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento / superaquecimento serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A6",
+            "severidade": "Alto",
+            "descricao": "Erro no motor do ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A7",
+            "severidade": "Médio",
+            "descricao": "Erro motor da aleta (swing flap)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AH",
+            "severidade": "Baixo",
+            "descricao": "Erro no coletor de poeira",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AJ",
+            "severidade": "Médio",
+            "descricao": "Erro de configuração de capacidade",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "C3",
+            "severidade": "Médio",
+            "descricao": "Resistência anormal sensor nível de água",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "C4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina do trocador (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "C9",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura ambiente (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CE",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de radiação (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CJ",
+            "severidade": "Baixo",
+            "descricao": "Erro sensor do controle remoto (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E0",
+            "severidade": "Alto",
+            "descricao": "Dispositivos de proteção outdoor ativados",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E1",
+            "severidade": "Alto",
+            "descricao": "Erro na placa externa (PCB outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão (HPS ativado)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão (LPS ativado)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecarga do compressor (OL)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro no motor do ventilador externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Temperatura de descarga muito alta",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F6",
+            "severidade": "Crítico",
+            "descricao": "Erro de alta pressão (proteção)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H6",
+            "severidade": "Crítico",
+            "descricao": "Sensor de posição do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H9",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura ar externo (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "J3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "J5",
+            "severidade": "Médio",
+            "descricao": "Erro sensor tubo de sucção (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "J6",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina externa (resistência anormal)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "L5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente instantânea",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P1",
+            "severidade": "Crítico",
+            "descricao": "Desequilíbrio de tensão / fase aberta",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U0",
+            "severidade": "Alto",
+            "descricao": "Temperatura de sucção muito alta",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U1",
+            "severidade": "Alto",
+            "descricao": "Fase reversa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U2",
+            "severidade": "Crítico",
+            "descricao": "Fase aberta / desequilíbrio de tensão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U4",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação (serial)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U5",
+            "severidade": "Médio",
+            "descricao": "Erro comunicação unidade interna / controle remoto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UA",
+            "severidade": "Alto",
+            "descricao": "Erro de combinação indoor/outdoor ou configuração PCB",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UC",
+            "severidade": "Médio",
+            "descricao": "Erro na configuração de endereço",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UE",
+            "severidade": "Alto",
+            "descricao": "Falha comunicação com dispositivo central",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UF",
+            "severidade": "Alto",
+            "descricao": "Incompatibilidade de fiação/tubulação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UH",
+            "severidade": "Alto",
+            "descricao": "Mau funcionamento do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UJ",
+            "severidade": "Alto",
+            "descricao": "Falha de comunicação",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "VRF (VRV)",
+        "codigos": [
+          {
+            "codigo": "A1",
+            "severidade": "Alto",
+            "descricao": "Defeito PCB interna",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A3",
+            "severidade": "Médio",
+            "descricao": "Nível de água alto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão (HPS)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão (LPS)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecarga compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "L4",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura no radiador do inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "L5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente instantânea",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U4",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre unidades",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U8",
+            "severidade": "Médio",
+            "descricao": "Erro comunicação controle remoto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "UA",
+            "severidade": "Alto",
+            "descricao": "Erro de combinação de unidades",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "Sky Air",
+        "codigos": [
+          {
+            "codigo": "A3",
+            "severidade": "Médio",
+            "descricao": "Nível de água alto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A6",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecarga compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U4",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "Controle Centralizado",
+        "codigos": [
+          {
+            "codigo": "M1",
+            "severidade": "Alto",
+            "descricao": "Falha no controlador central",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "M8",
+            "severidade": "Alto",
+            "descricao": "Falha comunicação central e controladores opcionais",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "MA",
+            "severidade": "Médio",
+            "descricao": "Combinação incorreta de controladores opcionais",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "MC",
+            "severidade": "Médio",
+            "descricao": "Endereço duplicado",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "midea-springer",
+    "nome": "Midea/Springer",
+    "totalCodigos": 31,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação evap/cond",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento ativada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Sobrecarga/alta pressão do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Erro no sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Erro de corrente/sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação (indoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Médio",
+            "descricao": "Erro de conflito de modo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro no motor do ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Alto",
+            "descricao": "Erro capacidade máxima atingida",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EA",
+            "severidade": "Médio",
+            "descricao": "Erro contagem de unidades internas",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EC",
+            "severidade": "Crítico",
+            "descricao": "Vazamento de gás refrigerante",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EE",
+            "severidade": "Médio",
+            "descricao": "Erro EEPROM (nível de água)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina interna",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina externa (cond)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P0",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM / modo de proteção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P4",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga (inverter)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Proteção de corrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED7",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "EC",
+            "severidade": "Crítico",
+            "descricao": "Vazamento de gás",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "Piso-Teto",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P0",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "carrier",
+    "nome": "Carrier",
+    "totalCodigos": 25,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina interna",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro no motor do ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Proteção de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Proteção de baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Sensor serpentina com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED4",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "VRF",
+        "codigos": [
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre unidades",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "gree",
+    "nome": "Gree",
+    "totalCodigos": 36,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E0",
+            "severidade": "Alto",
+            "descricao": "Erro de fiação / baixa corrente de inrush",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E1",
+            "severidade": "Crítico",
+            "descricao": "Proteção de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Proteção de baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura alta de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Proteção de sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação indoor/outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Médio",
+            "descricao": "Erro de conflito de modo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Proteção do ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Médio",
+            "descricao": "Erro dreno cheio",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F0",
+            "severidade": "Crítico",
+            "descricao": "Falta de gás refrigerante",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente (evaporadora)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina interna (evaporador)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina externa (condensador)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga (outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de exaustão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F6",
+            "severidade": "Alto",
+            "descricao": "Superaquecimento do capacitor / Ventilador lento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F7",
+            "severidade": "Alto",
+            "descricao": "Vazamento de óleo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H1",
+            "severidade": "Baixo",
+            "descricao": "Modo degelo ativado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H2",
+            "severidade": "Baixo",
+            "descricao": "Filtro eletrostático sujo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H3",
+            "severidade": "Alto",
+            "descricao": "Proteção de sobrecarga do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H4",
+            "severidade": "Alto",
+            "descricao": "Erro de mau funcionamento do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H5",
+            "severidade": "Crítico",
+            "descricao": "Proteção IPM (módulo inverter)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H6",
+            "severidade": "Alto",
+            "descricao": "Sem feedback do motor ventilador indoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H7",
+            "severidade": "Crítico",
+            "descricao": "Erro de sincronismo do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H8",
+            "severidade": "Médio",
+            "descricao": "Sistema de dreno com excesso de condensado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H9",
+            "severidade": "Alto",
+            "descricao": "Erro no aquecedor elétrico",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "L9",
+            "severidade": "Alto",
+            "descricao": "Modo proteção de energia",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Médio",
+            "descricao": "Dreno cheio",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F0",
+            "severidade": "Crítico",
+            "descricao": "Falta de gás",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "elgin",
+    "nome": "Elgin",
+    "totalCodigos": 20,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Proteção alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Proteção baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Sensor serpentina",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "Cassete",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "hitachi",
+    "nome": "Hitachi",
+    "totalCodigos": 25,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "01",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "02",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de retorno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "03",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "04",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "05",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "06",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "07",
+            "severidade": "Alto",
+            "descricao": "Erro no motor ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "08",
+            "severidade": "Alto",
+            "descricao": "Erro no motor ventilador externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "09",
+            "severidade": "Alto",
+            "descricao": "Erro na válvula de 4 vias",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "10",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de sucção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "11",
+            "severidade": "Médio",
+            "descricao": "Erro sensor do condensador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "12",
+            "severidade": "Crítico",
+            "descricao": "Proteção de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "13",
+            "severidade": "Alto",
+            "descricao": "Proteção de baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "14",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de descarga (alta temperatura)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "19",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador DC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "20",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "21",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "22",
+            "severidade": "Médio",
+            "descricao": "Erro comunicação controle remoto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Médio",
+            "descricao": "Sensor com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "VRF (Set Free)",
+        "codigos": [
+          {
+            "codigo": "01",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre módulos",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "06",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "12",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "19",
+            "severidade": "Alto",
+            "descricao": "Erro ventilador DC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "20",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "consul-brastemp",
+    "nome": "Consul/Brastemp",
+    "totalCodigos": 15,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "F1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor da serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Alto",
+            "descricao": "Erro motor do ventilador interno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Crítico",
+            "descricao": "Erro no compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F6",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F8",
+            "severidade": "Crítico",
+            "descricao": "Proteção de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F9",
+            "severidade": "Alto",
+            "descricao": "Proteção de baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "FA",
+            "severidade": "Alto",
+            "descricao": "Proteção de temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "FB",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "FC",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED4",
+            "severidade": "Alto",
+            "descricao": "Motor ventilador travado",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Compressor com falha",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "komeco",
+    "nome": "Komeco",
+    "totalCodigos": 15,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Proteção de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Sensor com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "agratto",
+    "nome": "Agratto",
+    "totalCodigos": 16,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Proteção descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F0",
+            "severidade": "Crítico",
+            "descricao": "Falta de gás",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "philco",
+    "nome": "Philco",
+    "totalCodigos": 15,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Proteção descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F0",
+            "severidade": "Crítico",
+            "descricao": "Falta de gás",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "electrolux",
+    "nome": "Electrolux",
+    "totalCodigos": 17,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Crítico",
+            "descricao": "Proteção de corrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Crítico",
+            "descricao": "Proteção de alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM (alternativo)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Médio",
+            "descricao": "Sensor ambiente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED4",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "trane",
+    "nome": "Trane",
+    "totalCodigos": 20,
+    "categorias": [
+      {
+        "nome": "VRF",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Crítico",
+            "descricao": "Proteção do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U1",
+            "severidade": "Médio",
+            "descricao": "Erro comunicação controle remoto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U4",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre unidades",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "Chiller",
+        "codigos": [
+          {
+            "codigo": "AL01",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AL02",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AL03",
+            "severidade": "Alto",
+            "descricao": "Proteção anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AL04",
+            "severidade": "Alto",
+            "descricao": "Erro fluxo de água",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AL05",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AL06",
+            "severidade": "Alto",
+            "descricao": "Erro sequência de fases",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "AL07",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura da água",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "york",
+    "nome": "York",
+    "totalCodigos": 21,
+    "categorias": [
+      {
+        "nome": "Split",
+        "codigos": [
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Médio",
+            "descricao": "Erro sensor externo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E4",
+            "severidade": "Alto",
+            "descricao": "Proteção descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro EEPROM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E8",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F3",
+            "severidade": "Alto",
+            "descricao": "Proteção temperatura descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F4",
+            "severidade": "Médio",
+            "descricao": "Anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Médio",
+            "descricao": "Sensor com defeito",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "led"
+          }
+        ]
+      },
+      {
+        "nome": "VRF",
+        "codigos": [
+          {
+            "codigo": "E5",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre unidades",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F5",
+            "severidade": "Crítico",
+            "descricao": "Erro módulo inverter",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "copeland-emerson",
+    "nome": "Copeland/Emerson",
+    "totalCodigos": 16,
+    "categorias": [
+      {
+        "nome": "Compressor",
+        "codigos": [
+          {
+            "codigo": "F01",
+            "severidade": "Crítico",
+            "descricao": "Perda de fase",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F02",
+            "severidade": "Alto",
+            "descricao": "Sequência de fases invertida",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F03",
+            "severidade": "Alto",
+            "descricao": "Baixa tensão de alimentação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F04",
+            "severidade": "Alto",
+            "descricao": "Alta tensão de alimentação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F05",
+            "severidade": "Médio",
+            "descricao": "Falha no sensor de temperatura do motor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F06",
+            "severidade": "Alto",
+            "descricao": "Temperatura do motor elevada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F07",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F08",
+            "severidade": "Crítico",
+            "descricao": "Rotor travado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F09",
+            "severidade": "Alto",
+            "descricao": "Proteção de descarga ativa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F10",
+            "severidade": "Alto",
+            "descricao": "Alta razão de pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F11",
+            "severidade": "Crítico",
+            "descricao": "Erro no módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Crítico",
+            "descricao": "Perda de fase",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Alto",
+            "descricao": "Fases invertidas",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED7",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED8",
+            "severidade": "Crítico",
+            "descricao": "Rotor travado",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED9",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura descarga",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "danfoss",
+    "nome": "Danfoss",
+    "totalCodigos": 16,
+    "categorias": [
+      {
+        "nome": "Compressor",
+        "codigos": [
+          {
+            "codigo": "A1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A2",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão do sistema",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A3",
+            "severidade": "Alto",
+            "descricao": "Proteção térmica do motor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A4",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A5",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A6",
+            "severidade": "Crítico",
+            "descricao": "Erro no inversor de frequência",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A7",
+            "severidade": "Alto",
+            "descricao": "Baixa tensão DC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A8",
+            "severidade": "Alto",
+            "descricao": "Alta tensão DC",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A9",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A10",
+            "severidade": "Crítico",
+            "descricao": "Rotor bloqueado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "A11",
+            "severidade": "Alto",
+            "descricao": "Desbalanceamento de corrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED1",
+            "severidade": "Baixo",
+            "descricao": "Operação normal",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED2",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED3",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED4",
+            "severidade": "Crítico",
+            "descricao": "Rotor travado",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED5",
+            "severidade": "Médio",
+            "descricao": "Erro sensor",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "bitzer",
+    "nome": "Bitzer",
+    "totalCodigos": 17,
+    "categorias": [
+      {
+        "nome": "Compressor",
+        "codigos": [
+          {
+            "codigo": "HP",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LP",
+            "severidade": "Alto",
+            "descricao": "Baixa pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "OL",
+            "severidade": "Crítico",
+            "descricao": "Sobrecarga/sobrecorrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "MP",
+            "severidade": "Alto",
+            "descricao": "Proteção do motor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "OP",
+            "severidade": "Alto",
+            "descricao": "Nível de óleo baixo",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "SC",
+            "severidade": "Crítico",
+            "descricao": "Curto-circuito",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "PH",
+            "severidade": "Crítico",
+            "descricao": "Falha de fase",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "SE",
+            "severidade": "Alto",
+            "descricao": "Erro de sequência de fases",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "DT",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "ST",
+            "severidade": "Médio",
+            "descricao": "Baixa temperatura de sucção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LR",
+            "severidade": "Crítico",
+            "descricao": "Rotor travado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "CF",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "VL",
+            "severidade": "Alto",
+            "descricao": "Baixa tensão de alimentação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "VH",
+            "severidade": "Alto",
+            "descricao": "Alta tensão de alimentação",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED-R1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED-R3",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED-R5",
+            "severidade": "Crítico",
+            "descricao": "Falha de fase",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "embraco",
+    "nome": "Embraco",
+    "totalCodigos": 17,
+    "categorias": [
+      {
+        "nome": "Compressor",
+        "codigos": [
+          {
+            "codigo": "E01",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente na partida",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E02",
+            "severidade": "Alto",
+            "descricao": "Proteção térmica do motor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E03",
+            "severidade": "Alto",
+            "descricao": "Baixa tensão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E04",
+            "severidade": "Alto",
+            "descricao": "Alta tensão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E05",
+            "severidade": "Médio",
+            "descricao": "Falha no sensor de temperatura",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E06",
+            "severidade": "Crítico",
+            "descricao": "Rotor travado",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E07",
+            "severidade": "Crítico",
+            "descricao": "Bobina aberta",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E08",
+            "severidade": "Crítico",
+            "descricao": "Bobina em curto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E09",
+            "severidade": "Alto",
+            "descricao": "Erro capacitor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E10",
+            "severidade": "Alto",
+            "descricao": "Alta temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E11",
+            "severidade": "Crítico",
+            "descricao": "Erro no módulo inverter",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E12",
+            "severidade": "Alto",
+            "descricao": "Desbalanceamento de corrente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "LED-G",
+            "severidade": "Baixo",
+            "descricao": "Operação normal",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED-R1",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED-R2",
+            "severidade": "Alto",
+            "descricao": "Proteção térmica",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED-R3",
+            "severidade": "Alto",
+            "descricao": "Baixa tensão",
+            "tipo": "led"
+          },
+          {
+            "codigo": "LED-R6",
+            "severidade": "Crítico",
+            "descricao": "Rotor travado",
+            "tipo": "led"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "mitsubishi-electric",
+    "nome": "Mitsubishi Electric",
+    "totalCodigos": 25,
+    "categorias": [
+      {
+        "nome": "Split",
+        "subtitulo": "Mr. Slim, MSZ, MSY",
+        "codigos": [
+          {
+            "codigo": "E0",
+            "severidade": "Baixo",
+            "descricao": "Erro sinal controle remoto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E1",
+            "severidade": "Médio",
+            "descricao": "Erro placa controle remoto",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação indoor/outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E6",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação indoor/outdoor (alternativo)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E7",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação expansor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P1",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de sucção",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P2",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina (TH5)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P5",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P6",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P8",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina (condensador)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "P9",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "PA",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão (proteção)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U2",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente / Baixa tensão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U3",
+            "severidade": "Alto",
+            "descricao": "Erro abertura/fechamento válvula",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U4",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de temperatura (TH2)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U5",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de temperatura do dissipador",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "Fb",
+            "severidade": "Alto",
+            "descricao": "Erro placa outdoor",
+            "tipo": "erro"
+          }
+        ]
+      },
+      {
+        "nome": "VRF (City Multi)",
+        "codigos": [
+          {
+            "codigo": "E3",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre unidades",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "E9",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação expansor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "PA",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U1",
+            "severidade": "Crítico",
+            "descricao": "Alta pressão",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "U3",
+            "severidade": "Alto",
+            "descricao": "Erro válvula",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "chave": "panasonic",
+    "nome": "Panasonic",
+    "totalCodigos": 25,
+    "categorias": [
+      {
+        "nome": "Split",
+        "subtitulo": "Inverter, Econavi",
+        "codigos": [
+          {
+            "codigo": "H00",
+            "severidade": "Baixo",
+            "descricao": "Sem anomalia detectada",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H11",
+            "severidade": "Alto",
+            "descricao": "Erro de comunicação indoor/outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H12",
+            "severidade": "Médio",
+            "descricao": "Erro de capacidade indoor/outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H14",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura ambiente",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H15",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina (compressor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H16",
+            "severidade": "Alto",
+            "descricao": "Erro sensor de corrente (CT)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H19",
+            "severidade": "Alto",
+            "descricao": "Erro motor ventilador indoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H23",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina indoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H25",
+            "severidade": "Baixo",
+            "descricao": "Erro sensor purificação de ar",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H27",
+            "severidade": "Médio",
+            "descricao": "Erro sensor temperatura externa",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H28",
+            "severidade": "Médio",
+            "descricao": "Erro sensor serpentina outdoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H30",
+            "severidade": "Médio",
+            "descricao": "Erro sensor de descarga",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H33",
+            "severidade": "Alto",
+            "descricao": "Erro comunicação entre placas internas",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H38",
+            "severidade": "Médio",
+            "descricao": "Erro bomba de dreno",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H98",
+            "severidade": "Alto",
+            "descricao": "Proteção alta pressão indoor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "H99",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F11",
+            "severidade": "Alto",
+            "descricao": "Erro válvula 4 vias",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F17",
+            "severidade": "Médio",
+            "descricao": "Proteção anti-congelamento (outdoor)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F90",
+            "severidade": "Crítico",
+            "descricao": "Erro PFC (correção fator de potência)",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F91",
+            "severidade": "Alto",
+            "descricao": "Erro no circuito de refrigeração",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F93",
+            "severidade": "Crítico",
+            "descricao": "Erro rotação do compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F95",
+            "severidade": "Alto",
+            "descricao": "Proteção serpentina outdoor superaquecida",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F96",
+            "severidade": "Crítico",
+            "descricao": "Proteção módulo IPM",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F97",
+            "severidade": "Crítico",
+            "descricao": "Sobrecorrente compressor",
+            "tipo": "erro"
+          },
+          {
+            "codigo": "F99",
+            "severidade": "Crítico",
+            "descricao": "Erro corrente DC (DCCT)",
+            "tipo": "erro"
+          }
+        ]
+      }
+    ]
+  }
+];
+
+const CATALOGO_ERRO_CORES = ['var(--blue)', 'var(--teal)', 'var(--green)', 'var(--purple)', 'var(--orange)', 'var(--navy)', 'var(--amber)'];
+const CATALOGO_ERRO_SEVERIDADE_TAG = { Baixo: 'tag-green', Médio: 'tag-amber', Alto: 'tag-orange', Crítico: 'tag-red' };
+
+async function renderCentralCodigosErro() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Central de Códigos de Erro é exclusiva de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  const totalCodigos = CATALOGO_ERRO_MARCAS.reduce((s, m) => s + m.totalCodigos, 0);
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div><h1>Central de Códigos de Erro</h1><p>${CATALOGO_ERRO_MARCAS.length} marcas · ${totalCodigos} códigos catalogados</p></div>
+      <button class="btn-outline-sm" onclick="ir('ferramentas-hub')">← Ferramentas</button>
+    </div>
+    <div class="field"><input id="central-erro-busca-marca" placeholder="Buscar marca..." value="${esc(window._centralErroBuscaMarca || '')}" oninput="window._centralErroBuscaMarca=this.value; desenharCentralErroGradeMarcas();"></div>
+    <div class="kpis-tiles" id="central-erro-grade-marcas" style="margin-top:12px;"></div>`;
+  desenharCentralErroGradeMarcas();
+}
+
+function desenharCentralErroGradeMarcas() {
+  const el = document.getElementById('central-erro-grade-marcas');
+  if (!el) return;
+  const termo = (window._centralErroBuscaMarca || '').trim().toLowerCase();
+  const marcas = CATALOGO_ERRO_MARCAS.filter((m) => !termo || m.nome.toLowerCase().includes(termo));
+  if (!marcas.length) { el.innerHTML = '<div class="empty">Nenhuma marca encontrada.</div>'; return; }
+  el.innerHTML = marcas.map((m) => {
+    const i = CATALOGO_ERRO_MARCAS.indexOf(m);
+    return `
+    <div class="kpis-tile" style="background:${CATALOGO_ERRO_CORES[i % CATALOGO_ERRO_CORES.length]};" onclick="abrirCentralCodigosErroMarca('${m.chave}')">
+      <div class="kpis-tile-label"><span>${esc(m.nome)}</span></div>
+      <div class="kpis-tile-valor" style="font-size:13px;">${m.totalCodigos} códigos</div>
+    </div>`;
+  }).join('');
+}
+
+function abrirCentralCodigosErroMarca(chave) {
+  const marca = CATALOGO_ERRO_MARCAS.find((m) => m.chave === chave);
+  if (!marca) return;
+  window._centralErroMarcaAtual = chave;
+  window._centralErroCategoriaAtual = marca.categorias[0].nome;
+  window._centralErroBusca = '';
+  window._centralErroExpandidos = {};
+  ir('central-codigos-erro-marca');
+}
+
+async function renderCentralCodigosErroMarca() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) return renderCentralCodigosErro();
+  const marca = CATALOGO_ERRO_MARCAS.find((m) => m.chave === window._centralErroMarcaAtual);
+  if (!marca) return renderCentralCodigosErro();
+  const categoria = marca.categorias.find((c) => c.nome === window._centralErroCategoriaAtual) || marca.categorias[0];
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(marca.nome)}</h1><p>${marca.totalCodigos} códigos catalogados</p></div>
+      <button class="btn-outline-sm" onclick="ir('central-codigos-erro')">← Central de Códigos</button>
+    </div>
+    <div class="field"><input id="central-erro-busca" placeholder="Buscar código ou descrição..." value="${esc(window._centralErroBusca || '')}" oninput="window._centralErroBusca=this.value; desenharCentralErroLista();"></div>
+    <div class="tabs-pill" id="central-erro-tabs" style="display:flex; gap:8px; flex-wrap:wrap; margin:12px 0;"></div>
+    <div id="central-erro-subtitulo" style="font-size:12.5px; color:var(--ink-soft); margin-bottom:8px;"></div>
+    <div id="central-erro-lista"></div>`;
+  desenharCentralErroTabs();
+  desenharCentralErroLista();
+}
+
+function desenharCentralErroTabs() {
+  const el = document.getElementById('central-erro-tabs');
+  if (!el) return;
+  const marca = CATALOGO_ERRO_MARCAS.find((m) => m.chave === window._centralErroMarcaAtual);
+  if (!marca) return;
+  el.innerHTML = marca.categorias.map((c) => {
+    const ativa = c.nome === window._centralErroCategoriaAtual;
+    return `<button class="btn-outline-sm${ativa ? ' btn-outline-sm-ativo' : ''}" style="${ativa ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="alternarCentralErroCategoria('${esc(c.nome).replace(/'/g, "\\'")}')">${esc(c.nome)} <span style="opacity:.75;">(${c.codigos.length})</span></button>`;
+  }).join('');
+}
+
+function alternarCentralErroCategoria(nome) {
+  window._centralErroCategoriaAtual = nome;
+  desenharCentralErroTabs();
+  desenharCentralErroLista();
+}
+
+function desenharCentralErroLista() {
+  const listaEl = document.getElementById('central-erro-lista');
+  const subEl = document.getElementById('central-erro-subtitulo');
+  if (!listaEl) return;
+  const marca = CATALOGO_ERRO_MARCAS.find((m) => m.chave === window._centralErroMarcaAtual);
+  if (!marca) return;
+  const categoria = marca.categorias.find((c) => c.nome === window._centralErroCategoriaAtual) || marca.categorias[0];
+  if (subEl) subEl.textContent = categoria.subtitulo ? `Modelos: ${categoria.subtitulo}` : '';
+  const termo = (window._centralErroBusca || '').trim().toLowerCase();
+  const codigos = categoria.codigos
+    .map((c, i) => ({ ...c, _i: i }))
+    .filter((c) => !termo || c.codigo.toLowerCase().includes(termo) || c.descricao.toLowerCase().includes(termo));
+  if (!codigos.length) { listaEl.innerHTML = '<div class="empty">Nenhum código encontrado.</div>'; return; }
+  listaEl.innerHTML = codigos.map((c) => {
+    const chave = `${categoria.nome}|${c._i}`;
+    const expandido = !!(window._centralErroExpandidos || {})[chave];
+    const tagClasse = CATALOGO_ERRO_SEVERIDADE_TAG[c.severidade] || 'tag-amber';
+    const icone = c.tipo === 'led' ? '⚡' : '⚙️';
+    return `
+      <div class="panel" style="margin-bottom:8px; cursor:pointer;" onclick="alternarCentralErroExpandido('${chave}')">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:38px; height:38px; border-radius:50%; background:var(--red-bg,#FDE8E5); display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0;">${icone}</div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:7px; flex-wrap:wrap;">
+              <strong>${esc(c.codigo)}</strong>
+              <span class="tag ${tagClasse}">${esc(c.severidade)}</span>
+              ${c.tipo === 'led' ? '<span class="tag tag-purple">LED</span>' : ''}
+            </div>
+            <div style="font-size:13px; color:var(--ink-soft); margin-top:2px;">${esc(c.descricao)}</div>
+          </div>
+          <span style="transform:rotate(${expandido ? '180' : '0'}deg); transition:transform .15s; flex-shrink:0;">⌄</span>
+        </div>
+        ${expandido ? `
+          <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;" onclick="event.stopPropagation();">
+            <span style="font-size:12.5px; color:var(--ink-soft);">${c.tipo === 'led' ? 'Padrão de piscadas do LED' : 'Código exibido no display'}</span>
+            <button class="btn-outline-sm" onclick="compartilharCentralErroCodigo('${chave}')">📤 Compartilhar</button>
+          </div>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function alternarCentralErroExpandido(chave) {
+  window._centralErroExpandidos = window._centralErroExpandidos || {};
+  window._centralErroExpandidos[chave] = !window._centralErroExpandidos[chave];
+  desenharCentralErroLista();
+}
+
+async function compartilharCentralErroCodigo(chave) {
+  const marca = CATALOGO_ERRO_MARCAS.find((m) => m.chave === window._centralErroMarcaAtual);
+  if (!marca) return;
+  const [nomeCategoria, iStr] = chave.split('|');
+  const categoria = marca.categorias.find((c) => c.nome === nomeCategoria);
+  const c = categoria && categoria.codigos[Number(iStr)];
+  if (!c) return;
+  const texto = [
+    `🧊 *${marca.nome} (${empresaNome()})*`,
+    `Categoria: ${categoria.nome}`,
+    '',
+    `${c.tipo === 'led' ? '⚡' : '⚙️'} *${c.codigo}* — ${c.severidade}`,
+    c.descricao,
+  ].join('\n');
+  if (navigator.share) {
+    try { await navigator.share({ text: texto }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
 async function renderFerramentaEmBreve(pagina) {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
@@ -8512,6 +12578,8 @@ async function ir(pagina) {
     if (pagina === 'calculadora-capacitor') return renderCalculadoraCapacitor();
     if (pagina === 'calculadora-carga-gas') return renderCalculadoraCargaGas();
     if (pagina === 'tabela-pressao') return renderTabelaPressao();
+    if (pagina === 'central-codigos-erro') return renderCentralCodigosErro();
+    if (pagina === 'central-codigos-erro-marca') return renderCentralCodigosErroMarca();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
