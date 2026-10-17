@@ -6374,7 +6374,7 @@ const FERRAMENTAS_REF_CATEGORIAS = [
     { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC', page: 'calculadora-btu' },
     { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores', page: 'calculadora-cabos' },
     { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária', page: 'calculadora-capacitor' },
-    { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro' },
+    { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro', page: 'calculadora-carga-gas' },
   ]},
   { chave: 'referencia', titulo: 'Referência', cor: '#0D9488', corIconeBg: '#E6F7F5', itens: [
     { icone: '🧭', label: 'Tab. Pressão', descricao: 'Gases refrigerantes' },
@@ -7419,20 +7419,24 @@ function alternarTabelaReferenciaCabos() {
   window._calcCabosTabelaAberta = !window._calcCabosTabelaAberta;
   desenharTabelaWrapCabos();
 }
+// pedido do usuário (print mostrando a linha "9k" sumida da tabela em celular) — CSS grid em vez
+// de <table>: a regra mobile compartilhada pra listas com ação (.panel table, ver style.css)
+// transforma qualquer <table> dentro de .panel em cartões e esconde "tr:first-child" achando que é
+// só o cabeçalho, mas isso pega o primeiro <tr> de QUALQUER pai (thead E tbody são pais
+// separados) — então a primeira linha de dado, não só o cabeçalho, sumia junto. Tabelinha de
+// referência pura não precisa virar cartão mesmo, então fica fora desse componente por completo.
 function desenharTabelaReferenciaCabos() {
+  const col = (texto, extra) => `<div style="padding:6px 4px; border-bottom:1px solid var(--line); ${extra || ''}">${texto}</div>`;
+  const cabecalho = ['BTU', '127V', '220V', 'Cabo', 'Disj.'].map((t) => col(`<span style="font-size:10px; text-transform:uppercase; color:var(--ink-soft); font-weight:700;">${t}</span>`)).join('');
+  const linhas = CALC_CABOS_TABELA_REFERENCIA.map((row) => [
+    col(`${row.btu / 1000}k`),
+    col(row.a127 != null ? `${row.a127}A` : '—'),
+    col(`${row.a220}A`),
+    col(`${row.cabo}mm²`, 'color:var(--blue); font-weight:700;'),
+    col(`${row.disjuntor}A`),
+  ].join('')).join('');
   return `<div class="panel" style="margin-top:10px; overflow-x:auto;">
-    <table style="width:100%; font-size:12.5px;">
-      <thead><tr><th>BTU</th><th>127V</th><th>220V</th><th>Cabo</th><th>Disj.</th></tr></thead>
-      <tbody>
-        ${CALC_CABOS_TABELA_REFERENCIA.map((row) => `<tr>
-          <td>${row.btu / 1000}k</td>
-          <td>${row.a127 != null ? row.a127 + 'A' : '—'}</td>
-          <td>${row.a220}A</td>
-          <td style="color:var(--blue); font-weight:700;">${row.cabo}mm²</td>
-          <td>${row.disjuntor}A</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
+    <div style="display:grid; grid-template-columns:44px repeat(4, 1fr); gap:0 6px; font-size:12.5px; min-width:280px;">${cabecalho}${linhas}</div>
     <div style="font-size:11px; color:var(--ink-soft); margin-top:8px;">Valores típicos de split (referência rápida) — pra um cálculo específico, use o formulário acima com a potência real do equipamento.</div>
   </div>`;
 }
@@ -7584,6 +7588,188 @@ async function compartilharCapacitorWhatsapp() {
   const linhas = [`⚡ *Dimensionamento de Capacitor (${empresaNome()})*`, ''];
   passos.forEach((p, i) => linhas.push(`${i + 1}. ${p.titulo}: ${p.substituicao} = ${p.resultado}`));
   linhas.push('', `✅ *Capacitor: ${escolhido} µF*`);
+  const texto = linhas.join('\n');
+  if (navigator.share) {
+    try { await navigator.share({ text: texto }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
+// ===== Calculadora de Carga de Gás (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, prints de um cálculo real feito lá) —
+// carga adicional de gás refrigerante pela tubulação excedente ao comprimento padrão do
+// equipamento, com passo a passo e compartilhamento via WhatsApp — mesmo padrão das outras
+// calculadoras do hub.
+// Conferido passo a passo contra o print do resultado deles (R-410A, 1/4", 12.000 BTU, 8m,
+// carga de fábrica 1200g):
+//   1. comprimento padrão do equipamento (consulta por modelo)        → 5m
+//   2. tubulação excedente = comprimento total − comprimento padrão   → 8 − 5 = 3m
+//   3. taxa de carga adicional = tabela gás × diâmetro da linha       → R-410A × 1/4" = 15 g/m
+//   4. carga adicional = excedente × taxa                             → 3 × 15 = 45g
+//   5. carga total = carga de fábrica + carga adicional                → 1200 + 45 = 1245g
+// Os 5 números bateram exatos com o print. A tabela de referência (g/m excedente por gás ×
+// diâmetro) também veio direto do print deles, reproduzida abaixo (CALC_GAS_TABELA_TAXA).
+// Único ponto sem confirmação extra: o "comprimento padrão" só foi confirmado pra UM modelo
+// (12.000 BTU → 5m) — não dá pra confirmar se esse valor muda por BTU sem mais exemplos. 5m é,
+// porém, o padrão amplamente conhecido/ensinado pra splits residenciais e comerciais em geral
+// (tubulação de fábrica cobre até 5m sem necessidade de carga extra, independente da capacidade),
+// então uso esse valor fixo pra todos os modelos em vez de inventar uma tabela variável sem como
+// confirmar — e o próprio resultado já avisa "sempre pesar com balança, nunca adicionar no olho",
+// então mesmo uma pequena diferença nesse valor de referência não vira erro silencioso em campo.
+const CALC_GAS_TIPOS = ['R-22', 'R-410A', 'R-32', 'R-134a'];
+const CALC_GAS_DIAMETROS = ['1/4"', '3/8"', '1/2"'];
+const CALC_GAS_CAPACIDADES_BTU = [7000, 9000, 12000, 18000, 24000, 30000, 36000, 48000, 60000];
+const CALC_GAS_COMPRIMENTO_PADRAO_M = 5; // padrão de fábrica — ver nota acima
+const CALC_GAS_TABELA_TAXA = { // g/m excedente, por gás × diâmetro da linha de líquido
+  'R-22': { '1/4"': 12, '3/8"': 24, '1/2"': 45 },
+  'R-410A': { '1/4"': 15, '3/8"': 30, '1/2"': 55 },
+  'R-32': { '1/4"': 10, '3/8"': 20, '1/2"': 38 },
+  'R-134a': { '1/4"': 11, '3/8"': 22, '1/2"': 40 },
+};
+function fmtGasNum(n) { return (Math.round(n * 10) / 10).toLocaleString('pt-BR'); }
+function calcGasFormVazio() {
+  return { tipo_gas: 'R-410A', diametro: '1/4"', capacidade_btu: 12000, comprimento_total_m: '', carga_fabrica_g: '' };
+}
+function calcularCargaGasResultado(f) {
+  const comprimentoTotal = Number(f.comprimento_total_m) || 0;
+  const cargaFabrica = Number(f.carga_fabrica_g) || 0;
+  const comprimentoPadrao = CALC_GAS_COMPRIMENTO_PADRAO_M;
+  const excedente = Math.max(0, comprimentoTotal - comprimentoPadrao);
+  const taxa = (CALC_GAS_TABELA_TAXA[f.tipo_gas] && CALC_GAS_TABELA_TAXA[f.tipo_gas][f.diametro]) || 0;
+  const cargaAdicional = excedente * taxa;
+  const cargaTotal = cargaFabrica + cargaAdicional;
+  return { tipoGas: f.tipo_gas, diametro: f.diametro, capacidadeBtu: Number(f.capacidade_btu), comprimentoTotal, cargaFabrica, comprimentoPadrao, excedente, taxa, cargaAdicional, cargaTotal };
+}
+function calcularPassosCargaGas(r) {
+  return [
+    { titulo: 'Comprimento padrão do equipamento', formula: 'Consulta por modelo (BTU)', substituicao: `Modelo ${fmtGasNum(r.capacidadeBtu)} BTU`, resultado: `${r.comprimentoPadrao} m` },
+    { titulo: 'Tubulação excedente', formula: 'Comprimento total - Comprimento padrão', substituicao: `${r.comprimentoTotal}m - ${r.comprimentoPadrao}m`, resultado: `${fmtGasNum(r.excedente)} m` },
+    { titulo: 'Taxa de carga adicional', formula: 'Tabela: gás × diâmetro da linha de líquido', substituicao: `${r.tipoGas} × ${r.diametro}`, resultado: `${r.taxa} g/m` },
+    { titulo: 'Carga adicional necessária', formula: 'Excedente × Taxa', substituicao: `${fmtGasNum(r.excedente)}m × ${r.taxa}g/m`, resultado: `${fmtGasNum(r.cargaAdicional)} g` },
+    { titulo: 'Carga total', formula: 'Carga de fábrica + Carga adicional', substituicao: `${fmtGasNum(r.cargaFabrica)}g + ${fmtGasNum(r.cargaAdicional)}g`, resultado: `${fmtGasNum(r.cargaTotal)} g`, dica: 'Sempre pesar o gás com balança digital. Nunca adicionar "no olho".' },
+  ];
+}
+
+async function renderCalculadoraCargaGas() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._calcGasForm) window._calcGasForm = calcGasFormVazio();
+  window._calcGasResultado = null;
+  window._calcGasDetalheAberto = false;
+  desenharCalculadoraCargaGas();
+}
+function desenharCalculadoraCargaGas() {
+  const main = document.getElementById('main');
+  const f = window._calcGasForm;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; align-items:center; gap:10px;">
+      <button class="btn-outline-sm" style="padding:6px 10px;" onclick="ir('ferramentas-hub')">←</button>
+      <h1 style="margin:0;">Carga de Gás</h1>
+    </div>
+    <div style="max-width:560px;">
+      <div class="row2">
+        <div class="field"><label>Tipo de gás</label>
+          <select id="gas-tipo">
+            ${CALC_GAS_TIPOS.map((t) => `<option value="${t}" ${f.tipo_gas === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Diâmetro (líquido)</label>
+          <select id="gas-diametro">
+            ${CALC_GAS_DIAMETROS.map((d) => `<option value="${esc(d)}" ${f.diametro === d ? 'selected' : ''}>${esc(d)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Capacidade do equipamento</label>
+        <select id="gas-capacidade">
+          ${CALC_GAS_CAPACIDADES_BTU.map((b) => `<option value="${b}" ${Number(f.capacidade_btu) === b ? 'selected' : ''}>${fmtGasNum(b)} BTU</option>`).join('')}
+        </select>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Comprimento total (m)</label><input id="gas-comprimento" type="number" step="0.5" min="0" value="${esc(f.comprimento_total_m)}" placeholder="Ex: 8"></div>
+        <div class="field"><label>Carga de fábrica (g)</label><input id="gas-carga-fabrica" type="number" step="1" min="0" value="${esc(f.carga_fabrica_g)}" placeholder="Ex: 800"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" style="width:100%; padding:12px; margin-top:6px;" onclick="calcularCargaGas()">Calcular Carga</button>
+      <div id="gas-resultado"></div>
+    </div>`;
+}
+function sincronizarCamposCargaGas() {
+  const f = window._calcGasForm;
+  f.tipo_gas = document.getElementById('gas-tipo').value;
+  f.diametro = document.getElementById('gas-diametro').value;
+  f.capacidade_btu = Number(document.getElementById('gas-capacidade').value) || 12000;
+  f.comprimento_total_m = document.getElementById('gas-comprimento').value;
+  f.carga_fabrica_g = document.getElementById('gas-carga-fabrica').value;
+}
+function calcularCargaGas() {
+  sincronizarCamposCargaGas();
+  const f = window._calcGasForm;
+  if (!(Number(f.comprimento_total_m) >= 0)) { alert('Informe o comprimento total da tubulação.'); return; }
+  if (!(Number(f.carga_fabrica_g) > 0)) { alert('Informe a carga de fábrica do equipamento.'); return; }
+  const r = calcularCargaGasResultado(f);
+  window._calcGasResultado = r;
+  window._calcGasDetalheAberto = false;
+  desenharResultadoCargaGas();
+}
+function desenharResultadoCargaGas() {
+  const el = document.getElementById('gas-resultado');
+  if (!el || !window._calcGasResultado) return;
+  const r = window._calcGasResultado;
+  el.innerHTML = `
+    <div class="panel" style="text-align:center; border:1.5px solid var(--blue); margin-top:16px;">
+      <div style="font-size:12px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.4px;">Carga adicional</div>
+      <div style="font-size:30px; font-weight:800; color:var(--blue);">${fmtGasNum(r.cargaAdicional)} g</div>
+      <div style="font-size:13px; color:var(--ink-soft); margin-top:6px;">Carga total: <strong style="color:var(--ink);">${fmtGasNum(r.cargaTotal)} g</strong></div>
+    </div>
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px; display:flex; justify-content:space-between; align-items:center;" onclick="alternarDetalheCargaGas()">📐 Ver cálculo detalhado <span>${window._calcGasDetalheAberto ? '▲' : '▼'}</span></button>
+    ${window._calcGasDetalheAberto ? desenharPassosCargaGas(r) : ''}
+    ${desenharTabelaReferenciaGas(r)}
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="compartilharCargaGasWhatsapp()">🔗 Compartilhar via WhatsApp</button>`;
+}
+function alternarDetalheCargaGas() {
+  window._calcGasDetalheAberto = !window._calcGasDetalheAberto;
+  desenharResultadoCargaGas();
+}
+function desenharPassosCargaGas(r) {
+  const passos = calcularPassosCargaGas(r);
+  return `<div class="panel" style="margin-top:10px;">${passos.map((p, i) => `
+    <div style="padding:12px 0; ${i < passos.length - 1 ? 'border-bottom:1px solid var(--line);' : ''}">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+        <span style="width:24px; height:24px; border-radius:50%; background:var(--blue-pale); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">${i + 1}</span>
+        <strong>${esc(p.titulo)}</strong>
+      </div>
+      <div style="background:var(--gray-50,#F4F6FA); border-radius:8px; padding:8px 10px; font-size:13px; font-family:monospace; margin-bottom:6px;">${esc(p.formula)}</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-bottom:4px;">${esc(p.substituicao)}</div>
+      <div style="font-weight:800; color:var(--blue); font-size:15px;">= ${esc(p.resultado)}</div>
+      ${p.dica ? `<div style="background:var(--amber-pale,#FEF3C7); border-radius:8px; padding:8px 10px; font-size:12px; color:var(--amber,#B45309); margin-top:8px;">💡 ${esc(p.dica)}</div>` : ''}
+    </div>`).join('')}</div>`;
+}
+// CSS grid em vez de <table> — ver comentário em desenharTabelaReferenciaCabos (a regra mobile
+// de converter table em cartões, pensada pra listas com ação, esconde a primeira linha de DADO
+// junto com o cabeçalho, não só o cabeçalho, nesse tipo de tabelinha de referência pura).
+function desenharTabelaReferenciaGas(r) {
+  const col = (texto, extra) => `<div style="padding:6px 4px; border-bottom:1px solid var(--line); ${extra || ''}">${texto}</div>`;
+  const cabecalho = ['Gás', '1/4"', '3/8"', '1/2"'].map((t) => col(`<span style="font-size:10px; text-transform:uppercase; color:var(--ink-soft); font-weight:700;">${esc(t)}</span>`)).join('');
+  const linhas = CALC_GAS_TIPOS.map((t) => {
+    const destaque = t === r.tipoGas ? 'background:var(--blue-pale); font-weight:700;' : '';
+    return [
+      col(esc(t), destaque),
+      col(`${CALC_GAS_TABELA_TAXA[t]['1/4"']} g`, destaque),
+      col(`${CALC_GAS_TABELA_TAXA[t]['3/8"']} g`, destaque),
+      col(`${CALC_GAS_TABELA_TAXA[t]['1/2"']} g`, destaque),
+    ].join('');
+  }).join('');
+  return `<div class="panel" style="margin-top:10px; overflow-x:auto;">
+    <div style="font-weight:700; font-size:13px; margin-bottom:8px;">Tabela de Referência (g/m excedente)</div>
+    <div style="display:grid; grid-template-columns:1fr repeat(3, 56px); gap:0 6px; font-size:12.5px; min-width:260px;">${cabecalho}${linhas}</div>
+  </div>`;
+}
+async function compartilharCargaGasWhatsapp() {
+  if (!window._calcGasResultado) return;
+  const r = window._calcGasResultado;
+  const passos = calcularPassosCargaGas(r);
+  const linhas = [`⛽ *Carga de Gás (${empresaNome()})*`, ''];
+  passos.forEach((p, i) => linhas.push(`${i + 1}. ${p.titulo}: ${p.substituicao} = ${p.resultado}`));
+  linhas.push('', `✅ *Carga adicional: ${fmtGasNum(r.cargaAdicional)}g | Carga total: ${fmtGasNum(r.cargaTotal)}g*`);
   const texto = linhas.join('\n');
   if (navigator.share) {
     try { await navigator.share({ text: texto }); return; } catch (e) { if (e.name === 'AbortError') return; }
@@ -8204,6 +8390,7 @@ async function ir(pagina) {
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();
     if (pagina === 'calculadora-cabos') return renderCalculadoraCabos();
     if (pagina === 'calculadora-capacitor') return renderCalculadoraCapacitor();
+    if (pagina === 'calculadora-carga-gas') return renderCalculadoraCargaGas();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
