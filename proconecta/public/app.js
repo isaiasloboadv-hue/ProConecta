@@ -2296,7 +2296,9 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
       doc.text(fmtMoeda(it.qtd * it.valorUnit), margem + largura * 0.88, y + 11);
       y += 16;
     });
-    y += 10;
+    // 18pt de respiro (não só 10) antes da próxima seção — mesmo ajuste aplicado nas outras
+    // tabelas do pacote (Documento PMOC), evita a última linha ficar colada no título seguinte.
+    y += 18;
   }
 
   // pedido do usuário (correção): as fotos anexadas na O.S. existiam no cadastro (os.fotos) mas
@@ -2351,7 +2353,10 @@ function montarDocOsRefrigeracaoPdf(os, logoCliente, logoNexor) {
     y += 38;
   }
 
-  y = novaPaginaSeNecessario(y, 110);
+  // reserva espaço extra (110 -> 180) pro cartão de assinaturas E pro crédito "Nexor Connect"
+  // do rodapé caberem confortavelmente abaixo — sem isso, o crédito podia ficar espremido/
+  // encostado nas assinaturas quando sobrava pouco espaço na página.
+  y = novaPaginaSeNecessario(y, 180);
   y = secaoTitulo(y, 'ASSINATURAS');
   y += 6;
   const largAssin = (largura - 20) / 2;
@@ -3101,30 +3106,34 @@ function montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
-  function rodape(pagina, total, yConteudoFinal) {
-    const yLinha = pageH - 40;
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
-    if (pagina === total) {
-      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
-      const topo = yConteudoFinal || margem;
-      const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
-      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, centroY);
-    } else {
-      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${pagina}/${total}`, pageW / 2, pageH - 20, { align: 'center' });
-    }
-  }
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração —
+  // barrinha colorida antes do título da seção, igual à O.S. (ver montarDocOsRefrigeracaoPdf).
   function secaoTitulo(y, texto) {
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(texto, margem, y);
-    return y + 16;
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
   }
   function campo(x, y, label, valor) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
     doc.text(label.toUpperCase(), x, y);
     doc.setFontSize(10); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(String(valor || '—')), x, y + 13);
+  }
+  // mesma correção aplicada na O.S.: texto livre (relato do cliente/diagnóstico/descrição) sem
+  // quebra de linha saía reto pra fora da margem da página.
+  function campoLongo(y, label, valor, larguraCampo) {
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(label.toUpperCase(), margem, y);
+    doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(String(valor || '—')), larguraCampo || largura);
+    doc.text(linhas, margem, y + 13);
+    return y + 13 + linhas.length * 12 + 12;
+  }
+  function novaPaginaSeNecessario(y, espaco) {
+    if (y + espaco <= pageH - 60) return y;
+    doc.addPage();
+    return cabecalho();
   }
 
   // ---- página 1 ----
@@ -3133,48 +3142,49 @@ function montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor) {
   campo(margem, y, 'Cliente', orcamento.cliente_nome); campo(margem + largura / 2, y, 'Válido até', validadeAteOrcamentoRef(orcamento.criado_em, orcamento.validade_dias)); y += 30;
 
   if (orcamento.descricao_cliente || orcamento.diagnostico_tecnico || orcamento.descricao_geral) {
+    y = novaPaginaSeNecessario(y, 50);
     y = secaoTitulo(y, 'DESCRIÇÃO');
-    if (orcamento.descricao_cliente) { campo(margem, y, 'O que o cliente relatou', orcamento.descricao_cliente); y += 26; }
-    if (orcamento.diagnostico_tecnico) { campo(margem, y, 'Diagnóstico técnico', orcamento.diagnostico_tecnico); y += 26; }
-    if (orcamento.descricao_geral) { campo(margem, y, 'Descrição geral', orcamento.descricao_geral); y += 30; }
+    if (orcamento.descricao_cliente) { y = novaPaginaSeNecessario(y, 40); y = campoLongo(y, 'O que o cliente relatou', orcamento.descricao_cliente); }
+    if (orcamento.diagnostico_tecnico) { y = novaPaginaSeNecessario(y, 40); y = campoLongo(y, 'Diagnóstico técnico', orcamento.diagnostico_tecnico); }
+    if (orcamento.descricao_geral) { y = novaPaginaSeNecessario(y, 40); y = campoLongo(y, 'Descrição geral', orcamento.descricao_geral); }
   }
 
-  if ((orcamento.servicos || []).length) {
-    y = secaoTitulo(y, 'SERVIÇOS');
-    orcamento.servicos.forEach((s, i) => {
-      if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
-      doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-      doc.text(limparPdf(s.descricao), margem + 8, y + 11);
-      doc.text(fmtMoeda(s.valor), pageW - margem - 8, y + 11, { align: 'right' });
-      y += 16;
-    });
-    y += 10;
-  }
-
-  if ((orcamento.materiais || []).length) {
-    y = secaoTitulo(y, 'MATERIAIS');
+  // pedido do usuário: mesma tabela unificada "ITENS" (coluna TIPO) já usada na O.S., em vez de
+  // SERVIÇOS e MATERIAIS como tabelas separadas.
+  const itensTabela = [
+    ...(orcamento.servicos || []).map((s) => ({ tipo: 'Serviço', nome: s.descricao, qtd: 1, valorUnit: s.valor })),
+    ...(orcamento.materiais || []).map((m) => ({ tipo: 'Material', nome: m.nome, qtd: m.quantidade, valorUnit: m.valor_unitario })),
+  ];
+  if (itensTabela.length) {
+    y = novaPaginaSeNecessario(y, 50);
+    y = secaoTitulo(y, 'ITENS');
     doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 18, 'F');
-    doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-    doc.text('ITEM', margem + 8, y + 12);
-    doc.text('QTD', margem + largura * 0.55, y + 12);
-    doc.text('VALOR UNIT.', margem + largura * 0.68, y + 12);
-    doc.text('SUBTOTAL', margem + largura * 0.86, y + 12);
+    doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+    doc.text('TIPO', margem + 8, y + 12);
+    doc.text('ITEM / DESCRIÇÃO', margem + largura * 0.17, y + 12);
+    doc.text('QTD', margem + largura * 0.62, y + 12);
+    doc.text('VALOR UNIT.', margem + largura * 0.73, y + 12);
+    doc.text('SUBTOTAL', margem + largura * 0.88, y + 12);
     y += 18;
-    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); doc.setFontSize(8.5);
-    orcamento.materiais.forEach((m, i) => {
+    doc.setFont(undefined, 'normal'); doc.setFontSize(8.5);
+    itensTabela.forEach((it, i) => {
+      y = novaPaginaSeNecessario(y, 16);
       if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
-      doc.text(limparPdf(m.nome), margem + 8, y + 11);
-      doc.text(String(m.quantidade), margem + largura * 0.55, y + 11);
-      doc.text(fmtMoeda(m.valor_unitario), margem + largura * 0.68, y + 11);
-      doc.text(fmtMoeda(m.quantidade * m.valor_unitario), margem + largura * 0.86, y + 11);
+      doc.setTextColor(...(it.tipo === 'Serviço' ? PDF_COR.blue : PDF_COR.inkSoft));
+      doc.text(it.tipo, margem + 8, y + 11);
+      doc.setTextColor(...PDF_COR.ink);
+      doc.text(limparPdf(it.nome).slice(0, 48), margem + largura * 0.17, y + 11);
+      doc.text(String(it.qtd), margem + largura * 0.62, y + 11);
+      doc.text(fmtMoeda(it.valorUnit), margem + largura * 0.73, y + 11);
+      doc.text(fmtMoeda(it.qtd * it.valorUnit), margem + largura * 0.88, y + 11);
       y += 16;
     });
+    y += 18;
   }
-  rodape(1, 2);
 
-  // ---- página 2 ----
-  doc.addPage();
-  y = cabecalho();
+  // ---- resumo financeiro + condições de pagamento + assinaturas (bloco próprio, sempre em
+  // página nova se o que já foi desenhado não deixar espaço decente — mesmo padrão da O.S.) ----
+  y = novaPaginaSeNecessario(y, 220);
   // pedido explícito do usuário: diferente do iClima (só o total), aqui o RESUMO FINANCEIRO
   // sempre detalha materiais/serviços/mão de obra/desconto antes do total.
   y = secaoTitulo(y, 'RESUMO FINANCEIRO');
@@ -3188,31 +3198,60 @@ function montarDocOrcamentoRefrigeracaoPdf(orcamento, logoCliente, logoNexor) {
       y += 16;
     });
   y += 6;
-  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 28, 'F');
+  doc.setFillColor(...PDF_COR.navy); doc.roundedRect(margem, y, largura, 28, 4, 4, 'F');
   doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
   doc.text('TOTAL', margem + 10, y + 19);
   doc.text(fmtMoeda(orcamento.total), pageW - margem - 10, y + 19, { align: 'right' });
   y += 46;
 
   if (orcamento.condicoes_pagamento) {
+    y = novaPaginaSeNecessario(y, 50);
     y = secaoTitulo(y, 'CONDIÇÕES DE PAGAMENTO');
     doc.setFontSize(9.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(orcamento.condicoes_pagamento), margem, y, { maxWidth: largura });
     y += 34;
   }
 
+  // mesma reserva extra de espaço da O.S. (110 -> 180) — garante que o crédito "Nexor Connect"
+  // do rodapé nunca fique espremido contra o cartão de assinaturas.
+  y = novaPaginaSeNecessario(y, 180);
   y = secaoTitulo(y, 'ASSINATURAS');
-  y += 4;
+  y += 6;
   const largAssin = (largura - 20) / 2;
-  if (orcamento.assinatura_tecnico_img) doc.addImage(orcamento.assinatura_tecnico_img, 'PNG', margem, y, largAssin, 70);
-  if (orcamento.assinatura_cliente_img) doc.addImage(orcamento.assinatura_cliente_img, 'PNG', margem + largAssin + 20, y, largAssin, 70);
+  // molduras arredondadas em volta de cada assinatura — mesmo acabamento de "cartão" da O.S.
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+  doc.roundedRect(margem, y, largAssin, 96, 5, 5, 'S');
+  doc.roundedRect(margem + largAssin + 20, y, largAssin, 96, 5, 5, 'S');
+  if (orcamento.assinatura_tecnico_img) { try { doc.addImage(orcamento.assinatura_tecnico_img, 'PNG', margem + 8, y + 6, largAssin - 16, 62); } catch (e) {} }
+  if (orcamento.assinatura_cliente_img) { try { doc.addImage(orcamento.assinatura_cliente_img, 'PNG', margem + largAssin + 28, y + 6, largAssin - 16, 62); } catch (e) {} }
   doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
-  doc.line(margem, y + 74, margem + largAssin, y + 74);
-  doc.line(margem + largAssin + 20, y + 74, margem + largAssin * 2 + 20, y + 74);
+  doc.line(margem + 8, y + 74, margem + largAssin - 8, y + 74);
+  doc.line(margem + largAssin + 28, y + 74, margem + largAssin * 2 + 12, y + 74);
   doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text('TÉCNICO RESPONSÁVEL', margem, y + 86);
-  doc.text('CLIENTE', margem + largAssin + 20, y + 86);
-  rodape(2, 2, y + 96);
+  doc.text('TÉCNICO RESPONSÁVEL', margem + 8, y + 86);
+  doc.text('CLIENTE', margem + largAssin + 28, y + 86);
+  y += 96;
+
+  // pedido do usuário: paginação dinâmica de verdade — antes assumia sempre "página 1 de 2"
+  // fixo; como o conteúdo agora pode crescer (texto longo, muitos itens), o rodapé com
+  // "página X/Y" é escrito só no final, depois de saber o total real de páginas (mesmo padrão
+  // da O.S./Relatório de Visita PMOC).
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (p === totalPaginas) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+      const topo = p === totalPaginas ? Math.max(y, margem) : margem;
+      const centroY = Math.min(yLinha - 42, Math.max(topo + 50, topo + (yLinha - topo) / 2));
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, centroY);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
 
   return doc;
 }
@@ -5261,10 +5300,13 @@ function montarDocPmocVisitaPdf(visita, local, logoCliente, logoNexor) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração —
+  // barrinha colorida antes do título da seção, igual à O.S./Orçamento.
   function secaoTitulo(y, texto) {
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(texto, margem, y);
-    return y + 16;
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
   }
   function campo(x, y, label, valor) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -5306,7 +5348,7 @@ function montarDocPmocVisitaPdf(visita, local, logoCliente, logoNexor) {
 
   const comObservacao = (visita.pmoc_itens || []).filter((i) => i.observacao);
   if (comObservacao.length) {
-    y += 10; y = novaPaginaSeNecessario(y, 16);
+    y += 18; y = novaPaginaSeNecessario(y, 16);
     y = secaoTitulo(y, 'OBSERVAÇÕES');
     doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
     comObservacao.forEach((item) => {
@@ -5318,25 +5360,36 @@ function montarDocPmocVisitaPdf(visita, local, logoCliente, logoNexor) {
 
   const comFoto = (visita.pmoc_itens || []).filter((i) => i.foto_antes || i.foto_depois);
   if (comFoto.length) {
-    y += 14; y = novaPaginaSeNecessario(y, 90);
+    y += 14; y = novaPaginaSeNecessario(y, 104);
     y = secaoTitulo(y, 'FOTOS');
     comFoto.forEach((item) => {
-      y = novaPaginaSeNecessario(y, 90);
+      y = novaPaginaSeNecessario(y, 104);
       doc.setFontSize(8); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
       doc.text(limparPdf(`${item.aparelho_tipo || ''} — ${item.item_descricao}`).slice(0, 80), margem, y);
       let x = margem;
-      if (item.foto_antes) { try { doc.addImage(item.foto_antes, 'JPEG', x, y + 6, 70, 70); doc.setFontSize(7); doc.text('Antes', x, y + 80); } catch (e) {} x += 80; }
-      if (item.foto_depois) { try { doc.addImage(item.foto_depois, 'JPEG', x, y + 6, 70, 70); doc.setFontSize(7); doc.text('Depois', x, y + 80); } catch (e) {} }
-      y += 90;
+      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+      if (item.foto_antes) { try { doc.roundedRect(x - 1, y + 5, 72, 72, 3, 3, 'S'); doc.addImage(item.foto_antes, 'JPEG', x, y + 6, 70, 70); doc.setFontSize(7); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Antes', x, y + 80); } catch (e) {} x += 80; }
+      if (item.foto_depois) { try { doc.roundedRect(x - 1, y + 5, 72, 72, 3, 3, 'S'); doc.addImage(item.foto_depois, 'JPEG', x, y + 6, 70, 70); doc.setFontSize(7); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Depois', x, y + 80); } catch (e) {} }
+      // 14pt de respiro extra (90 -> 104) — a legenda "Antes/Depois" ficava quase colada no
+      // título do próximo item/na próxima seção.
+      y += 104;
     });
   }
 
   if (visita.assinatura_responsavel_img) {
-    y += 10; y = novaPaginaSeNecessario(y, 70);
+    // reserva espaço extra (90 -> 150) pra assinatura E pro crédito "Nexor Connect" do rodapé
+    // nunca ficarem espremidos um no outro.
+    y += 14; y = novaPaginaSeNecessario(y, 150);
     y = secaoTitulo(y, 'ASSINATURA DO RESPONSÁVEL NO LOCAL');
-    try { doc.addImage(visita.assinatura_responsavel_img, 'PNG', margem, y, 180, 60); } catch (e) {}
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    doc.text(limparPdf(visita.assinatura_responsavel_nome || ''), margem, y + 74);
+    y += 6;
+    // moldura arredondada em volta da assinatura — mesmo acabamento de "cartão" da O.S./Orçamento.
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
+    doc.roundedRect(margem, y, 196, 86, 5, 5, 'S');
+    try { doc.addImage(visita.assinatura_responsavel_img, 'PNG', margem + 8, y + 6, 180, 54); } catch (e) {}
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+    doc.line(margem + 8, y + 66, margem + 188, y + 66);
+    doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+    doc.text(limparPdf(visita.assinatura_responsavel_nome || ''), margem + 8, y + 78);
   }
 
   const totalPaginas = doc.internal.getNumberOfPages();
@@ -5423,10 +5476,12 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
     doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
     return y + 20;
   }
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração.
   function secaoTitulo(y, texto) {
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(texto, margem, y);
-    return y + 16;
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
   }
   function campo(x, y, label, valor) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -5482,7 +5537,9 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
   });
   if (!totalAparelhos) { doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhum aparelho cadastrado ainda.', margem, y + 10); y += 16; }
 
-  y += 10; y = novaPaginaSeNecessario(y, 40);
+  // 18pt de respiro (10 -> 18) — o item da tabela acima ficava quase colado na barrinha do
+  // título da próxima seção.
+  y += 18; y = novaPaginaSeNecessario(y, 40);
   y = secaoTitulo(y, '4. PLANO DE MANUTENÇÃO');
   if (plano && plano.itens.length) {
     doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -5495,7 +5552,7 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
     doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhum plano PMOC ativo pra este local.', margem, y); y += 16;
   }
 
-  y += 10; y = novaPaginaSeNecessario(y, 60);
+  y += 18; y = novaPaginaSeNecessario(y, 60);
   y = secaoTitulo(y, '5. CRONOGRAMA ANUAL');
   if (cronograma.length) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -5509,7 +5566,7 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
     doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Sem cronograma — nenhum plano ativo.', margem, y); y += 16;
   }
 
-  y += 10; y = novaPaginaSeNecessario(y, 40);
+  y += 18; y = novaPaginaSeNecessario(y, 40);
   y = secaoTitulo(y, '6. REGISTRO DE EXECUÇÕES');
   if (execucoes.length) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -5522,7 +5579,7 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
     doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhuma visita registrada ainda.', margem, y); y += 16;
   }
 
-  y += 10; y = novaPaginaSeNecessario(y, 40);
+  y += 18; y = novaPaginaSeNecessario(y, 40);
   y = secaoTitulo(y, '7. QUALIDADE DO AR');
   if (qualidade_ar.length) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
@@ -5539,15 +5596,22 @@ function montarDocPmocDocumento(documento, logoCliente, logoNexor) {
     doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft); doc.text('Nenhuma análise registrada ainda.', margem, y); y += 16;
   }
 
-  y += 14; y = novaPaginaSeNecessario(y, 90);
+  // mesma reserva extra de espaço (110 -> 180) pro crédito "Nexor Connect" nunca ficar
+  // espremido contra o cartão de assinaturas.
+  y += 14; y = novaPaginaSeNecessario(y, 180);
   y = secaoTitulo(y, '8. ASSINATURAS');
+  y += 6;
+  // molduras arredondadas — mesmo acabamento de "cartão" da O.S./Orçamento/Relatório de Visita.
   doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.8);
-  doc.line(margem, y + 50, margem + 200, y + 50);
-  doc.line(margem + largura - 200, y + 50, margem + largura, y + 50);
-  if (responsavel_tecnico && responsavel_tecnico.assinatura_img) { try { doc.addImage(responsavel_tecnico.assinatura_img, 'PNG', margem, y, 180, 48); } catch (e) {} }
+  doc.roundedRect(margem, y, 200, 86, 5, 5, 'S');
+  doc.roundedRect(margem + largura - 200, y, 200, 86, 5, 5, 'S');
+  if (responsavel_tecnico && responsavel_tecnico.assinatura_img) { try { doc.addImage(responsavel_tecnico.assinatura_img, 'PNG', margem + 8, y + 6, 184, 54); } catch (e) {} }
+  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+  doc.line(margem + 8, y + 66, margem + 192, y + 66);
+  doc.line(margem + largura - 192, y + 66, margem + largura - 8, y + 66);
   doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-  doc.text(limparPdf((responsavel_tecnico && responsavel_tecnico.nome) || 'Responsável técnico'), margem, y + 62);
-  doc.text('Responsável no local', margem + largura - 200, y + 62);
+  doc.text(limparPdf((responsavel_tecnico && responsavel_tecnico.nome) || 'Responsável técnico'), margem + 8, y + 78);
+  doc.text('Responsável no local', margem + largura - 192, y + 78);
 
   const totalPaginas = doc.internal.getNumberOfPages();
   for (let p = 1; p <= totalPaginas; p++) {
@@ -5628,15 +5692,35 @@ function montarDocPmocRelatorioMensal(relatorio, logoCliente, logoNexor) {
   const pageH = doc.internal.pageSize.getHeight();
   const margem = 40;
   const largura = pageW - margem * 2;
-  const y0 = margem;
-  desenharCabecalhoEmpresaPdf(doc, null, margem, y0);
-  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
-  doc.text('Relatório Mensal PMOC', pageW - margem, y0, { align: 'right' });
-  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`${pmocMesLabel(Number(relatorio.mes.slice(5, 7)))}/${relatorio.mes.slice(0, 4)}`, pageW - margem, y0 + 14, { align: 'right' });
-  let y = y0 + 48;
-  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
 
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração
+  // — cabeçalho/título com barrinha igual O.S./Orçamento, e paginação de verdade (antes, uma
+  // lista grande de visitas quebrava a página sem redesenhar o cabeçalho e sem rodapé nas
+  // páginas anteriores à última).
+  function cabecalho() {
+    const y0 = margem;
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0);
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Relatório Mensal PMOC', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(`${pmocMesLabel(Number(relatorio.mes.slice(5, 7)))}/${relatorio.mes.slice(0, 4)}`, pageW - margem, y0 + 14, { align: 'right' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
+  }
+  function novaPaginaSeNecessario(y, espaco) {
+    if (y + espaco <= pageH - 60) return y;
+    doc.addPage();
+    return cabecalho();
+  }
+
+  let y = cabecalho();
   doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
   doc.text(limparPdf(relatorio.cliente.nome), margem, y); y += 24;
 
@@ -5655,15 +5739,15 @@ function montarDocPmocRelatorioMensal(relatorio, logoCliente, logoNexor) {
   });
   y += Math.ceil(stats.length / 2) * 26 + 16;
 
-  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text('VISITAS DO MÊS', margem, y); y += 16;
+  y = novaPaginaSeNecessario(y, 40);
+  y = secaoTitulo(y, 'VISITAS DO MÊS');
   doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
   doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('DATA', margem + 6, y + 11); doc.text('LOCAL', margem + 80, y + 11); doc.text('TÉCNICO', margem + largura * 0.6, y + 11); doc.text('STATUS', margem + largura * 0.85, y + 11);
   y += 16;
   doc.setFont(undefined, 'normal');
   relatorio.visitas.forEach((v, i) => {
-    if (y > pageH - 80) { doc.addPage(); y = margem; }
+    y = novaPaginaSeNecessario(y, 16);
     if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
     doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
     doc.text(fmtDataIsoAgendaRef(v.data), margem + 6, y + 11);
@@ -5673,11 +5757,20 @@ function montarDocPmocRelatorioMensal(relatorio, logoCliente, logoNexor) {
     y += 16;
   });
 
-  const yLinha = pageH - 40;
-  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
-  doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')}`, pageW / 2, pageH - 20, { align: 'center' });
-  desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (p === totalPaginas) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
   return doc;
 }
 async function baixarRelatorioMensalPmoc() {
@@ -5741,23 +5834,40 @@ function montarDocPmocRelatorioGas(relatorio, logoNexor) {
   const pageH = doc.internal.pageSize.getHeight();
   const margem = 40;
   const largura = pageW - margem * 2;
-  const y0 = margem;
-  desenharCabecalhoEmpresaPdf(doc, null, margem, y0);
-  doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
-  doc.text('Relatório Anual de Gás Refrigerante', pageW - margem, y0, { align: 'right' });
-  doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(String(relatorio.ano), pageW - margem, y0 + 14, { align: 'right' });
-  let y = y0 + 48;
-  doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y); y += 24;
 
-  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text('TOTAIS POR FLUIDO', margem, y); y += 16;
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração.
+  function cabecalho() {
+    const y0 = margem;
+    desenharCabecalhoEmpresaPdf(doc, null, margem, y0);
+    doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Relatório Anual de Gás Refrigerante', pageW - margem, y0, { align: 'right' });
+    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(String(relatorio.ano), pageW - margem, y0 + 14, { align: 'right' });
+    const y = y0 + 48;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2); doc.line(margem, y, pageW - margem, y);
+    return y + 20;
+  }
+  function secaoTitulo(y, texto) {
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
+  }
+  function novaPaginaSeNecessario(y, espaco) {
+    if (y + espaco <= pageH - 60) return y;
+    doc.addPage();
+    return cabecalho();
+  }
+
+  let y = cabecalho();
+  y = secaoTitulo(y, 'TOTAIS POR FLUIDO');
   doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
   doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('FLUIDO', margem + 6, y + 11); doc.text('CARGA (kg)', margem + largura * 0.5, y + 11); doc.text('RECOLHIMENTO (kg)', margem + largura * 0.75, y + 11);
   y += 16;
   doc.setFont(undefined, 'normal');
   relatorio.por_fluido.forEach((f, i) => {
+    y = novaPaginaSeNecessario(y, 16);
     if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
     doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
     doc.text(limparPdf(f.fluido), margem + 6, y + 11);
@@ -5767,15 +5877,15 @@ function montarDocPmocRelatorioGas(relatorio, logoNexor) {
   });
   y += 24;
 
-  doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-  doc.text('REGISTROS', margem, y); y += 16;
+  y = novaPaginaSeNecessario(y, 40);
+  y = secaoTitulo(y, 'REGISTROS');
   doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 16, 'F');
   doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('DATA', margem + 6, y + 11); doc.text('LOCAL / APARELHO', margem + 70, y + 11); doc.text('OPERAÇÃO', margem + largura * 0.65, y + 11); doc.text('KG', margem + largura * 0.9, y + 11);
   y += 16;
   doc.setFont(undefined, 'normal');
   relatorio.registros.forEach((g, i) => {
-    if (y > pageH - 80) { doc.addPage(); y = margem; }
+    y = novaPaginaSeNecessario(y, 16);
     if (i % 2 === 1) { doc.setFillColor(...PDF_COR.bluePale); doc.rect(margem, y, largura, 16, 'F'); }
     doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.ink);
     doc.text(fmtDataIsoAgendaRef(g.data), margem + 6, y + 11);
@@ -5785,11 +5895,20 @@ function montarDocPmocRelatorioGas(relatorio, logoNexor) {
     y += 16;
   });
 
-  const yLinha = pageH - 40;
-  doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
-  doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-  doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')}`, pageW / 2, pageH - 20, { align: 'center' });
-  desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+  const totalPaginas = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPaginas; p++) {
+    doc.setPage(p);
+    const yLinha = pageH - 40;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6); doc.line(margem, yLinha, pageW - margem, yLinha);
+    if (p === totalPaginas) {
+      doc.setFontSize(7.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+      desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 50);
+    } else {
+      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(`${limparPdf(empresaNome())} · gerado em ${new Date().toLocaleDateString('pt-BR')} · página ${p}/${totalPaginas}`, pageW / 2, pageH - 20, { align: 'center' });
+    }
+  }
   return doc;
 }
 async function baixarRelatorioGasPmoc() {
@@ -6636,10 +6755,12 @@ function montarDocCalcBlindadaPdf(f, totais, ajustes, logoCliente, logoNexor) {
     doc.text(`gerado em ${new Date().toLocaleDateString('pt-BR')} · página 1/1`, pageW / 2, pageH - 20, { align: 'center' });
     desenharCreditoNexorConnect(doc, logoNexor, pageW / 2, yLinha - 70);
   }
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração.
   function secaoTitulo(y, texto) {
-    doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(texto, margem, y);
-    return y + 16;
+    doc.setFillColor(...PDF_COR.blue); doc.roundedRect(margem, y - 9, 3.5, 12, 1, 1, 'F');
+    doc.setFontSize(10.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.text(texto, margem + 10, y);
+    return y + 17;
   }
   function campo(x, y, label, valor) {
     doc.setFontSize(7.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -6689,7 +6810,7 @@ function montarDocCalcBlindadaPdf(f, totais, ajustes, logoCliente, logoNexor) {
     y += 16;
   });
   y += 6;
-  doc.setFillColor(...PDF_COR.navy); doc.rect(margem, y, largura, 28, 'F');
+  doc.setFillColor(...PDF_COR.navy); doc.roundedRect(margem, y, largura, 28, 4, 4, 'F');
   doc.setFont(undefined, 'bold'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.white);
   doc.text('TOTAL', margem + 10, y + 19);
   doc.text(fmtMoeda(totais.total), pageW - margem - 10, y + 19, { align: 'right' });
