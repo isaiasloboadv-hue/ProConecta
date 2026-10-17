@@ -6362,7 +6362,7 @@ const FERRAMENTAS_REF_CATEGORIAS = [
   { chave: 'calculadoras', titulo: 'Calculadoras', cor: 'var(--blue)', corIconeBg: 'var(--blue-pale)', itens: [
     { icone: '🧮', label: 'Calculadora Blindada', descricao: 'Orçamento com mensagens prontas', page: 'calculadora-blindada' },
     { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC', page: 'calculadora-btu' },
-    { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores' },
+    { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores', page: 'calculadora-cabos' },
     { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária' },
     { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro' },
   ]},
@@ -7218,6 +7218,215 @@ async function compartilharBtuWhatsapp() {
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
 }
 
+// ===== Calculadora de Cabos (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, prints de um cálculo real feito lá) —
+// dimensiona cabo/disjuntor pra instalação do AC a partir da potência elétrica, tensão, distância
+// até o quadro e tipo de instalação, com o passo a passo sempre visível ("Ver cálculo detalhado")
+// e compartilhamento via WhatsApp — mesmo padrão da Calculadora de BTU acima.
+// A fórmula (critério de queda de tensão da NBR 5410, citado no próprio app de referência) foi
+// conferida passo a passo contra o print do resultado deles (1200W, 220V, 10m, embutida):
+//   1. corrente = potência ÷ tensão                              → 1200 ÷ 220 = 5.45A
+//   2. corrente corrigida = corrente × 1,25 (margem de 25% da NBR 5410 p/ carga contínua) → 6.82A
+//   3. seção = (2 × distância × corrente × ρcobre) ÷ (tensão × 4%), ρcobre=0,0175 Ω·mm²/m,
+//      4% é o limite de queda de tensão de circuito terminal      → 0,22mm² → arredonda pra
+//      bitola comercial acima (1mm²); a queda de tensão resultante bateu exatamente com o
+//      print (0,87%)
+//   4. disjuntor = corrente corrigida arredondada pro disjuntor comercial acima → 10A
+// Todos os 4 números bateram exatos com o print, então a fórmula está confirmada.
+// DIFERENÇA proposital em relação ao app de referência: não tem seletor BTU/W pra potência. No
+// print deles, mesmo com "BTU" selecionado o campo foi usado direto como watts na fórmula (users
+// digitou 1200 e o passo 1 saiu "1200W ÷ 220V", sem nenhuma conversão) — ou é uma limitação do
+// app de referência, ou o seletor ali não faz nada de verdade. De todo jeito, BTU é capacidade de
+// refrigeração, não potência elétrica, e não existe uma razão de conversão BTU→W confiável sem o
+// EER/COP real do aparelho (varia por eficiência/modelo) — inventar uma aqui teria efeito direto
+// e perigoso no dimensionamento (cabo/disjuntor subdimensionado), o mesmo cuidado já descrito no
+// comentário no topo de FERRAMENTAS_REF_CATEGORIAS pras ferramentas elétricas/de gás ainda não
+// construídas. Por isso o campo pede direto a potência elétrica (W) da etiqueta/manual do
+// aparelho, com uma dica visível explicando o porquê.
+const CALC_CABOS_TENSAO_LABEL = { 127: '127V', 220: '220V', 380: '380V (trifásico)' };
+const CALC_CABOS_RESISTIVIDADE_COBRE = 0.0175; // Ω·mm²/m (cobre, NBR 5410)
+const CALC_CABOS_QUEDA_MAX_PCT = 0.04; // 4% — limite de queda de tensão p/ circuito terminal (NBR 5410)
+const CALC_CABOS_MARGEM = 1.25; // 25% de margem sobre a corrente nominal (NBR 5410, carga contínua/motor)
+const CALC_CABOS_SECOES_COMERCIAIS = [1, 1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95, 120, 150, 185, 240]; // mm²
+const CALC_CABOS_DISJUNTORES_COMERCIAIS = [10, 16, 20, 25, 32, 40, 50, 63, 70, 80, 100, 125]; // A
+const CALC_CABOS_TIPO_INSTALACAO_LABEL = { embutida: 'Embutida (eletroduto)', aparente: 'Aparente (canaleta/externo)' };
+// tabela de referência rápida — mesmos valores típicos de split mostrados no app de referência
+// (corrente/cabo/disjuntor por BTU/tensão); é só consulta, não entra no cálculo acima, que usa
+// sempre a potência elétrica real informada no formulário.
+const CALC_CABOS_TABELA_REFERENCIA = [
+  { btu: 9000, a127: 9.5, a220: 5.5, cabo: 1.5, disjuntor: 16 },
+  { btu: 12000, a127: 12.5, a220: 7.2, cabo: 2.5, disjuntor: 16 },
+  { btu: 18000, a127: 18.5, a220: 10.7, cabo: 4, disjuntor: 20 },
+  { btu: 24000, a127: null, a220: 14.2, cabo: 4, disjuntor: 25 },
+  { btu: 30000, a127: null, a220: 17.8, cabo: 6, disjuntor: 25 },
+  { btu: 36000, a127: null, a220: 21.3, cabo: 6, disjuntor: 32 },
+  { btu: 48000, a127: null, a220: 28.4, cabo: 10, disjuntor: 40 },
+  { btu: 60000, a127: null, a220: 35.5, cabo: 10, disjuntor: 50 },
+];
+function fmtCabosNum(n) { return Math.round(n).toLocaleString('pt-BR'); }
+function calcCabosFormVazio() {
+  return { potencia_w: '', tensao: 220, distancia_m: 10, tipo_instalacao: 'embutida' };
+}
+function calcCabosProximoComercial(lista, valor) {
+  return lista.find((v) => v >= valor) || lista[lista.length - 1];
+}
+function calcularCabosResultado(f) {
+  const potencia = Number(f.potencia_w) || 0;
+  const tensao = Number(f.tensao) || 220;
+  const distancia = Number(f.distancia_m) || 0;
+  const corrente = tensao > 0 ? potencia / tensao : 0;
+  const correnteCorrigida = corrente * CALC_CABOS_MARGEM;
+  const secaoCalculada = (2 * distancia * corrente * CALC_CABOS_RESISTIVIDADE_COBRE) / (tensao * CALC_CABOS_QUEDA_MAX_PCT);
+  const secaoComercial = calcCabosProximoComercial(CALC_CABOS_SECOES_COMERCIAIS, secaoCalculada);
+  const disjuntor = calcCabosProximoComercial(CALC_CABOS_DISJUNTORES_COMERCIAIS, correnteCorrigida);
+  const tipoCabo = f.tipo_instalacao === 'aparente'
+    ? 'Cabo flexível anti-chama 750V (indicado para canaleta/fixação aparente)'
+    : 'Cabo flexível anti-chama 750V';
+  const quedaTensaoPct = secaoComercial > 0 ? ((2 * distancia * corrente * CALC_CABOS_RESISTIVIDADE_COBRE) / (secaoComercial * tensao)) * 100 : 0;
+  return { potencia, tensao, distancia, corrente, correnteCorrigida, secaoCalculada, secaoComercial, disjuntor, tipoCabo, quedaTensaoPct };
+}
+function calcularPassosCabos(f, r) {
+  return [
+    { titulo: 'Corrente do equipamento', formula: 'Potência ÷ Tensão', substituicao: `${fmtCabosNum(r.potencia)}W ÷ ${r.tensao}V`, resultado: `${r.corrente.toFixed(2)} A` },
+    { titulo: 'Corrente corrigida (margem 25%)', formula: 'Corrente × 1.25', substituicao: `${r.corrente.toFixed(2)}A × 1.25`, resultado: `${r.correnteCorrigida.toFixed(2)} A`, dica: 'NBR 5410 exige margem de 25% sobre a corrente nominal' },
+    { titulo: 'Seção do cabo (NBR 5410)', formula: 'S = (2 × L × I × ρ) ÷ (V × ΔV%)', substituicao: `(2 × ${r.distancia}m × ${r.corrente.toFixed(2)}A × ${CALC_CABOS_RESISTIVIDADE_COBRE}) ÷ (${r.tensao}V × 4%)`, resultado: `${r.secaoComercial} mm²`, dica: `Queda de tensão: ${r.quedaTensaoPct.toFixed(2)}% (máx. 4%)` },
+    { titulo: 'Disjuntor recomendado', formula: 'Corrente corrigida → disjuntor comercial ≥', substituicao: `${r.correnteCorrigida.toFixed(2)}A → próximo padrão`, resultado: `${r.disjuntor} A` },
+    { titulo: 'Tipo de cabo', formula: f.tipo_instalacao === 'aparente' ? 'Instalação aparente → flexível' : 'Instalação embutida → flexível', substituicao: `Instalação: ${CALC_CABOS_TIPO_INSTALACAO_LABEL[f.tipo_instalacao]}`, resultado: r.tipoCabo },
+  ];
+}
+
+async function renderCalculadoraCabos() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._calcCabosForm) window._calcCabosForm = calcCabosFormVazio();
+  window._calcCabosResultado = null;
+  window._calcCabosDetalheAberto = false;
+  window._calcCabosTabelaAberta = false;
+  desenharCalculadoraCabos();
+}
+function desenharCalculadoraCabos() {
+  const main = document.getElementById('main');
+  const f = window._calcCabosForm;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; align-items:center; gap:10px;">
+      <button class="btn-outline-sm" style="padding:6px 10px;" onclick="ir('ferramentas-hub')">←</button>
+      <h1 style="margin:0;">Calculadora de Cabos</h1>
+    </div>
+    <div style="max-width:560px;">
+      <div class="field"><label>Potência elétrica do equipamento (W) *</label><input id="cabos-potencia" type="number" step="1" min="0" value="${esc(f.potencia_w)}" placeholder="Ex: 1200"></div>
+      <div style="font-size:12px; color:var(--ink-soft); margin:-10px 0 14px;">💡 Use a potência elétrica (W) da etiqueta/manual do aparelho — BTU é capacidade de refrigeração, não equivale à potência elétrica.</div>
+      <div class="field"><label>Tensão</label>
+        <select id="cabos-tensao">
+          ${Object.entries(CALC_CABOS_TENSAO_LABEL).map(([k, label]) => `<option value="${k}" ${Number(f.tensao) === Number(k) ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Distância do quadro (m)</label><input id="cabos-distancia" type="number" step="0.5" min="0" value="${esc(f.distancia_m)}"></div>
+      <div class="field"><label>Tipo de instalação</label>
+        <select id="cabos-tipo">
+          ${Object.entries(CALC_CABOS_TIPO_INSTALACAO_LABEL).map(([k, label]) => `<option value="${k}" ${f.tipo_instalacao === k ? 'selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" style="width:100%; padding:12px; margin-top:6px;" onclick="calcularCabos()">Calcular</button>
+      <div id="cabos-resultado"></div>
+      <div id="cabos-tabela-wrap" style="margin-top:14px;"></div>
+    </div>`;
+  desenharTabelaWrapCabos();
+}
+function sincronizarCamposCabos() {
+  const f = window._calcCabosForm;
+  f.potencia_w = document.getElementById('cabos-potencia').value;
+  f.tensao = Number(document.getElementById('cabos-tensao').value) || 220;
+  f.distancia_m = document.getElementById('cabos-distancia').value;
+  f.tipo_instalacao = document.getElementById('cabos-tipo').value;
+}
+function calcularCabos() {
+  sincronizarCamposCabos();
+  const f = window._calcCabosForm;
+  if (!(Number(f.potencia_w) > 0)) { alert('Informe a potência do equipamento em Watts.'); return; }
+  if (!(Number(f.distancia_m) >= 0)) { alert('Informe a distância do quadro.'); return; }
+  const r = calcularCabosResultado(f);
+  window._calcCabosResultado = r;
+  window._calcCabosDetalheAberto = false;
+  desenharResultadoCabos();
+}
+function desenharResultadoCabos() {
+  const el = document.getElementById('cabos-resultado');
+  if (!el || !window._calcCabosResultado) return;
+  const r = window._calcCabosResultado;
+  el.innerHTML = `
+    <div class="panel" style="text-align:center; border:1.5px solid var(--blue); margin-top:16px;">
+      <div style="font-size:30px;">🔌</div>
+      <div style="display:flex; justify-content:space-around; margin-top:10px; flex-wrap:wrap; gap:10px;">
+        <div><div style="font-size:11px; color:var(--ink-soft);">Corrente</div><div style="font-size:18px; font-weight:800;">${r.corrente.toFixed(2)}A</div></div>
+        <div><div style="font-size:11px; color:var(--ink-soft);">Cabo</div><div style="font-size:18px; font-weight:800; color:var(--blue);">${r.secaoComercial}mm²</div></div>
+        <div><div style="font-size:11px; color:var(--ink-soft);">Disjuntor</div><div style="font-size:18px; font-weight:800;">${r.disjuntor}A</div></div>
+      </div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:10px;">${esc(r.tipoCabo)}</div>
+    </div>
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px; display:flex; justify-content:space-between; align-items:center;" onclick="alternarDetalheCabos()">📐 Ver cálculo detalhado <span>${window._calcCabosDetalheAberto ? '▲' : '▼'}</span></button>
+    ${window._calcCabosDetalheAberto ? desenharPassosCabos(r) : ''}
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="compartilharCabosWhatsapp()">🔗 Compartilhar via WhatsApp</button>`;
+}
+function alternarDetalheCabos() {
+  window._calcCabosDetalheAberto = !window._calcCabosDetalheAberto;
+  desenharResultadoCabos();
+}
+function desenharPassosCabos(r) {
+  const passos = calcularPassosCabos(window._calcCabosForm, r);
+  return `<div class="panel" style="margin-top:10px;">${passos.map((p, i) => `
+    <div style="padding:12px 0; ${i < passos.length - 1 ? 'border-bottom:1px solid var(--line);' : ''}">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+        <span style="width:24px; height:24px; border-radius:50%; background:var(--blue-pale); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">${i + 1}</span>
+        <strong>${esc(p.titulo)}</strong>
+      </div>
+      <div style="background:var(--gray-50,#F4F6FA); border-radius:8px; padding:8px 10px; font-size:13px; font-family:monospace; margin-bottom:6px;">${esc(p.formula)}</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-bottom:4px;">${esc(p.substituicao)}</div>
+      <div style="font-weight:800; color:var(--blue); font-size:15px;">= ${esc(p.resultado)}</div>
+      ${p.dica ? `<div style="background:var(--amber-pale,#FEF3C7); border-radius:8px; padding:8px 10px; font-size:12px; color:var(--amber,#B45309); margin-top:8px;">💡 ${esc(p.dica)}</div>` : ''}
+    </div>`).join('')}</div>`;
+}
+function desenharTabelaWrapCabos() {
+  const el = document.getElementById('cabos-tabela-wrap');
+  if (!el) return;
+  el.innerHTML = `
+    <button class="btn-outline-sm" style="width:100%; display:flex; justify-content:space-between; align-items:center;" onclick="alternarTabelaReferenciaCabos()">📋 Tabela de referência rápida <span>${window._calcCabosTabelaAberta ? '▲' : '▼'}</span></button>
+    ${window._calcCabosTabelaAberta ? desenharTabelaReferenciaCabos() : ''}`;
+}
+function alternarTabelaReferenciaCabos() {
+  window._calcCabosTabelaAberta = !window._calcCabosTabelaAberta;
+  desenharTabelaWrapCabos();
+}
+function desenharTabelaReferenciaCabos() {
+  return `<div class="panel" style="margin-top:10px; overflow-x:auto;">
+    <table style="width:100%; font-size:12.5px;">
+      <thead><tr><th>BTU</th><th>127V</th><th>220V</th><th>Cabo</th><th>Disj.</th></tr></thead>
+      <tbody>
+        ${CALC_CABOS_TABELA_REFERENCIA.map((row) => `<tr>
+          <td>${row.btu / 1000}k</td>
+          <td>${row.a127 != null ? row.a127 + 'A' : '—'}</td>
+          <td>${row.a220}A</td>
+          <td style="color:var(--blue); font-weight:700;">${row.cabo}mm²</td>
+          <td>${row.disjuntor}A</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="font-size:11px; color:var(--ink-soft); margin-top:8px;">Valores típicos de split (referência rápida) — pra um cálculo específico, use o formulário acima com a potência real do equipamento.</div>
+  </div>`;
+}
+async function compartilharCabosWhatsapp() {
+  if (!window._calcCabosResultado) return;
+  const r = window._calcCabosResultado;
+  const passos = calcularPassosCabos(window._calcCabosForm, r);
+  const linhas = [`⚡ *Dimensionamento de Cabos (${empresaNome()})*`, ''];
+  passos.forEach((p, i) => linhas.push(`${i + 1}. ${p.titulo}: ${p.substituicao} = ${p.resultado}`));
+  linhas.push('', `✅ *Cabo: ${r.secaoComercial}mm² | Disjuntor: ${r.disjuntor}A | ${r.tipoCabo}*`);
+  const texto = linhas.join('\n');
+  if (navigator.share) {
+    try { await navigator.share({ text: texto }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
 async function renderFerramentaEmBreve(pagina) {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
@@ -7829,6 +8038,7 @@ async function ir(pagina) {
     if (pagina === 'ferramentas-hub') return renderFerramentasRefrigeracao();
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();
+    if (pagina === 'calculadora-cabos') return renderCalculadoraCabos();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
