@@ -5776,8 +5776,10 @@ function montarDocPmocRelatorioMensal(relatorio, logoCliente, logoNexor) {
 async function baixarRelatorioMensalPmoc() {
   const relatorio = window._pmocRelatorioMensalAtual;
   if (!relatorio) return;
-  const logoNexor = await logoNexorFlatHeader();
-  const doc = montarDocPmocRelatorioMensal(relatorio, null, logoNexor);
+  // pedido do usuário: faltava a logo da empresa nesse relatório (só o nome em texto) —
+  // mesma logo já mostrada nos outros PDFs do perfil (O.S./Orçamento/Documento PMOC).
+  const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+  const doc = montarDocPmocRelatorioMensal(relatorio, logoCliente, logoNexor);
   doc.save(`relatorio-mensal-pmoc-${relatorio.cliente.nome.replace(/[^a-zA-Z0-9]+/g, '-')}-${relatorio.mes}.pdf`);
 }
 
@@ -5826,7 +5828,7 @@ async function carregarPmocRelatorioGas() {
       <button class="btn btn-outline-sm" onclick="baixarRelatorioGasPmoc()">📄 Baixar PDF</button>`;
   } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
-function montarDocPmocRelatorioGas(relatorio, logoNexor) {
+function montarDocPmocRelatorioGas(relatorio, logoCliente, logoNexor) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   doc.setProperties({ title: `Relatório de Gás ${relatorio.ano}` });
@@ -5835,10 +5837,11 @@ function montarDocPmocRelatorioGas(relatorio, logoNexor) {
   const margem = 40;
   const largura = pageW - margem * 2;
 
-  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração.
+  // pedido do usuário: "mesmo padrão de layout e cores" em todos os PDFs do perfil Refrigeração —
+  // aqui faltava literalmente a logo da empresa no cabeçalho (só o nome em texto).
   function cabecalho() {
     const y0 = margem;
-    desenharCabecalhoEmpresaPdf(doc, null, margem, y0);
+    desenharCabecalhoEmpresaPdf(doc, logoCliente, margem, y0);
     doc.setFontSize(16); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
     doc.text('Relatório Anual de Gás Refrigerante', pageW - margem, y0, { align: 'right' });
     doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
@@ -5914,8 +5917,8 @@ function montarDocPmocRelatorioGas(relatorio, logoNexor) {
 async function baixarRelatorioGasPmoc() {
   const relatorio = window._pmocRelatorioGasAtual;
   if (!relatorio) return;
-  const logoNexor = await logoNexorFlatHeader();
-  const doc = montarDocPmocRelatorioGas(relatorio, logoNexor);
+  const [logoCliente, logoNexor] = await Promise.all([logoClienteFlatHeader(), logoNexorFlatHeader()]);
+  const doc = montarDocPmocRelatorioGas(relatorio, logoCliente, logoNexor);
   doc.save(`relatorio-gas-pmoc-${relatorio.ano}.pdf`);
 }
 
