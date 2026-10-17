@@ -6373,7 +6373,7 @@ const FERRAMENTAS_REF_CATEGORIAS = [
     { icone: '🧮', label: 'Calculadora Blindada', descricao: 'Orçamento com mensagens prontas', page: 'calculadora-blindada' },
     { icone: '🌡️', label: 'Calculadora BTU', descricao: 'Capacidade ideal do AC', page: 'calculadora-btu' },
     { icone: '🔌', label: 'Calc. Cabos', descricao: 'Dimensione cabos e disjuntores', page: 'calculadora-cabos' },
-    { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária' },
+    { icone: '⚡', label: 'Calc. Capacitor', descricao: 'Capacitância necessária', page: 'calculadora-capacitor' },
     { icone: '⛽', label: 'Carga de Gás', descricao: 'Gás adicional por metro' },
   ]},
   { chave: 'referencia', titulo: 'Referência', cor: '#0D9488', corIconeBg: '#E6F7F5', itens: [
@@ -7450,6 +7450,147 @@ async function compartilharCabosWhatsapp() {
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
 }
 
+// ===== Calculadora de Capacitor (Ferramentas, perfil "Refrigeração e Climatização") =====
+// pedido do usuário (referência: app concorrente iClima, prints de um cálculo real feito lá) —
+// capacitância de partida/permanente a partir de tensão, corrente e fator de potência do motor/
+// compressor, com passo a passo e compartilhamento via WhatsApp — mesmo padrão das calculadoras
+// de Cabos/BTU acima.
+// Fórmula (correção de fator de potência — padrão de engenharia elétrica, não específico da
+// NBR 5410 como a de Cabos) conferida passo a passo contra o print do resultado deles (220V,
+// 10A, FP 0,85):
+//   1. corrente reativa = I × sen(arccos(FP))                → 10 × sen(31.8°) = 5.27A
+//   2. capacitância = I_reativa ÷ (2π × f × V) × 10⁶, f=60Hz (rede brasileira)  → 63.5 µF
+//   3. arredonda pro capacitor comercial ≥ calculado           → 65 µF
+// Os 3 números bateram exatos com o print (inclusive o ângulo de fase 31.8°), então a fórmula
+// está confirmada — dá pra verificar de forma independente também (é trigonometria padrão: 10 ×
+// sen(arccos(0.85)) = 5.266..., e 5.266/(2π×60×220)×1e6 = 63.49...). A lista de capacitores
+// comerciais (CALC_CAPACITOR_VALORES_COMERCIAIS) é a mesma mostrada no print de referência.
+const CALC_CAPACITOR_FREQUENCIA_HZ = 60; // rede elétrica brasileira
+const CALC_CAPACITOR_FP_PADRAO = 0.85;
+const CALC_CAPACITOR_VALORES_COMERCIAIS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 80]; // µF
+function fmtCapacitorNum(n) { return (Math.round(n * 10) / 10).toLocaleString('pt-BR'); }
+function calcCapacitorFormVazio() {
+  return { tensao: 220, corrente: '', fator_potencia: CALC_CAPACITOR_FP_PADRAO };
+}
+function calcularCapacitorResultado(f) {
+  const tensao = Number(f.tensao) || 220;
+  const corrente = Number(f.corrente) || 0;
+  const fp = Number(f.fator_potencia) || CALC_CAPACITOR_FP_PADRAO;
+  const anguloRad = Math.acos(Math.min(1, Math.max(-1, fp)));
+  const anguloGraus = (anguloRad * 180) / Math.PI;
+  const correnteReativa = corrente * Math.sin(anguloRad);
+  const capacitanciaCalculada = (correnteReativa / (2 * Math.PI * CALC_CAPACITOR_FREQUENCIA_HZ * tensao)) * 1e6;
+  const capacitorComercial = calcCabosProximoComercial(CALC_CAPACITOR_VALORES_COMERCIAIS, capacitanciaCalculada);
+  return { tensao, corrente, fp, anguloGraus, correnteReativa, capacitanciaCalculada, capacitorComercial };
+}
+function calcularPassosCapacitor(r) {
+  return [
+    { titulo: 'Corrente reativa', formula: 'I_reativa = I × sen(arccos(FP))', substituicao: `${r.corrente}A × sen(arccos(${r.fp})) = ${r.corrente}A × sen(${r.anguloGraus.toFixed(1)}°)`, resultado: `${r.correnteReativa.toFixed(2)} A`, dica: `Ângulo de fase: ${r.anguloGraus.toFixed(1)}° (FP = ${r.fp})` },
+    { titulo: 'Capacitância necessária', formula: 'C = I_reativa ÷ (2π × f × V) × 10⁶', substituicao: `${r.correnteReativa.toFixed(2)} ÷ (2π × ${CALC_CAPACITOR_FREQUENCIA_HZ} × ${r.tensao}) × 10⁶`, resultado: `${fmtCapacitorNum(r.capacitanciaCalculada)} µF` },
+    { titulo: 'Capacitor comercial mais próximo', formula: 'Arredondar para valor comercial ≥ calculado', substituicao: `${fmtCapacitorNum(r.capacitanciaCalculada)} µF → ${r.capacitorComercial} µF`, resultado: `${r.capacitorComercial} µF`, dica: 'Se o capacitor medido estiver abaixo de 10% do valor nominal, substituir' },
+  ];
+}
+
+async function renderCalculadoraCapacitor() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  if (!window._calcCapacitorForm) window._calcCapacitorForm = calcCapacitorFormVazio();
+  window._calcCapacitorResultado = null;
+  window._calcCapacitorDetalheAberto = false;
+  window._calcCapacitorEscolhido = null;
+  desenharCalculadoraCapacitor();
+}
+function desenharCalculadoraCapacitor() {
+  const main = document.getElementById('main');
+  const f = window._calcCapacitorForm;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; align-items:center; gap:10px;">
+      <button class="btn-outline-sm" style="padding:6px 10px;" onclick="ir('ferramentas-hub')">←</button>
+      <h1 style="margin:0;">Calculadora de Capacitor</h1>
+    </div>
+    <div style="max-width:560px;">
+      <div class="field"><label>Tensão (V) *</label><input id="capacitor-tensao" type="number" step="1" min="0" value="${esc(f.tensao)}"></div>
+      <div class="field"><label>Corrente (A) *</label><input id="capacitor-corrente" type="number" step="0.1" min="0" value="${esc(f.corrente)}" placeholder="Ex: 10"></div>
+      <div class="field"><label>Fator de potência</label><input id="capacitor-fp" type="number" step="0.01" min="0" max="1" value="${esc(f.fator_potencia)}"></div>
+      <button class="btn btn-primary btn-sm" style="width:100%; padding:12px; margin-top:6px;" onclick="calcularCapacitor()">Calcular</button>
+      <div id="capacitor-resultado"></div>
+    </div>`;
+}
+function sincronizarCamposCapacitor() {
+  const f = window._calcCapacitorForm;
+  f.tensao = document.getElementById('capacitor-tensao').value;
+  f.corrente = document.getElementById('capacitor-corrente').value;
+  f.fator_potencia = document.getElementById('capacitor-fp').value;
+}
+function calcularCapacitor() {
+  sincronizarCamposCapacitor();
+  const f = window._calcCapacitorForm;
+  if (!(Number(f.tensao) > 0)) { alert('Informe a tensão.'); return; }
+  if (!(Number(f.corrente) > 0)) { alert('Informe a corrente do motor/compressor.'); return; }
+  if (!(Number(f.fator_potencia) > 0 && Number(f.fator_potencia) <= 1)) { alert('Fator de potência deve ser maior que 0 e até 1.'); return; }
+  const r = calcularCapacitorResultado(f);
+  window._calcCapacitorResultado = r;
+  window._calcCapacitorEscolhido = r.capacitorComercial;
+  window._calcCapacitorDetalheAberto = false;
+  desenharResultadoCapacitor();
+}
+function desenharResultadoCapacitor() {
+  const el = document.getElementById('capacitor-resultado');
+  if (!el || !window._calcCapacitorResultado) return;
+  const r = window._calcCapacitorResultado;
+  const escolhido = window._calcCapacitorEscolhido || r.capacitorComercial;
+  el.innerHTML = `
+    <div class="panel" style="text-align:center; border:1.5px solid var(--blue); margin-top:16px;">
+      <div style="font-size:30px;">⚡</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">Capacitância calculada</div>
+      <div style="font-size:26px; font-weight:800; color:var(--blue);">${fmtCapacitorNum(r.capacitanciaCalculada)} µF</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-top:10px;">Capacitor comercial</div>
+      <div style="font-size:30px; font-weight:800;">${escolhido} µF</div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:12px;">
+        ${CALC_CAPACITOR_VALORES_COMERCIAIS.map((v) => `<button type="button" class="${v === escolhido ? 'btn btn-primary btn-sm' : 'btn-outline-sm'}" style="padding:6px 10px; font-size:12px;" onclick="escolherCapacitorComercial(${v})">${v}</button>`).join('')}
+      </div>
+    </div>
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px; display:flex; justify-content:space-between; align-items:center;" onclick="alternarDetalheCapacitor()">📐 Ver cálculo detalhado <span>${window._calcCapacitorDetalheAberto ? '▲' : '▼'}</span></button>
+    ${window._calcCapacitorDetalheAberto ? desenharPassosCapacitor(r) : ''}
+    <button class="btn-outline-sm" style="width:100%; margin-top:10px;" onclick="compartilharCapacitorWhatsapp()">🔗 Compartilhar via WhatsApp</button>`;
+}
+function escolherCapacitorComercial(v) {
+  window._calcCapacitorEscolhido = v;
+  desenharResultadoCapacitor();
+}
+function alternarDetalheCapacitor() {
+  window._calcCapacitorDetalheAberto = !window._calcCapacitorDetalheAberto;
+  desenharResultadoCapacitor();
+}
+function desenharPassosCapacitor(r) {
+  const passos = calcularPassosCapacitor(r);
+  return `<div class="panel" style="margin-top:10px;">${passos.map((p, i) => `
+    <div style="padding:12px 0; ${i < passos.length - 1 ? 'border-bottom:1px solid var(--line);' : ''}">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+        <span style="width:24px; height:24px; border-radius:50%; background:var(--blue-pale); color:var(--blue); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex-shrink:0;">${i + 1}</span>
+        <strong>${esc(p.titulo)}</strong>
+      </div>
+      <div style="background:var(--gray-50,#F4F6FA); border-radius:8px; padding:8px 10px; font-size:13px; font-family:monospace; margin-bottom:6px;">${esc(p.formula)}</div>
+      <div style="font-size:12px; color:var(--ink-soft); margin-bottom:4px;">${esc(p.substituicao)}</div>
+      <div style="font-weight:800; color:var(--blue); font-size:15px;">= ${esc(p.resultado)}</div>
+      ${p.dica ? `<div style="background:var(--amber-pale,#FEF3C7); border-radius:8px; padding:8px 10px; font-size:12px; color:var(--amber,#B45309); margin-top:8px;">💡 ${esc(p.dica)}</div>` : ''}
+    </div>`).join('')}</div>`;
+}
+async function compartilharCapacitorWhatsapp() {
+  if (!window._calcCapacitorResultado) return;
+  const r = window._calcCapacitorResultado;
+  const escolhido = window._calcCapacitorEscolhido || r.capacitorComercial;
+  const passos = calcularPassosCapacitor(r);
+  const linhas = [`⚡ *Dimensionamento de Capacitor (${empresaNome()})*`, ''];
+  passos.forEach((p, i) => linhas.push(`${i + 1}. ${p.titulo}: ${p.substituicao} = ${p.resultado}`));
+  linhas.push('', `✅ *Capacitor: ${escolhido} µF*`);
+  const texto = linhas.join('\n');
+  if (navigator.share) {
+    try { await navigator.share({ text: texto }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
+}
+
 async function renderFerramentaEmBreve(pagina) {
   const main = document.getElementById('main');
   if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Ferramentas é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
@@ -8062,6 +8203,7 @@ async function ir(pagina) {
     if (pagina === 'calculadora-blindada') return renderCalculadoraBlindada();
     if (pagina === 'calculadora-btu') return renderCalculadoraBtu();
     if (pagina === 'calculadora-cabos') return renderCalculadoraCabos();
+    if (pagina === 'calculadora-capacitor') return renderCalculadoraCapacitor();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
