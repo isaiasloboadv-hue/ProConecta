@@ -31,7 +31,13 @@
 // normalmente (ver PREFIXO_MODULO abaixo e moduloDaRota).
 // /api/pmoc/pesquisa — pesquisa de satisfação pós-visita (Fase B, análise de concorrentes):
 // pública igual ao /api/pmoc/qr, pra abrir sem exigir login de quem recebeu o e-mail.
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr', '/api/pmoc/pesquisa'];
+// /api/monitoramento/ingest — pedido do usuário: monitoramento de temperatura/umidade via ESP32.
+// Quem chama é o próprio microcontrolador (sem navegador, sem sessão de usuário nenhuma), então
+// tem que ser público — a autenticação ali é o token do dispositivo no corpo da requisição, não
+// o Bearer de sessão (ver POST /api/monitoramento/ingest em server.js). Só esse sub-caminho é
+// público; o resto de /api/monitoramento (cadastrar dispositivo, ver histórico) continua exigindo
+// login normal, cai em "núcleo" por omissão, igual o resto das rotas de perfil Refrigeração.
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr', '/api/pmoc/pesquisa', '/api/monitoramento/ingest'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],

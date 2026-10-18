@@ -3759,6 +3759,37 @@ rota('GET', /^\/api\/notificacoes$/, async (req, res) => {
       }
       if (precisaSalvarAlertas) db.save(data);
     }
+    // pedido do usuário: monitoramento de temperatura/umidade (ESP32) — mesmo "sininho + e-mail"
+    // dos alertas PMOC acima, pra dispositivo cuja última leitura saiu da faixa configurada (ver
+    // statusMonitorDispositivo, seção "Monitoramento" mais abaixo em server.js). O dedup
+    // (alerta_email_enviado_em) é limpo direto no ingest assim que a leitura volta pra faixa —
+    // não precisa de edição em outro lugar pra "mudar a situação de fato", como no PMOC.
+    if (empresaPerfilRefrigeracao(data, user.empresa_id)) {
+      const dispositivosMonitor = tenant.listar(data, 'os_refrigeracao_monitor_dispositivos', user.empresa_id);
+      const dispositivosForaFaixa = dispositivosMonitor.filter((d) => statusMonitorDispositivo(d) === 'alerta');
+      const textoLeituraMonitor = (d) => [
+        d.ultima_temperatura != null ? `${d.ultima_temperatura}°C` : null,
+        d.ultima_umidade != null ? `${d.ultima_umidade}% UR` : null,
+      ].filter(Boolean).join(' / ');
+      notificacoes = notificacoes.concat(
+        dispositivosForaFaixa.map((d) => ({ id: d.id, tipo: 'monitor_fora_faixa', texto: `${d.nome}${d.local ? ' (' + d.local + ')' : ''} fora da faixa — ${textoLeituraMonitor(d)}`, registro_id: d.id }))
+      );
+      let precisaSalvarAlertasMonitor = false;
+      const emailsAdminsMonitor = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador' && u.email).map((u) => u.email);
+      const telefonesAdminsMonitor = tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'administrador' && u.celular).map((u) => u.celular);
+      const nomeEmpresaMonitor = (data.empresas.find((e) => e.id === user.empresa_id) || {}).nome;
+      for (const d of dispositivosForaFaixa) {
+        if (d.alerta_email_enviado_em) continue;
+        const leituraTexto = textoLeituraMonitor(d);
+        if (emailsAdminsMonitor.length) email.enviarAlerta({ emails: emailsAdminsMonitor, assunto: `Monitoramento: ${d.nome} fora da faixa`, corpoHtml: `<p>O dispositivo <b>${d.nome}</b>${d.local ? ` (${d.local})` : ''} registrou uma leitura fora da faixa configurada: <b>${leituraTexto}</b>.</p>`, nomeEmpresa: nomeEmpresaMonitor }).catch((e) => console.error('[monitoramento] falha ao enviar alerta por e-mail:', e.message));
+        if (whatsapp.envioAtivo() && telefonesAdminsMonitor.length) {
+          for (const tel of telefonesAdminsMonitor) whatsapp.enviarMensagemWhatsApp(tel, `🌡️ Monitoramento: ${d.nome}${d.local ? ' (' + d.local + ')' : ''} fora da faixa — ${leituraTexto}`).catch((e) => console.error('[monitoramento] falha ao enviar alerta por WhatsApp:', e.message));
+        }
+        d.alerta_email_enviado_em = new Date().toISOString();
+        precisaSalvarAlertasMonitor = true;
+      }
+      if (precisaSalvarAlertasMonitor) db.save(data);
+    }
   } else if (user.papel === 'gerente_loja' || user.papel === 'coordenador_tecnico' || user.papel === 'consultor_mercado') {
     // versão Restaurantes/rede multiunidade (Fase 5): os 3 papéis novos não tinham sininho
     // nenhum até aqui (caíam no "nenhum bloco corresponde" = lista sempre vazia) — cada um só
@@ -7166,6 +7197,175 @@ rota('GET', /^\/api\/pmoc\/painel$/, async (req, res) => {
     clientes_problema: [...clientesProblema.values()],
     faturamento,
   });
+});
+
+// ---------- Monitoramento de Temperatura/Umidade (ESP32) — perfil "Refrigeração e Climatização" ----------
+// pedido do usuário: "menu de monitoramento de temperaturas", alimentado por um ESP32 com sensor
+// (pra teste, um sensor de umidade — DHT22/DHT11, que de brinde já dá temperatura também). Cada
+// dispositivo cadastrado ganha um token próprio (gerarTokenConvite, mesmo gerador de token usado
+// pra convite/assinatura em outras partes do sistema); o ESP32 manda as leituras direto pro
+// POST /api/monitoramento/ingest, autenticado só pelo token no corpo (sem login — ver
+// '/api/monitoramento/ingest' em PREFIXOS_PUBLICOS, rotas-modulo.js, já que quem chama é um
+// microcontrolador, não um navegador com sessão). O firmware pronto pra gravar no ESP32 (com o
+// token e a URL do servidor já preenchidos) é montado no próprio front, como texto — ver
+// gerarFirmwareMonitor em app.js; esta rota não precisa devolver nada relacionado a isso.
+
+const MONITOR_LEITURAS_RETENCAO_DIAS = 30;
+// nunca deixa um dispositivo mal configurado (ex.: mandando leitura a cada 1s por engano) inflar
+// o arquivo sem limite: poda tudo que já passou da retenção toda vez que uma leitura nova chega
+// daquele dispositivo — barato (só percorre as leituras DELE) e não depende de cron/job separado.
+function podarLeiturasMonitor(data, dispositivoId) {
+  const limite = new Date(Date.now() - MONITOR_LEITURAS_RETENCAO_DIAS * 24 * 60 * 60 * 1000).toISOString();
+  data.os_refrigeracao_monitor_leituras = data.os_refrigeracao_monitor_leituras.filter((l) => l.dispositivo_id !== dispositivoId || l.criado_em >= limite);
+}
+
+// 'inativo' (desligado pelo usuário) > 'sem_leitura' (cadastrado, ESP32 nunca mandou nada) >
+// 'offline' (já mandou antes, mas nenhuma leitura chegou no dobro do intervalo esperado — rede
+// caiu, ESP32 travou, etc.) > 'alerta' (dentro do prazo, mas fora da faixa configurada) > 'ok'.
+function statusMonitorDispositivo(d) {
+  if (!d.ativo) return 'inativo';
+  if (!d.ultima_leitura_em) return 'sem_leitura';
+  const limiteOfflineMs = (d.intervalo_leitura_seg || 300) * 2 * 1000;
+  if (Date.now() - new Date(d.ultima_leitura_em).getTime() > limiteOfflineMs) return 'offline';
+  const foraTemp = (d.temp_min != null && d.ultima_temperatura != null && d.ultima_temperatura < d.temp_min)
+    || (d.temp_max != null && d.ultima_temperatura != null && d.ultima_temperatura > d.temp_max);
+  const foraUmid = (d.umid_min != null && d.ultima_umidade != null && d.ultima_umidade < d.umid_min)
+    || (d.umid_max != null && d.ultima_umidade != null && d.ultima_umidade > d.umid_max);
+  if (foraTemp || foraUmid) return 'alerta';
+  return 'ok';
+}
+
+function numOuNullMonitor(v) {
+  return (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
+}
+
+// GET /api/monitoramento/dispositivos
+rota('GET', /^\/api\/monitoramento\/dispositivos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const lista = tenant.listar(data, 'os_refrigeracao_monitor_dispositivos', user.empresa_id)
+    .map((d) => ({ ...d, status: statusMonitorDispositivo(d) }));
+  lista.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  enviarJSON(res, 200, { dispositivos: lista });
+});
+
+// POST /api/monitoramento/dispositivos { nome, local, tipo_sensor, temp_min, temp_max, umid_min, umid_max, intervalo_leitura_seg }
+rota('POST', /^\/api\/monitoramento\/dispositivos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const body = await lerCorpo(req);
+  const nome = String(body.nome || '').trim();
+  if (!nome) return enviarJSON(res, 400, { erro: 'Nome é obrigatório.' });
+  const dispositivo = tenant.criar(data, 'os_refrigeracao_monitor_dispositivos', user.empresa_id, {
+    nome, local: String(body.local || '').trim(),
+    tipo_sensor: String(body.tipo_sensor || 'dht22'),
+    token: db.gerarTokenConvite(),
+    temp_min: numOuNullMonitor(body.temp_min), temp_max: numOuNullMonitor(body.temp_max),
+    umid_min: numOuNullMonitor(body.umid_min), umid_max: numOuNullMonitor(body.umid_max),
+    intervalo_leitura_seg: numOuNullMonitor(body.intervalo_leitura_seg) || 300,
+    ativo: true, ultima_leitura_em: null, ultima_temperatura: null, ultima_umidade: null,
+    em_alerta: false, alerta_email_enviado_em: null,
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { dispositivo: { ...dispositivo, status: statusMonitorDispositivo(dispositivo) } });
+});
+
+// PUT /api/monitoramento/dispositivos/:id
+rota('PUT', /^\/api\/monitoramento\/dispositivos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const dispositivo = tenant.buscar(data, 'os_refrigeracao_monitor_dispositivos', Number(m[1]), user.empresa_id);
+  if (!dispositivo) return enviarJSON(res, 404, { erro: 'Dispositivo não encontrado.' });
+  const body = await lerCorpo(req);
+  const nome = String(body.nome || '').trim();
+  if (!nome) return enviarJSON(res, 400, { erro: 'Nome é obrigatório.' });
+  Object.assign(dispositivo, {
+    nome, local: String(body.local || '').trim(), tipo_sensor: String(body.tipo_sensor || dispositivo.tipo_sensor),
+    temp_min: numOuNullMonitor(body.temp_min), temp_max: numOuNullMonitor(body.temp_max),
+    umid_min: numOuNullMonitor(body.umid_min), umid_max: numOuNullMonitor(body.umid_max),
+    intervalo_leitura_seg: numOuNullMonitor(body.intervalo_leitura_seg) || dispositivo.intervalo_leitura_seg,
+    ativo: body.ativo !== undefined ? !!body.ativo : dispositivo.ativo,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { dispositivo: { ...dispositivo, status: statusMonitorDispositivo(dispositivo) } });
+});
+
+// POST /api/monitoramento/dispositivos/:id/regenerar-token — invalida o token antigo na hora (o
+// ESP32 com o código velho passa a levar 401 em /ingest até regravar o firmware com o novo).
+rota('POST', /^\/api\/monitoramento\/dispositivos\/(\d+)\/regenerar-token$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const dispositivo = tenant.buscar(data, 'os_refrigeracao_monitor_dispositivos', Number(m[1]), user.empresa_id);
+  if (!dispositivo) return enviarJSON(res, 404, { erro: 'Dispositivo não encontrado.' });
+  dispositivo.token = db.gerarTokenConvite();
+  db.save(data);
+  enviarJSON(res, 200, { dispositivo: { ...dispositivo, status: statusMonitorDispositivo(dispositivo) } });
+});
+
+// DELETE /api/monitoramento/dispositivos/:id
+rota('DELETE', /^\/api\/monitoramento\/dispositivos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const dispositivo = tenant.buscar(data, 'os_refrigeracao_monitor_dispositivos', Number(m[1]), user.empresa_id);
+  if (!dispositivo) return enviarJSON(res, 404, { erro: 'Dispositivo não encontrado.' });
+  data.os_refrigeracao_monitor_dispositivos = data.os_refrigeracao_monitor_dispositivos.filter((d) => d.id !== dispositivo.id);
+  data.os_refrigeracao_monitor_leituras = data.os_refrigeracao_monitor_leituras.filter((l) => l.dispositivo_id !== dispositivo.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// GET /api/monitoramento/dispositivos/:id/leituras?horas=24 — histórico pro gráfico.
+rota('GET', /^\/api\/monitoramento\/dispositivos\/(\d+)\/leituras$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilRefrigeracao(res, user, data)) return;
+  const dispositivo = tenant.buscar(data, 'os_refrigeracao_monitor_dispositivos', Number(m[1]), user.empresa_id);
+  if (!dispositivo) return enviarJSON(res, 404, { erro: 'Dispositivo não encontrado.' });
+  const url = new URL(req.url, 'http://localhost');
+  const horas = Math.min(Math.max(Number(url.searchParams.get('horas')) || 24, 1), 24 * MONITOR_LEITURAS_RETENCAO_DIAS);
+  const limite = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString();
+  const leituras = data.os_refrigeracao_monitor_leituras
+    .filter((l) => l.dispositivo_id === dispositivo.id && l.criado_em >= limite)
+    .sort((a, b) => a.criado_em.localeCompare(b.criado_em));
+  enviarJSON(res, 200, { leituras });
+});
+
+// POST /api/monitoramento/ingest { token, temperatura?, umidade? } — SEM login (ver comentário no
+// topo desta seção e '/api/monitoramento/ingest' em PREFIXOS_PUBLICOS); quem autentica é o
+// próprio token do dispositivo. Aceita só temperatura, só umidade, ou as duas — o teste do
+// usuário vai mandar só umidade no começo.
+rota('POST', /^\/api\/monitoramento\/ingest$/, async (req, res) => {
+  const body = await lerCorpo(req);
+  const token = String(body.token || '').trim();
+  if (!token) return enviarJSON(res, 400, { erro: 'Token é obrigatório.' });
+  const data = db.load();
+  const dispositivo = data.os_refrigeracao_monitor_dispositivos.find((d) => d.token === token);
+  if (!dispositivo) return enviarJSON(res, 401, { erro: 'Token inválido.' });
+  if (!dispositivo.ativo) return enviarJSON(res, 403, { erro: 'Dispositivo desativado.' });
+  const temperatura = numOuNullMonitor(body.temperatura);
+  const umidade = numOuNullMonitor(body.umidade);
+  if (temperatura === null && umidade === null) return enviarJSON(res, 400, { erro: 'Envie ao menos temperatura ou umidade.' });
+  const agora = new Date().toISOString();
+  tenant.criar(data, 'os_refrigeracao_monitor_leituras', dispositivo.empresa_id, {
+    dispositivo_id: dispositivo.id, temperatura, umidade, criado_em: agora,
+  });
+  podarLeiturasMonitor(data, dispositivo.id);
+  dispositivo.ultima_leitura_em = agora;
+  if (temperatura !== null) dispositivo.ultima_temperatura = temperatura;
+  if (umidade !== null) dispositivo.ultima_umidade = umidade;
+  const status = statusMonitorDispositivo(dispositivo);
+  dispositivo.em_alerta = status === 'alerta';
+  // volta pra faixa normal: limpa o dedup do e-mail de alerta, pra um próximo episódio fora da
+  // faixa avisar de novo (ver bloco "sininho + e-mail" em GET /api/notificacoes).
+  if (status !== 'alerta') dispositivo.alerta_email_enviado_em = null;
+  db.save(data);
+  enviarJSON(res, 200, { ok: true, status });
 });
 
 // ---------- Início (Home) — perfil "Refrigeração e Climatização" ----------

@@ -774,6 +774,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
     'agenda-refrigeracao': 'Agenda',
+    'monitoramento': 'Monitoramento',
     'pmoc': 'PMOC',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda',
@@ -800,6 +801,7 @@ const MENUS_LABEL_POR_PAPEL = {
     'os-refrigeracao': 'Ordens de Serviço',
     'orcamentos-refrigeracao': 'Orçamentos',
     'agenda-refrigeracao': 'Agenda geral',
+    'monitoramento': 'Monitoramento',
     'pmoc': 'PMOC',
     'ferramentas': 'Ferramentas',
     'agenda': 'Agenda geral',
@@ -877,6 +879,11 @@ const NAV = {
     // — por isso o item núcleo usa `ocultoNoPerfil: 'refrigeracao'` (ver navDoUsuario), senão o
     // menu mostraria "Agenda" duas vezes com conteúdos completamente diferentes.
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda', page: 'agenda-refrigeracao-lista' },
+    // pedido do usuário: "menu de monitoramento de temperaturas", alimentado por um ESP32 com
+    // sensor (ver POST /api/monitoramento/ingest em server.js, sem login nenhum — quem chama é o
+    // próprio microcontrolador). Gate só por `perfil`, igual o resto deste menu — não é módulo de
+    // plano contratado.
+    { key: 'monitoramento', perfil: 'refrigeracao', label: 'Monitoramento', page: 'monitoramento-lista' },
     // pedido do usuário: pacote "Climatização / PMOC" (Lei 13.589/2018) — ALÉM do `perfil`
     // Refrigeração, exige o módulo `pmoc` contratado à parte (nem toda empresa do perfil usa
     // PMOC); por isso é o único item deste perfil com os dois gates juntos (ver navDoUsuario, que
@@ -956,6 +963,7 @@ const NAV = {
     { key: 'orcamentos-refrigeracao', perfil: 'refrigeracao', label: 'Orçamentos', page: 'orcamentos-refrigeracao-lista' },
     { key: 'ferramentas', perfil: 'refrigeracao', label: 'Ferramentas', page: 'ferramentas-hub' },
     { key: 'agenda-refrigeracao', perfil: 'refrigeracao', label: 'Agenda geral', page: 'agenda-refrigeracao-lista' },
+    { key: 'monitoramento', perfil: 'refrigeracao', label: 'Monitoramento', page: 'monitoramento-lista' },
     { key: 'pmoc', perfil: 'refrigeracao', modulo: 'pmoc', label: 'PMOC', children: [
       // pedido do usuário (item 8 — Painel/dashboard do pacote): visão gerencial, primeiro item
       // do menu PMOC do administrador (ver GET /api/pmoc/painel no servidor).
@@ -1230,6 +1238,7 @@ const ICONE_MENU = {
   'pmoc': '🌡️',
   'pmoc-portal': '🌡️',
   'ferramentas': '🧰',
+  'monitoramento': '📡',
 };
 
 // ===== Guia de Diagnóstico Rápido (perfil "Refrigeração e Climatização") =====
@@ -3993,6 +4002,423 @@ async function salvarNovoAgendamentoRef() {
     window._agendaRefVisao = 'dia';
     await carregarConfigAgendaRef();
   } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+
+// ===== Monitoramento de Temperatura/Umidade via ESP32 (perfil "Refrigeração e Climatização") =====
+// pedido do usuário: "menu de monitoramento de temperaturas... para teste irei utilizar um esp32
+// com um sensor de temperatura [depois trocado por] um sensor de umidade apenas para verificar se
+// funciona ok". Cada dispositivo cadastrado ganha um token próprio; o ESP32 manda as leituras pra
+// POST /api/monitoramento/ingest (sem login, só o token — ver server.js) e esta tela mostra o
+// último valor + histórico. O código pronto pra gravar no ESP32 (com o token e a URL do servidor
+// já preenchidos) é montado aqui mesmo, como texto — ver gerarFirmwareMonitor mais abaixo.
+
+const MONITOR_STATUS_INFO = {
+  ok: { label: 'Normal', tag: 'tag-green', icone: '✅' },
+  alerta: { label: 'Fora da faixa', tag: 'tag-red', icone: '🔴' },
+  offline: { label: 'Offline', tag: 'tag-orange', icone: '📴' },
+  sem_leitura: { label: 'Aguardando 1ª leitura', tag: 'tag-amber', icone: '⏳' },
+  inativo: { label: 'Inativo', tag: '', icone: '⏸️' },
+};
+const MONITOR_TIPOS_SENSOR = [
+  { chave: 'dht22', label: 'DHT22 (temperatura + umidade)' },
+  { chave: 'dht11', label: 'DHT11 (temperatura + umidade)' },
+  { chave: 'ds18b20', label: 'DS18B20 (só temperatura, sonda à prova d\'água)' },
+  { chave: 'outro', label: 'Outro' },
+];
+
+function monitorFaixaTexto(d) {
+  const partes = [];
+  if (d.temp_min != null || d.temp_max != null) partes.push(`🌡️ ${d.temp_min != null ? d.temp_min + '°C' : '–'} a ${d.temp_max != null ? d.temp_max + '°C' : '–'}`);
+  if (d.umid_min != null || d.umid_max != null) partes.push(`💧 ${d.umid_min != null ? d.umid_min + '%' : '–'} a ${d.umid_max != null ? d.umid_max + '%' : '–'}`);
+  return partes.length ? partes.join(' · ') : 'Sem faixa configurada';
+}
+
+function monitorTempoRelativo(iso) {
+  if (!iso) return 'nunca';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return 'agora mesmo';
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  return `há ${Math.floor(h / 24)}d`;
+}
+
+async function renderMonitoramentoLista() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) { main.innerHTML = '<div class="empty">Monitoramento é exclusivo de empresas com o perfil Refrigeração e Climatização.</div>'; return; }
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div><h1>Monitoramento</h1><p>Dispositivos ESP32 enviando leituras de temperatura/umidade em tempo real.</p></div>
+      <button class="btn btn-primary btn-sm" onclick="abrirModalMonitorDispositivo()">+ Novo dispositivo</button>
+    </div>
+    <div id="monitor-lista-corpo"><div class="empty">Carregando...</div></div>`;
+  await carregarMonitoramentoLista();
+}
+async function carregarMonitoramentoLista() {
+  const alvo = document.getElementById('monitor-lista-corpo');
+  if (!alvo) return;
+  try {
+    const { dispositivos } = await api('/api/monitoramento/dispositivos');
+    window._monitorDispositivos = dispositivos;
+    if (!dispositivos.length) {
+      alvo.innerHTML = `<div class="panel" style="text-align:center; padding:40px 20px;">
+        <div style="font-size:40px;">📡</div>
+        <h3 style="margin-top:10px;">Nenhum dispositivo cadastrado</h3>
+        <p style="color:var(--ink-soft);">Cadastre um dispositivo pra gerar o token e o código pronto pro ESP32.</p>
+      </div>`;
+      return;
+    }
+    alvo.innerHTML = `<div class="kpis-tiles">${dispositivos.map((d) => {
+      const info = MONITOR_STATUS_INFO[d.status] || MONITOR_STATUS_INFO.sem_leitura;
+      return `
+      <div class="panel" style="cursor:pointer;" onclick="abrirMonitoramentoDetalhe(${d.id})">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+          <div>
+            <strong>${esc(d.nome)}</strong>
+            ${d.local ? `<div style="font-size:12.5px; color:var(--ink-soft);">${esc(d.local)}</div>` : ''}
+          </div>
+          <span class="tag ${info.tag}">${info.icone} ${info.label}</span>
+        </div>
+        <div style="display:flex; gap:16px; margin-top:12px;">
+          ${d.ultima_temperatura != null ? `<div><div style="font-size:22px; font-weight:700;">${d.ultima_temperatura}°C</div><div style="font-size:11px; color:var(--ink-soft);">Temperatura</div></div>` : ''}
+          ${d.ultima_umidade != null ? `<div><div style="font-size:22px; font-weight:700;">${d.ultima_umidade}%</div><div style="font-size:11px; color:var(--ink-soft);">Umidade</div></div>` : ''}
+        </div>
+        <div style="font-size:11.5px; color:var(--ink-soft); margin-top:8px;">Última leitura: ${monitorTempoRelativo(d.ultima_leitura_em)}</div>
+      </div>`;
+    }).join('')}</div>`;
+  } catch (e) { alvo.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---- modal: novo/editar dispositivo ----
+function monitorDispositivoFormVazio(d) {
+  return {
+    id: d ? d.id : null,
+    nome: d ? d.nome : '', local: d ? d.local : '',
+    tipo_sensor: d ? d.tipo_sensor : 'dht22',
+    temp_min: d && d.temp_min != null ? d.temp_min : '', temp_max: d && d.temp_max != null ? d.temp_max : '',
+    umid_min: d && d.umid_min != null ? d.umid_min : '', umid_max: d && d.umid_max != null ? d.umid_max : '',
+    intervalo_leitura_seg: d ? d.intervalo_leitura_seg : 300,
+  };
+}
+function abrirModalMonitorDispositivo(id) {
+  const existente = id ? (window._monitorDispositivos || []).find((d) => d.id === id) : null;
+  window._monitorForm = monitorDispositivoFormVazio(existente);
+  let modal = document.getElementById('modal-monitor-dispositivo');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-monitor-dispositivo';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalMonitorDispositivo(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `<div class="modal-card" style="max-width:480px; max-height:88vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">${existente ? 'Editar dispositivo' : 'Novo dispositivo'}</h3>
+      <button class="btn-outline-sm" style="padding:4px 10px;" onclick="fecharModalMonitorDispositivo()">✕</button>
+    </div>
+    ${desenharCorpoModalMonitorDispositivo()}
+  </div>`;
+}
+function fecharModalMonitorDispositivo() {
+  const modal = document.getElementById('modal-monitor-dispositivo');
+  if (modal) modal.classList.remove('show');
+}
+function desenharCorpoModalMonitorDispositivo() {
+  const f = window._monitorForm;
+  return `
+    <div class="field"><label>Nome *</label><input id="monitor-f-nome" value="${esc(f.nome)}" placeholder="Câmara fria 1" oninput="window._monitorForm.nome=this.value"></div>
+    <div class="field"><label>Local</label><input id="monitor-f-local" value="${esc(f.local)}" placeholder="Depósito — fundos" oninput="window._monitorForm.local=this.value"></div>
+    <div class="field"><label>Sensor</label>
+      <select id="monitor-f-tipo" onchange="window._monitorForm.tipo_sensor=this.value">${MONITOR_TIPOS_SENSOR.map((t) => `<option value="${t.chave}" ${f.tipo_sensor === t.chave ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Temp. mín (°C)</label><input id="monitor-f-temp-min" type="number" step="0.1" value="${f.temp_min}" placeholder="opcional" oninput="window._monitorForm.temp_min=this.value"></div>
+      <div class="field"><label>Temp. máx (°C)</label><input id="monitor-f-temp-max" type="number" step="0.1" value="${f.temp_max}" placeholder="opcional" oninput="window._monitorForm.temp_max=this.value"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Umid. mín (%)</label><input id="monitor-f-umid-min" type="number" step="0.1" value="${f.umid_min}" placeholder="opcional" oninput="window._monitorForm.umid_min=this.value"></div>
+      <div class="field"><label>Umid. máx (%)</label><input id="monitor-f-umid-max" type="number" step="0.1" value="${f.umid_max}" placeholder="opcional" oninput="window._monitorForm.umid_max=this.value"></div>
+    </div>
+    <div class="field"><label>Intervalo entre leituras (segundos)</label><input id="monitor-f-intervalo" type="number" value="${f.intervalo_leitura_seg}" oninput="window._monitorForm.intervalo_leitura_seg=this.value"></div>
+    <div id="monitor-f-erro" class="auth-error hidden"></div>
+    <button class="btn btn-primary btn-sm" style="width:100%; margin-top:10px;" onclick="salvarMonitorDispositivo()">${f.id ? 'Salvar alterações' : '+ Criar dispositivo'}</button>`;
+}
+async function salvarMonitorDispositivo() {
+  const f = window._monitorForm;
+  const erroEl = document.getElementById('monitor-f-erro');
+  erroEl.classList.add('hidden');
+  try {
+    const body = {
+      nome: f.nome, local: f.local, tipo_sensor: f.tipo_sensor,
+      temp_min: f.temp_min, temp_max: f.temp_max, umid_min: f.umid_min, umid_max: f.umid_max,
+      intervalo_leitura_seg: f.intervalo_leitura_seg,
+    };
+    const resp = f.id
+      ? await api(`/api/monitoramento/dispositivos/${f.id}`, { method: 'PUT', body })
+      : await api('/api/monitoramento/dispositivos', { method: 'POST', body });
+    fecharModalMonitorDispositivo();
+    const criado = resp.dispositivo;
+    await carregarMonitoramentoLista();
+    // dispositivo recém-criado: já abre o código do ESP32 pronto (é o próximo passo óbvio depois
+    // de cadastrar — sem isso o usuário teria que caçar o token de novo no detalhe).
+    if (!f.id) abrirModalCodigoEsp32(criado);
+  } catch (e) { erroEl.textContent = e.message; erroEl.classList.remove('hidden'); }
+}
+async function excluirMonitorDispositivo(id) {
+  if (!confirm('Excluir este dispositivo e todo o histórico de leituras dele?')) return;
+  await api(`/api/monitoramento/dispositivos/${id}`, { method: 'DELETE' });
+  ir('monitoramento-lista');
+}
+
+// ---- detalhe do dispositivo (histórico + gráfico) ----
+function abrirMonitoramentoDetalhe(id) {
+  window._monitorDispositivoAtual = id;
+  window._monitorHoras = 24;
+  ir('monitoramento-detalhe');
+}
+async function renderMonitoramentoDetalhe() {
+  const main = document.getElementById('main');
+  if (!perfilRefrigeracaoAtivo()) return renderMonitoramentoLista();
+  main.innerHTML = `<div class="empty">Carregando...</div>`;
+  let dispositivo;
+  try {
+    const { dispositivos } = await api('/api/monitoramento/dispositivos');
+    window._monitorDispositivos = dispositivos;
+    dispositivo = dispositivos.find((d) => d.id === window._monitorDispositivoAtual);
+  } catch (e) { main.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (!dispositivo) return renderMonitoramentoLista();
+  const info = MONITOR_STATUS_INFO[dispositivo.status] || MONITOR_STATUS_INFO.sem_leitura;
+  main.innerHTML = `
+    <div class="page-head" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px;">
+      <div><h1>${esc(dispositivo.nome)}</h1><p>${dispositivo.local ? esc(dispositivo.local) + ' · ' : ''}${monitorFaixaTexto(dispositivo)}</p></div>
+      <button class="btn-outline-sm" onclick="ir('monitoramento-lista')">← Monitoramento</button>
+    </div>
+    <div class="panel" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <div style="display:flex; gap:20px; flex-wrap:wrap;">
+        ${dispositivo.ultima_temperatura != null ? `<div><div style="font-size:30px; font-weight:800;">${dispositivo.ultima_temperatura}°C</div><div style="font-size:12px; color:var(--ink-soft);">Temperatura</div></div>` : ''}
+        ${dispositivo.ultima_umidade != null ? `<div><div style="font-size:30px; font-weight:800;">${dispositivo.ultima_umidade}%</div><div style="font-size:12px; color:var(--ink-soft);">Umidade</div></div>` : ''}
+        <div><span class="tag ${info.tag}" style="font-size:12px;">${info.icone} ${info.label}</span><div style="font-size:11.5px; color:var(--ink-soft); margin-top:4px;">Última leitura: ${monitorTempoRelativo(dispositivo.ultima_leitura_em)}</div></div>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn-outline-sm" onclick="abrirModalCodigoEsp32(window._monitorDispositivos.find((d) => d.id === ${dispositivo.id}))">💻 Código ESP32</button>
+        <button class="btn-outline-sm" onclick="abrirModalMonitorDispositivo(${dispositivo.id})">✏️ Editar</button>
+        <button class="btn-outline-sm" style="color:var(--red); border-color:var(--red);" onclick="excluirMonitorDispositivo(${dispositivo.id})">🗑️ Excluir</button>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+        <strong>Histórico</strong>
+        <div id="monitor-periodo-botoes" style="display:flex; gap:6px;">${desenharBotoesPeriodoMonitor()}</div>
+      </div>
+      <canvas id="monitor-chart" height="90"></canvas>
+      <div id="monitor-chart-vazio" class="empty hidden" style="margin-top:8px;">Sem leituras nesse período ainda.</div>
+    </div>`;
+  await carregarGraficoMonitor(window._monitorHoras);
+}
+const MONITOR_PERIODOS = [[24, '24h'], [168, '7 dias'], [720, '30 dias']];
+function desenharBotoesPeriodoMonitor() {
+  return MONITOR_PERIODOS.map(([h, label]) => `<button class="btn-outline-sm" style="${window._monitorHoras === h ? 'background:var(--blue); color:#fff; border-color:var(--blue);' : ''}" onclick="carregarGraficoMonitor(${h})">${label}</button>`).join('');
+}
+async function carregarGraficoMonitor(horas) {
+  window._monitorHoras = horas;
+  const botoesEl = document.getElementById('monitor-periodo-botoes');
+  if (botoesEl) botoesEl.innerHTML = desenharBotoesPeriodoMonitor();
+  const dispositivo = (window._monitorDispositivos || []).find((d) => d.id === window._monitorDispositivoAtual);
+  if (!dispositivo) return;
+  try {
+    const { leituras } = await api(`/api/monitoramento/dispositivos/${dispositivo.id}/leituras?horas=${horas}`);
+    desenharGraficoMonitor(leituras);
+  } catch (e) { console.error(e); }
+}
+let _monitorChart = null;
+function desenharGraficoMonitor(leituras) {
+  const canvas = document.getElementById('monitor-chart');
+  const vazioEl = document.getElementById('monitor-chart-vazio');
+  if (!canvas) return;
+  if (!leituras.length) {
+    canvas.classList.add('hidden');
+    if (vazioEl) vazioEl.classList.remove('hidden');
+    return;
+  }
+  canvas.classList.remove('hidden');
+  if (vazioEl) vazioEl.classList.add('hidden');
+  if (typeof Chart === 'undefined') return;
+  if (_monitorChart) _monitorChart.destroy();
+  const labels = leituras.map((l) => {
+    const d = new Date(l.criado_em);
+    return window._monitorHoras <= 24 ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  });
+  const temTemp = leituras.some((l) => l.temperatura != null);
+  const temUmid = leituras.some((l) => l.umidade != null);
+  const datasets = [];
+  if (temTemp) datasets.push({ label: 'Temperatura (°C)', data: leituras.map((l) => l.temperatura), borderColor: '#D64545', backgroundColor: 'rgba(214,69,69,.12)', fill: true, spanGaps: true, pointRadius: 2, yAxisID: 'y' });
+  if (temUmid) datasets.push({ label: 'Umidade (%)', data: leituras.map((l) => l.umidade), borderColor: '#1976D2', backgroundColor: 'rgba(25,118,210,.12)', fill: true, spanGaps: true, pointRadius: 2, yAxisID: temTemp ? 'y1' : 'y' });
+  const scales = { y: { beginAtZero: false } };
+  if (temTemp && temUmid) scales.y1 = { beginAtZero: false, position: 'right', grid: { drawOnChartArea: false } };
+  _monitorChart = new Chart(canvas, { type: 'line', data: { labels, datasets }, options: { responsive: true, scales, interaction: { mode: 'index', intersect: false } } });
+}
+
+// ---- gerar código pronto pro ESP32 ----
+function gerarFirmwareMonitor(d) {
+  const origem = location.origin;
+  const https = location.protocol === 'https:';
+  const url = `${origem}/api/monitoramento/ingest`;
+  const intervaloMs = Math.max(Number(d.intervalo_leitura_seg) || 300, 10) * 1000;
+  const dhtType = d.tipo_sensor === 'dht11' ? 'DHT11' : 'DHT22';
+  const ehDht = d.tipo_sensor === 'dht11' || d.tipo_sensor === 'dht22' || d.tipo_sensor === 'outro';
+  const clienteHttp = https
+    ? `WiFiClientSecure client;\n  client.setInsecure(); // pula a validação do certificado — ok pra um dispositivo de teste; pra produção, prefira fixar o certificado da Nexor Connect\n  HTTPClient http;\n  http.begin(client, SERVIDOR_URL);`
+    : `HTTPClient http;\n  http.begin(SERVIDOR_URL);`;
+  const incluirSecure = https ? '#include <WiFiClientSecure.h>\n' : '';
+  if (d.tipo_sensor === 'ds18b20') {
+    return `// Firmware ESP32 — Monitoramento (Nexor Connect)
+// Dispositivo: ${d.nome}
+// Sensor: DS18B20 (sonda digital 1-Wire) — pino de dados no GPIO4, com resistor de 4k7 entre DATA e 3.3V
+// Bibliotecas (Arduino IDE > Ferramentas > Gerenciar Bibliotecas): "OneWire" e "DallasTemperature"
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+${incluirSecure}#include <OneWire.h>
+#include <DallasTemperature.h>
+
+#define PINO_SENSOR 4
+OneWire oneWire(PINO_SENSOR);
+DallasTemperature sensores(&oneWire);
+
+const char* WIFI_SSID = "SEU_WIFI_AQUI";
+const char* WIFI_SENHA = "SUA_SENHA_AQUI";
+const char* SERVIDOR_URL = "${url}";
+const char* TOKEN_DISPOSITIVO = "${d.token}";
+const unsigned long INTERVALO_MS = ${intervaloMs};
+
+void setup() {
+  Serial.begin(115200);
+  sensores.begin();
+  WiFi.begin(WIFI_SSID, WIFI_SENHA);
+  Serial.print("Conectando ao WiFi");
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\\nWiFi conectado! IP: " + WiFi.localIP().toString());
+}
+
+void loop() {
+  sensores.requestTemperatures();
+  float temperatura = sensores.getTempCByIndex(0);
+  if (temperatura == DEVICE_DISCONNECTED_C) {
+    Serial.println("Falha ao ler o sensor DS18B20!");
+  } else {
+    enviarLeitura(temperatura, NAN);
+  }
+  delay(INTERVALO_MS);
+}
+
+void enviarLeitura(float temperatura, float umidade) {
+  if (WiFi.status() != WL_CONNECTED) { Serial.println("WiFi desconectado, pulando envio."); return; }
+  ${clienteHttp}
+  http.addHeader("Content-Type", "application/json");
+  String corpo = "{\\"token\\":\\"" + String(TOKEN_DISPOSITIVO) + "\\",\\"temperatura\\":" + String(temperatura, 1) + "}";
+  int codigo = http.POST(corpo);
+  if (codigo > 0) Serial.println("Enviado! Código: " + String(codigo) + " | " + http.getString());
+  else Serial.println("Erro ao enviar: " + http.errorToString(codigo));
+  http.end();
+}
+`;
+  }
+  return `// Firmware ESP32 — Monitoramento (Nexor Connect)
+// Dispositivo: ${d.nome}
+// Sensor: ${dhtType} — pino de dados no GPIO4, com resistor de 10kΩ entre DATA e 3.3V
+// Biblioteca (Arduino IDE > Ferramentas > Gerenciar Bibliotecas): "DHT sensor library" (Adafruit)
+// — ao instalar, aceite instalar também a dependência "Adafruit Unified Sensor".
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+${incluirSecure}#include <DHT.h>
+
+#define DHTPIN 4
+#define DHTTYPE ${dhtType} // troque para DHT11 ou DHT22 conforme o seu sensor
+DHT dht(DHTPIN, DHTTYPE);
+
+const char* WIFI_SSID = "SEU_WIFI_AQUI";
+const char* WIFI_SENHA = "SUA_SENHA_AQUI";
+const char* SERVIDOR_URL = "${url}";
+const char* TOKEN_DISPOSITIVO = "${d.token}";
+const unsigned long INTERVALO_MS = ${intervaloMs};
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+  WiFi.begin(WIFI_SSID, WIFI_SENHA);
+  Serial.print("Conectando ao WiFi");
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  Serial.println("\\nWiFi conectado! IP: " + WiFi.localIP().toString());
+}
+
+void loop() {
+  float umidade = dht.readHumidity();
+  float temperatura = dht.readTemperature();
+  if (isnan(umidade) || isnan(temperatura)) {
+    Serial.println("Falha ao ler o sensor DHT!");
+  } else {
+    enviarLeitura(temperatura, umidade);
+  }
+  delay(INTERVALO_MS);
+}
+
+void enviarLeitura(float temperatura, float umidade) {
+  if (WiFi.status() != WL_CONNECTED) { Serial.println("WiFi desconectado, pulando envio."); return; }
+  ${clienteHttp}
+  http.addHeader("Content-Type", "application/json");
+  String corpo = "{\\"token\\":\\"" + String(TOKEN_DISPOSITIVO) + "\\",\\"temperatura\\":" + String(temperatura, 1) + ",\\"umidade\\":" + String(umidade, 1) + "}";
+  int codigo = http.POST(corpo);
+  if (codigo > 0) Serial.println("Enviado! Código: " + String(codigo) + " | " + http.getString());
+  else Serial.println("Erro ao enviar: " + http.errorToString(codigo));
+  http.end();
+}
+`;
+}
+function abrirModalCodigoEsp32(d) {
+  if (!d) return;
+  window._monitorCodigoAtual = gerarFirmwareMonitor(d);
+  let modal = document.getElementById('modal-monitor-codigo');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-monitor-codigo';
+    modal.className = 'modal-overlay';
+    modal.addEventListener('click', (e) => { if (e.target === modal) fecharModalCodigoEsp32(); });
+    document.body.appendChild(modal);
+  }
+  modal.classList.add('show');
+  modal.innerHTML = `<div class="modal-card" style="max-width:640px; max-height:88vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0;">Código para o ESP32 — ${esc(d.nome)}</h3>
+      <button class="btn-outline-sm" style="padding:4px 10px;" onclick="fecharModalCodigoEsp32()">✕</button>
+    </div>
+    <div class="panel" style="background:#FFF8E1; border-left:4px solid #F5A623; margin:12px 0; font-size:13px;">
+      <strong>Como usar:</strong>
+      <ol style="margin:8px 0 0 18px; padding:0;">
+        <li>Na Arduino IDE, instale a placa "esp32" (Ferramentas → Placa → Gerenciador de Placas).</li>
+        <li>Instale a biblioteca do sensor indicada no comentário do código.</li>
+        <li>Cole o código abaixo, troque <code>SEU_WIFI_AQUI</code>/<code>SUA_SENHA_AQUI</code> pelo WiFi real e grave na placa.</li>
+        <li>Abra o Monitor Serial (115200 baud) pra acompanhar o envio das leituras.</li>
+      </ol>
+    </div>
+    <textarea id="monitor-codigo-texto" readonly style="width:100%; height:320px; font-family:monospace; font-size:12px; white-space:pre; overflow:auto;">${esc(window._monitorCodigoAtual)}</textarea>
+    <button class="btn btn-primary btn-sm" style="width:100%; margin-top:10px;" onclick="copiarCodigoEsp32()">📋 Copiar código</button>
+  </div>`;
+}
+function fecharModalCodigoEsp32() {
+  const modal = document.getElementById('modal-monitor-codigo');
+  if (modal) modal.classList.remove('show');
+}
+async function copiarCodigoEsp32() {
+  try {
+    await navigator.clipboard.writeText(window._monitorCodigoAtual || '');
+  } catch (e) {
+    const el = document.getElementById('monitor-codigo-texto');
+    if (el) { el.select(); document.execCommand('copy'); }
+  }
+  alert('Código copiado!');
 }
 
 // ===== Pacote "Climatização / PMOC" — perfil "Refrigeração e Climatização" =====
@@ -12579,6 +13005,8 @@ async function ir(pagina) {
     if (pagina === 'tabela-pressao') return renderTabelaPressao();
     if (pagina === 'central-codigos-erro') return renderCentralCodigosErro();
     if (pagina === 'central-codigos-erro-marca') return renderCentralCodigosErroMarca();
+    if (pagina === 'monitoramento-lista') return renderMonitoramentoLista();
+    if (pagina === 'monitoramento-detalhe') return renderMonitoramentoDetalhe();
     if (pagina.startsWith('ferramenta-em-breve-')) return renderFerramentaEmBreve(pagina);
     if (pagina === 'etiquetas-gerador') return renderGeradorEtiquetas();
     if (pagina === 'onboarding-refrigeracao') return renderOnboardingRefrigeracao();
