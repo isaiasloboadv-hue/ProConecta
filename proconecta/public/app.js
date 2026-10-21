@@ -140,9 +140,20 @@ const EQUIPAMENTOS_PREVENTIVA = {
   'UV': { checklist: CHECKLIST_PREVENTIVA_LASER, fotos: FOTOS_PREVENTIVA_LASER },
   'KT': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
   'MP5': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'MB100i': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'MB150P': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
+  'MB150E': { checklist: CHECKLIST_PREVENTIVA_PLACA, fotos: FOTOS_PREVENTIVA_GENERICO },
   'FlyMarker': { checklist: CHECKLIST_PREVENTIVA_FLYMARKER, fotos: FOTOS_PREVENTIVA_GENERICO },
   'Limpeza a laser': { checklist: CHECKLIST_PREVENTIVA_INSTALACAO, fotos: FOTOS_PREVENTIVA_GENERICO },
   'Solda a Laser': { checklist: CHECKLIST_PREVENTIVA_INSTALACAO, fotos: FOTOS_PREVENTIVA_GENERICO },
+};
+// pedido do usuário: no título do PDF do Termo de Manutenção Corretiva, "Termo de Manutenção
+// Corretiva" vem seguido da categoria do equipamento (ex.: "... Corretiva Micropuncionamento"
+// pro modelo MP5) — só os modelos abaixo têm categoria confirmada pelo usuário; os demais (e
+// "Outro") saem sem sufixo algum, até ele confirmar o resto.
+const CATEGORIA_EQUIPAMENTO_CORRETIVA = {
+  'MP5': 'Micropuncionamento', 'KT': 'Micropuncionamento', 'FlyMarker': 'Micropuncionamento',
+  'MB100i': 'Micropuncionamento', 'MB150P': 'Micropuncionamento', 'MB150E': 'Micropuncionamento',
 };
 const UF_REGIAO = {
   AC: 'Norte', AP: 'Norte', AM: 'Norte', PA: 'Norte', RO: 'Norte', RR: 'Norte', TO: 'Norte',
@@ -19742,6 +19753,16 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   return doc.output('bloburl');
 }
 
+// pedido do usuário: clonagem exata de um modelo de referência (não é mais o padrão "capa navy
+// cheia página + conteúdo", ver gerarPdfRelatorioPreventiva2 pro mesmo esqueleto em outro
+// relatório) — a página de dados vem PRIMEIRO (sem capa antes dela), cabeçalho com o nome da
+// empresa à esquerda e "Termo de Manutenção Corretiva {categoria}" + O.S. Nº à direita, SEM a
+// linha "Elaborado por/Revisão/Data" que o modelo de referência tem (pedido do usuário: "remover
+// essa linha" — não existe campo equivalente no sistema). Só depois da página de dados entra a
+// divisória navy ("TERMO DE MANUTENÇÃO CORRETIVA" — a referência mostra "RELATÓRIO TÉCNICO" aqui,
+// mas o usuário confirmou que é reaproveitamento indevido do outro tipo de relatório e pediu pra
+// corrigir, não clonar o erro), e por fim fotos/avaliação/assinatura — sem página de contato final
+// (a referência tem só 4 páginas).
 function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -19751,148 +19772,192 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   const margem = 40;
   const largura = pageW - margem * 2;
   let y = margem;
+  let cabecalhoAtual = 'termo';
 
   function novaPagina() { doc.addPage(); y = margem; cabecalho(); }
 
   function cabecalho() {
-    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', pageW / 2 - 9, y - 12, 18, 21); } catch (e) {} }
-    y += 20;
-    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(empresaNome(), pageW / 2, y, { align: 'center' });
-    y += 15;
-    doc.setFontSize(13); doc.setFont(undefined, 'bold');
-    doc.text('Termo de Manutenção Corretiva', pageW / 2, y, { align: 'center' });
-    y += 10;
-    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+    if (cabecalhoAtual === 'termo2') {
+      const palavras = empresaNome().split(' ');
+      const primeira = palavras[0], resto = palavras.slice(1).join(' ');
+      const iconW = 20, iconH = 23, gap = 8;
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11);
+      const wTexto = Math.max(doc.getTextWidth(primeira), resto ? doc.getTextWidth(resto) : 0);
+      const totalW = iconW + gap + wTexto;
+      const xIcon = pageW / 2 - totalW / 2;
+      const xTexto = xIcon + iconW + gap;
+      const yTopo = y;
+      if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', xIcon, yTopo - 4, iconW, iconH); } catch (e) {} }
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...PDF_COR.blue);
+      doc.text(primeira, xTexto, yTopo + 6);
+      if (resto) {
+        doc.setTextColor(...PDF_COR.navy);
+        doc.text(resto, xTexto, yTopo + 19);
+      }
+      y = yTopo + 36;
+      doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+      doc.text('Termo de Manutenção Corretiva', pageW / 2, y, { align: 'center' });
+      y += 10;
+      doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
+      doc.line(margem, y, pageW - margem, y);
+      y += 24;
+      return;
+    }
+    const yTopo = y;
+    if (logoDataUri) { try { doc.addImage(logoDataUri.header, 'PNG', margem, yTopo - 6, 24, 28); } catch (e) {} }
+    const palavras = empresaNome().split(' ');
+    const primeira = palavras[0], resto = palavras.slice(1).join(' ');
+    doc.setFont(undefined, 'bold'); doc.setFontSize(12); doc.setTextColor(...PDF_COR.blue);
+    doc.text(primeira, margem + 30, yTopo + 2);
+    if (resto) {
+      doc.setTextColor(...PDF_COR.navy);
+      doc.text(resto, margem + 30, yTopo + 15);
+    }
+    const categoria = CATEGORIA_EQUIPAMENTO_CORRETIVA[r.modelo_maquina] || '';
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(13); doc.setTextColor(...PDF_COR.navy);
+    doc.text(limparPdf(`Termo de Manutenção Corretiva${categoria ? ' ' + categoria : ''}`), pageW - margem, yTopo + 9, { align: 'right' });
+    doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(`O.S. Nº ${r.os_uf} / ${r.os_numero} / ${r.os_ano}`), pageW - margem, yTopo + 23, { align: 'right' });
+    y = yTopo + 32;
+    doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1);
     doc.line(margem, y, pageW - margem, y);
-    y += 24;
+    y += 22;
   }
 
-  function tituloCentro(t, sub, apertado) {
-    if (y > pageH - margem - 60) novaPagina();
-    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.blue);
-    doc.text(t.toUpperCase(), pageW / 2, y, { align: 'center' }); y += 13;
+  function tituloSecao(t, sub) {
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(10.5); doc.setTextColor(...PDF_COR.blue);
+    doc.text(t.toUpperCase(), margem, y);
+    y += 14;
     if (sub) {
-      doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text(sub, pageW / 2, y, { align: 'center' }); y += 13;
-      y += 4;
+      doc.setFont('times', 'italic'); doc.setFontSize(7.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text(sub.toUpperCase(), margem, y);
+      y += 14;
     } else {
-      y += apertado ? 4 : 16;
+      y += 2;
     }
   }
 
-  function tituloEsquerda(t) {
-    if (y > pageH - margem - 60) novaPagina();
-    doc.setFontSize(11); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(t, margem, y); y += 14;
-  }
-
-  function linhaCampos(campos) {
-    const larguras = campos.map((c) => largura * c.frac);
+  function boxInfo(linhas) {
     doc.setFontSize(8.5);
-    let alturaMax = 20;
-    const conteudos = campos.map((c, i) => {
-      const labelTxt = c.label ? c.label.toUpperCase() + ': ' : '';
-      doc.setFont(undefined, 'bold');
+    const preparado = linhas.map((linha) => linha.map((c) => {
+      const labelTxt = c.label + ': ';
+      doc.setFont('times', 'bold');
       const wLabel = doc.getTextWidth(labelTxt);
-      doc.setFont(undefined, 'normal');
-      const linhas = doc.splitTextToSize(limparPdf(c.valor) || '—', larguras[i] - 14 - wLabel);
-      const altura = Math.max(20, linhas.length * 11 + 9);
-      if (altura > alturaMax) alturaMax = altura;
-      return { labelTxt, wLabel, linhas };
+      doc.setFont('times', 'normal');
+      const larguraCol = linha.length === 2 ? largura / 2 - 18 : largura - 20;
+      const linhasTxt = doc.splitTextToSize(limparPdf(c.valor) || '—', larguraCol - wLabel);
+      return { labelTxt, wLabel, linhasTxt };
+    }));
+    const alturasLinha = preparado.map((linha) => Math.max(...linha.map((c) => c.linhasTxt.length)) * 11 + 6);
+    const altura = alturasLinha.reduce((a, b) => a + b, 0) + 8;
+    if (y + altura > pageH - margem) novaPagina();
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
+    doc.rect(margem, y, largura, altura, 'S');
+    let ty = y + 13;
+    preparado.forEach((linha, li) => {
+      let cx = margem + 10;
+      linha.forEach((c) => {
+        doc.setFont('times', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+        doc.text(c.labelTxt, cx, ty);
+        doc.setFont('times', 'normal');
+        doc.text(c.linhasTxt, cx + c.wLabel, ty);
+        cx += largura / linha.length;
+      });
+      ty += alturasLinha[li];
     });
-    if (y + alturaMax > pageH - margem) novaPagina();
-    let cx = margem;
-    campos.forEach((c, i) => {
-      doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
-      doc.rect(cx, y, larguras[i], alturaMax, 'S');
-      doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.ink);
-      doc.text(conteudos[i].labelTxt, cx + 7, y + 13);
-      doc.setFont(undefined, 'normal');
-      doc.text(conteudos[i].linhas, cx + 7 + conteudos[i].wLabel, y + 13);
-      cx += larguras[i];
-    });
-    y += alturaMax;
+    y += altura + 12;
   }
 
-  // ===== capa =====
-  doc.setFillColor(...PDF_COR.navy);
-  doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
-  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
-  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-  doc.text('TERMO DE MANUTENÇÃO', pageW / 2, 410, { align: 'center' });
-  doc.text('CORRETIVA', pageW / 2, 438, { align: 'center' });
-  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
-  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 464, { align: 'center' });
-  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
-  doc.text(`O.S. ${limparPdf(r.os_uf)}/${limparPdf(r.os_numero)}/${limparPdf(r.os_ano)}`, pageW / 2, 485, { align: 'center' });
-  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+  function caixaTexto(titulo, valor) {
+    tituloSecao(titulo);
+    if (y > pageH - margem - 40) novaPagina();
+    doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+    const linhas = doc.splitTextToSize(limparPdf(valor) || '—', largura - 16);
+    const altura = Math.max(24, linhas.length * 12 + 12);
+    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
+    doc.text(linhas, margem + 8, y + 14);
+    y += altura + 16;
+  }
 
-  // ===== conteúdo =====
-  doc.addPage(); y = margem; cabecalho();
+  // ===== página de dados (1ª página — sem capa antes dela) =====
+  cabecalhoAtual = 'termo';
+  y = margem; cabecalho();
 
-  tituloCentro('Dados do atendimento');
-  linhaCampos([{ label: 'Data inicial', valor: r.data_inicial, frac: 0.34 }, { label: 'Data final', valor: r.data_final, frac: 0.33 }, { label: 'O.S. Nº', valor: `${r.os_uf}/${r.os_numero}/${r.os_ano}`, frac: 0.33 }]);
-  linhaCampos([{ label: 'Modelo da máquina', valor: r.modelo_maquina, frac: 0.5 }, { label: 'Nº de série', valor: r.numero_serie, frac: 0.5 }]);
-  linhaCampos([{ label: 'Serviço realizado', valor: r.servico_realizado, frac: 0.5 }, { label: 'Técnico', valor: r.tecnico_nome, frac: 0.5 }]);
-  linhaCampos([{ label: 'Empresa (cliente)', valor: r.empresa, frac: 1 }]);
-  linhaCampos([{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}`, frac: 1 }]);
-  linhaCampos([{ label: 'Setor da máquina', valor: r.setor_maquina, frac: 1 }]);
-  y += 16;
+  tituloSecao('Dados do cliente');
+  boxInfo([
+    [{ label: 'Empresa', valor: r.empresa }],
+    [{ label: 'Endereço', valor: `${r.endereco}, ${r.numero} — ${r.bairro}, ${r.cidade}/${r.estado} — CEP ${r.cep}` }],
+    [{ label: 'Setor', valor: r.setor_maquina }],
+  ]);
+  boxInfo([
+    [{ label: 'Data inicial', valor: r.data_inicial }, { label: 'Data final', valor: r.data_final }],
+    [{ label: 'Modelo da máquina', valor: r.modelo_maquina }, { label: 'Nº série', valor: r.numero_serie }],
+    [{ label: 'Serviço', valor: r.servico_realizado }, { label: 'Responsável', valor: r.tecnico_nome || r.autor_nome }],
+  ]);
 
-  tituloCentro('Defeito informado');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.defeito_informado) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+  caixaTexto('Defeito informado', r.defeito_informado);
+  caixaTexto('Ações executadas', r.acoes_executadas);
+  caixaTexto('Observações', r.observacoes);
 
-  tituloCentro('Ações executadas');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.acoes_executadas) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
-
-  tituloCentro('Observações');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
-
-  tituloEsquerda('Peças fornecidas');
+  tituloSecao('Peças fornecidas');
   {
-    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.52 }, { t: rotuloCodigoPeca(), frac: 0.24 }, { t: 'Qtd.', frac: 0.14 }];
+    const cols = [{ t: 'Item', frac: 0.1 }, { t: 'Descrição da peça', frac: 0.48 }, { t: rotuloCodigoPeca(), frac: 0.27 }, { t: 'Qtd.', frac: 0.15 }];
     const larguras = cols.map((c) => largura * c.frac);
-    if (y + 20 > pageH - margem) novaPagina();
+    if (y + 24 > pageH - margem) novaPagina();
     let cx = margem;
-    doc.setFillColor(...PDF_COR.navy);
-    doc.rect(margem, y, largura, 18, 'F');
-    doc.setFontSize(8.5); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-    cols.forEach((c, i) => { doc.text(c.t, cx + 6, y + 12); cx += larguras[i]; });
-    y += 18;
+    doc.setFont('times', 'bolditalic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
+    cols.forEach((c, i) => { doc.text(c.t, cx, y); cx += larguras[i]; });
+    y += 6;
+    doc.setDrawColor(...PDF_COR.ink); doc.setLineWidth(0.6);
+    doc.line(margem, y, pageW - margem, y);
+    y += 14;
     const pecas = r.pecas || [];
     if (!pecas.length) {
-      if (y + 18 > pageH - margem) novaPagina();
-      doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
-      doc.setFont(undefined, 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
-      doc.text('Nenhuma peça informada', margem + 6, y + 12);
-      y += 18;
+      if (y + 16 > pageH - margem) novaPagina();
+      doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.text('Nenhuma peça informada', margem, y);
+      y += 16;
     } else {
       pecas.forEach((p, i) => {
-        if (y + 18 > pageH - margem) novaPagina();
+        if (y + 16 > pageH - margem) novaPagina();
         cx = margem;
-        doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, 18, 'S');
-        doc.setFontSize(8.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
+        doc.setFont('times', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.ink);
         const valores = [String(i + 1), limparPdf(p.descricao) || '—', limparPdf(p.codigo_pmk) || '—', limparPdf(p.quantidade) || '—'];
-        valores.forEach((v, j) => { doc.text(v, cx + 6, y + 12); cx += larguras[j]; });
-        y += 18;
+        valores.forEach((v, j) => { doc.text(v, cx, y); cx += larguras[j]; });
+        doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.4);
+        doc.line(margem, y + 4, pageW - margem, y + 4);
+        y += 16;
       });
     }
-    y += 16;
+    y += 14;
   }
+
+  // ===== divisória navy entre a página de dados e o relatório fotográfico/assinatura =====
+  cabecalhoAtual = 'termo2';
+  doc.addPage();
+  doc.setFillColor(...PDF_COR.navy);
+  doc.rect(0, 0, pageW, pageH, 'F');
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, pageH / 2 - 160, 84, 97); } catch (e) {} }
+  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('TERMO DE MANUTENÇÃO CORRETIVA', pageW / 2, pageH / 2 - 10, { align: 'center', maxWidth: largura });
+  doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, pageH / 2 + 18, { align: 'center' });
+  doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
+
+  // ===== relatório fotográfico + avaliação + assinatura =====
+  doc.addPage(); y = margem; cabecalho();
 
   const temFotos = (r.fotos || []).some((bloco) => bloco && Array.isArray(bloco.fotos) && bloco.fotos.length);
   if (temFotos) {
     const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
     if (y + 34 + hImgFoto > pageH - margem) novaPagina();
   }
-  tituloCentro('Fotos', null, true);
+  tituloSecao('Relatório fotográfico');
   (r.fotos || []).forEach((bloco) => {
     const fotosDoBloco = (bloco && bloco.fotos) || [];
     if (y > pageH - margem - 20) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
+    doc.setFont('times', 'italic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.navy);
     doc.text(limparPdf(bloco && bloco.comentario) || '—', margem, y); y += 12;
     if (fotosDoBloco.length) {
       const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
@@ -19912,62 +19977,42 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
         y += hImg + gap;
       }
     } else {
-      doc.setFontSize(8.5); doc.setFont(undefined, 'italic'); doc.setTextColor(...PDF_COR.inkSoft);
+      doc.setFont('times', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
       doc.text('Nenhuma foto anexada.', margem, y); y += 14;
     }
     y += 6;
   });
 
-  tituloCentro('Pesquisa de satisfação');
-  linhaCampos([{ label: 'Avaliação', valor: `${r.satisfacao_estrelas}/5 estrelas`, frac: 0.4 }, { label: 'Autoriza uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim' : 'Não', frac: 0.6 }]);
-  if (r.satisfacao_comentario) linhaCampos([{ label: 'Comentário', valor: r.satisfacao_comentario, frac: 1 }]);
-  y += 18;
+  tituloSecao('Avaliação de desempenho');
+  boxInfo([
+    [{ label: 'Avaliação do atendimento', valor: `${r.satisfacao_estrelas}/5` }],
+    [{ label: 'Comentário do cliente', valor: r.satisfacao_comentario }],
+    [{ label: 'Autorização de uso do feedback', valor: r.satisfacao_autoriza === 'sim' ? 'Sim, autorizo o uso do meu feedback.' : 'Não, não autorizo o uso do meu feedback.' }],
+  ]);
 
   if (y > 560) novaPagina();
-  tituloCentro('Assinaturas');
+  tituloSecao('Assinatura');
   {
     const wImg = 220, hImg = 90;
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    doc.text(limparPdf(`Cliente: ${r.assinatura_cliente_nome}`), margem, y);
-    doc.text(limparPdf(`Técnico: ${r.assinatura_tecnico_nome}`), margem + largura / 2, y);
-    y += 18;
+    if (y + hImg + 50 > pageH - margem) novaPagina();
     try { doc.addImage(r.assinatura_cliente_img, 'PNG', margem, y, wImg, hImg); } catch (e) {}
     try { doc.addImage(r.assinatura_tecnico_img, 'PNG', margem + largura / 2, y, wImg, hImg); } catch (e) {}
+    const yLinha = y + hImg + 10;
+    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.6);
+    doc.line(margem, yLinha, margem + wImg, yLinha);
+    doc.line(margem + largura / 2, yLinha, margem + largura / 2 + wImg, yLinha);
+    doc.setFont('times', 'italic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
+    doc.text('Ciente (Cliente/Empresa)', margem + wImg / 2, yLinha + 14, { align: 'center' });
+    doc.text(limparPdf(`Ciente (Técnico/${empresaNome()})`), margem + largura / 2 + wImg / 2, yLinha + 14, { align: 'center' });
+    doc.setFont('times', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(r.assinatura_cliente_nome) || '—', margem + wImg / 2, yLinha + 27, { align: 'center' });
+    doc.text(limparPdf(r.assinatura_tecnico_nome) || '—', margem + largura / 2 + wImg / 2, yLinha + 27, { align: 'center' });
+    y = yLinha + 40;
   }
-
-  // ===== página de contato =====
-  doc.addPage();
-  doc.setFillColor(...PDF_COR.bege);
-  doc.rect(0, 0, pageW, pageH, 'F');
-  // pedido do usuário: logo da Nexor Connect "tipo uma marca d'água" e nome da empresa "em
-  // destaque" — só pra quem não é a PRO Marking (pedido do usuário: "na empresa Promarking não
-  // deve ser alterado nada" — ela continua com o layout de sempre, sem o selo/redução de logo).
-  if (ehEmpresaPromarking()) {
-    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 20, pageH / 2 - 150, 40, 46); } catch (e) {} }
-    doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
-  } else {
-    if (logoDataUri) { try { doc.addImage(logoDataUri.contato, 'PNG', pageW / 2 - 12, pageH / 2 - 150, 24, 28); } catch (e) {} }
-    doc.setFontSize(6.5); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.inkSoft);
-    doc.text('SISTEMA NEXOR CONNECT', pageW / 2, pageH / 2 - 112, { align: 'center' });
-    doc.setFontSize(18); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-    doc.text(empresaNome(), pageW / 2, pageH / 2 - 85, { align: 'center' });
-  }
-  doc.setFontSize(10); doc.setFont(undefined, 'bold');
-  doc.text('Entre em contato conosco através:', pageW / 2, pageH / 2 - 40, { align: 'center' });
-  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-  // pedido do usuário: "na última página aparece o contato da Promarking isso não deve
-  // acontecer" — empresaWhatsapp()/Telefone()/Emails() já não caem mais no contato real da PRO
-  // Marking pra outra empresa (ver helpers), mas aqui também não mostra linha vazia nenhuma.
-  if (empresaWhatsapp()) doc.text(`WhatsApp: ${empresaWhatsapp()}`, pageW / 2, pageH / 2 - 18, { align: 'center' });
-  if (empresaTelefone()) doc.text(`Telefone: ${empresaTelefone()}`, pageW / 2, pageH / 2 - 4, { align: 'center' });
-  if (empresaEmails().length) {
-    doc.setFont(undefined, 'bold');
-    doc.text('E-mail:', pageW / 2, pageH / 2 + 20, { align: 'center' });
-    doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.blue);
-    empresaEmails().forEach((email, i) => {
-      doc.text(email, pageW / 2, pageH / 2 + 36 + i * 14, { align: 'center' });
-    });
+  if ((r.emails_copia || []).length) {
+    if (y > pageH - margem - 16) novaPagina();
+    doc.setFont('times', 'italic'); doc.setFontSize(8); doc.setTextColor(...PDF_COR.inkSoft);
+    doc.text(limparPdf(`Cópia enviada para: ${r.emails_copia[0]}`), margem, y);
   }
 
   return doc.output('bloburl');
@@ -22571,7 +22616,7 @@ async function mostrarFormRelatorioCorretiva(existente) {
         <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
         <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoCorretiva(${d.id || 'null'})">Limpar rascunho</button>
-        <button class="btn btn-primary btn-sm" onclick="concluirRelatorioCorretiva()">Concluir e enviar termo</button>
+        <button class="btn btn-primary btn-sm" id="rcm-btn-concluir" onclick="concluirRelatorioCorretiva()">Concluir e enviar termo</button>
       </div>
     </div>`;
   renderPecasCorretiva();
@@ -22840,6 +22885,13 @@ async function concluirRelatorioCorretiva() {
   if (emails.length === 0) return alert('Informe ao menos um e-mail para envio do termo.');
   d.emails_copia = emails;
 
+  // pedido do usuário: "Já tem um minuto que choveu em enviar msg mas não vai, parece que
+  // travou" — mesmo tratamento do botão de Preventiva 2 (ver concluirRelatorioPreventiva2):
+  // mostra "Enviando..." durante toda a operação, em vez de ficar sem feedback nenhum.
+  const btn = document.getElementById('rcm-btn-concluir');
+  const textoOriginalBtn = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+
   try {
     const { relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
@@ -22847,13 +22899,43 @@ async function concluirRelatorioCorretiva() {
     limparRascunhoManual('corretiva', d.id);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioCorretiva(relatorio, logo);
-    window.open(url, '_blank');
-    const assunto = encodeURIComponent(`Termo de Manutenção Corretiva — ${d.empresa}`);
-    const corpo = encodeURIComponent(`Olá,\n\nSegue em anexo o Termo de Manutenção Corretiva (OS ${d.os_uf}/${d.os_numero}/${d.os_ano}) referente ao atendimento em ${d.empresa}.\n\nO PDF foi baixado neste dispositivo — anexe-o antes de enviar.\n\nAtenciosamente,\n${USER.nome}`);
-    window.open(`mailto:${emails.join(',')}?subject=${assunto}&body=${corpo}`, '_blank');
-    mostrarToast(d.id ? 'Termo atualizado e PDF gerado.' : 'Termo salvo e PDF gerado — anexe-o no e-mail que foi aberto.');
+    const nomeArquivo = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
+    // pedido do usuário: "no celular... aparece o relatório precisa ir pro e-mail ou WhatsApp. E
+    // o relatório já tem que ser baixado direto" — mesmo mecanismo do Preventiva 2: baixa o PDF
+    // direto (sem depender de abrir blob: numa aba nova, instável no mobile) e, em seguida, abre
+    // a bandeja de compartilhamento nativa já com o PDF anexado, pra escolher e-mail/WhatsApp.
+    const linkDownload = document.createElement('a');
+    linkDownload.href = url;
+    linkDownload.download = nomeArquivo;
+    document.body.appendChild(linkDownload);
+    linkDownload.click();
+    document.body.removeChild(linkDownload);
+    const categoria = CATEGORIA_EQUIPAMENTO_CORRETIVA[relatorio.modelo_maquina] || '';
+    const assunto = `Termo de Manutenção Corretiva${categoria ? ' ' + categoria : ''} - ${relatorio.modelo_maquina || ''} - ${relatorio.empresa || ''}`.trim();
+    const corpo = `Segue o Termo de Manutenção Corretiva${categoria ? ' ' + categoria : ''} referente ao atendimento realizado.\n\n` +
+      `Empresa: ${relatorio.empresa || '—'}\n` +
+      `Setor: ${relatorio.setor_maquina || '—'}\n` +
+      `Modelo: ${relatorio.modelo_maquina || '—'}\n` +
+      `Nº de série: ${relatorio.numero_serie || '—'}\n` +
+      `Data: ${relatorio.data_inicial || '—'} a ${relatorio.data_final || '—'}\n` +
+      `Técnico: ${relatorio.tecnico_nome || relatorio.autor_nome || '—'}\n\n` +
+      `Enviar para: ${emails.join(', ')}`;
+    try {
+      const blob = await (await fetch(url)).blob();
+      const arquivo = new File([blob], nomeArquivo, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+        await navigator.share({ files: [arquivo], title: assunto, text: corpo });
+      }
+      mostrarToast(d.id ? 'Termo atualizado e PDF baixado neste dispositivo.' : 'Termo salvo e PDF baixado neste dispositivo.');
+    } catch (e) {
+      if (e.name !== 'AbortError') mostrarToast(d.id ? 'Termo atualizado e PDF baixado neste dispositivo.' : 'Termo salvo e PDF baixado neste dispositivo.');
+    }
     renderRelatorioManutencao();
-  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+  } catch (e) {
+    alert('Erro ao salvar: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = textoOriginalBtn; }
+  }
 }
 
 // ---------- Relatório > Manual > Relatório Técnico ----------
