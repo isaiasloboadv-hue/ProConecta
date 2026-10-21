@@ -121,6 +121,15 @@ const FOTOS_PREVENTIVA_GENERICO = [
   'Etiqueta de NS do equipamento', 'Equipamento', 'Equipamento antes de executar o serviço',
   'Equipamento após de executar o serviço', 'Fotos adicionais',
 ];
+// Termo de Manutenção Corretiva: conjunto de fotos próprio, independente do modelo da máquina —
+// diferente da Preventiva (antes/depois do serviço em geral), a Corretiva documenta a peça
+// defeituosa removida e a peça nova instalada, que é a evidência que importa num reparo. Os 4
+// primeiros são obrigatórios; "Fotos adicionais" (sempre o último) é opcional, mesmo padrão da
+// Preventiva (ver renderFotosCorretiva/validarRelatorioCorretiva — só o último grupo é opcional).
+const FOTOS_CORRETIVA = [
+  'Etiqueta de NS do equipamento', 'Equipamento', 'Peça retirada do cliente',
+  'Peça substituída no cliente', 'Fotos adicionais',
+];
 // cada modelo de máquina indica qual check-list e qual conjunto de fotos usar — "Outro" (fora
 // desta lista) começa com o check-list em branco e o conjunto de fotos genérico.
 const EQUIPAMENTOS_PREVENTIVA = {
@@ -22428,8 +22437,8 @@ function relatorioCorretivaPadrao() {
     observacoes: '',
     pecas: [],
     // vazio até o técnico escolher o modelo da máquina, igual no Preventiva (ver
-    // relatorioPreventivaPadrao — quem não é a PRO Marking já nasce com fotos genérico).
-    fotos: ehEmpresaPromarking() ? [] : FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] })),
+    // relatorioPreventivaPadrao — quem não é a PRO Marking já nasce com as fotos da Corretiva).
+    fotos: ehEmpresaPromarking() ? [] : FOTOS_CORRETIVA.map((label) => ({ comentario: label, fotos: [] })),
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
     satisfacao_autoriza: '',
@@ -22610,9 +22619,11 @@ function renderPecasCorretiva() {
 function adicionarPecaCorretiva() { relatorioCorretivaDraft.pecas.push({ descricao: '', codigo_pmk: '', quantidade: '' }); renderPecasCorretiva(); }
 function removerPecaCorretiva(i) { relatorioCorretivaDraft.pecas.splice(i, 1); renderPecasCorretiva(); }
 
-// o modelo da máquina escolhido decide o conjunto de fotos deste termo — reaproveita as mesmas
-// fotos por equipamento do Preventiva (EQUIPAMENTOS_PREVENTIVA), já que o conjunto de fotos não
-// depende do tipo de relatório, só do equipamento atendido. Corretiva não tem check-list.
+// o modelo da máquina só decide se mostra o campo "Outro" (texto livre) — diferente da
+// Preventiva, o conjunto de fotos da Corretiva NÃO depende do modelo/equipamento: é sempre a
+// evidência do próprio reparo (etiqueta, equipamento, peça retirada, peça instalada — ver
+// FOTOS_CORRETIVA). Corretiva não tem check-list, então EQUIPAMENTOS_PREVENTIVA só é consultado
+// aqui pra saber se o modelo é um dos conhecidos ou precisa do campo "Outro".
 async function selecionarModeloCorretiva(nome) {
   const d = relatorioCorretivaDraft;
   const jaTemFotos = d.fotos.some((b) => b.fotos.length);
@@ -22622,15 +22633,10 @@ async function selecionarModeloCorretiva(nome) {
   }
   d.modelo_maquina = nome;
   const outroWrap = document.getElementById('rcm-modelo_maquina-outro-wrap');
-  const preset = EQUIPAMENTOS_PREVENTIVA[nome];
-  if (preset) {
-    outroWrap.style.display = 'none';
-    d.fotos = preset.fotos.map((label) => ({ comentario: label, fotos: [] }));
-  } else {
-    outroWrap.style.display = 'block';
-    document.getElementById('rcm-modelo_maquina_outro').value = '';
-    d.fotos = FOTOS_PREVENTIVA_GENERICO.map((label) => ({ comentario: label, fotos: [] }));
-  }
+  const conhecido = !!EQUIPAMENTOS_PREVENTIVA[nome];
+  outroWrap.style.display = conhecido ? 'none' : 'block';
+  if (!conhecido) document.getElementById('rcm-modelo_maquina_outro').value = '';
+  d.fotos = FOTOS_CORRETIVA.map((label) => ({ comentario: label, fotos: [] }));
   renderFotosCorretiva();
 }
 
