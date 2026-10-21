@@ -19633,19 +19633,21 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
     y += 14;
   }
 
+  const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
   const temFotos = (r.fotos || []).some((bloco) => bloco && Array.isArray(bloco.fotos) && bloco.fotos.length);
-  if (temFotos) {
-    const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
-    if (y + 34 + hImgFoto > pageH - margem) novaPagina();
-  }
+  if (temFotos && y + 34 + hImg > pageH - margem) novaPagina();
   tituloSecao('Relatório fotográfico');
   (r.fotos || []).forEach((bloco) => {
     const fotosDoBloco = (bloco && bloco.fotos) || [];
-    if (y > pageH - margem - 20) novaPagina();
+    // pedido do usuário (ver mesmo conserto na Corretiva): reserva espaço pra legenda + a 1ª
+    // linha de fotos JUNTAS antes de decidir se quebra de página — senão a legenda cabia sozinha
+    // no fim da página, mas as fotos do grupo não, e eram empurradas pra página seguinte,
+    // deixando a legenda grudada embaixo das fotos do grupo ANTERIOR.
+    const alturaReservada = 12 + (fotosDoBloco.length ? hImg : 14);
+    if (y + alturaReservada > pageH - margem) novaPagina();
     doc.setFont('times', 'italic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.navy);
     doc.text(limparPdf(bloco && bloco.comentario) || '—', margem, y); y += 12;
     if (fotosDoBloco.length) {
-      const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
       for (let i = 0; i < fotosDoBloco.length; i += 2) {
         if (y + hImg > pageH - margem) novaPagina();
         [fotosDoBloco[i], fotosDoBloco[i + 1]].forEach((f, j) => {
@@ -19948,19 +19950,22 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   // ===== relatório fotográfico + avaliação + assinatura =====
   doc.addPage(); y = margem; cabecalho();
 
+  const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
   const temFotos = (r.fotos || []).some((bloco) => bloco && Array.isArray(bloco.fotos) && bloco.fotos.length);
-  if (temFotos) {
-    const gapFoto = 12, wImgFoto = (largura - gapFoto) / 2, hImgFoto = wImgFoto * 0.68;
-    if (y + 34 + hImgFoto > pageH - margem) novaPagina();
-  }
+  if (temFotos && y + 34 + hImg > pageH - margem) novaPagina();
   tituloSecao('Relatório fotográfico');
   (r.fotos || []).forEach((bloco) => {
     const fotosDoBloco = (bloco && bloco.fotos) || [];
-    if (y > pageH - margem - 20) novaPagina();
+    // pedido do usuário: "o título fica embaixo das fotos do título anterior" — reserva espaço
+    // pra legenda + a 1ª linha de fotos JUNTAS antes de decidir se quebra de página; antes, só a
+    // legenda (12pt) precisava caber no fim da página, mas as fotos do grupo não cabiam e eram
+    // todas empurradas pra página seguinte — deixando a legenda "grudada" embaixo das fotos do
+    // grupo ANTERIOR, longe das fotos que ela descreve.
+    const alturaReservada = 12 + (fotosDoBloco.length ? hImg : 14);
+    if (y + alturaReservada > pageH - margem) novaPagina();
     doc.setFont('times', 'italic'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.navy);
     doc.text(limparPdf(bloco && bloco.comentario) || '—', margem, y); y += 12;
     if (fotosDoBloco.length) {
-      const gap = 12, wImg = (largura - gap) / 2, hImg = wImg * 0.68;
       for (let i = 0; i < fotosDoBloco.length; i += 2) {
         if (y + hImg > pageH - margem) novaPagina();
         [fotosDoBloco[i], fotosDoBloco[i + 1]].forEach((f, j) => {
