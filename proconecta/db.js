@@ -1530,15 +1530,58 @@ function load() {
   return carregarDoArquivo();
 }
 
+// escritas em voo no Postgres (fire-and-forget do ponto de vista de quem chama save(), que
+// continua síncrono — tornar save() de verdade assíncrono exigiria mexer em toda rota do
+// server.js que chama db.save(data) antes de responder). O risco real de "fire-and-forget": se o
+// processo for encerrado (redeploy, ou o plano gratuito do Render hibernando por inatividade)
+// ANTES dessa escrita terminar, ela nunca chega no Postgres e o dado criado na hora (ex.: um
+// relatório que o técnico acabou de salvar) desaparece na próxima leitura, mesmo a resposta já
+// tendo voltado 201 pro cliente. Duas mitigações: repetir a escrita algumas vezes antes de
+// desistir (cobre falha transitória de rede/pool), e registrar a promise num conjunto que o
+// encerramento gracioso (ver aguardarEscritasPendentes, chamado no SIGTERM em server.js) espera
+// terminar antes de deixar o processo morrer de vez.
+const escritasPendentes = new Set();
+
 function save(data) {
   if (usaPostgres && cache) {
     cache = data;
-    obterPool()
-      .query('UPDATE app_state SET data = $1 WHERE id = 1', [JSON.stringify(data)])
-      .catch((e) => console.error('Erro ao salvar no Postgres:', e.message));
+    const payload = JSON.stringify(data);
+    const escrita = (async () => {
+      const tentativasMax = 3;
+      for (let tentativa = 1; tentativa <= tentativasMax; tentativa++) {
+        try {
+          await obterPool().query('UPDATE app_state SET data = $1 WHERE id = 1', [payload]);
+          return;
+        } catch (e) {
+          const ultimaTentativa = tentativa === tentativasMax;
+          console.error(`Erro ao salvar no Postgres (tentativa ${tentativa}/${tentativasMax}):`, e.message);
+          if (ultimaTentativa) {
+            console.error('ALERTA: escrita perdida no Postgres após todas as tentativas — o dado pode não ter sido persistido.');
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 300 * tentativa));
+        }
+      }
+    })();
+    escritasPendentes.add(escrita);
+    escrita.finally(() => escritasPendentes.delete(escrita));
     return;
   }
   salvarNoArquivo(data);
+}
+
+// chamado no encerramento gracioso do processo (SIGTERM — é o sinal que o Render manda antes de
+// desligar uma instância velha num redeploy, ou antes de hibernar o plano gratuito por
+// inatividade) pra dar tempo das escritas que ainda estavam em voo chegarem no Postgres antes do
+// processo morrer de vez. Espera no máximo 8s (não trava um encerramento pra sempre se alguma
+// escrita estiver presa) — ver uso em server.js.
+async function aguardarEscritasPendentes() {
+  if (!escritasPendentes.size) return;
+  console.log(`[db] aguardando ${escritasPendentes.size} escrita(s) pendente(s) no Postgres antes de encerrar...`);
+  await Promise.race([
+    Promise.allSettled([...escritasPendentes]),
+    new Promise((resolve) => setTimeout(resolve, 8000)),
+  ]);
 }
 
 function nextId(data, tabela) {
@@ -1816,6 +1859,7 @@ async function migrarMensagensSeNecessario() {
 
 module.exports = {
   load, save, nextId, hashSenha, conferirSenha, gerarTokenConvite, DB_PATH, pronto, estaUsandoPostgres, salvarFoto, carregarFoto,
+  aguardarEscritasPendentes,
   supabaseStorageConfigurado, salvarFotoSupabase, carregarFotoAntiga, empresaIdDaFoto,
   salvarMensagemChamado, carregarMensagensChamado,
   salvarMensagemInterna, carregarMensagensInternas, marcarMensagensInternasLidas, resumoContatoInterno,

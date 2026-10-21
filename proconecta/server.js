@@ -12719,6 +12719,24 @@ server.listen(PORT, () => {
   if (process.env.ADMIN_EMAIL) console.log(`Conta de administrador: ${process.env.ADMIN_EMAIL}`);
 });
 
+// encerramento gracioso: o Render manda SIGTERM antes de desligar uma instância velha (redeploy)
+// ou antes de hibernar o plano gratuito por inatividade. db.save() no modo Postgres é
+// fire-and-forget (ver comentário em db.js) — sem isso, uma escrita que ainda estivesse em voo
+// nesse momento (ex.: um relatório que o técnico acabou de salvar) nunca chegaria no banco e
+// sumiria, mesmo a resposta já tendo voltado sucesso pro cliente. Espera as escritas pendentes
+// (no máximo 8s) antes de deixar o processo morrer de vez.
+let _encerrandoGraciosamente = false;
+async function encerrarGraciosamente(sinal) {
+  if (_encerrandoGraciosamente) return;
+  _encerrandoGraciosamente = true;
+  console.log(`[server] ${sinal} recebido — aguardando escritas pendentes no banco antes de encerrar...`);
+  try { await db.aguardarEscritasPendentes(); } catch (e) { console.error('[server] erro ao aguardar escritas pendentes:', e.message); }
+  console.log('[server] encerrando.');
+  process.exit(0);
+}
+process.on('SIGTERM', () => encerrarGraciosamente('SIGTERM'));
+process.on('SIGINT', () => encerrarGraciosamente('SIGINT'));
+
 db.pronto.then(() => {
   console.log(`Banco de dados: ${db.estaUsandoPostgres() ? 'Postgres' : db.DB_PATH}`);
   verificarLembretesRecorrentes();
