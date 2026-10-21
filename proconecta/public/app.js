@@ -19798,7 +19798,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
       }
       y = yTopo + 36;
       doc.setFontSize(13); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy);
-      doc.text('Termo de Manutenção Corretiva', pageW / 2, y, { align: 'center' });
+      doc.text('Relatório Técnico', pageW / 2, y, { align: 'center' });
       y += 10;
       doc.setDrawColor(...PDF_COR.blue); doc.setLineWidth(1.2);
       doc.line(margem, y, pageW - margem, y);
@@ -19940,11 +19940,17 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, pageH / 2 - 160, 84, 97); } catch (e) {} }
-  doc.setFontSize(20); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-  doc.text('TERMO DE MANUTENÇÃO CORRETIVA', pageW / 2, pageH / 2 - 10, { align: 'center', maxWidth: largura });
+  // pedido do usuário: "clone e deixe exatamente igual" — mesma posição/tamanho do modelo de
+  // referência (idêntico ao capa do gerarPdfRelatorioTecnico: logo fixo em y=130, bem acima do
+  // bloco de título, não centralizado verticalmente com ele).
+  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
+  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
+  doc.text('RELATÓRIO TÉCNICO', pageW / 2, 420, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
-  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, pageH / 2 + 18, { align: 'center' });
+  doc.text(limparPdf(r.empresa).toUpperCase() || '—', pageW / 2, 445, { align: 'center' });
+  doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(150, 170, 200);
   doc.text('SIMPLES, ROBUSTO E ACESSÍVEL', pageW / 2, pageH - 60, { align: 'center' });
 
   // ===== relatório fotográfico + avaliação + assinatura =====
