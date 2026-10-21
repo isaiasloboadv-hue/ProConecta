@@ -20396,11 +20396,17 @@ function limparFiltrosRelatorioManut() {
 }
 
 // pedido do usuário: "os relatórios são compartilhados entre o comercial... coloque um filtro
-// meus relatórios e todos" — ao contrário do administrador/supervisor (que já veem tudo direto,
-// sem escolher), o comercial tem um alternador de verdade: começa em "Meus relatórios" (mesmo
-// padrão de privacidade do técnico) e troca pra "Todos" quando quer ver o que os colegas
-// comerciais lançaram (ver filtro por papel comercial em GET /relatorios-manutencao/meus).
-let relatorioManutModoTodos = false;
+// meus relatórios e todos" — o comercial tem um alternador de verdade entre "Meus relatórios" e
+// "Todos" (ver filtro por papel comercial em GET /relatorios-manutencao/meus), diferente do
+// administrador/supervisor, que já vê tudo direto, sem escolher.
+// pedido do usuário (2ª rodada): "quero que seja compartilhado de forma automática" — o Briefing/
+// Devolutivo/Levantamento Técnico de QUALQUER técnico (não só comercial) agora é visível em
+// "Todos" (ver TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL no servidor), mas isso só ajuda de verdade
+// se "Todos" já vier selecionado — por isso começa `null` (em vez de sempre `false`) e
+// renderRelatorioManutencao() abaixo resolve pro valor certo na primeira vez que o comercial
+// abre a tela nesta sessão: "Todos" por padrão. Depois disso, o próprio alternador manual
+// (alternarFiltroRelatorioManutTodos) continua mandando enquanto a página não for recarregada.
+let relatorioManutModoTodos = null;
 function alternarFiltroRelatorioManutTodos(valor) {
   relatorioManutModoTodos = valor;
   renderRelatorioManutencao();
@@ -20449,6 +20455,11 @@ async function renderRelatorioManutencao() {
   // técnico/empresa numa lista que já é só dele).
   const vePodeTodos = USER.papel === 'administrador' || USER.papel === 'supervisor';
   const podeAlternarTodos = USER.papel === 'comercial';
+  // pedido do usuário (2ª rodada): "quero que seja compartilhado de forma automática" — resolve o
+  // sentinela null (ver comentário na declaração de relatorioManutModoTodos) ANTES da chamada à
+  // API abaixo, já que é essa chamada (e não desenharRelatorioManutencao) que decide se manda
+  // ?todas=1; sem isso o comercial abriria a tela em "Meus relatórios" mesmo com o padrão intencional.
+  if (relatorioManutModoTodos === null) relatorioManutModoTodos = podeAlternarTodos;
   const mostrarTodos = vePodeTodos || (podeAlternarTodos && relatorioManutModoTodos);
   const [{ relatorios }] = await Promise.all([
     api('/api/relatorios-manutencao/meus' + (mostrarTodos ? '?todas=1' : '')),
