@@ -19956,7 +19956,12 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   // ícone + texto com a fonte genérica do jsPDF, que nunca bateria com a fonte real da marca.
   // Empresas sem esse arquivo continuam com o "lockup" de sempre (ícone + nome em 2 linhas).
   if (ehEmpresaPromarking()) {
-    const wLogo = 360, hLogo = wLogo / LOGO_PROMARKING_BRANCO_RATIO;
+    // pedido do usuário: "só precisa diminuir o tamanho, o início e o fim do logo fica entre o L
+    // e o C do nome Relatório Técnico" — a largura do logo tem que bater com a largura real do
+    // título desenhado logo abaixo (mesma fonte/tamanho usados ali: bold, 22pt).
+    doc.setFont(undefined, 'bold'); doc.setFontSize(22);
+    const wLogo = doc.getTextWidth('RELATÓRIO TÉCNICO');
+    const hLogo = wLogo / LOGO_PROMARKING_BRANCO_RATIO;
     try { doc.addImage('data:image/png;base64,' + LOGO_PROMARKING_BRANCO_B64, 'PNG', pageW / 2 - wLogo / 2, 170, wLogo, hLogo); } catch (e) {}
   } else {
     const palavras = empresaNome().split(' ');
