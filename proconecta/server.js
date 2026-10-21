@@ -119,6 +119,12 @@ function sanitizarMenusAcesso(papel, body) {
 // cadastrando todo mundo, inclusive outros administradores — é sempre o caso da conta master
 // (ADMIN_EMAIL).
 const DEPARTAMENTOS_ADMIN = ['suporte', 'pos_venda'];
+// pedido do usuário: "qualquer usuário que criar um relatório briefing, devolutivo pós visita,
+// levantamento técnico precisa ser compartilhado com os usuários comercial" — usado tanto no
+// filtro "Todos" (GET /relatorios-manutencao/meus) quanto na reabertura de um relatório específico
+// (GET /relatorios-manutencao/:id, chamada pelos botões PDF/Encaminhar/Editar) — as duas rotas
+// precisam da mesma regra, senão o relatório aparece na lista mas o PDF não abre (404).
+const TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL = ['promotor', 'devolutivo', 'levantamento_tecnico'];
 function papelGerenciavelPorAdmin(admin, papelAlvo) {
   if (!admin.departamento) return true;
   if (papelAlvo === admin.departamento) return true;
@@ -3920,8 +3926,7 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   // pós visita, levantamento técnico precisa ser compartilhado com os usuários comercial" — esses
   // 3 tipos (promotor/devolutivo/levantamento_tecnico) são sobre a visita comercial em si, por
   // isso entram pro comercial independente de quem criou (técnico, administrador...), e não só
-  // quando o autor também é comercial, como o resto continua sendo.
-  const TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL = ['promotor', 'devolutivo', 'levantamento_tecnico'];
+  // quando o autor também é comercial, como o resto continua sendo (ver TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL).
   if (user.papel === 'comercial' && query.todas === '1') {
     const idsComercial = new Set(tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'comercial').map((u) => u.id));
     lista = lista.filter((r) => idsComercial.has(r.autor_id) || TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL.includes(r.tipo));
@@ -3950,11 +3955,19 @@ rota('GET', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   // administrador (e supervisor, só leitura) vê/reabre o relatório de qualquer técnico (tela
   // "Relatório" com filtro por todo mundo); o técnico continua só vendo os que ele mesmo criou.
   // comercial também reabre o relatório de outro comercial (ver filtro "Todos" em GET /meus
-  // acima) — precisa pra gerar o PDF/Encaminhar de um relatório que não é o dele.
+  // acima) — precisa pra gerar o PDF/Encaminhar de um relatório que não é o dele. O bug relatado
+  // pelo usuário ("apareceu mas ele não consegue abrir o arquivo") era essa regra ficar
+  // desatualizada em relação ao GET /meus: Briefing/Devolutivo/Levantamento Técnico de QUALQUER
+  // técnico (TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL) já aparecia na lista do comercial, mas o botão
+  // "PDF"/"Encaminhar"/"Editar" chama esta rota pra buscar o relatório completo antes de gerar o
+  // PDF — sem essa mesma exceção aqui, voltava 404 e o PDF nunca abria.
   const item = data.relatorios_manutencao.find((r) => r.id === Number(m[1]) && r.empresa_id === user.empresa_id && (
     r.autor_id === user.id
     || ['administrador', 'supervisor'].includes(user.papel)
-    || (user.papel === 'comercial' && (data.usuarios.find((u) => u.id === r.autor_id) || {}).papel === 'comercial')
+    || (user.papel === 'comercial' && (
+      (data.usuarios.find((u) => u.id === r.autor_id) || {}).papel === 'comercial'
+      || TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL.includes(r.tipo)
+    ))
   ));
   if (!item) return enviarJSON(res, 404, { erro: 'Relatório não encontrado.' });
   enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });

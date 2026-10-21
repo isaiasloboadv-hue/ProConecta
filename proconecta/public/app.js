@@ -20363,7 +20363,16 @@ function linhasRelatorioManut() {
     if (relatorios.length) return `<tr><td colspan="4" class="empty">Nenhum relatório encontrado com esses filtros.</td></tr>`;
     return rascunhosNovosPendentes().length ? '' : `<tr><td colspan="4" class="empty">Nenhum relatório criado ainda.</td></tr>`;
   }
-  return filtrados.map(({ r, i }) => `
+  return filtrados.map(({ r, i }) => {
+    // pedido do usuário: "quando o relatório for de outro técnico que não seja o logado a função
+    // editar e excluir fica bloqueado, coloque a função visualizar, coloque um ícone olho no lugar
+    // de excluir" — mesma regra de dono usada no servidor pro PUT/DELETE (ver server.js): só o
+    // próprio autor (ou o administrador, que edita/exclui o de qualquer um) vê Editar/Excluir; pra
+    // quem não é dono (ex.: comercial vendo o Devolutivo de um técnico via "Todos"), essas duas
+    // viram só "Visualizar" (abre o PDF, que já é só leitura) — assim ninguém mexe/apaga relatório
+    // alheio, mesmo que a API já bloqueasse isso (403/404), sem precisar clicar pra descobrir.
+    const souDono = r.autor_id === USER.id || USER.papel === 'administrador';
+    return `
     <tr>
       <td data-label="Data">${fmtData(r.criado_em)}</td>
       <td data-label="Descrição">${descricaoRelatorioManutencao(r)}</td>
@@ -20373,10 +20382,15 @@ function linhasRelatorioManut() {
         <button class="btn-outline-sm" onclick="abrirEncaminharRelatorioManutencao(${i})">Encaminhar</button>
         ${r.tipo !== 'ciclagem' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="abrirFotosRelatorioManutencao(${i})">Fotos</button>` : ''}
         ${r.tipo !== 'preventiva' && r.tipo !== 'preventiva2' && r.tipo !== 'corretiva' && r.tipo !== 'relatorio_tecnico' && r.tipo !== 'aceite_entrega' && r.tipo !== 'entrega_teste' && r.tipo !== 'promotor' && r.tipo !== 'devolutivo' && r.tipo !== 'levantamento_tecnico' ? `<button class="btn-outline-sm" onclick="baixarWordRelatorioManutencao(${i})">Word</button>` : ''}
-        <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
-        <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        ${souDono ? `
+          <button class="btn-outline-sm" onclick="editarRelatorioManutencao(${i})">Editar</button>
+          <button class="btn-outline-sm" onclick="excluirRelatorioManutencao(${r.id})" style="color:var(--red); border-color:var(--red);">Excluir</button>
+        ` : `
+          <button class="btn-outline-sm" onclick="abrirPdfRelatorioManutencao(${i})" title="Visualizar (somente leitura — relatório de outro usuário)">👁 Visualizar</button>
+        `}
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 function atualizarFiltroRelatorioManut(campo, valor) {
