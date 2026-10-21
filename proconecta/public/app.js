@@ -21254,7 +21254,7 @@ function mostrarFormRelatorioManutencao(existente) {
         <button class="btn btn-outline-sm" onclick="salvarRascunhoAgora()">Salvar rascunho</button>
         <button class="btn btn-ghost btn-sm" onclick="voltarComRascunho()">Voltar</button>
         <button class="btn btn-outline-sm" onclick="limparRascunhoCompleto(${d.id || 'null'})">Limpar rascunho</button>
-        <button class="btn btn-primary btn-sm" onclick="salvarRelatorioManutencao()">Gerar PDF e salvar</button>
+        <button class="btn btn-primary btn-sm" id="rm-btn-gerar" onclick="salvarRelatorioManutencao()">Gerar PDF e salvar</button>
       </div>
     </div>`;
   renderPecasRelatorioManut();
@@ -21470,17 +21470,42 @@ async function salvarRelatorioManutencao() {
 
   if (!d.empresa.trim() || !d.equipamento.trim()) { alert('Preencha ao menos Empresa e Equipamento.'); return; }
 
+  const btn = document.getElementById('rm-btn-gerar');
+  const textoOriginalBtn = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  let relatorio;
   try {
-    const { relatorio } = d.id
+    ({ relatorio } = d.id
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
-      : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
+      : await api('/api/relatorios-manutencao', { method: 'POST', body: d }));
     limparRascunhoManual('completo', d.id);
+  } catch (e) {
+    alert('Erro ao salvar: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = textoOriginalBtn; }
+    return;
+  }
+  // pedido do usuário: "não estou conseguindo finalizar e gerar PDF do tipo completo" — o
+  // relatório já estava salvo nesse ponto (POST/PUT acima), mas window.open(url, '_blank') tenta
+  // abrir uma aba nova DEPOIS de dois awaits (API + logo); como isso já não conta mais como "direto
+  // do clique" pro navegador, o popup blocker barra silenciosamente — nenhum erro, nenhum PDF,
+  // parecendo que "não funciona". Troca pro mesmo padrão de <a download> usado na Corretiva/
+  // Preventiva 2 (baixa o arquivo, não depende de popup) e separa o try/catch do salvar do try/
+  // catch do gerar PDF: se o PDF falhar por algum motivo, o relatório já ficou salvo (o usuário
+  // não perde o que preencheu) e pode baixar de novo pelo botão "PDF" na lista.
+  try {
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioManutencao(relatorio, logo);
-    window.open(url, '_blank');
-    mostrarToast(d.id ? 'Relatório atualizado e PDF gerado.' : 'Relatório salvo e PDF gerado.');
-    renderRelatorioManutencao();
-  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+    const nomeArquivo = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
+    const linkDownload = document.createElement('a');
+    linkDownload.href = url; linkDownload.download = nomeArquivo;
+    document.body.appendChild(linkDownload); linkDownload.click(); document.body.removeChild(linkDownload);
+    mostrarToast(d.id ? 'Relatório atualizado e PDF baixado neste dispositivo.' : 'Relatório salvo e PDF baixado neste dispositivo.');
+  } catch (e) {
+    alert('O relatório foi salvo, mas houve um erro ao gerar o PDF: ' + e.message + '\n\nVocê pode tentar baixar o PDF de novo pelo botão "PDF" na lista de relatórios.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = textoOriginalBtn; }
+  }
+  renderRelatorioManutencao();
 }
 
 async function editarRelatorioManutencao(i) {
@@ -25572,7 +25597,16 @@ async function abrirPdfRelatorioManutencao(i) {
   if (!r) return;
   try {
     const logo = await carregarLogoVariantes();
-    window.open(gerarPdfUrlRelatorioManutencao(r, logo), '_blank');
+    const url = gerarPdfUrlRelatorioManutencao(r, logo);
+    // pedido do usuário: "não estou conseguindo finalizar e gerar PDF" — botão "PDF"/"Visualizar"
+    // da lista é async (await relatorioManutCompleto + await carregarLogoVariantes antes de abrir),
+    // então window.open(url, '_blank') já não conta mais como resposta direta ao clique pro
+    // navegador e o popup blocker barra silenciosamente (sem erro, sem aba nova). <a download>
+    // não depende de popup — baixa o arquivo direto, mesmo padrão já usado na Corretiva/Preventiva 2.
+    const nomeArquivo = `${nomeArquivoRelatorioManutencao(r)}.pdf`;
+    const linkDownload = document.createElement('a');
+    linkDownload.href = url; linkDownload.download = nomeArquivo;
+    document.body.appendChild(linkDownload); linkDownload.click(); document.body.removeChild(linkDownload);
   } catch (e) { alert('Erro ao gerar o PDF: ' + e.message); }
 }
 
