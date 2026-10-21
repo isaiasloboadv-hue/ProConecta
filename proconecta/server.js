@@ -4379,7 +4379,10 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     });
   }
   db.save(data);
-  enviarJSON(res, 201, { relatorio: item });
+  // mesma hidratação do PUT logo abaixo — o front gera o PDF direto com esta resposta de criação
+  // (ver concluirRelatorioXxx no app.js), então sem isso as fotos/assinaturas vinham como
+  // `{__foto_ref}` e o PDF saía com os quadros de foto vazios.
+  enviarJSON(res, 201, { relatorio: await hidratarFotosProfundo(item) });
 });
 
 // PUT /api/relatorios-manutencao/:id — o próprio autor pode editar um relatório que criou; o
@@ -4611,7 +4614,12 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
   }
   sincronizarClienteDoRelatorio(data, user.empresa_id, body);
   db.save(data);
-  enviarJSON(res, 200, { relatorio: item });
+  // hidrata antes de responder — o front gera o PDF na hora com ESTA resposta (ver
+  // concluirRelatorioXxx no app.js), sem dar um GET de volta antes; sem isso as fotos/assinaturas
+  // chegavam como `{__foto_ref}` (ver extrairFotosProfundo acima) em vez da imagem de verdade, e o
+  // PDF saía com os quadros de foto vazios — só "consertava sozinho" se o usuário reabrisse o
+  // relatório depois (o GET de detalhe, logo abaixo, sempre hidratou).
+  enviarJSON(res, 200, { relatorio: await hidratarFotosProfundo(item) });
 });
 
 // DELETE /api/relatorios-manutencao/:id — o próprio autor pode apagar um relatório que criou;
