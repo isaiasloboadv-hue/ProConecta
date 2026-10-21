@@ -19940,12 +19940,25 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
   doc.addPage();
   doc.setFillColor(...PDF_COR.navy);
   doc.rect(0, 0, pageW, pageH, 'F');
-  // pedido do usuário: "clone e deixe exatamente igual" — mesma posição/tamanho do modelo de
-  // referência (idêntico ao capa do gerarPdfRelatorioTecnico: logo fixo em y=130, bem acima do
-  // bloco de título, não centralizado verticalmente com ele).
-  if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', pageW / 2 - 42, 130, 84, 97); } catch (e) {} }
-  doc.setFontSize(24); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
-  doc.text(empresaNome(), pageW / 2, 265, { align: 'center' });
+  // pedido do usuário: "o logo mudar também, coloque exatamente igual a foto que mandei" — não é
+  // ícone centralizado com o nome embaixo (como no resto do app), e sim o logotipo completo:
+  // ícone à esquerda + nome em 2 linhas empilhadas ao lado (mesmo "lockup" do cabeçalho da pág.
+  // 1, só bem maior aqui), o bloco inteiro (ícone+texto) centralizado como uma unidade só.
+  {
+    const palavras = empresaNome().split(' ');
+    const primeira = palavras[0], resto = palavras.slice(1).join(' ');
+    const iconW = 90, iconH = 103, gap = 16;
+    doc.setFont(undefined, 'bold'); doc.setFontSize(28);
+    const wTexto = Math.max(doc.getTextWidth(primeira), resto ? doc.getTextWidth(resto) : 0);
+    const totalW = iconW + gap + wTexto;
+    const xIcon = pageW / 2 - totalW / 2;
+    const xTexto = xIcon + iconW + gap;
+    const yTopo = 150;
+    if (logoDataUri) { try { doc.addImage(logoDataUri.cover, 'PNG', xIcon, yTopo, iconW, iconH); } catch (e) {} }
+    doc.setFont(undefined, 'bold'); doc.setFontSize(28); doc.setTextColor(...PDF_COR.white);
+    doc.text(primeira, xTexto, yTopo + 46);
+    if (resto) doc.text(resto, xTexto, yTopo + 88);
+  }
   doc.setFontSize(22); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.white);
   doc.text('RELATÓRIO TÉCNICO', pageW / 2, 420, { align: 'center' });
   doc.setFontSize(12); doc.setFont(undefined, 'normal'); doc.setTextColor(200, 216, 236);
