@@ -3912,13 +3912,19 @@ rota('GET', /^\/api\/relatorios-manutencao\/meus$/, async (req, res) => {
   const data = db.load();
   let lista = tenant.listar(data, 'relatorios_manutencao', user.empresa_id);
   // pedido do usuário: "os relatórios são compartilhados entre o comercial... coloque um filtro
-  // meus relatórios e todos" — "Todos" pro comercial mostra só os relatórios de QUEM TAMBÉM É
+  // meus relatórios e todos" — "Todos" pro comercial mostra os relatórios de QUEM TAMBÉM É
   // comercial (o time de vendas compartilha entre si), não o relatório técnico de manutenção de
   // suporte/administrador — diferente do ?todas=1 do administrador/supervisor, que já era (e
   // continua sendo) a empresa inteira.
+  // pedido do usuário (2ª rodada): "qualquer usuário que criar um relatório briefing, devolutivo
+  // pós visita, levantamento técnico precisa ser compartilhado com os usuários comercial" — esses
+  // 3 tipos (promotor/devolutivo/levantamento_tecnico) são sobre a visita comercial em si, por
+  // isso entram pro comercial independente de quem criou (técnico, administrador...), e não só
+  // quando o autor também é comercial, como o resto continua sendo.
+  const TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL = ['promotor', 'devolutivo', 'levantamento_tecnico'];
   if (user.papel === 'comercial' && query.todas === '1') {
     const idsComercial = new Set(tenant.listar(data, 'usuarios', user.empresa_id).filter((u) => u.papel === 'comercial').map((u) => u.id));
-    lista = lista.filter((r) => idsComercial.has(r.autor_id));
+    lista = lista.filter((r) => idsComercial.has(r.autor_id) || TIPOS_SEMPRE_COMPARTILHADOS_COMERCIAL.includes(r.tipo));
   } else if (!(['administrador', 'supervisor'].includes(user.papel) && query.todas === '1')) {
     lista = lista.filter((r) => r.autor_id === user.id);
   }
