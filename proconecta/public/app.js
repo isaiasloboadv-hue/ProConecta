@@ -34918,6 +34918,10 @@ function linhaLancamentoFamilia(t) {
   // pedido do usuário: "dar baixa em cada conta" — despesa pendente ganha uma etiqueta e um botão
   // de check rápido (além do lápis de editar) pra marcar como paga sem abrir o formulário inteiro.
   const pendente = t.tipo === 'despesa' && t.status === 'pendente';
+  // pedido do usuário: "igual fatura de cartão... considerando as parcelas" — a descrição já vem
+  // com "(i/N)" no fim (ver POST /api/financas/lancamentos), mas isso pode sumir cortado pelo
+  // text-overflow:ellipsis numa descrição longa; a etiqueta garante que a parcela sempre apareça.
+  const parcelado = t.parcela_total > 1;
   return `
     <div style="display:flex; align-items:center; gap:11px; padding:10px 0; border-bottom:1px solid #F1F4F9;">
       <div style="width:36px; height:36px; border-radius:11px; background:${cor}1A; color:${cor}; font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${esc(letra)}</div>
@@ -34925,6 +34929,7 @@ function linhaLancamentoFamilia(t) {
         <div style="font-size:13.5px; font-weight:700; color:#101826; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(t.descricao)}</div>
         <div style="font-size:11.5px; color:#94A3B8; display:flex; align-items:center; gap:6px;">
           <span>${esc(t.categoria)} · ${fmtDataFamilia(t.data)}</span>
+          ${parcelado ? `<span style="font-size:10px; font-weight:700; color:${FAM_COR.blue}; background:#E8F0FD; padding:1px 7px; border-radius:999px; flex-shrink:0;">${t.parcela_atual}/${t.parcela_total}</span>` : ''}
           ${pendente ? `<span style="font-size:10px; font-weight:700; color:${FAM_COR.amarelo}; background:#FEF3C7; padding:1px 7px; border-radius:999px; flex-shrink:0;">Pendente</span>` : ''}
         </div>
       </div>
@@ -35179,11 +35184,13 @@ function coletarDraftFamiliaNovo() {
   const elValor = document.getElementById('fn-valor');
   const elDescricao = document.getElementById('fn-descricao');
   const elData = document.getElementById('fn-data');
+  const elParcelas = document.getElementById('fn-parcelas');
   return {
     ...base,
     valor: elValor ? elValor.value : base.valor,
     descricao: elDescricao ? elDescricao.value : base.descricao,
     data: elData ? elData.value : base.data,
+    parcelas: elParcelas ? elParcelas.value : base.parcelas,
   };
 }
 
@@ -35251,6 +35258,12 @@ function renderFamiliaNovo() {
           <button type="button" onclick="mudarStatusFamiliaNovo('pendente')" style="flex:1; border:none; background:${d.status === 'pendente' ? '#FEF3C7' : 'transparent'}; color:${d.status === 'pendente' ? FAM_COR.amarelo : '#94A3B8'}; font-weight:${d.status === 'pendente' ? 700 : 600}; font-size:13px; padding:9px 0; border-radius:9px; cursor:pointer;">Pendente</button>
         </div>
       </div>` : ''}
+      ${d.tipo === 'despesa' && !editando ? `
+      <div>
+        <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Parcelar em quantas vezes?</label>
+        <input id="fn-parcelas" type="number" step="1" min="1" max="48" value="${esc(d.parcelas || 1)}" style="width:100%; box-sizing:border-box; border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; font-size:14px;">
+        <div style="font-size:11px; color:#94A3B8; margin-top:5px;">Igual fatura de cartão: cria uma parcela por mês a partir da data acima, com o mesmo valor cada uma. Deixe 1 se não for parcelado.</div>
+      </div>` : ''}
     </div>
 
     <button onclick="salvarLancamentoFamilia(${editando ? d.id : 'null'})" style="margin-top:22px; width:100%; border:none; background:${d.tipo === 'receita' ? FAM_COR.verde : FAM_COR.navy}; color:#fff; font-weight:700; font-size:14.5px; padding:14px 0; border-radius:14px; cursor:pointer;">Salvar lançamento</button>
@@ -35260,6 +35273,7 @@ function renderFamiliaNovo() {
 }
 
 async function salvarLancamentoFamilia(id) {
+  const elParcelas = document.getElementById('fn-parcelas');
   const body = {
     tipo: familiaNovoDraft.tipo,
     categoria: document.getElementById('fn-categoria').value,
@@ -35267,12 +35281,17 @@ async function salvarLancamentoFamilia(id) {
     valor: document.getElementById('fn-valor').value,
     data: document.getElementById('fn-data').value,
     status: familiaNovoDraft.status || 'pago',
+    parcelas: elParcelas ? elParcelas.value : 1,
   };
   try {
-    if (id) await api(`/api/financas/lancamentos/${id}`, { method: 'PUT', body });
-    else await api('/api/financas/lancamentos', { method: 'POST', body });
+    if (id) {
+      await api(`/api/financas/lancamentos/${id}`, { method: 'PUT', body });
+      mostrarToast('Lançamento atualizado.');
+    } else {
+      const resp = await api('/api/financas/lancamentos', { method: 'POST', body });
+      mostrarToast(resp.parcelas > 1 ? `${resp.parcelas} parcelas lançadas, uma por mês a partir de ${fmtDataFamilia(body.data)}.` : 'Lançamento salvo.');
+    }
     familiaNovoDraft = null;
-    mostrarToast(id ? 'Lançamento atualizado.' : 'Lançamento salvo.');
     irFamilia('familia-inicio');
   } catch (e) { alert('Erro ao salvar: ' + e.message); }
 }

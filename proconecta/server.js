@@ -12699,6 +12699,17 @@ function validarLancamentoFamilia(body) {
   return null;
 }
 
+// pedido do usuário: "igual uma fatura de cartão, sei quanto vai ser de despesas nos outros
+// meses, considerando as parcelas" — soma N meses a uma data, mantendo o dia (ajustado pro
+// último dia do mês de destino quando ele é mais curto, ex.: 31/01 + 1 mês vira 28/02, não 03/03).
+function somarMesesData(dataIso, n) {
+  const [ano, mes, dia] = dataIso.split('-').map(Number);
+  const alvo = new Date(ano, mes - 1 + n, 1);
+  const ultimoDiaDoMesAlvo = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate();
+  const diaFinal = Math.min(dia, ultimoDiaDoMesAlvo);
+  return new Date(alvo.getFullYear(), alvo.getMonth(), diaFinal).toISOString().slice(0, 10);
+}
+
 // GET /api/financas/resumo — dados agregados do Início (saldo, gastos por categoria do mês,
 // evolução dos últimos 6 meses, metas, orçamento do mês e uma prévia dos últimos lançamentos).
 // Tudo calculado na hora a partir de financas_lancamentos — nenhum total fica guardado à parte,
@@ -12813,15 +12824,29 @@ rota('POST', /^\/api\/financas\/lancamentos$/, async (req, res) => {
   // pedido do usuário: "dar baixa em cada conta" — status pago/pendente só faz sentido pra
   // despesa (uma "conta"); receita nasce sempre "pago" (dinheiro que já entrou).
   const status = body.tipo === 'despesa' && body.status === 'pendente' ? 'pendente' : 'pago';
-  const item = tenant.criar(data, 'financas_lancamentos', user.empresa_id, {
-    tipo: body.tipo, categoria: body.categoria, descricao: String(body.descricao).trim(),
-    valor: Number(body.valor), data: body.data, status,
-    pago_em: status === 'pago' ? new Date().toISOString() : null,
-    autor_id: user.id, autor_nome: (autor && autor.nome) || user.nome || '',
-    criado_em: new Date().toISOString(),
-  });
+  // pedido do usuário: "igual uma fatura de cartão, sei quanto vai ser de despesas nos outros
+  // meses, considerando as parcelas" — só despesa parcela (receita recorrente não é o pedido);
+  // cada parcela vira um lançamento próprio um mês depois do anterior (ver somarMesesData acima),
+  // com a descrição marcada "(i/N)" — assim cada mês futuro já mostra o valor certo ao navegar
+  // (ver seletor de mês em app.js). A 1ª parcela nasce com o status escolhido no formulário; as
+  // seguintes nascem sempre "pendente" (são cobranças futuras, ainda não pagas).
+  const parcelas = body.tipo === 'despesa' ? Math.min(48, Math.max(1, Math.round(Number(body.parcelas) || 1))) : 1;
+  const descricaoBase = String(body.descricao).trim();
+  const criados = [];
+  for (let i = 0; i < parcelas; i++) {
+    const statusParcela = i === 0 ? status : 'pendente';
+    criados.push(tenant.criar(data, 'financas_lancamentos', user.empresa_id, {
+      tipo: body.tipo, categoria: body.categoria,
+      descricao: parcelas > 1 ? `${descricaoBase} (${i + 1}/${parcelas})` : descricaoBase,
+      valor: Number(body.valor), data: somarMesesData(body.data, i), status: statusParcela,
+      parcela_atual: parcelas > 1 ? i + 1 : null, parcela_total: parcelas > 1 ? parcelas : null,
+      pago_em: statusParcela === 'pago' ? new Date().toISOString() : null,
+      autor_id: user.id, autor_nome: (autor && autor.nome) || user.nome || '',
+      criado_em: new Date().toISOString(),
+    }));
+  }
   db.save(data);
-  enviarJSON(res, 201, { lancamento: item });
+  enviarJSON(res, 201, { lancamento: criados[0], parcelas: criados.length });
 });
 
 rota('PUT', /^\/api\/financas\/lancamentos\/(\d+)$/, async (req, res, m) => {
