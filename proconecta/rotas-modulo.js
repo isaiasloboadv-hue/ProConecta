@@ -102,12 +102,12 @@ const PREFIXO_MODULO = [
   // sub-rotas (/api/pmoc/locais, /ambientes, /aparelhos, /responsaveis-tecnicos, ...) porque elas
   // nascem com barra (bateComPrefixo abaixo exige "/" depois do prefixo).
   ['/api/pmoc', 'pmoc'],
-  // pedido do usuário: controle financeiro familiar (pessoa física) — um prefixo só cobre todas
-  // as sub-rotas (/api/financas/lancamentos, /metas, /orcamentos, /resumo), mesmo padrão do
-  // /api/pmoc acima. Só empresa com o módulo `financas_familia` ligado (ver MODULOS_DISPONIVEIS em
-  // db.js) usa esse prefixo — na prática, só "famílias" (empresas cujo único uso é este módulo).
-  ['/api/financas', 'financas_familia'],
 ];
+// /api/financas/* (lançamentos, metas, orçamentos, resumo — controle financeiro familiar) NÃO
+// entra no PREFIXO_MODULO acima — cai em "núcleo" por omissão, mesmo padrão de /api/os-refrigeracao
+// (ver comentário no topo do arquivo): não há módulo de plano pra isso, o acesso é por `perfil` da
+// empresa (`financas_familiar`, ver PERFIS_DISPONIVEIS em db.js), checado no próprio handler em
+// server.js (ver PAPEIS_FINANCAS_FAMILIA/empresaPerfilFinancasFamiliar/exigirPerfilFinancasFamiliar).
 
 // tudo que não bate com nenhum prefixo acima é núcleo: login/convite (públicos, tratados à
 // parte), /api/me, /api/clientes, /api/usuarios, /api/notificacoes, /api/push, /api/chat-interno,

@@ -22,9 +22,6 @@ const PAPEL_LABEL = {
   suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro', comercial: 'Comercial',
   // versão Restaurantes/rede multiunidade (Fase 1 — Base)
   gerente_loja: 'Gerente de loja', coordenador_tecnico: 'Coordenador técnico', consultor_mercado: 'Consultor de mercado',
-  // controle financeiro da família (módulo `financas_familia`) — ver entrarNoApp (casca própria,
-  // sem menu lateral) e renderFamiliaInicio/Lancamentos/Novo/Metas/Orcamento.
-  pessoa_fisica: 'Pessoa física',
 };
 const STATUS_OPERACIONAL_LABEL = { operando: 'Operando', restricao: 'Com restrição', parado: 'Parado' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
@@ -597,7 +594,10 @@ function entrarNoApp() {
   // controle financeiro da família: casca própria, sem o menu lateral/cabeçalho do núcleo (ver
   // pedido do usuário — "pra parecer um app de banco" — e AskUserQuestion confirmando a
   // navegação inferior isolada em vez do menu lateral padrão). appView nem chega a aparecer.
-  if (USER.papel === 'pessoa_fisica') {
+  // Gate por `perfil` da empresa (ver PERFIS_DISPONIVEIS em db.js), não por papel do usuário —
+  // mesmo padrão do perfil "Refrigeração e Climatização" (ver perfilRefrigeracaoAtivo abaixo):
+  // qualquer usuário (administrador, suporte, ...) de uma empresa com esse perfil cai aqui.
+  if (financasFamiliarAtivo()) {
     document.getElementById('appView').style.display = 'none';
     document.getElementById('familiaView').style.display = 'block';
     irFamilia('familia-inicio');
@@ -1473,6 +1473,12 @@ const GUIA_DIAGNOSTICO_PULO_DO_GATO = [
 // Serviço, e os próximos que ainda vão ser construídos, um a um — ver NAV/perfilAtivoNoMenu).
 function perfilRefrigeracaoAtivo() {
   return !!(window._empresa && window._empresa.perfil === 'refrigeracao');
+}
+
+// gate do perfil "Controle Financeiro Familiar" (ver PERFIS_DISPONIVEIS em db.js) — mesmo padrão
+// de perfilRefrigeracaoAtivo acima. Usado em entrarNoApp pra trocar a casca inteira do app.
+function financasFamiliarAtivo() {
+  return !!(window._empresa && window._empresa.perfil === 'financas_familiar');
 }
 
 async function renderGuiaDiagnosticoRapido() {
@@ -31649,10 +31655,9 @@ function papeisCadastraveis(usuario) {
   // supervisor (só visualização) e financeiro (aprova prestação de contas) — Etapa 6 do briefing
   // white label — só o administrador geral cadastra, igual administrador.
   const base = ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro', 'comercial'];
-  // controle financeiro da família: só aparece pra cadastro numa empresa com o módulo
-  // `financas_familia` ligado (mesmo padrão de "comFiliais"/"equipe_avancado" abaixo) — na prática,
-  // só empresas que SÃO uma "família" (ver papelExigeFinancasFamiliar em server.js).
-  if ((USER.modulos_ativos || []).includes('financas_familia')) base.push('pessoa_fisica');
+  // controle financeiro da família (perfil `financas_familiar`, ver PERFIS_DISPONIVEIS em db.js):
+  // membros da família usam os papéis padrão já listados acima (administrador/suporte — ver
+  // PAPEIS_FINANCAS_FAMILIA em server.js), nenhum papel exclusivo a mais pra essas empresas.
   // pedido do usuário: "o perfil comercial é quando já é uma empresa grande e já é dividido em
   // vários departamento" — Comercial/Financeiro como login PRÓPRIO (separado do administrador)
   // só faz sentido numa empresa já dividida em departamentos, o mesmo estágio que o módulo
@@ -31675,7 +31680,6 @@ function mostrarFormUsuario(usuario) {
     administrador: 'Administrador', cliente: 'Cliente', supervisor: 'Supervisor', financeiro: 'Financeiro',
     comercial: 'Comercial',
     gerente_loja: 'Gerente de loja', coordenador_tecnico: 'Coordenador técnico', consultor_mercado: 'Consultor de mercado',
-    pessoa_fisica: 'Pessoa física',
   };
   const filiais = window._filiaisCache || [];
   const setores = window._setoresCache || [];
@@ -34785,12 +34789,13 @@ async function cancelarSolicitacaoRH(id) {
 }
 
 // =====================================================================================
-// ---------- CONTROLE FINANCEIRO DA FAMÍLIA (papel pessoa_fisica) ----------
+// ---------- CONTROLE FINANCEIRO DA FAMÍLIA (perfil "financas_familiar") ----------
 // pedido do usuário: "Crie um perfil para pessoa física para controle financeiro familiar...
-// com cara de app de banco digital" — casca própria (ver entrarNoApp acima), sem o menu lateral
-// do núcleo: cada tela desenha a própria barra de navegação inferior (ver barraInferiorFamilia).
-// Lançamentos/metas/orçamento são compartilhados entre todos os membros da família (mesma
-// empresa_id) — ver comentário em server.js (GET/POST /api/financas/*).
+// com cara de app de banco digital" — mesmo padrão do perfil "Refrigeração e Climatização" (ver
+// PERFIS_DISPONIVEIS em db.js): casca própria (ver entrarNoApp/financasFamiliarAtivo acima), sem
+// o menu lateral do núcleo — cada tela desenha a própria barra de navegação inferior (ver
+// barraInferiorFamilia). Lançamentos/metas/orçamento são compartilhados entre todos os membros da
+// família (mesma empresa_id) — ver comentário em server.js (GET/POST /api/financas/*).
 // =====================================================================================
 
 const CATEGORIAS_DESPESA_FAMILIA = ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Educação', 'Outros'];

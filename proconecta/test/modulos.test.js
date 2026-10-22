@@ -42,13 +42,13 @@ test('desativar um módulo não afeta os outros da mesma empresa', () => {
 // ser do mais simples ao completo" — Relatório/Equipamentos/IA e Equipe/Escala/KPIs/FMEA saíram
 // de dentro de "os_chamados" e viraram módulos próprios (ver rotas-modulo.js). "pmoc" (pacote
 // Climatização/PMOC) entrou depois — exclusivo de empresas com `perfil: 'refrigeracao'`, ver
-// comentário em MODULOS_DISPONIVEIS (db.js). "financas_familia" (controle financeiro da família,
-// pessoa física) entrou depois ainda — mesmo padrão `foraDaCascataPadrao` do "pmoc".
-test('MODULOS_DISPONIVEIS lista todos os 14 módulos da spec', () => {
+// comentário em MODULOS_DISPONIVEIS (db.js). Controle financeiro da família é `perfil`
+// (`financas_familiar`, ver PERFIS_DISPONIVEIS em db.js), não módulo — não entra nesta lista.
+test('MODULOS_DISPONIVEIS lista todos os 13 módulos da spec', () => {
   const chaves = db.MODULOS_DISPONIVEIS.map((m) => m.chave).sort();
   assert.deepEqual(chaves, [
     'agendamento', 'assistente_ia', 'atividades', 'biblioteca', 'comercial', 'equipe_avancado',
-    'financeiro', 'filiais', 'financas_familia', 'os_chamados', 'pmoc', 'prestacao_contas', 'relatorios', 'smp_preventivas',
+    'financeiro', 'filiais', 'os_chamados', 'pmoc', 'prestacao_contas', 'relatorios', 'smp_preventivas',
   ].sort());
 });
 

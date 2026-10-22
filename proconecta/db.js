@@ -80,13 +80,6 @@ const MODULOS_DISPONIVEIS = [
   // outros módulos, já que nenhum plano da cascata padrão tem "pmoc" de propósito — ver comentário
   // acima). Continua ativável normalmente por empresa (Super Admin > Cadastros > Módulos ativos).
   { chave: 'pmoc', nome: 'Climatização / PMOC', foraDaCascataPadrao: true },
-  // pedido do usuário: "controle financeiro familiar... com cara de app de banco digital" — vertical
-  // à parte pra pessoa física (não é módulo B2B contratável na cascata de planos normal, mesmo
-  // padrão de `foraDaCascataPadrao` do PMOC acima). Uma "família" é uma empresa tenant comum, só que
-  // com esse módulo ligado e cujos usuários têm papel `pessoa_fisica` (ver NAV/entrarNoApp em
-  // app.js, que troca a casca inteira do app — sem menu lateral, barra de navegação inferior
-  // própria — e papelExigePessoaFisica/PAPEIS_PESSOA_FISICA em server.js).
-  { chave: 'financas_familia', nome: 'Finanças da Família', foraDaCascataPadrao: true },
 ];
 const CHAVES_MODULOS = MODULOS_DISPONIVEIS.map((m) => m.chave);
 // subconjunto de CHAVES_MODULOS elegível pra fazer parte da cascata de planos padrão (Básico →
@@ -188,6 +181,19 @@ const PERFIS_DISPONIVEIS = [
     nome: 'Refrigeração e Climatização',
     segmentos: [
       { chave: 'generico', nome: 'Refrigeração e Climatização' },
+    ],
+  },
+  // pedido do usuário: "controle financeiro familiar... com cara de app de banco digital" — mesmo
+  // padrão do perfil "refrigeracao" acima (não é módulo B2B contratável na cascata de planos
+  // normal): uma "família" é uma empresa tenant comum (ver tenant.js) com esse `perfil`, cujos
+  // usuários usam os papéis padrão (administrador/suporte) — ver entrarNoApp em app.js, que troca
+  // a casca inteira do app pra essas empresas (sem menu lateral, barra de navegação inferior
+  // própria), e exigirPerfilFinancasFamiliar em server.js.
+  {
+    chave: 'financas_familiar',
+    nome: 'Controle Financeiro Familiar',
+    segmentos: [
+      { chave: 'generico', nome: 'Controle Financeiro Familiar' },
     ],
   },
 ];
@@ -473,10 +479,10 @@ function seed() {
     // cresce sem parar; ver podarLeiturasMonitor em server.js (mantém só os últimos N dias por
     // dispositivo a cada ingestão, pro arquivo JSON não crescer sem limite).
     os_refrigeracao_monitor_leituras: [],
-    // pedido do usuário: controle financeiro familiar (pessoa física, módulo `financas_familia`
-    // acima) — lançamentos (receita/despesa categorizados), metas de economia e orçamento mensal
-    // por categoria. Compartilhados entre todos os membros da família (mesma empresa_id), não por
-    // usuário — ver GET/POST /api/financas/* em server.js.
+    // pedido do usuário: controle financeiro familiar (perfil `financas_familiar`, ver
+    // PERFIS_DISPONIVEIS acima) — lançamentos (receita/despesa categorizados), metas de economia e
+    // orçamento mensal por categoria. Compartilhados entre todos os membros da família (mesma
+    // empresa_id), não por usuário — ver GET/POST /api/financas/* em server.js.
     financas_lancamentos: [],
     financas_metas: [],
     financas_orcamentos: [],
@@ -1334,7 +1340,7 @@ function migrar(data) {
   if (!data._seq.os_refrigeracao_monitor_dispositivos) data._seq.os_refrigeracao_monitor_dispositivos = 1;
   if (!Array.isArray(data.os_refrigeracao_monitor_leituras)) data.os_refrigeracao_monitor_leituras = [];
   if (!data._seq.os_refrigeracao_monitor_leituras) data._seq.os_refrigeracao_monitor_leituras = 1;
-  // pedido do usuário: controle financeiro familiar (módulo `financas_familia`, ver seed() acima).
+  // pedido do usuário: controle financeiro familiar (perfil `financas_familiar`, ver seed() acima).
   if (!Array.isArray(data.financas_lancamentos)) data.financas_lancamentos = [];
   if (!data._seq.financas_lancamentos) data._seq.financas_lancamentos = 1;
   if (!Array.isArray(data.financas_metas)) data.financas_metas = [];
