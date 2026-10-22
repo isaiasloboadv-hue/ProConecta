@@ -156,6 +156,13 @@ function papelExigeEstruturaFiliais(data, empresaId, papel) {
   return escopo.PAPEIS_ESTRUTURA_FILIAIS.includes(papel) && !db.moduloAtivo(data, empresaId, 'filiais');
 }
 
+// controle financeiro familiar (pessoa física) — mesmo padrão de papelExigeDepartamentalizacao/
+// papelExigeEstruturaFiliais acima: o papel só pode ser cadastrado numa empresa que já tem o
+// módulo `financas_familia` ligado (ver MODULOS_DISPONIVEIS em db.js).
+function papelExigeFinancasFamiliar(data, empresaId, papel) {
+  return papel === 'pessoa_fisica' && !db.moduloAtivo(data, empresaId, 'financas_familia');
+}
+
 // resolve/valida filial_id (gerente_loja) ou setor_id (coordenador_tecnico/consultor_mercado) no
 // cadastro/edição de usuário — gerente só pode gerenciar a própria loja, coordenador/consultor só
 // o próprio setor, então o vínculo nasce aqui, não é escolha livre de qualquer id. Técnico
@@ -10684,6 +10691,9 @@ rota('POST', /^\/api\/usuarios$/, async (req, res) => {
   if (papelExigeEstruturaFiliais(data, user.empresa_id, body.papel)) {
     return enviarJSON(res, 400, { erro: 'Gerente de loja/Coordenador técnico/Consultor de mercado ficam disponíveis a partir do módulo "Redes e Filiais". Cadastre primeiro os setores/filiais da empresa.' });
   }
+  if (papelExigeFinancasFamiliar(data, user.empresa_id, body.papel)) {
+    return enviarJSON(res, 400, { erro: 'O papel "Pessoa física" só existe em uma empresa com o módulo "Finanças da Família" ativo.' });
+  }
   const refsFilial = validarReferenciasEstruturaFiliais(data, user.empresa_id, body.papel, body);
   if (refsFilial.erro) return enviarJSON(res, 400, { erro: refsFilial.erro });
   if (tenant.listar(data, 'usuarios', user.empresa_id).some((u) => u.email === body.email)) {
@@ -12661,6 +12671,265 @@ rota('PUT', /^\/api\/plataforma\/empresas\/(\d+)\/terminologia$/, async (req, re
   empresa.terminologia = limpa;
   db.save(data);
   enviarJSON(res, 200, { empresa });
+});
+
+// ---------- controle financeiro da família (pessoa física) ----------
+// pedido do usuário: "controle financeiro familiar... com cara de app de banco digital". Toda
+// uma "família" é uma empresa tenant comum (ver tenant.js) com o módulo `financas_familia` ligado
+// (checagem automática via rotas-modulo.js — ['/api/financas', 'financas_familia']); os
+// lançamentos/metas/orçamento são compartilhados entre todos os membros da família (mesma
+// empresa_id), não isolados por usuário — qualquer um pode ver/editar o que qualquer outro lançou,
+// de propósito (é o mesmo "caixa" da casa).
+
+const CATEGORIAS_DESPESA_FAMILIA = ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Educação', 'Outros'];
+const CATEGORIAS_RECEITA_FAMILIA = ['Salário', 'Mesada', 'Outros'];
+
+function validarLancamentoFamilia(body) {
+  if (body.tipo !== 'despesa' && body.tipo !== 'receita') return 'Informe se é despesa ou receita.';
+  const categorias = body.tipo === 'despesa' ? CATEGORIAS_DESPESA_FAMILIA : CATEGORIAS_RECEITA_FAMILIA;
+  if (!categorias.includes(body.categoria)) return 'Categoria inválida.';
+  if (!String(body.descricao || '').trim()) return 'Informe uma descrição.';
+  const valor = Number(body.valor);
+  if (!Number.isFinite(valor) || valor <= 0) return 'Informe um valor maior que zero.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.data || ''))) return 'Informe a data do lançamento.';
+  return null;
+}
+
+// GET /api/financas/resumo — dados agregados do Início (saldo, gastos por categoria do mês,
+// evolução dos últimos 6 meses, metas, orçamento do mês e uma prévia dos últimos lançamentos).
+// Tudo calculado na hora a partir de financas_lancamentos — nenhum total fica guardado à parte,
+// pra nunca ficar desatualizado em relação aos lançamentos de verdade.
+rota('GET', /^\/api\/financas\/resumo$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const data = db.load();
+  const lancamentos = tenant.listar(data, 'financas_lancamentos', user.empresa_id);
+  const saldoTotal = lancamentos.reduce((soma, l) => soma + (l.tipo === 'receita' ? l.valor : -l.valor), 0);
+
+  const agora = new Date();
+  const mesAtual = agora.toISOString().slice(0, 7);
+  const doMes = (l, mes) => (l.data || '').slice(0, 7) === mes;
+
+  const despesasMes = lancamentos.filter((l) => l.tipo === 'despesa' && doMes(l, mesAtual));
+  const receitasMes = lancamentos.filter((l) => l.tipo === 'receita' && doMes(l, mesAtual));
+  const totalDespesasMes = despesasMes.reduce((s, l) => s + l.valor, 0);
+  const totalReceitasMes = receitasMes.reduce((s, l) => s + l.valor, 0);
+
+  const gastosPorCategoria = CATEGORIAS_DESPESA_FAMILIA
+    .map((categoria) => {
+      const valor = despesasMes.filter((l) => l.categoria === categoria).reduce((s, l) => s + l.valor, 0);
+      return { categoria, valor, percentual: totalDespesasMes ? Math.round((valor / totalDespesasMes) * 100) : 0 };
+    })
+    .filter((c) => c.valor > 0)
+    .sort((a, b) => b.valor - a.valor);
+
+  // últimos 6 meses (incluindo o atual), mais antigo primeiro — pro gráfico de evolução mensal.
+  const NOMES_MES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const evolucaoMensal = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(agora.getFullYear(), agora.getMonth() - i, 1);
+    const mes = d.toISOString().slice(0, 7);
+    evolucaoMensal.push({
+      mes,
+      label: NOMES_MES[d.getMonth()],
+      receita: lancamentos.filter((l) => l.tipo === 'receita' && doMes(l, mes)).reduce((s, l) => s + l.valor, 0),
+      despesa: lancamentos.filter((l) => l.tipo === 'despesa' && doMes(l, mes)).reduce((s, l) => s + l.valor, 0),
+    });
+  }
+
+  const metas = tenant.listar(data, 'financas_metas', user.empresa_id)
+    .map((m) => ({ ...m, percentual: m.valor_alvo ? Math.min(100, Math.round((m.valor_atual / m.valor_alvo) * 100)) : 0 }))
+    .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+
+  const orcamentos = tenant.listar(data, 'financas_orcamentos', user.empresa_id)
+    .filter((o) => o.mes === mesAtual)
+    .map((o) => {
+      const gastoAtual = despesasMes.filter((l) => l.categoria === o.categoria).reduce((s, l) => s + l.valor, 0);
+      return { ...o, gastoAtual, percentual: o.limite ? Math.round((gastoAtual / o.limite) * 100) : 0 };
+    });
+
+  const ultimosLancamentos = [...lancamentos]
+    .sort((a, b) => (b.data + b.criado_em).localeCompare(a.data + a.criado_em))
+    .slice(0, 5);
+
+  enviarJSON(res, 200, {
+    saldoTotal, totalDespesasMes, totalReceitasMes, gastosPorCategoria, evolucaoMensal,
+    metas, orcamentos, ultimosLancamentos,
+    categoriasDespesa: CATEGORIAS_DESPESA_FAMILIA, categoriasReceita: CATEGORIAS_RECEITA_FAMILIA,
+  });
+});
+
+// GET /api/financas/lancamentos?tipo=&categoria=&mes=YYYY-MM — lista completa (pra tela
+// "Lançamentos"), mais recente primeiro; os filtros são todos opcionais e combináveis.
+rota('GET', /^\/api\/financas\/lancamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const { query } = url.parse(req.url, true);
+  const data = db.load();
+  let lista = tenant.listar(data, 'financas_lancamentos', user.empresa_id);
+  if (query.tipo) lista = lista.filter((l) => l.tipo === query.tipo);
+  if (query.categoria) lista = lista.filter((l) => l.categoria === query.categoria);
+  if (query.mes) lista = lista.filter((l) => (l.data || '').slice(0, 7) === query.mes);
+  lista = [...lista].sort((a, b) => (b.data + b.criado_em).localeCompare(a.data + a.criado_em));
+  enviarJSON(res, 200, { lancamentos: lista });
+});
+
+rota('POST', /^\/api\/financas\/lancamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const body = await lerCorpo(req);
+  const erro = validarLancamentoFamilia(body);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const data = db.load();
+  const autor = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
+  const item = tenant.criar(data, 'financas_lancamentos', user.empresa_id, {
+    tipo: body.tipo, categoria: body.categoria, descricao: String(body.descricao).trim(),
+    valor: Number(body.valor), data: body.data,
+    autor_id: user.id, autor_nome: (autor && autor.nome) || user.nome || '',
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { lancamento: item });
+});
+
+rota('PUT', /^\/api\/financas\/lancamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const body = await lerCorpo(req);
+  const erro = validarLancamentoFamilia(body);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const data = db.load();
+  const item = tenant.buscar(data, 'financas_lancamentos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Lançamento não encontrado.' });
+  Object.assign(item, {
+    tipo: body.tipo, categoria: body.categoria, descricao: String(body.descricao).trim(),
+    valor: Number(body.valor), data: body.data,
+  });
+  db.save(data);
+  enviarJSON(res, 200, { lancamento: item });
+});
+
+rota('DELETE', /^\/api\/financas\/lancamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'financas_lancamentos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Lançamento não encontrado.' });
+  data.financas_lancamentos = data.financas_lancamentos.filter((l) => l.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ----- metas de economia -----
+
+rota('GET', /^\/api\/financas\/metas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const data = db.load();
+  const metas = tenant.listar(data, 'financas_metas', user.empresa_id).sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
+  enviarJSON(res, 200, { metas });
+});
+
+rota('POST', /^\/api\/financas\/metas$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const body = await lerCorpo(req);
+  if (!String(body.nome || '').trim()) return enviarJSON(res, 400, { erro: 'Dê um nome pra meta.' });
+  const valorAlvo = Number(body.valor_alvo);
+  if (!Number.isFinite(valorAlvo) || valorAlvo <= 0) return enviarJSON(res, 400, { erro: 'Informe um valor alvo maior que zero.' });
+  const data = db.load();
+  const item = tenant.criar(data, 'financas_metas', user.empresa_id, {
+    nome: String(body.nome).trim(), valor_alvo: valorAlvo, valor_atual: 0,
+    criado_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarJSON(res, 201, { meta: item });
+});
+
+// PUT /api/financas/metas/:id — edita nome/valor alvo e/ou guarda um aporte (valor_atual soma
+// `aporte`, em vez do front mandar o total já calculado — evita dois aportes simultâneos de
+// membros diferentes da família pisarem um no outro, cada PUT soma em cima do que está salvo).
+rota('PUT', /^\/api\/financas\/metas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const body = await lerCorpo(req);
+  const data = db.load();
+  const item = tenant.buscar(data, 'financas_metas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Meta não encontrada.' });
+  if (body.nome !== undefined) item.nome = String(body.nome).trim() || item.nome;
+  if (body.valor_alvo !== undefined) {
+    const valorAlvo = Number(body.valor_alvo);
+    if (Number.isFinite(valorAlvo) && valorAlvo > 0) item.valor_alvo = valorAlvo;
+  }
+  if (body.aporte !== undefined) {
+    const aporte = Number(body.aporte);
+    if (Number.isFinite(aporte)) item.valor_atual = Math.max(0, item.valor_atual + aporte);
+  }
+  db.save(data);
+  enviarJSON(res, 200, { meta: item });
+});
+
+rota('DELETE', /^\/api\/financas\/metas\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'financas_metas', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Meta não encontrada.' });
+  data.financas_metas = data.financas_metas.filter((x) => x.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
+});
+
+// ----- orçamento mensal por categoria -----
+
+rota('GET', /^\/api\/financas\/orcamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const { query } = url.parse(req.url, true);
+  const mes = /^\d{4}-\d{2}$/.test(query.mes || '') ? query.mes : new Date().toISOString().slice(0, 7);
+  const data = db.load();
+  const despesasDoMes = tenant.listar(data, 'financas_lancamentos', user.empresa_id)
+    .filter((l) => l.tipo === 'despesa' && (l.data || '').slice(0, 7) === mes);
+  const orcamentos = tenant.listar(data, 'financas_orcamentos', user.empresa_id)
+    .filter((o) => o.mes === mes)
+    .map((o) => {
+      const gastoAtual = despesasDoMes.filter((l) => l.categoria === o.categoria).reduce((s, l) => s + l.valor, 0);
+      return { ...o, gastoAtual, percentual: o.limite ? Math.round((gastoAtual / o.limite) * 100) : 0 };
+    });
+  enviarJSON(res, 200, { mes, orcamentos, categorias: CATEGORIAS_DESPESA_FAMILIA });
+});
+
+// POST /api/financas/orcamentos — "upsert": já existindo orçamento pra essa categoria+mês, só
+// atualiza o limite em vez de duplicar a linha.
+rota('POST', /^\/api\/financas\/orcamentos$/, async (req, res) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const body = await lerCorpo(req);
+  if (!CATEGORIAS_DESPESA_FAMILIA.includes(body.categoria)) return enviarJSON(res, 400, { erro: 'Categoria inválida.' });
+  if (!/^\d{4}-\d{2}$/.test(String(body.mes || ''))) return enviarJSON(res, 400, { erro: 'Mês inválido.' });
+  const limite = Number(body.limite);
+  if (!Number.isFinite(limite) || limite <= 0) return enviarJSON(res, 400, { erro: 'Informe um limite maior que zero.' });
+  const data = db.load();
+  let item = tenant.listar(data, 'financas_orcamentos', user.empresa_id)
+    .find((o) => o.categoria === body.categoria && o.mes === body.mes);
+  if (item) {
+    item.limite = limite;
+  } else {
+    item = tenant.criar(data, 'financas_orcamentos', user.empresa_id, { categoria: body.categoria, mes: body.mes, limite });
+  }
+  db.save(data);
+  enviarJSON(res, 200, { orcamento: item });
+});
+
+rota('DELETE', /^\/api\/financas\/orcamentos\/(\d+)$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  if (!exigirPapel(user, ['pessoa_fisica'])) return enviarJSON(res, 403, { erro: 'Só quem usa o controle financeiro da família acessa isso.' });
+  const data = db.load();
+  const item = tenant.buscar(data, 'financas_orcamentos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Orçamento não encontrado.' });
+  data.financas_orcamentos = data.financas_orcamentos.filter((x) => x.id !== item.id);
+  db.save(data);
+  enviarJSON(res, 200, { ok: true });
 });
 
 // ---------- assistente de suporte via WhatsApp (opcional) ----------

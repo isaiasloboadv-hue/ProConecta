@@ -22,6 +22,9 @@ const PAPEL_LABEL = {
   suporte: 'Suporte', administrador: 'Administrador', cliente: 'Cliente', producao: 'Produção', pos_venda: 'Pós-venda', estoque: 'Estoque', super_admin: 'Super Admin', supervisor: 'Supervisor', financeiro: 'Financeiro', comercial: 'Comercial',
   // versão Restaurantes/rede multiunidade (Fase 1 — Base)
   gerente_loja: 'Gerente de loja', coordenador_tecnico: 'Coordenador técnico', consultor_mercado: 'Consultor de mercado',
+  // controle financeiro da família (módulo `financas_familia`) — ver entrarNoApp (casca própria,
+  // sem menu lateral) e renderFamiliaInicio/Lancamentos/Novo/Metas/Orcamento.
+  pessoa_fisica: 'Pessoa física',
 };
 const STATUS_OPERACIONAL_LABEL = { operando: 'Operando', restricao: 'Com restrição', parado: 'Parado' };
 // setores que têm administrador próprio (cada um só cadastra gente do próprio setor + clientes) —
@@ -364,6 +367,8 @@ function mostrarTelaLogin() {
   const splash = document.getElementById('splashView');
   if (splash) splash.style.display = 'none';
   document.getElementById('appView').style.display = 'none';
+  const familiaView = document.getElementById('familiaView');
+  if (familiaView) familiaView.style.display = 'none';
   document.getElementById('authView').style.display = 'flex';
   mostrarFormLoginNovamente();
 }
@@ -588,8 +593,17 @@ function entrarNoApp() {
   const splash = document.getElementById('splashView');
   if (splash) splash.style.display = 'none';
   document.getElementById('authView').style.display = 'none';
-  document.getElementById('appView').style.display = 'block';
   if (USER.empresa) window._empresa = USER.empresa;
+  // controle financeiro da família: casca própria, sem o menu lateral/cabeçalho do núcleo (ver
+  // pedido do usuário — "pra parecer um app de banco" — e AskUserQuestion confirmando a
+  // navegação inferior isolada em vez do menu lateral padrão). appView nem chega a aparecer.
+  if (USER.papel === 'pessoa_fisica') {
+    document.getElementById('appView').style.display = 'none';
+    document.getElementById('familiaView').style.display = 'block';
+    irFamilia('familia-inicio');
+    return;
+  }
+  document.getElementById('appView').style.display = 'block';
   aplicarMarcaNaTela();
   const empresaTag = document.getElementById('empresaTag');
   if (empresaTag) empresaTag.textContent = USER.empresa ? USER.empresa.nome : (USER.papel === 'super_admin' ? 'Painel da plataforma' : '');
@@ -31635,6 +31649,10 @@ function papeisCadastraveis(usuario) {
   // supervisor (só visualização) e financeiro (aprova prestação de contas) — Etapa 6 do briefing
   // white label — só o administrador geral cadastra, igual administrador.
   const base = ['suporte', 'producao', 'pos_venda', 'estoque', 'administrador', 'cliente', 'supervisor', 'financeiro', 'comercial'];
+  // controle financeiro da família: só aparece pra cadastro numa empresa com o módulo
+  // `financas_familia` ligado (mesmo padrão de "comFiliais"/"equipe_avancado" abaixo) — na prática,
+  // só empresas que SÃO uma "família" (ver papelExigeFinancasFamiliar em server.js).
+  if ((USER.modulos_ativos || []).includes('financas_familia')) base.push('pessoa_fisica');
   // pedido do usuário: "o perfil comercial é quando já é uma empresa grande e já é dividido em
   // vários departamento" — Comercial/Financeiro como login PRÓPRIO (separado do administrador)
   // só faz sentido numa empresa já dividida em departamentos, o mesmo estágio que o módulo
@@ -31657,6 +31675,7 @@ function mostrarFormUsuario(usuario) {
     administrador: 'Administrador', cliente: 'Cliente', supervisor: 'Supervisor', financeiro: 'Financeiro',
     comercial: 'Comercial',
     gerente_loja: 'Gerente de loja', coordenador_tecnico: 'Coordenador técnico', consultor_mercado: 'Consultor de mercado',
+    pessoa_fisica: 'Pessoa física',
   };
   const filiais = window._filiaisCache || [];
   const setores = window._setoresCache || [];
@@ -34763,6 +34782,527 @@ async function cancelarSolicitacaoRH(id) {
   if (!(await mostrarConfirmacao('Cancelar esse pedido?'))) return;
   try { await api(`/api/solicitacoes-rh/${id}`, { method: 'DELETE' }); mostrarToast('Pedido cancelado.'); renderSolicitacoesRH(); }
   catch (e) { alert('Erro: ' + e.message); }
+}
+
+// =====================================================================================
+// ---------- CONTROLE FINANCEIRO DA FAMÍLIA (papel pessoa_fisica) ----------
+// pedido do usuário: "Crie um perfil para pessoa física para controle financeiro familiar...
+// com cara de app de banco digital" — casca própria (ver entrarNoApp acima), sem o menu lateral
+// do núcleo: cada tela desenha a própria barra de navegação inferior (ver barraInferiorFamilia).
+// Lançamentos/metas/orçamento são compartilhados entre todos os membros da família (mesma
+// empresa_id) — ver comentário em server.js (GET/POST /api/financas/*).
+// =====================================================================================
+
+const CATEGORIAS_DESPESA_FAMILIA = ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Educação', 'Outros'];
+const CATEGORIAS_RECEITA_FAMILIA = ['Salário', 'Mesada', 'Outros'];
+const FAM_COR = { navy: '#0A2647', blue: '#1467D6', teal: '#0E7C86', verde: '#16A34A', vermelho: '#DC2626', amarelo: '#D97706' };
+const FAM_CATEGORIA_COR = { Moradia: '#0A2647', Alimentação: '#D97706', Transporte: '#1467D6', Lazer: '#7C3AED', Saúde: '#DB2777', Educação: '#0E7C86', Outros: '#64748B' };
+
+let familiaPaginaAtual = 'familia-inicio';
+let familiaNovoDraft = null;
+
+function fmtMoedaFamilia(v) {
+  return (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDataFamilia(iso) {
+  if (!iso) return '';
+  const [ano, mes, dia] = iso.split('-');
+  return `${dia}/${mes}/${ano}`;
+}
+// agrupamento "Hoje"/"Ontem"/data por extenso pra tela de Lançamentos, igual ao protótipo aprovado.
+function grupoDataFamilia(iso) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const ontem = new Date(hoje); ontem.setDate(hoje.getDate() - 1);
+  const d = new Date(iso + 'T00:00:00');
+  if (d.getTime() === hoje.getTime()) return 'Hoje';
+  if (d.getTime() === ontem.getTime()) return 'Ontem';
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+}
+
+async function irFamilia(pagina) {
+  familiaPaginaAtual = pagina;
+  if (pagina !== 'familia-novo') familiaNovoDraft = null;
+  if (pagina === 'familia-inicio') await renderFamiliaInicio();
+  else if (pagina === 'familia-lancamentos') await renderFamiliaLancamentos();
+  else if (pagina === 'familia-novo') renderFamiliaNovo();
+  else if (pagina === 'familia-metas') await renderFamiliaMetas();
+  else if (pagina === 'familia-orcamento') await renderFamiliaOrcamento();
+}
+
+function barraInferiorFamilia(ativo) {
+  const item = (id, label, svg, pagina) => `
+    <a href="#" onclick="irFamilia('${pagina}'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:4px; color:${ativo === id ? FAM_COR.navy : '#94A3B8'}; text-decoration:none;">
+      ${svg}
+      <div style="font-size:10px; font-weight:${ativo === id ? 700 : 600};">${label}</div>
+    </a>`;
+  return `
+    <div style="position:sticky; bottom:0; left:0; right:0; width:100%; height:82px; background:#fff; border-top:1px solid #E7ECF3; display:flex; align-items:center; justify-content:space-around; padding-bottom:14px; box-sizing:border-box;">
+      ${item('inicio', 'Início', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>', 'familia-inicio')}
+      ${item('lancamentos', 'Lançamentos', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg>', 'familia-lancamentos')}
+      <a href="#" onclick="abrirFamiliaNovo('despesa'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:-26px; text-decoration:none;">
+        <div style="width:52px; height:52px; border-radius:999px; background:linear-gradient(135deg,${FAM_COR.navy},${FAM_COR.blue}); display:flex; align-items:center; justify-content:center; color:#fff; box-shadow:0 6px 14px rgba(10,38,71,0.35);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+      </a>
+      ${item('metas', 'Metas', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>', 'familia-metas')}
+      ${item('orcamento', 'Orçamento', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="8" y1="14" x2="8" y2="17"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="16" y1="8" x2="16" y2="17"/></svg>', 'familia-orcamento')}
+    </div>`;
+}
+
+function shellFamilia(conteudoHtml, ativo) {
+  document.getElementById('familiaMain').innerHTML = `
+    <div style="background:#E2E8F0; width:100%; min-height:100vh; box-sizing:border-box; display:flex; justify-content:center; font-family:'Inter',system-ui,sans-serif; color:#101826;">
+      <div style="width:100%; max-width:480px; min-height:100vh; background:#F3F6FB; position:relative; box-sizing:border-box;">
+        <div style="padding:22px 20px 24px; box-sizing:border-box;">${conteudoHtml}</div>
+        ${barraInferiorFamilia(ativo)}
+      </div>
+    </div>`;
+}
+
+function linhaLancamentoFamilia(t) {
+  const cor = t.tipo === 'receita' ? FAM_COR.verde : (FAM_CATEGORIA_COR[t.categoria] || '#64748B');
+  const letra = t.tipo === 'receita' ? '$' : (t.categoria || '?')[0].toUpperCase();
+  const valorTxt = (t.tipo === 'receita' ? '+ ' : '- ') + 'R$ ' + fmtMoedaFamilia(t.valor);
+  return `
+    <div style="display:flex; align-items:center; gap:11px; padding:10px 0; border-bottom:1px solid #F1F4F9;">
+      <div style="width:36px; height:36px; border-radius:11px; background:${cor}1A; color:${cor}; font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${esc(letra)}</div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13.5px; font-weight:700; color:#101826; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(t.descricao)}</div>
+        <div style="font-size:11.5px; color:#94A3B8;">${esc(t.categoria)} · ${fmtDataFamilia(t.data)}</div>
+      </div>
+      <div style="font-family:'Plus Jakarta Sans','Inter',sans-serif; font-size:13.5px; font-weight:700; white-space:nowrap; color:${t.tipo === 'receita' ? FAM_COR.verde : '#101826'};">${valorTxt}</div>
+      <button onclick="editarLancamentoFamilia(${t.id})" style="background:none; border:none; color:#C3CCD9; cursor:pointer; padding:2px; display:flex; flex-shrink:0;" aria-label="Editar lançamento">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      </button>
+    </div>`;
+}
+
+// ---------- Início (painel) ----------
+
+async function renderFamiliaInicio() {
+  shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'inicio');
+  let r;
+  try { r = await api('/api/financas/resumo'); } catch (e) { shellFamilia(`<p class="empty">Erro ao carregar: ${esc(e.message)}</p>`, 'inicio'); return; }
+  window._familiaResumoCache = r;
+  const saldoVisivel = window._familiaSaldoVisivel !== false;
+  const saldoTexto = saldoVisivel ? `R$ ${fmtMoedaFamilia(r.saldoTotal)}` : 'R$ ••••••';
+
+  let acumulado = 0;
+  const fatias = r.gastosPorCategoria.map((c) => {
+    const cor = FAM_CATEGORIA_COR[c.categoria] || '#64748B';
+    const inicio = acumulado; acumulado += c.percentual;
+    return `${cor} ${inicio}% ${acumulado}%`;
+  });
+  const donutGradient = fatias.length ? `conic-gradient(${fatias.join(', ')})` : '#EEF1F6';
+
+  const html = `
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="width:38px; height:38px; border-radius:999px; background:${FAM_COR.navy}; color:#fff; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${esc((USER.nome || '?')[0].toUpperCase())}</div>
+      <div>
+        <div style="font-size:11.5px; color:#94A3B8;">Olá,</div>
+        <div style="font-size:15px; font-weight:800; color:${FAM_COR.navy};">${esc((USER.nome || '').split(' ')[0] || '')}</div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px; background:linear-gradient(135deg,${FAM_COR.navy} 0%,#123A6B 55%,${FAM_COR.blue} 150%); border-radius:24px; padding:24px 22px; color:#fff;">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div style="font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#9FB8E0;">Saldo total</div>
+        <button onclick="alternarSaldoFamilia()" style="background:none; border:none; padding:4px; cursor:pointer; color:#9FB8E0; display:flex;" aria-label="Mostrar ou ocultar saldo">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <div style="font-family:'Plus Jakarta Sans','Inter',sans-serif; font-size:34px; font-weight:800; margin-top:6px; letter-spacing:-0.01em;">${saldoTexto}</div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; margin-top:22px; padding:0 4px;">
+      <a href="#" onclick="abrirFamiliaNovo('despesa'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:7px; text-decoration:none;">
+        <div style="width:50px; height:50px; border-radius:16px; background:#fff; border:1px solid #E7ECF3; display:flex; align-items:center; justify-content:center; color:${FAM_COR.vermelho};">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <div style="font-size:11px; font-weight:600; color:#475569;">Despesa</div>
+      </a>
+      <a href="#" onclick="abrirFamiliaNovo('receita'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:7px; text-decoration:none;">
+        <div style="width:50px; height:50px; border-radius:16px; background:#fff; border:1px solid #E7ECF3; display:flex; align-items:center; justify-content:center; color:${FAM_COR.verde};">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <div style="font-size:11px; font-weight:600; color:#475569;">Receita</div>
+      </a>
+      <a href="#" onclick="irFamilia('familia-metas'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:7px; text-decoration:none;">
+        <div style="width:50px; height:50px; border-radius:16px; background:#fff; border:1px solid #E7ECF3; display:flex; align-items:center; justify-content:center; color:${FAM_COR.amarelo};">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/></svg>
+        </div>
+        <div style="font-size:11px; font-weight:600; color:#475569;">Metas</div>
+      </a>
+      <a href="#" onclick="irFamilia('familia-orcamento'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:7px; text-decoration:none;">
+        <div style="width:50px; height:50px; border-radius:16px; background:#fff; border:1px solid #E7ECF3; display:flex; align-items:center; justify-content:center; color:${FAM_COR.blue};">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="8" y1="14" x2="8" y2="17"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="16" y1="8" x2="16" y2="17"/></svg>
+        </div>
+        <div style="font-size:11px; font-weight:600; color:#475569;">Orçamento</div>
+      </a>
+    </div>
+
+    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:20px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+        <div style="font-size:13.5px; font-weight:700; color:${FAM_COR.navy};">Gastos por categoria</div>
+        <div style="font-size:11.5px; font-weight:600; color:#94A3B8;">Este mês</div>
+      </div>
+      ${r.gastosPorCategoria.length ? `
+        <div style="display:flex; gap:18px; align-items:center;">
+          <div style="position:relative; width:84px; height:84px; flex-shrink:0;">
+            <div style="width:100%; height:100%; border-radius:50%; background:${donutGradient};"></div>
+            <div style="position:absolute; inset:14px; background:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center;">
+              <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:11px; font-weight:800; color:${FAM_COR.navy};">R$ ${Math.round(r.totalDespesasMes / 1000)}k</div>
+            </div>
+          </div>
+          <div style="flex:1; display:flex; flex-direction:column; gap:7px; min-width:0;">
+            ${r.gastosPorCategoria.slice(0, 3).map((c) => `
+              <div style="display:flex; align-items:center; gap:8px;">
+                <div style="width:10px; height:10px; border-radius:999px; background:${FAM_CATEGORIA_COR[c.categoria] || '#64748B'}; flex-shrink:0;"></div>
+                <div style="flex:1; font-size:12px; font-weight:600; color:#101826;">${esc(c.categoria)}</div>
+                <div style="font-size:11.5px; font-weight:600; color:#94A3B8;">${c.percentual}%</div>
+              </div>`).join('')}
+          </div>
+        </div>` : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:12px 0;">Nenhuma despesa lançada este mês ainda.</p>`}
+    </div>
+
+    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="font-size:13.5px; font-weight:700; color:${FAM_COR.navy};">Últimos lançamentos</div>
+        <a href="#" onclick="irFamilia('familia-lancamentos'); return false;" style="font-size:12px; font-weight:700; color:${FAM_COR.blue}; text-decoration:none;">Ver tudo</a>
+      </div>
+      ${r.ultimosLancamentos.length ? r.ultimosLancamentos.map((t) => linhaLancamentoFamilia(t)).join('') : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:12px 0;">Nenhum lançamento ainda.</p>`}
+    </div>
+  `;
+  shellFamilia(html, 'inicio');
+}
+
+function alternarSaldoFamilia() {
+  window._familiaSaldoVisivel = window._familiaSaldoVisivel === false ? true : false;
+  renderFamiliaInicio();
+}
+
+function abrirFamiliaNovo(tipo) {
+  window._familiaNovoTipoPadrao = tipo;
+  irFamilia('familia-novo');
+}
+
+// ---------- Lançamentos (lista completa + filtro) ----------
+
+async function renderFamiliaLancamentos() {
+  shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'lancamentos');
+  const filtro = window._familiaFiltroCategoria || 'todas';
+  const queryStr = filtro === 'todas' ? '' : filtro === 'receitas' ? '?tipo=receita' : `?categoria=${encodeURIComponent(filtro)}`;
+  let lista;
+  try { ({ lancamentos: lista } = await api('/api/financas/lancamentos' + queryStr)); }
+  catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'lancamentos'); return; }
+
+  const totalReceitas = lista.filter((l) => l.tipo === 'receita').reduce((s, l) => s + l.valor, 0);
+  const totalDespesas = lista.filter((l) => l.tipo === 'despesa').reduce((s, l) => s + l.valor, 0);
+  const chips = ['todas', ...CATEGORIAS_DESPESA_FAMILIA, 'receitas'];
+  const grupos = [];
+  lista.forEach((t) => {
+    const chave = grupoDataFamilia(t.data);
+    let g = grupos.find((x) => x.chave === chave);
+    if (!g) { g = { chave, itens: [] }; grupos.push(g); }
+    g.itens.push(t);
+  });
+
+  const html = `
+    <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">Lançamentos</div>
+
+    <div style="display:flex; gap:12px; margin-top:18px;">
+      <div style="flex:1; background:#fff; border:1px solid #E7ECF3; border-radius:14px; padding:12px 14px;">
+        <div style="font-size:10.5px; font-weight:700; color:#94A3B8; text-transform:uppercase;">Receitas</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:800; color:${FAM_COR.verde}; margin-top:4px;">+ R$ ${fmtMoedaFamilia(totalReceitas)}</div>
+      </div>
+      <div style="flex:1; background:#fff; border:1px solid #E7ECF3; border-radius:14px; padding:12px 14px;">
+        <div style="font-size:10.5px; font-weight:700; color:#94A3B8; text-transform:uppercase;">Despesas</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:800; color:${FAM_COR.vermelho}; margin-top:4px;">- R$ ${fmtMoedaFamilia(totalDespesas)}</div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:7px; overflow-x:auto; margin-top:16px; padding-bottom:4px;">
+      ${chips.map((c) => `
+        <button onclick="filtrarFamiliaCategoria('${esc(c)}')" style="flex-shrink:0; border:1px solid ${filtro === c ? FAM_COR.navy : '#E2E8F0'}; background:${filtro === c ? FAM_COR.navy : '#fff'}; color:${filtro === c ? '#fff' : '#475569'}; font-weight:${filtro === c ? 700 : 600}; font-size:12px; padding:8px 14px; border-radius:999px; cursor:pointer;">${esc(c === 'todas' ? 'Todas' : c === 'receitas' ? 'Receitas' : c)}</button>
+      `).join('')}
+    </div>
+
+    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+      ${grupos.length ? grupos.map((g) => `
+        <div>
+          <div style="font-size:11px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:#94A3B8; margin:14px 0 6px;">${esc(g.chave)}</div>
+          ${g.itens.map((t) => linhaLancamentoFamilia(t)).join('')}
+        </div>
+      `).join('') : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:30px 0;">Nenhum lançamento nessa categoria ainda.</p>`}
+    </div>
+  `;
+  shellFamilia(html, 'lancamentos');
+}
+
+function filtrarFamiliaCategoria(c) {
+  window._familiaFiltroCategoria = c;
+  renderFamiliaLancamentos();
+}
+
+// ---------- Novo lançamento (criar/editar) ----------
+
+function editarLancamentoFamilia(id) {
+  const cache = (window._familiaResumoCache && window._familiaResumoCache.ultimosLancamentos) || [];
+  const jaTenho = cache.find((l) => l.id === id);
+  if (jaTenho) { familiaNovoDraft = { ...jaTenho }; irFamilia('familia-novo'); return; }
+  api('/api/financas/lancamentos').then(({ lancamentos }) => {
+    const encontrado = lancamentos.find((l) => l.id === id);
+    if (encontrado) { familiaNovoDraft = { ...encontrado }; irFamilia('familia-novo'); }
+  }).catch((e) => alert('Erro: ' + e.message));
+}
+
+function coletarDraftFamiliaNovo() {
+  const base = familiaNovoDraft || {};
+  const elValor = document.getElementById('fn-valor');
+  const elDescricao = document.getElementById('fn-descricao');
+  const elData = document.getElementById('fn-data');
+  return {
+    ...base,
+    valor: elValor ? elValor.value : base.valor,
+    descricao: elDescricao ? elDescricao.value : base.descricao,
+    data: elData ? elData.value : base.data,
+  };
+}
+
+function mudarTipoFamiliaNovo(tipo) {
+  familiaNovoDraft = coletarDraftFamiliaNovo();
+  familiaNovoDraft.tipo = tipo;
+  familiaNovoDraft.categoria = '';
+  renderFamiliaNovo();
+}
+
+function renderFamiliaNovo() {
+  const editando = !!(familiaNovoDraft && familiaNovoDraft.id);
+  const d = familiaNovoDraft || {
+    tipo: window._familiaNovoTipoPadrao || 'despesa', categoria: '', descricao: '', valor: '',
+    data: new Date().toISOString().slice(0, 10),
+  };
+  familiaNovoDraft = d;
+  window._familiaNovoTipoPadrao = null;
+  const categorias = d.tipo === 'despesa' ? CATEGORIAS_DESPESA_FAMILIA : CATEGORIAS_RECEITA_FAMILIA;
+
+  const html = `
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">${editando ? 'Editar lançamento' : 'Novo lançamento'}</div>
+      <a href="#" onclick="irFamilia('familia-inicio'); return false;" style="width:34px; height:34px; border-radius:999px; background:#fff; border:1px solid #E7ECF3; display:flex; align-items:center; justify-content:center; font-size:15px; color:#64748B; text-decoration:none;">×</a>
+    </div>
+
+    <div style="display:flex; background:#fff; border:1px solid #E2E8F0; border-radius:14px; padding:4px; gap:2px; margin-top:18px;">
+      <button onclick="mudarTipoFamiliaNovo('despesa')" style="flex:1; border:none; background:${d.tipo === 'despesa' ? '#FEF2F2' : 'transparent'}; color:${d.tipo === 'despesa' ? FAM_COR.vermelho : '#94A3B8'}; font-weight:${d.tipo === 'despesa' ? 700 : 600}; font-size:13.5px; padding:10px 0; border-radius:10px; cursor:pointer;">Despesa</button>
+      <button onclick="mudarTipoFamiliaNovo('receita')" style="flex:1; border:none; background:${d.tipo === 'receita' ? '#ECFDF3' : 'transparent'}; color:${d.tipo === 'receita' ? FAM_COR.verde : '#94A3B8'}; font-weight:${d.tipo === 'receita' ? 700 : 600}; font-size:13.5px; padding:10px 0; border-radius:10px; cursor:pointer;">Receita</button>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:14px; margin-top:22px;">
+      <div>
+        <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Valor (R$)</label>
+        <input id="fn-valor" type="number" step="0.01" min="0.01" value="${esc(d.valor || '')}" style="width:100%; box-sizing:border-box; border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; font-size:16px; font-family:'Plus Jakarta Sans',sans-serif; font-weight:700; color:#101826;">
+      </div>
+      <div>
+        <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Descrição</label>
+        <input id="fn-descricao" value="${esc(d.descricao || '')}" placeholder="Ex.: Supermercado, salário..." style="width:100%; box-sizing:border-box; border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; font-size:14px;">
+      </div>
+      <div>
+        <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Categoria</label>
+        <select id="fn-categoria" style="width:100%; box-sizing:border-box; border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; font-size:14px; background:#FBFCFE;">
+          ${categorias.map((c) => `<option value="${esc(c)}" ${d.categoria === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Data</label>
+        <input id="fn-data" type="date" value="${esc(d.data)}" style="width:100%; box-sizing:border-box; border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; font-size:14px;">
+      </div>
+    </div>
+
+    <button onclick="salvarLancamentoFamilia(${editando ? d.id : 'null'})" style="margin-top:22px; width:100%; border:none; background:${d.tipo === 'receita' ? FAM_COR.verde : FAM_COR.navy}; color:#fff; font-weight:700; font-size:14.5px; padding:14px 0; border-radius:14px; cursor:pointer;">Salvar lançamento</button>
+    ${editando ? `<button onclick="excluirLancamentoFamilia(${d.id})" style="margin-top:10px; width:100%; border:1px solid #FBD5D5; background:#fff; color:${FAM_COR.vermelho}; font-weight:700; font-size:13.5px; padding:12px 0; border-radius:14px; cursor:pointer;">Excluir lançamento</button>` : ''}
+  `;
+  shellFamilia(html, 'novo');
+}
+
+async function salvarLancamentoFamilia(id) {
+  const body = {
+    tipo: familiaNovoDraft.tipo,
+    categoria: document.getElementById('fn-categoria').value,
+    descricao: document.getElementById('fn-descricao').value,
+    valor: document.getElementById('fn-valor').value,
+    data: document.getElementById('fn-data').value,
+  };
+  try {
+    if (id) await api(`/api/financas/lancamentos/${id}`, { method: 'PUT', body });
+    else await api('/api/financas/lancamentos', { method: 'POST', body });
+    familiaNovoDraft = null;
+    mostrarToast(id ? 'Lançamento atualizado.' : 'Lançamento salvo.');
+    irFamilia('familia-inicio');
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+async function excluirLancamentoFamilia(id) {
+  if (!(await mostrarConfirmacao('Excluir este lançamento?'))) return;
+  try {
+    await api(`/api/financas/lancamentos/${id}`, { method: 'DELETE' });
+    familiaNovoDraft = null;
+    mostrarToast('Lançamento excluído.');
+    irFamilia('familia-inicio');
+  } catch (e) { alert('Erro ao excluir: ' + e.message); }
+}
+
+// ---------- Metas ----------
+
+async function renderFamiliaMetas() {
+  shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'metas');
+  let metas;
+  try { ({ metas } = await api('/api/financas/metas')); } catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'metas'); return; }
+  metas = metas.map((m) => ({ ...m, percentual: m.valor_alvo ? Math.min(100, Math.round((m.valor_atual / m.valor_alvo) * 100)) : 0 }));
+
+  const html = `
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">Metas</div>
+      <button onclick="abrirNovaMetaFamilia()" style="display:inline-flex; align-items:center; gap:6px; background:${FAM_COR.navy}; color:#fff; font-weight:700; font-size:13px; padding:9px 14px; border-radius:12px; border:none; cursor:pointer;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Nova meta
+      </button>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:14px; margin-top:18px;">
+      ${metas.length ? metas.map((m) => `
+        <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <div style="font-size:14px; font-weight:700; color:#101826;">${esc(m.nome)}</div>
+            <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:12.5px; font-weight:700; color:#64748B;">${m.percentual}%</div>
+          </div>
+          <div style="height:9px; background:#EEF1F6; border-radius:999px; overflow:hidden;">
+            <div style="height:100%; width:${m.percentual}%; background:${FAM_COR.teal}; border-radius:999px;"></div>
+          </div>
+          <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:12px; color:#94A3B8; margin-top:6px;">R$ ${fmtMoedaFamilia(m.valor_atual)} de R$ ${fmtMoedaFamilia(m.valor_alvo)}</div>
+          <div style="display:flex; gap:8px; margin-top:12px;">
+            <button onclick="aportarMetaFamilia(${m.id})" style="flex:1; border:1px solid #E2E8F0; background:#fff; color:${FAM_COR.navy}; font-weight:700; font-size:12.5px; padding:9px 0; border-radius:10px; cursor:pointer;">+ Guardar valor</button>
+            <button onclick="excluirMetaFamilia(${m.id})" style="border:1px solid #FBD5D5; background:#fff; color:${FAM_COR.vermelho}; font-weight:700; font-size:12.5px; padding:9px 14px; border-radius:10px; cursor:pointer;">Excluir</button>
+          </div>
+        </div>
+      `).join('') : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:30px 0;">Nenhuma meta criada ainda.</p>`}
+    </div>
+  `;
+  shellFamilia(html, 'metas');
+}
+
+function abrirNovaMetaFamilia() {
+  let modal = document.getElementById('modal-nova-meta');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'modal-nova-meta'; modal.className = 'modal-overlay'; document.body.appendChild(modal); }
+  modal.classList.add('show');
+  const fechar = () => modal.classList.remove('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:360px;">
+      <h3>Nova meta</h3>
+      <div class="field"><label>Nome da meta</label><input id="meta-nome" placeholder="Ex.: Viagem em família"></div>
+      <div class="field"><label>Valor alvo (R$)</label><input id="meta-valor-alvo" type="number" step="0.01" min="0.01"></div>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;" id="meta-btn-salvar">Criar meta</button>
+      <button class="btn-outline-sm" style="width:100%; justify-content:center; margin-top:10px;" onclick="document.getElementById('modal-nova-meta').classList.remove('show')">Cancelar</button>
+    </div>`;
+  modal.querySelector('#meta-btn-salvar').onclick = async () => {
+    const nome = document.getElementById('meta-nome').value.trim();
+    const valorAlvo = Number(document.getElementById('meta-valor-alvo').value);
+    if (!nome) return alert('Dê um nome pra meta.');
+    if (!Number.isFinite(valorAlvo) || valorAlvo <= 0) return alert('Informe um valor alvo maior que zero.');
+    try {
+      await api('/api/financas/metas', { method: 'POST', body: { nome, valor_alvo: valorAlvo } });
+      fechar();
+      renderFamiliaMetas();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
+
+function aportarMetaFamilia(id) {
+  let modal = document.getElementById('modal-aporte-meta');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'modal-aporte-meta'; modal.className = 'modal-overlay'; document.body.appendChild(modal); }
+  modal.classList.add('show');
+  const fechar = () => modal.classList.remove('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:340px;">
+      <h3>Guardar valor na meta</h3>
+      <div class="field"><label>Valor (R$)</label><input id="meta-aporte-valor" type="number" step="0.01" min="0.01"></div>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;" id="meta-aporte-btn-salvar">Guardar</button>
+      <button class="btn-outline-sm" style="width:100%; justify-content:center; margin-top:10px;" onclick="document.getElementById('modal-aporte-meta').classList.remove('show')">Cancelar</button>
+    </div>`;
+  modal.querySelector('#meta-aporte-btn-salvar').onclick = async () => {
+    const aporte = Number(document.getElementById('meta-aporte-valor').value);
+    if (!Number.isFinite(aporte) || aporte <= 0) return alert('Informe um valor maior que zero.');
+    try {
+      await api(`/api/financas/metas/${id}`, { method: 'PUT', body: { aporte } });
+      fechar();
+      mostrarToast('Valor guardado na meta.');
+      renderFamiliaMetas();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
+}
+
+async function excluirMetaFamilia(id) {
+  if (!(await mostrarConfirmacao('Excluir esta meta?'))) return;
+  try { await api(`/api/financas/metas/${id}`, { method: 'DELETE' }); renderFamiliaMetas(); }
+  catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ---------- Orçamento mensal por categoria ----------
+
+async function renderFamiliaOrcamento() {
+  shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'orcamento');
+  let resp;
+  try { resp = await api('/api/financas/orcamentos'); } catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'orcamento'); return; }
+  const porCategoria = {};
+  resp.orcamentos.forEach((o) => { porCategoria[o.categoria] = o; });
+
+  const html = `
+    <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">Orçamento do mês</div>
+    <div style="font-size:12.5px; color:#94A3B8; margin-top:3px;">Defina um limite de gasto por categoria e acompanhe o quanto já foi usado.</div>
+    <div style="display:flex; flex-direction:column; gap:14px; margin-top:18px;">
+      ${CATEGORIAS_DESPESA_FAMILIA.map((categoria) => {
+        const o = porCategoria[categoria];
+        const cor = o && o.percentual >= 90 ? FAM_COR.vermelho : (FAM_CATEGORIA_COR[categoria] || FAM_COR.navy);
+        return `
+        <div style="background:#fff; border:1px solid #E7ECF3; border-radius:16px; padding:16px 18px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <div style="font-size:13.5px; font-weight:700; color:#101826;">${esc(categoria)}</div>
+            ${o ? `<div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:12px; font-weight:700; color:${cor};">${o.percentual}% usado</div>` : ''}
+          </div>
+          ${o ? `
+            <div style="height:7px; background:#EEF1F6; border-radius:999px; overflow:hidden;">
+              <div style="height:100%; width:${Math.min(100, o.percentual)}%; background:${cor}; border-radius:999px;"></div>
+            </div>
+            <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:11.5px; color:#94A3B8; margin-top:6px;">R$ ${fmtMoedaFamilia(o.gastoAtual)} de R$ ${fmtMoedaFamilia(o.limite)}</div>
+          ` : `<div style="font-size:12px; color:#94A3B8;">Sem limite definido</div>`}
+          <button onclick="definirOrcamentoFamilia('${esc(categoria)}', ${o ? o.limite : 'null'})" style="margin-top:10px; border:1px solid #E2E8F0; background:#fff; color:${FAM_COR.navy}; font-weight:700; font-size:12px; padding:8px 0; border-radius:10px; cursor:pointer; width:100%;">${o ? 'Alterar limite' : 'Definir limite'}</button>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+  shellFamilia(html, 'orcamento');
+}
+
+function definirOrcamentoFamilia(categoria, limiteAtual) {
+  let modal = document.getElementById('modal-orcamento-familia');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'modal-orcamento-familia'; modal.className = 'modal-overlay'; document.body.appendChild(modal); }
+  modal.classList.add('show');
+  const fechar = () => modal.classList.remove('show');
+  modal.innerHTML = `
+    <div class="modal-card" style="max-width:340px;">
+      <h3>Limite de ${esc(categoria)}</h3>
+      <div class="field"><label>Limite mensal (R$)</label><input id="orc-limite" type="number" step="0.01" min="0.01" value="${limiteAtual || ''}"></div>
+      <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:6px;" id="orc-btn-salvar">Salvar</button>
+      <button class="btn-outline-sm" style="width:100%; justify-content:center; margin-top:10px;" onclick="document.getElementById('modal-orcamento-familia').classList.remove('show')">Cancelar</button>
+    </div>`;
+  modal.querySelector('#orc-btn-salvar').onclick = async () => {
+    const limite = Number(document.getElementById('orc-limite').value);
+    if (!Number.isFinite(limite) || limite <= 0) return alert('Informe um limite maior que zero.');
+    const mes = new Date().toISOString().slice(0, 7);
+    try {
+      await api('/api/financas/orcamentos', { method: 'POST', body: { categoria, mes, limite } });
+      fechar();
+      renderFamiliaOrcamento();
+    } catch (e) { alert('Erro: ' + e.message); }
+  };
 }
 
 tentarSessaoExistente();
