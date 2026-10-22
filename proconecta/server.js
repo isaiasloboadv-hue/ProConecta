@@ -12728,17 +12728,25 @@ rota('GET', /^\/api\/financas\/resumo$/, async (req, res) => {
     .sort((a, b) => b.valor - a.valor);
 
   // últimos 6 meses (incluindo o atual), mais antigo primeiro — pro gráfico de evolução mensal.
+  // "acumulado" é a economia acumulada mês a mês (pedido do usuário: "qual foi a economia do mês
+  // acumulado com os outros meses" — mesma ideia da linha ANTERIOR + coluna ACUMULADO da planilha
+  // do usuário): nasce de "baseAnterior" (soma de tudo ANTES do primeiro mês da janela, pra não
+  // resetar a zero um saldo que já existia) e soma o saldo (receita − despesa) de cada mês.
   const NOMES_MES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const primeiroMesJanela = new Date(agora.getFullYear(), agora.getMonth() - 5, 1).toISOString().slice(0, 7);
+  const baseAnterior = lancamentos
+    .filter((l) => (l.data || '').slice(0, 7) < primeiroMesJanela)
+    .reduce((s, l) => s + (l.tipo === 'receita' ? l.valor : -l.valor), 0);
   const evolucaoMensal = [];
+  let acumulado = baseAnterior;
   for (let i = 5; i >= 0; i--) {
     const d = new Date(agora.getFullYear(), agora.getMonth() - i, 1);
     const mes = d.toISOString().slice(0, 7);
-    evolucaoMensal.push({
-      mes,
-      label: NOMES_MES[d.getMonth()],
-      receita: lancamentos.filter((l) => l.tipo === 'receita' && doMes(l, mes)).reduce((s, l) => s + l.valor, 0),
-      despesa: lancamentos.filter((l) => l.tipo === 'despesa' && doMes(l, mes)).reduce((s, l) => s + l.valor, 0),
-    });
+    const receita = lancamentos.filter((l) => l.tipo === 'receita' && doMes(l, mes)).reduce((s, l) => s + l.valor, 0);
+    const despesa = lancamentos.filter((l) => l.tipo === 'despesa' && doMes(l, mes)).reduce((s, l) => s + l.valor, 0);
+    const saldo = receita - despesa;
+    acumulado += saldo;
+    evolucaoMensal.push({ mes, label: NOMES_MES[d.getMonth()], receita, despesa, saldo, acumulado });
   }
 
   const metas = tenant.listar(data, 'financas_metas', user.empresa_id)
@@ -12756,9 +12764,18 @@ rota('GET', /^\/api\/financas\/resumo$/, async (req, res) => {
     .sort((a, b) => (b.data + b.criado_em).localeCompare(a.data + a.criado_em))
     .slice(0, 5);
 
+  // pedido do usuário: "para que eu possa estar dando baixa em cada conta... mostrando as contas
+  // que estão pendentes de pagamento" — todas as despesas pendentes, qualquer mês (uma conta
+  // atrasada de mês passado continua pendente até alguém dar baixa), mais antiga primeiro.
+  const pendentes = lancamentos
+    .filter((l) => l.tipo === 'despesa' && l.status === 'pendente')
+    .sort((a, b) => a.data.localeCompare(b.data))
+    .map((l) => ({ id: l.id, descricao: l.descricao, categoria: l.categoria, valor: l.valor, data: l.data }));
+  const totalPendente = pendentes.reduce((s, l) => s + l.valor, 0);
+
   enviarJSON(res, 200, {
     saldoTotal, totalDespesasMes, totalReceitasMes, gastosPorCategoria, evolucaoMensal,
-    metas, orcamentos, ultimosLancamentos,
+    metas, orcamentos, ultimosLancamentos, pendentes, totalPendente,
     categoriasDespesa: CATEGORIAS_DESPESA_FAMILIA, categoriasReceita: CATEGORIAS_RECEITA_FAMILIA,
   });
 });
@@ -12774,6 +12791,7 @@ rota('GET', /^\/api\/financas\/lancamentos$/, async (req, res) => {
   if (query.tipo) lista = lista.filter((l) => l.tipo === query.tipo);
   if (query.categoria) lista = lista.filter((l) => l.categoria === query.categoria);
   if (query.mes) lista = lista.filter((l) => (l.data || '').slice(0, 7) === query.mes);
+  if (query.status) lista = lista.filter((l) => l.status === query.status);
   lista = [...lista].sort((a, b) => (b.data + b.criado_em).localeCompare(a.data + a.criado_em));
   enviarJSON(res, 200, { lancamentos: lista });
 });
@@ -12786,9 +12804,13 @@ rota('POST', /^\/api\/financas\/lancamentos$/, async (req, res) => {
   const erro = validarLancamentoFamilia(body);
   if (erro) return enviarJSON(res, 400, { erro });
   const autor = data.usuarios.find((u) => u.id === user.id && u.empresa_id === user.empresa_id);
+  // pedido do usuário: "dar baixa em cada conta" — status pago/pendente só faz sentido pra
+  // despesa (uma "conta"); receita nasce sempre "pago" (dinheiro que já entrou).
+  const status = body.tipo === 'despesa' && body.status === 'pendente' ? 'pendente' : 'pago';
   const item = tenant.criar(data, 'financas_lancamentos', user.empresa_id, {
     tipo: body.tipo, categoria: body.categoria, descricao: String(body.descricao).trim(),
-    valor: Number(body.valor), data: body.data,
+    valor: Number(body.valor), data: body.data, status,
+    pago_em: status === 'pago' ? new Date().toISOString() : null,
     autor_id: user.id, autor_nome: (autor && autor.nome) || user.nome || '',
     criado_em: new Date().toISOString(),
   });
@@ -12805,10 +12827,40 @@ rota('PUT', /^\/api\/financas\/lancamentos\/(\d+)$/, async (req, res, m) => {
   if (erro) return enviarJSON(res, 400, { erro });
   const item = tenant.buscar(data, 'financas_lancamentos', Number(m[1]), user.empresa_id);
   if (!item) return enviarJSON(res, 404, { erro: 'Lançamento não encontrado.' });
+  const novoStatus = body.tipo === 'despesa' && body.status === 'pendente' ? 'pendente' : 'pago';
   Object.assign(item, {
     tipo: body.tipo, categoria: body.categoria, descricao: String(body.descricao).trim(),
-    valor: Number(body.valor), data: body.data,
+    valor: Number(body.valor), data: body.data, status: novoStatus,
+    pago_em: novoStatus === 'pago' ? (item.status === 'pago' ? item.pago_em : new Date().toISOString()) : null,
   });
+  db.save(data);
+  enviarJSON(res, 200, { lancamento: item });
+});
+
+// PUT /api/financas/lancamentos/:id/marcar-paga — "dar baixa" numa conta pendente (mesmo padrão
+// de PUT /api/pmoc/faturas/:id/marcar-paga).
+rota('PUT', /^\/api\/financas\/lancamentos\/(\d+)\/marcar-paga$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilFinancasFamiliar(res, user, data)) return;
+  const item = tenant.buscar(data, 'financas_lancamentos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Lançamento não encontrado.' });
+  item.status = 'pago';
+  item.pago_em = new Date().toISOString();
+  db.save(data);
+  enviarJSON(res, 200, { lancamento: item });
+});
+
+// PUT /api/financas/lancamentos/:id/marcar-pendente — desfaz um "dar baixa" por engano.
+rota('PUT', /^\/api\/financas\/lancamentos\/(\d+)\/marcar-pendente$/, async (req, res, m) => {
+  const user = usuarioAutenticado(req);
+  const data = db.load();
+  if (!exigirPerfilFinancasFamiliar(res, user, data)) return;
+  const item = tenant.buscar(data, 'financas_lancamentos', Number(m[1]), user.empresa_id);
+  if (!item) return enviarJSON(res, 404, { erro: 'Lançamento não encontrado.' });
+  if (item.tipo !== 'despesa') return enviarJSON(res, 400, { erro: 'Só despesa tem status de pendente/pago.' });
+  item.status = 'pendente';
+  item.pago_em = null;
   db.save(data);
   enviarJSON(res, 200, { lancamento: item });
 });

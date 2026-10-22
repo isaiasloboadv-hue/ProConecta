@@ -1347,6 +1347,14 @@ function migrar(data) {
   if (!data._seq.financas_metas) data._seq.financas_metas = 1;
   if (!Array.isArray(data.financas_orcamentos)) data.financas_orcamentos = [];
   if (!data._seq.financas_orcamentos) data._seq.financas_orcamentos = 1;
+  // pedido do usuário: "dar baixa" numa conta (despesa) — status pago/pendente (só despesa tem
+  // esse controle; receita nasce sempre "pago"). Lançamento já existente antes dessa mudança não
+  // tinha o campo: preenche como "pago" (era implícito que já tinha acontecido, igual sempre foi),
+  // nunca "pendente" — não inventa pendência que o usuário nunca cadastrou.
+  for (const l of data.financas_lancamentos) {
+    if (!l.status) l.status = 'pago';
+    if (l.pago_em === undefined) l.pago_em = l.status === 'pago' ? l.criado_em || null : null;
+  }
   // valor do contrato mensal do cliente — opcional, só usado como referência no PDF de atividades
   // acima (o técnico/administrador compara o que foi entregue no período com esse valor).
   for (const c of data.clientes) { if (c.valor_contrato_mensal === undefined) c.valor_contrato_mensal = null; }

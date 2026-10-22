@@ -34876,18 +34876,36 @@ function linhaLancamentoFamilia(t) {
   const cor = t.tipo === 'receita' ? FAM_COR.verde : (FAM_CATEGORIA_COR[t.categoria] || '#64748B');
   const letra = t.tipo === 'receita' ? '$' : (t.categoria || '?')[0].toUpperCase();
   const valorTxt = (t.tipo === 'receita' ? '+ ' : '- ') + 'R$ ' + fmtMoedaFamilia(t.valor);
+  // pedido do usuário: "dar baixa em cada conta" — despesa pendente ganha uma etiqueta e um botão
+  // de check rápido (além do lápis de editar) pra marcar como paga sem abrir o formulário inteiro.
+  const pendente = t.tipo === 'despesa' && t.status === 'pendente';
   return `
     <div style="display:flex; align-items:center; gap:11px; padding:10px 0; border-bottom:1px solid #F1F4F9;">
       <div style="width:36px; height:36px; border-radius:11px; background:${cor}1A; color:${cor}; font-size:13px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;">${esc(letra)}</div>
       <div style="flex:1; min-width:0;">
         <div style="font-size:13.5px; font-weight:700; color:#101826; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(t.descricao)}</div>
-        <div style="font-size:11.5px; color:#94A3B8;">${esc(t.categoria)} · ${fmtDataFamilia(t.data)}</div>
+        <div style="font-size:11.5px; color:#94A3B8; display:flex; align-items:center; gap:6px;">
+          <span>${esc(t.categoria)} · ${fmtDataFamilia(t.data)}</span>
+          ${pendente ? `<span style="font-size:10px; font-weight:700; color:${FAM_COR.amarelo}; background:#FEF3C7; padding:1px 7px; border-radius:999px; flex-shrink:0;">Pendente</span>` : ''}
+        </div>
       </div>
       <div style="font-family:'Plus Jakarta Sans','Inter',sans-serif; font-size:13.5px; font-weight:700; white-space:nowrap; color:${t.tipo === 'receita' ? FAM_COR.verde : '#101826'};">${valorTxt}</div>
+      ${pendente ? `
+      <button onclick="darBaixaLancamentoFamilia(${t.id})" title="Dar baixa (marcar como paga)" style="background:none; border:none; color:${FAM_COR.verde}; cursor:pointer; padding:2px; display:flex; flex-shrink:0;" aria-label="Dar baixa">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </button>` : ''}
       <button onclick="editarLancamentoFamilia(${t.id})" style="background:none; border:none; color:#C3CCD9; cursor:pointer; padding:2px; display:flex; flex-shrink:0;" aria-label="Editar lançamento">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       </button>
     </div>`;
+}
+
+async function darBaixaLancamentoFamilia(id) {
+  try {
+    await api(`/api/financas/lancamentos/${id}/marcar-paga`, { method: 'PUT' });
+    mostrarToast('Conta paga — baixa registrada.');
+    irFamilia(familiaPaginaAtual);
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ---------- Início (painel) ----------
@@ -34907,6 +34925,13 @@ async function renderFamiliaInicio() {
     return `${cor} ${inicio}% ${acumulado}%`;
   });
   const donutGradient = fatias.length ? `conic-gradient(${fatias.join(', ')})` : '#EEF1F6';
+
+  // pedido do usuário: "economia do mês acumulado com os outros meses" + "gráfico pra acompanhar
+  // resultados mês a mês" — r.evolucaoMensal já traz receita/despesa/saldo/acumulado por mês (ver
+  // GET /api/financas/resumo). acumuladoAtual é o valor do mês mais recente da janela (já carrega
+  // tudo que veio antes, ver "baseAnterior" no servidor); maxEvo escala a altura das barrinhas.
+  const acumuladoAtual = r.evolucaoMensal.length ? r.evolucaoMensal[r.evolucaoMensal.length - 1].acumulado : 0;
+  const maxEvo = Math.max(1, ...r.evolucaoMensal.flatMap((m) => [m.receita, m.despesa]));
 
   const html = `
     <div style="display:flex; align-items:center; gap:10px;">
@@ -34955,6 +34980,35 @@ async function renderFamiliaInicio() {
     </div>
 
     <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:20px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <div style="font-size:13.5px; font-weight:700; color:${FAM_COR.navy};">Contas pendentes</div>
+        ${r.pendentes.length ? `<div style="font-size:12px; font-weight:700; color:${FAM_COR.vermelho};">R$ ${fmtMoedaFamilia(r.totalPendente)}</div>` : ''}
+      </div>
+      ${r.pendentes.length ? r.pendentes.slice(0, 5).map((p) => linhaLancamentoFamilia({ ...p, tipo: 'despesa', status: 'pendente' })).join('') : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:12px 0;">Nenhuma conta pendente.</p>`}
+      ${r.pendentes.length > 5 ? `<a href="#" onclick="window._familiaFiltroCategoria = 'pendentes'; irFamilia('familia-lancamentos'); return false;" style="display:block; text-align:center; margin-top:10px; font-size:12px; font-weight:700; color:${FAM_COR.blue}; text-decoration:none;">Ver todas (${r.pendentes.length})</a>` : ''}
+    </div>
+
+    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+      <div style="font-size:13.5px; font-weight:700; color:${FAM_COR.navy};">Economia acumulada</div>
+      <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:24px; font-weight:800; margin-top:4px; color:${acumuladoAtual >= 0 ? FAM_COR.verde : FAM_COR.vermelho};">${acumuladoAtual >= 0 ? '+ ' : '− '}R$ ${fmtMoedaFamilia(Math.abs(acumuladoAtual))}</div>
+      <div style="font-size:11px; color:#94A3B8; margin-top:2px;">Soma de receitas menos despesas de todos os meses</div>
+      <div style="display:flex; align-items:flex-end; gap:10px; height:70px; margin-top:18px;">
+        ${r.evolucaoMensal.map((m) => `
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;">
+            <div style="width:100%; display:flex; align-items:flex-end; justify-content:center; gap:3px; height:54px;">
+              <div style="width:7px; border-radius:3px 3px 0 0; background:${FAM_COR.verde}; height:${Math.max(2, Math.round((m.receita / maxEvo) * 54))}px;"></div>
+              <div style="width:7px; border-radius:3px 3px 0 0; background:${FAM_COR.vermelho}; height:${Math.max(2, Math.round((m.despesa / maxEvo) * 54))}px;"></div>
+            </div>
+            <div style="font-size:9.5px; font-weight:600; color:#94A3B8;">${m.label}</div>
+          </div>`).join('')}
+      </div>
+      <div style="display:flex; align-items:center; gap:14px; margin-top:12px; justify-content:center;">
+        <div style="display:flex; align-items:center; gap:5px;"><span style="width:8px; height:8px; border-radius:2px; background:${FAM_COR.verde};"></span><span style="font-size:11px; color:#64748B;">Receita</span></div>
+        <div style="display:flex; align-items:center; gap:5px;"><span style="width:8px; height:8px; border-radius:2px; background:${FAM_COR.vermelho};"></span><span style="font-size:11px; color:#64748B;">Despesa</span></div>
+      </div>
+    </div>
+
+    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
         <div style="font-size:13.5px; font-weight:700; color:${FAM_COR.navy};">Gastos por categoria</div>
         <div style="font-size:11.5px; font-weight:600; color:#94A3B8;">Este mês</div>
@@ -35004,14 +35058,14 @@ function abrirFamiliaNovo(tipo) {
 async function renderFamiliaLancamentos() {
   shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'lancamentos');
   const filtro = window._familiaFiltroCategoria || 'todas';
-  const queryStr = filtro === 'todas' ? '' : filtro === 'receitas' ? '?tipo=receita' : `?categoria=${encodeURIComponent(filtro)}`;
+  const queryStr = filtro === 'todas' ? '' : filtro === 'receitas' ? '?tipo=receita' : filtro === 'pendentes' ? '?status=pendente' : `?categoria=${encodeURIComponent(filtro)}`;
   let lista;
   try { ({ lancamentos: lista } = await api('/api/financas/lancamentos' + queryStr)); }
   catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'lancamentos'); return; }
 
   const totalReceitas = lista.filter((l) => l.tipo === 'receita').reduce((s, l) => s + l.valor, 0);
   const totalDespesas = lista.filter((l) => l.tipo === 'despesa').reduce((s, l) => s + l.valor, 0);
-  const chips = ['todas', ...CATEGORIAS_DESPESA_FAMILIA, 'receitas'];
+  const chips = ['todas', 'pendentes', ...CATEGORIAS_DESPESA_FAMILIA, 'receitas'];
   const grupos = [];
   lista.forEach((t) => {
     const chave = grupoDataFamilia(t.data);
@@ -35036,7 +35090,7 @@ async function renderFamiliaLancamentos() {
 
     <div style="display:flex; gap:7px; overflow-x:auto; margin-top:16px; padding-bottom:4px;">
       ${chips.map((c) => `
-        <button onclick="filtrarFamiliaCategoria('${esc(c)}')" style="flex-shrink:0; border:1px solid ${filtro === c ? FAM_COR.navy : '#E2E8F0'}; background:${filtro === c ? FAM_COR.navy : '#fff'}; color:${filtro === c ? '#fff' : '#475569'}; font-weight:${filtro === c ? 700 : 600}; font-size:12px; padding:8px 14px; border-radius:999px; cursor:pointer;">${esc(c === 'todas' ? 'Todas' : c === 'receitas' ? 'Receitas' : c)}</button>
+        <button onclick="filtrarFamiliaCategoria('${esc(c)}')" style="flex-shrink:0; border:1px solid ${filtro === c ? FAM_COR.navy : '#E2E8F0'}; background:${filtro === c ? FAM_COR.navy : '#fff'}; color:${filtro === c ? '#fff' : '#475569'}; font-weight:${filtro === c ? 700 : 600}; font-size:12px; padding:8px 14px; border-radius:999px; cursor:pointer;">${esc(c === 'todas' ? 'Todas' : c === 'receitas' ? 'Receitas' : c === 'pendentes' ? 'Pendentes' : c)}</button>
       `).join('')}
     </div>
 
@@ -35089,6 +35143,15 @@ function mudarTipoFamiliaNovo(tipo) {
   renderFamiliaNovo();
 }
 
+// pedido do usuário: "dar baixa em cada conta" — status pago/pendente só aparece pra despesa (ver
+// toggle em renderFamiliaNovo); default "pago" quando não escolhido, pra não mudar o comportamento
+// de quem só lança uma despesa já paga (fluxo de hoje, sem clicar em nada a mais).
+function mudarStatusFamiliaNovo(status) {
+  familiaNovoDraft = coletarDraftFamiliaNovo();
+  familiaNovoDraft.status = status;
+  renderFamiliaNovo();
+}
+
 function renderFamiliaNovo() {
   const editando = !!(familiaNovoDraft && familiaNovoDraft.id);
   const d = familiaNovoDraft || {
@@ -35129,6 +35192,14 @@ function renderFamiliaNovo() {
         <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Data</label>
         <input id="fn-data" type="date" value="${esc(d.data)}" style="width:100%; box-sizing:border-box; border:1px solid #E2E8F0; border-radius:12px; padding:12px 14px; font-size:14px;">
       </div>
+      ${d.tipo === 'despesa' ? `
+      <div>
+        <label style="font-size:12px; font-weight:700; color:#64748B; margin-bottom:6px; display:block;">Status</label>
+        <div style="display:flex; background:#fff; border:1px solid #E2E8F0; border-radius:12px; padding:4px; gap:2px;">
+          <button type="button" onclick="mudarStatusFamiliaNovo('pago')" style="flex:1; border:none; background:${(d.status || 'pago') === 'pago' ? '#ECFDF3' : 'transparent'}; color:${(d.status || 'pago') === 'pago' ? FAM_COR.verde : '#94A3B8'}; font-weight:${(d.status || 'pago') === 'pago' ? 700 : 600}; font-size:13px; padding:9px 0; border-radius:9px; cursor:pointer;">Pago</button>
+          <button type="button" onclick="mudarStatusFamiliaNovo('pendente')" style="flex:1; border:none; background:${d.status === 'pendente' ? '#FEF3C7' : 'transparent'}; color:${d.status === 'pendente' ? FAM_COR.amarelo : '#94A3B8'}; font-weight:${d.status === 'pendente' ? 700 : 600}; font-size:13px; padding:9px 0; border-radius:9px; cursor:pointer;">Pendente</button>
+        </div>
+      </div>` : ''}
     </div>
 
     <button onclick="salvarLancamentoFamilia(${editando ? d.id : 'null'})" style="margin-top:22px; width:100%; border:none; background:${d.tipo === 'receita' ? FAM_COR.verde : FAM_COR.navy}; color:#fff; font-weight:700; font-size:14.5px; padding:14px 0; border-radius:14px; cursor:pointer;">Salvar lançamento</button>
@@ -35144,6 +35215,7 @@ async function salvarLancamentoFamilia(id) {
     descricao: document.getElementById('fn-descricao').value,
     valor: document.getElementById('fn-valor').value,
     data: document.getElementById('fn-data').value,
+    status: familiaNovoDraft.status || 'pago',
   };
   try {
     if (id) await api(`/api/financas/lancamentos/${id}`, { method: 'PUT', body });
