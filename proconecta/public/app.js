@@ -14745,6 +14745,42 @@ function limparPdf(s) {
 }
 function numeroOS(a) { return a.numero_os || `OS-${String(a.id).padStart(6, '0')}`; }
 
+// pedido do usuário: texto longo do relatório (laudo técnico/serviço realizado/observações)
+// cortava no rodapé da página em vez de continuar na seguinte — cada PDF decidia pular de página
+// ANTES de calcular a altura de verdade da caixa (sempre reservando só 40pt fixos, pouco pra um
+// texto de várias linhas), então uma caixa comprida começava tarde demais na página e saía
+// desenhada passando do rodapé — o jsPDF não quebra página sozinho, só desenha fora da área
+// visível. Substitui o bloco repetido em todo PDF de relatório manual (calcular linhas, desenhar
+// a caixa com borda, escrever o texto): calcula a altura de verdade primeiro, pula de página se
+// não couber, e ainda divide o texto em mais de uma caixa/página se ele for maior que uma página
+// inteira sozinho. obterY/definirY leem e escrevem o `y` de quem chamou (cada gerador de PDF tem
+// o seu próprio, fechado na função) — por isso não devolve nada, só deixa esse `y` atualizado.
+function desenharCaixaTextoLongoPdf(doc, o) {
+  const fonte = o.fonte || undefined;
+  const estilo = o.estilo || 'normal';
+  const fontSize = o.fontSize || 9;
+  const corTexto = o.corTexto || PDF_COR.ink;
+  const corBorda = o.corBorda || PDF_COR.line;
+  doc.setFontSize(fontSize); doc.setFont(fonte, estilo); doc.setTextColor(...corTexto);
+  const linhas = doc.splitTextToSize(o.texto || '—', o.largura - 16);
+  const alturaLinha = 12;
+  const folga = 14 + 12; // 14pt até a 1ª linha de texto + 12pt de respiro embaixo
+  const linhasPorCaixaCheia = Math.max(1, Math.floor((o.pageH - o.margem * 2 - folga) / alturaLinha));
+  let i = 0;
+  while (i < linhas.length) {
+    const bloco = linhas.slice(i, i + linhasPorCaixaCheia);
+    const altura = Math.max(24, bloco.length * alturaLinha + 12);
+    if (o.obterY() + altura > o.pageH - o.margem) o.novaPagina();
+    const y = o.obterY();
+    doc.setDrawColor(...corBorda); doc.setLineWidth(0.7);
+    doc.rect(o.margem, y, o.largura, altura, 'S');
+    doc.setFontSize(fontSize); doc.setFont(fonte, estilo); doc.setTextColor(...corTexto);
+    doc.text(bloco, o.margem + 8, y + 14);
+    i += linhasPorCaixaCheia;
+    o.definirY(y + altura + (i >= linhas.length ? (o.espacoFinal ?? 16) : 10));
+  }
+}
+
 // campo de empresa/cliente com dropdown pesquisável (combobox) — em vez de um <select> puro.
 // idPrefix vira "<idPrefix>-nome" (o que o usuário digita/vê) + "<idPrefix>" (hidden com o id resolvido)
 // + "<idPrefix>-lista" (o menu suspenso). Clicar no campo mostra todas as empresas em ordem
@@ -17133,16 +17169,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   y += 16;
 
   tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(d.laudo_tecnico) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(d.laudo_tecnico), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   if (d.componente_nome) {
     tituloCentro('Classificação da falha (RCM/FMEA)', null, true);
@@ -17152,15 +17179,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
   }
 
   tituloCentro('Serviço realizado', null, true);
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(d.servico_realizado) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 14;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(d.servico_realizado), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloEsquerda('Peças Fornecidas');
   {
@@ -17196,13 +17215,7 @@ function gerarPdfLaudo(d, item, logoDataUri) {
 
   if (d.observacoes) {
     tituloCentro('Observações');
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(d.observacoes), largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 14;
+    desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(d.observacoes), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
   }
 
   // garante que o título "Relatório fotográfico" nunca fique sozinho no fim de uma página
@@ -17366,15 +17379,7 @@ function gerarPdfRelatorioSimples(r, a, logoDataUri) {
   y += 8;
 
   tituloCentro('Observações');
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.observacoes) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.observacoes), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   // ===== página de contato =====
   doc.addPage();
@@ -19182,7 +19187,7 @@ function gerarPdfRelatorioPreventiva(r, logoDataUri) {
   { if (y > pageH - margem - 30) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'bold'); doc.setTextColor(...PDF_COR.navy); doc.text('OBSERVAÇÕES DO CHECK-LIST', margem, y); y += 13; doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_checklist) || '—', largura); doc.text(linhas, margem, y); y += linhas.length * 12 + 16; }
 
   tituloCentro('Serviços realizados', 'O que foi feito na máquina');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.servico_feito) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.servico_feito), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloEsquerda('Peças fornecidas');
   {
@@ -19626,7 +19631,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   doc.addPage(); y = margem; cabecalho();
 
   tituloSecao('Serviços realizados', 'Manutenção realizada / resultados de amostra');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.servico_feito) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.servico_feito), novaPagina, obterY: () => y, definirY: (v) => { y = v; }, fonte: 'times' });
 
   tituloSecao('Peças fornecidas');
   {
@@ -19701,7 +19706,7 @@ function gerarPdfRelatorioPreventiva2(r, logoDataUri) {
   });
 
   tituloSecao('Observações do serviço');
-  { if (y > pageH - margem - 40) novaPagina(); doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink); const linhas = doc.splitTextToSize(limparPdf(r.observacoes_servico) || '—', largura - 16); const altura = Math.max(24, linhas.length * 12 + 12); doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S'); doc.text(linhas, margem + 8, y + 14); y += altura + 16; }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.observacoes_servico), novaPagina, obterY: () => y, definirY: (v) => { y = v; }, fonte: 'times' });
 
   // pedido do usuário: "o campo observação e avaliação precisa ser exatamente iguais" — na
   // referência é UMA caixa só com as 3 linhas empilhadas (reaproveita boxInfo, igual às caixas
@@ -19903,13 +19908,7 @@ function gerarPdfRelatorioCorretiva(r, logoDataUri) {
 
   function caixaTexto(titulo, valor) {
     tituloSecao(titulo);
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFont('times', 'normal'); doc.setFontSize(9); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(valor) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
+    desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(valor), novaPagina, obterY: () => y, definirY: (v) => { y = v; }, fonte: 'times' });
   }
 
   // ===== página de dados (1ª página — sem capa antes dela) =====
@@ -23491,27 +23490,10 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
   y += 16;
 
   tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.laudo_tecnico) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.laudo_tecnico), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloCentro('Serviços realizados', 'Manutenção realizada / resultados de amostra', true);
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.servico_realizado) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.servico_realizado), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloEsquerda('Peças fornecidas');
   {
@@ -23547,13 +23529,7 @@ function gerarPdfRelatorioTecnico(r, logoDataUri) {
 
   if (r.observacoes) {
     tituloCentro('Observações do serviço');
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.observacoes), largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 14;
+    desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.observacoes), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
   }
 
   const fotos = r.fotos || [];
@@ -24182,15 +24158,7 @@ function gerarPdfRelatorioAceite(r, logoDataUri) {
   }
 
   tituloCentro('Observações');
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.observacoes) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.observacoes), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloCentro('Aceite');
   {
@@ -26975,27 +26943,10 @@ function gerarPdfRelatorioManutencao(r, logoDataUri) {
   y += 16;
 
   tituloCentro('Laudo técnico', 'Defeito encontrado e análise do estado do equipamento');
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setDrawColor(...PDF_COR.line); doc.setLineWidth(0.7);
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.laudo_tecnico) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 16;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.laudo_tecnico), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloCentro('Serviços realizados', 'Manutenção realizada / Resultados de amostra');
-  {
-    if (y > pageH - margem - 40) novaPagina();
-    doc.setFontSize(9); doc.setFont(undefined, 'normal'); doc.setTextColor(...PDF_COR.ink);
-    const linhas = doc.splitTextToSize(limparPdf(r.servico_realizado) || '—', largura - 16);
-    const altura = Math.max(24, linhas.length * 12 + 12);
-    doc.setDrawColor(...PDF_COR.line); doc.rect(margem, y, largura, altura, 'S');
-    doc.text(linhas, margem + 8, y + 14);
-    y += altura + 14;
-  }
+  desenharCaixaTextoLongoPdf(doc, { margem, largura, pageH, texto: limparPdf(r.servico_realizado), novaPagina, obterY: () => y, definirY: (v) => { y = v; } });
 
   tituloEsquerda('Peças Fornecidas');
   {
