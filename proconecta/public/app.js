@@ -20168,23 +20168,55 @@ window._pararAutoSalvarRascunhoPendente = null;
   // quando esse salvamento roda, os campos que window._draftSyncAtual tenta ler não existem
   // mais no DOM — sem o try/catch isso estouraria um erro sem efeito nenhum, só ruído.
   const disparar = () => { try { if (window._draftSyncAtual) window._draftSyncAtual(); } catch (e) {} };
-  // 'input' dispara a cada tecla digitada — salvar (e reescrever fotos/assinatura em base64
-  // junto) a cada letra deixa o formulário pesado à toa. Em vez disso, espera 1s sem digitar
-  // pra só então salvar — continua protegendo contra recarregamento acidental, só que mais leve.
-  main.addEventListener('input', () => {
+  // pedido do usuário: "está demorando muito, travando" — um relatório com várias fotos (cada
+  // uma já comprimida, mas ainda algumas centenas de KB em base64) faz o rascunho virar um objeto
+  // de vários MB; 'change' e 'click' salvavam ESSE objeto inteiro NA HORA a cada disparo (só
+  // 'input' esperava a digitação parar), então qualquer clique na tela — mesmo sem relação
+  // nenhuma com foto, como um botão de negrito/itálico do comentário — travava a interface
+  // reescrevendo esse rascunho pesado de novo. Agora os três tipos de evento caem no mesmo
+  // temporizador: só salva 1s depois do ÚLTIMO disparo, não a cada um isoladamente. Isso não
+  // arrisca perder nada — o envio de verdade (salvarRelatorioManutencao e afins) sempre relê os
+  // campos direto do DOM, nunca depende deste rascunho; e "Salvar rascunho"/sair da tela chamam
+  // window._draftSyncAtual() direto, sem esperar o temporizador.
+  const agendar = () => {
     clearTimeout(esperaDigitacao);
     esperaDigitacao = setTimeout(disparar, 1000);
-  });
-  // 'change' (marcar checkbox, escolher opção) e 'click' (+/x de peça, foto, e-mail, estrela de
-  // satisfação) são esporádicos, não uma tecla atrás da outra — continuam salvando na hora.
-  main.addEventListener('change', disparar);
-  main.addEventListener('click', disparar);
-  // se o usuário digitar o último campo e enviar o relatório em menos de 1s (antes do
-  // autosalvamento "esperar 1s sem digitar" disparar), esse salvamento atrasado ressuscitava o
-  // rascunho no localStorage logo depois de limparRascunhoManual já ter apagado ele — exposto
-  // aqui pra limparRascunhoManual cancelar esse timer pendente junto.
+  };
+  main.addEventListener('input', agendar);
+  main.addEventListener('change', agendar);
+  main.addEventListener('click', agendar);
+  // se o usuário interagir pela última vez e enviar o relatório em menos de 1s (antes do
+  // temporizador acima disparar), esse salvamento atrasado ressuscitava o rascunho no
+  // localStorage logo depois de limparRascunhoManual já ter apagado ele — exposto aqui pra
+  // limparRascunhoManual cancelar esse timer pendente junto.
   window._pararAutoSalvarRascunhoPendente = () => clearTimeout(esperaDigitacao);
 })();
+
+// pedido do usuário: "faça ajuste para que [consuma] menos espaço possível" — um rascunho
+// abandonado (o usuário fechou o app no meio do preenchimento e nunca voltou pra terminar ou
+// descartar) ficava pra sempre no localStorage deste aparelho, fotos incluídas (cada uma já
+// comprimida, mas ainda algumas centenas de KB em base64 cada); com vários tipos de relatório,
+// isso acumula ao longo do tempo e é o que mais pesa o armazenamento do navegador. Varre os três
+// mecanismos de rascunho (Relatório/Laudo da O.S. — chaveRascunho/chaveRascunhoLaudo — e o Manual
+// — chaveRascunhoManual) uma vez por carregamento da página e apaga os com mais de 90 dias —
+// tempo generoso o bastante pra nunca arriscar apagar um preenchimento que alguém ainda queira
+// retomar; só entra em keys que já têm o campo salvoEmISO (todos nascem com ele), uma formatação
+// inesperada é só ignorada, nunca apagada por engano.
+function limparRascunhosAntigos() {
+  try {
+    const PREFIXOS_RASCUNHO = ['pc_rascunho_relatorio_', 'pc_rascunho_laudo_', 'pc_rascunho_manual_'];
+    const NOVENTA_DIAS_MS = 90 * 24 * 60 * 60 * 1000;
+    const agora = Date.now();
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const chave = localStorage.key(i);
+      if (!chave || !PREFIXOS_RASCUNHO.some((p) => chave.startsWith(p))) continue;
+      try {
+        const { salvoEmISO } = JSON.parse(localStorage.getItem(chave)) || {};
+        if (salvoEmISO && agora - new Date(salvoEmISO).getTime() > NOVENTA_DIAS_MS) localStorage.removeItem(chave);
+      } catch (e) { /* entrada corrompida ou formato antigo sem salvoEmISO — ignora, não apaga */ }
+    }
+  } catch (e) {}
+}
 
 function chaveRascunhoManual(tipo, idExistente) {
   return `pc_rascunho_manual_${tipo}${idExistente ? '_edit_' + idExistente : '_novo'}`;
@@ -35462,5 +35494,6 @@ function definirOrcamentoFamilia(categoria, limiteAtual) {
   };
 }
 
+limparRascunhosAntigos();
 tentarSessaoExistente();
 carregarEmpresa();
