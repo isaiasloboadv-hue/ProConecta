@@ -14755,6 +14755,12 @@ function numeroOS(a) { return a.numero_os || `OS-${String(a.id).padStart(6, '0')
 // não couber, e ainda divide o texto em mais de uma caixa/página se ele for maior que uma página
 // inteira sozinho. obterY/definirY leem e escrevem o `y` de quem chamou (cada gerador de PDF tem
 // o seu próprio, fechado na função) — por isso não devolve nada, só deixa esse `y` atualizado.
+// A 1ª primeira correção pulava a caixa INTEIRA pra página seguinte quando ela não cabia por
+// completo embaixo do título (linhasPorCaixaCheia sempre media o espaço de uma página cheia, sem
+// contar quanto já tinha sido ocupado pelo título acima) — sobrava um vão em branco feio embaixo
+// do título. Agora cada "fatia" usa só o espaço que realmente resta da posição atual até o rodapé:
+// a caixa começa colada no título, preenche o que tem embaixo dele, e só o restante do texto migra
+// pra(s) página(s) seguinte(s), essas sim com a página cheia disponível.
 function desenharCaixaTextoLongoPdf(doc, o) {
   const fonte = o.fonte || undefined;
   const estilo = o.estilo || 'normal';
@@ -14768,15 +14774,18 @@ function desenharCaixaTextoLongoPdf(doc, o) {
   const linhasPorCaixaCheia = Math.max(1, Math.floor((o.pageH - o.margem * 2 - folga) / alturaLinha));
   let i = 0;
   while (i < linhas.length) {
-    const bloco = linhas.slice(i, i + linhasPorCaixaCheia);
+    const espacoRestante = o.pageH - o.margem - o.obterY() - folga;
+    const linhasQueCabemAqui = Math.max(1, Math.floor(espacoRestante / alturaLinha));
+    const capacidade = Math.min(linhasPorCaixaCheia, linhasQueCabemAqui);
+    const bloco = linhas.slice(i, i + capacidade);
     const altura = Math.max(24, bloco.length * alturaLinha + 12);
-    if (o.obterY() + altura > o.pageH - o.margem) o.novaPagina();
+    if (o.obterY() + altura > o.pageH - o.margem) { o.novaPagina(); continue; }
     const y = o.obterY();
     doc.setDrawColor(...corBorda); doc.setLineWidth(0.7);
     doc.rect(o.margem, y, o.largura, altura, 'S');
     doc.setFontSize(fontSize); doc.setFont(fonte, estilo); doc.setTextColor(...corTexto);
     doc.text(bloco, o.margem + 8, y + 14);
-    i += linhasPorCaixaCheia;
+    i += bloco.length;
     o.definirY(y + altura + (i >= linhas.length ? (o.espacoFinal ?? 16) : 10));
   }
 }
