@@ -34841,7 +34841,7 @@ function barraInferiorFamilia(ativo) {
       <div style="font-size:10px; font-weight:${ativo === id ? 700 : 600};">${label}</div>
     </a>`;
   return `
-    <div style="position:sticky; bottom:0; left:0; right:0; width:100%; height:82px; background:#fff; border-top:1px solid #E7ECF3; display:flex; align-items:center; justify-content:space-around; padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); box-sizing:border-box;">
+    <div style="position:fixed; bottom:0; left:0; right:0; width:100%; max-width:480px; margin:0 auto; height:82px; background:#fff; border-top:1px solid #E7ECF3; display:flex; align-items:center; justify-content:space-around; padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); box-sizing:border-box; z-index:20;">
       ${item('inicio', 'Início', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>', 'familia-inicio')}
       ${item('lancamentos', 'Lançamentos', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg>', 'familia-lancamentos')}
       <a href="#" onclick="abrirFamiliaNovo('despesa'); return false;" style="display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:-26px; text-decoration:none;">
@@ -34856,15 +34856,17 @@ function barraInferiorFamilia(ativo) {
 
 function shellFamilia(conteudoHtml, ativo) {
   // pedido do usuário: "o menu inferior precisa ficar na borda do celular, está ficando espaço
-  // depois do menu inferior" — min-height:100vh sozinho fica curto no celular (a altura "real"
-  // visível costuma ser maior que 100vh enquanto a barra de endereço do navegador recolhe),
-  // sobrando um resto do fundo cinza claro da própria página (--blue-pale-2) abaixo da barra
-  // inferior sticky. 100dvh (altura dinâmica, com fallback pro 100vh em navegador sem suporte)
-  // acompanha a altura visível de verdade.
+  // depois do menu inferior" — a barra era position:sticky dentro de um wrapper com
+  // min-height:100vh; em celular essa altura calculada não bate sempre com a altura visível de
+  // verdade (barra de endereço do navegador recolhendo/aparecendo), sobrando um resto do fundo
+  // claro da página abaixo da barra. Trocado pra position:fixed (ver barraInferiorFamilia): fica
+  // colada na borda real da tela, sempre, independente de qualquer cálculo de altura do conteúdo.
+  // O padding-bottom do conteúdo abaixo compensa a altura da barra fixa, pra nada ficar escondido
+  // atrás dela ao rolar a página até o fim.
   document.getElementById('familiaMain').innerHTML = `
     <div style="background:#E2E8F0; width:100%; min-height:100vh; min-height:100dvh; box-sizing:border-box; display:flex; justify-content:center; font-family:'Inter',system-ui,sans-serif; color:#101826;">
       <div style="width:100%; max-width:480px; min-height:100vh; min-height:100dvh; background:#F3F6FB; position:relative; box-sizing:border-box;">
-        <div style="padding:22px 20px 24px; box-sizing:border-box;">${conteudoHtml}</div>
+        <div style="padding:22px 20px calc(96px + env(safe-area-inset-bottom, 0px)); box-sizing:border-box;">${conteudoHtml}</div>
         ${barraInferiorFamilia(ativo)}
       </div>
     </div>`;
