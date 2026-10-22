@@ -12713,9 +12713,15 @@ rota('GET', /^\/api\/financas\/resumo$/, async (req, res) => {
   const agora = new Date();
   const mesAtual = agora.toISOString().slice(0, 7);
   const doMes = (l, mes) => (l.data || '').slice(0, 7) === mes;
+  // pedido do usuário: "como posso acompanhar mês a mês... não tem filtrar mês anterior ou nem
+  // futuro" — ?mes=YYYY-MM deixa escolher qualquer mês pro bloco "Gastos por categoria"/orçamento
+  // do mês (ver seletorMesFamiliaHtml em app.js); o resto (saldo total, pendentes, evolução dos
+  // últimos 6 meses) continua sempre "de verdade", sem depender do mês escolhido na tela.
+  const { query } = url.parse(req.url, true);
+  const mesSelecionado = /^\d{4}-\d{2}$/.test(query.mes || '') ? query.mes : mesAtual;
 
-  const despesasMes = lancamentos.filter((l) => l.tipo === 'despesa' && doMes(l, mesAtual));
-  const receitasMes = lancamentos.filter((l) => l.tipo === 'receita' && doMes(l, mesAtual));
+  const despesasMes = lancamentos.filter((l) => l.tipo === 'despesa' && doMes(l, mesSelecionado));
+  const receitasMes = lancamentos.filter((l) => l.tipo === 'receita' && doMes(l, mesSelecionado));
   const totalDespesasMes = despesasMes.reduce((s, l) => s + l.valor, 0);
   const totalReceitasMes = receitasMes.reduce((s, l) => s + l.valor, 0);
 
@@ -12754,7 +12760,7 @@ rota('GET', /^\/api\/financas\/resumo$/, async (req, res) => {
     .sort((a, b) => (b.criado_em || '').localeCompare(a.criado_em || ''));
 
   const orcamentos = tenant.listar(data, 'financas_orcamentos', user.empresa_id)
-    .filter((o) => o.mes === mesAtual)
+    .filter((o) => o.mes === mesSelecionado)
     .map((o) => {
       const gastoAtual = despesasMes.filter((l) => l.categoria === o.categoria).reduce((s, l) => s + l.valor, 0);
       return { ...o, gastoAtual, percentual: o.limite ? Math.round((gastoAtual / o.limite) * 100) : 0 };
@@ -12775,7 +12781,7 @@ rota('GET', /^\/api\/financas\/resumo$/, async (req, res) => {
 
   enviarJSON(res, 200, {
     saldoTotal, totalDespesasMes, totalReceitasMes, gastosPorCategoria, evolucaoMensal,
-    metas, orcamentos, ultimosLancamentos, pendentes, totalPendente,
+    metas, orcamentos, ultimosLancamentos, pendentes, totalPendente, mesSelecionado,
     categoriasDespesa: CATEGORIAS_DESPESA_FAMILIA, categoriasReceita: CATEGORIAS_RECEITA_FAMILIA,
   });
 });

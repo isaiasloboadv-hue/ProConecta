@@ -34824,6 +34824,45 @@ function grupoDataFamilia(iso) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
 }
 
+// pedido do usuário: "como posso acompanhar mês a mês... não tem filtrar mês anterior ou nem
+// futuro" — seletor de mês compartilhado por Início/Lançamentos/Orçamento (as 3 telas cujo
+// conteúdo depende de "qual mês"); window._familiaMesSelecionado null = mês atual (não grava um
+// valor fixo, pra sempre acompanhar o mês corrente sozinho até o usuário navegar pra outro).
+const NOMES_MES_FAMILIA = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+function familiaMesAtualIso() { return new Date().toISOString().slice(0, 7); }
+function familiaMesSelecionado() { return window._familiaMesSelecionado || familiaMesAtualIso(); }
+function familiaMesLabel(mesIso) {
+  const [ano, mes] = mesIso.split('-').map(Number);
+  return `${NOMES_MES_FAMILIA[mes - 1]} ${ano}`;
+}
+function mudarMesFamilia(delta) {
+  const [ano, mes] = familiaMesSelecionado().split('-').map(Number);
+  const d = new Date(ano, mes - 1 + delta, 1);
+  window._familiaMesSelecionado = d.toISOString().slice(0, 7);
+  irFamilia(familiaPaginaAtual);
+}
+function irMesAtualFamilia() {
+  window._familiaMesSelecionado = null;
+  irFamilia(familiaPaginaAtual);
+}
+function seletorMesFamiliaHtml() {
+  const mes = familiaMesSelecionado();
+  const ehMesAtual = mes === familiaMesAtualIso();
+  return `
+    <div style="display:flex; align-items:center; justify-content:space-between; background:#fff; border:1px solid #E7ECF3; border-radius:14px; padding:8px 6px; margin-bottom:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+      <button onclick="mudarMesFamilia(-1)" aria-label="Mês anterior" style="background:none; border:none; cursor:pointer; color:${FAM_COR.navy}; display:flex; padding:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div style="display:flex; flex-direction:column; align-items:center; gap:1px;">
+        <div style="font-size:13.5px; font-weight:800; color:${FAM_COR.navy};">${esc(familiaMesLabel(mes))}</div>
+        ${!ehMesAtual ? `<a href="#" onclick="irMesAtualFamilia(); return false;" style="font-size:10.5px; font-weight:700; color:${FAM_COR.blue}; text-decoration:none;">Voltar pro mês atual</a>` : `<div style="font-size:10.5px; color:#94A3B8;">Mês atual</div>`}
+      </div>
+      <button onclick="mudarMesFamilia(1)" aria-label="Mês seguinte" style="background:none; border:none; cursor:pointer; color:${FAM_COR.navy}; display:flex; padding:8px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>`;
+}
+
 async function irFamilia(pagina) {
   familiaPaginaAtual = pagina;
   if (pagina !== 'familia-novo') familiaNovoDraft = null;
@@ -34913,7 +34952,7 @@ async function darBaixaLancamentoFamilia(id) {
 async function renderFamiliaInicio() {
   shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'inicio');
   let r;
-  try { r = await api('/api/financas/resumo'); } catch (e) { shellFamilia(`<p class="empty">Erro ao carregar: ${esc(e.message)}</p>`, 'inicio'); return; }
+  try { r = await api('/api/financas/resumo?mes=' + familiaMesSelecionado()); } catch (e) { shellFamilia(`<p class="empty">Erro ao carregar: ${esc(e.message)}</p>`, 'inicio'); return; }
   window._familiaResumoCache = r;
   const saldoVisivel = window._familiaSaldoVisivel !== false;
   const saldoTexto = saldoVisivel ? `R$ ${fmtMoedaFamilia(r.saldoTotal)}` : 'R$ ••••••';
@@ -35008,10 +35047,12 @@ async function renderFamiliaInicio() {
       </div>
     </div>
 
-    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
+    ${seletorMesFamiliaHtml()}
+
+    <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
         <div style="font-size:13.5px; font-weight:700; color:${FAM_COR.navy};">Gastos por categoria</div>
-        <div style="font-size:11.5px; font-weight:600; color:#94A3B8;">Este mês</div>
+        <div style="font-size:11.5px; font-weight:600; color:#94A3B8;">${esc(familiaMesLabel(r.mesSelecionado))}</div>
       </div>
       ${r.gastosPorCategoria.length ? `
         <div style="display:flex; gap:18px; align-items:center;">
@@ -35029,7 +35070,7 @@ async function renderFamiliaInicio() {
                 <div style="font-size:11.5px; font-weight:600; color:#94A3B8;">${c.percentual}%</div>
               </div>`).join('')}
           </div>
-        </div>` : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:12px 0;">Nenhuma despesa lançada este mês ainda.</p>`}
+        </div>` : `<p style="color:#94A3B8; font-size:13px; text-align:center; padding:12px 0;">Nenhuma despesa lançada em ${esc(familiaMesLabel(r.mesSelecionado))}.</p>`}
     </div>
 
     <div style="background:#fff; border:1px solid #E7ECF3; border-radius:18px; padding:18px; margin-top:16px; box-shadow:0 1px 2px rgba(16,24,38,0.04);">
@@ -35058,7 +35099,15 @@ function abrirFamiliaNovo(tipo) {
 async function renderFamiliaLancamentos() {
   shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'lancamentos');
   const filtro = window._familiaFiltroCategoria || 'todas';
-  const queryStr = filtro === 'todas' ? '' : filtro === 'receitas' ? '?tipo=receita' : filtro === 'pendentes' ? '?status=pendente' : `?categoria=${encodeURIComponent(filtro)}`;
+  // "Pendentes" é visão global (qualquer mês — uma conta atrasada continua pendente até alguém dar
+  // baixa, ver GET /api/financas/resumo), por isso ignora o seletor de mês; as outras combinam com
+  // o mês escolhido (ver seletorMesFamiliaHtml).
+  const params = new URLSearchParams();
+  if (filtro === 'receitas') params.set('tipo', 'receita');
+  else if (filtro === 'pendentes') params.set('status', 'pendente');
+  else if (filtro !== 'todas') params.set('categoria', filtro);
+  if (filtro !== 'pendentes') params.set('mes', familiaMesSelecionado());
+  const queryStr = '?' + params.toString();
   let lista;
   try { ({ lancamentos: lista } = await api('/api/financas/lancamentos' + queryStr)); }
   catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'lancamentos'); return; }
@@ -35077,7 +35126,9 @@ async function renderFamiliaLancamentos() {
   const html = `
     <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">Lançamentos</div>
 
-    <div style="display:flex; gap:12px; margin-top:18px;">
+    <div style="margin-top:18px;">${seletorMesFamiliaHtml()}</div>
+
+    <div style="display:flex; gap:12px;">
       <div style="flex:1; background:#fff; border:1px solid #E7ECF3; border-radius:14px; padding:12px 14px;">
         <div style="font-size:10.5px; font-weight:700; color:#94A3B8; text-transform:uppercase;">Receitas</div>
         <div style="font-family:'Plus Jakarta Sans',sans-serif; font-size:16px; font-weight:800; color:${FAM_COR.verde}; margin-top:4px;">+ R$ ${fmtMoedaFamilia(totalReceitas)}</div>
@@ -35334,15 +35385,17 @@ async function excluirMetaFamilia(id) {
 
 async function renderFamiliaOrcamento() {
   shellFamilia('<p style="text-align:center; padding:60px 0; color:#94A3B8;">Carregando...</p>', 'orcamento');
+  const mes = familiaMesSelecionado();
   let resp;
-  try { resp = await api('/api/financas/orcamentos'); } catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'orcamento'); return; }
+  try { resp = await api('/api/financas/orcamentos?mes=' + mes); } catch (e) { shellFamilia(`<p class="empty">Erro: ${esc(e.message)}</p>`, 'orcamento'); return; }
   const porCategoria = {};
   resp.orcamentos.forEach((o) => { porCategoria[o.categoria] = o; });
 
   const html = `
-    <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">Orçamento do mês</div>
+    <div style="font-size:20px; font-weight:800; color:${FAM_COR.navy};">Orçamento — ${esc(familiaMesLabel(mes))}</div>
     <div style="font-size:12.5px; color:#94A3B8; margin-top:3px;">Defina um limite de gasto por categoria e acompanhe o quanto já foi usado.</div>
-    <div style="display:flex; flex-direction:column; gap:14px; margin-top:18px;">
+    <div style="margin-top:16px;">${seletorMesFamiliaHtml()}</div>
+    <div style="display:flex; flex-direction:column; gap:14px;">
       ${CATEGORIAS_DESPESA_FAMILIA.map((categoria) => {
         const o = porCategoria[categoria];
         const cor = o && o.percentual >= 90 ? FAM_COR.vermelho : (FAM_CATEGORIA_COR[categoria] || FAM_COR.navy);
@@ -35381,7 +35434,7 @@ function definirOrcamentoFamilia(categoria, limiteAtual) {
   modal.querySelector('#orc-btn-salvar').onclick = async () => {
     const limite = Number(document.getElementById('orc-limite').value);
     if (!Number.isFinite(limite) || limite <= 0) return alert('Informe um limite maior que zero.');
-    const mes = new Date().toISOString().slice(0, 7);
+    const mes = familiaMesSelecionado();
     try {
       await api('/api/financas/orcamentos', { method: 'POST', body: { categoria, mes, limite } });
       fechar();
