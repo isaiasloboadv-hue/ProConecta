@@ -692,21 +692,6 @@ function initials(nome) {
 function renderHeaderRight() {
   const el = document.getElementById('headerRight');
   el.innerHTML = `
-    ${USER.papel === 'suporte' ? `
-    <button class="btn-presenca ${USER.online ? 'online' : 'offline'}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
-      <span class="presenca-bolinha"></span><span class="presenca-label">${USER.online ? 'Online' : 'Offline'}</span>
-    </button>` : ''}
-    <div class="user-chip" onclick="abrirMeuPerfil()" title="Meu perfil — alterar e-mail/senha" style="cursor:pointer;">
-      <div class="user-avatar">${initials(USER.nome)}</div>
-      <div class="user-meta">
-        <span class="u-name">${esc(USER.nome)}</span>
-        <span class="u-role">${PAPEL_LABEL[USER.papel] || USER.papel}</span>
-      </div>
-    </div>
-    <button class="btn-bell" id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span class="bell-badge hidden" id="sync-badge">0</span>
-    </button>
     <div class="bell-wrap">
       <button class="btn-bell" id="btn-bell" onclick="alternarSino()">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 3a6 6 0 0 0-6 6v3.3c0 .6-.2 1.2-.6 1.7L4 16h16l-1.4-2a2.6 2.6 0 0 1-.6-1.7V9a6 6 0 0 0-6-6Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -782,7 +767,7 @@ async function alternarPresenca() {
     const { usuario } = await api('/api/tecnico/online', { method: 'POST', body: { online: !USER.online } });
     USER.online = usuario.online;
     USER.online_desde = usuario.online_desde;
-    renderHeaderRight();
+    montarSidebar();
   } catch (e) { alert('Erro: ' + e.message); }
   finally { if (btn) btn.disabled = false; }
 }
@@ -12919,10 +12904,37 @@ function renderNavNodes(nodes, nivel) {
   }).join('');
 }
 
+// pedido do usuário (print de referência de outro sistema): cabeçalho mais "enxuto" — perfil,
+// status online e sincronizar saem do cabeçalho navy e viram linhas dentro do próprio menu
+// lateral, igual o cartão de perfil + lista de ações da referência. Estrutura/cor/foto do resto
+// do sistema não mudam, só essa reorganização do menu. As linhas de ação (Meu perfil, Online,
+// Sincronizar) são <button> dentro de nav.side, então já herdam o estilo dos itens de navegação
+// (nav.side button no CSS) sem precisar de classe própria.
 function montarSidebar() {
-  const label = 'Acesso ' + (PAPEL_LABEL[USER.papel] || 'cliente').toLowerCase();
   const nav = navDoUsuario();
-  document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
+  document.getElementById('sideNav').innerHTML = `
+    <div class="side-profile">
+      <div class="user-avatar">${initials(USER.nome)}</div>
+      <div class="user-meta">
+        <span class="u-name">${esc(USER.nome)}</span>
+        <span class="u-role">${PAPEL_LABEL[USER.papel] || USER.papel}</span>
+      </div>
+    </div>
+    <button onclick="abrirMeuPerfil()" title="Meu perfil — alterar e-mail/senha">
+      <span class="nav-icone">👤</span>Meu perfil
+    </button>
+    ${USER.papel === 'suporte' ? `
+    <button class="${USER.online ? 'online' : ''}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
+      <span class="side-action-dot"></span>${USER.online ? 'Online — recebendo atendimentos' : 'Offline'}
+    </button>` : ''}
+    <button id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Sincronizar<span class="bell-badge hidden" id="sync-badge">0</span>
+    </button>
+    <div class="side-divider"></div>
+    <span class="tag">Módulos</span>
+    ${renderNavNodes(nav, 0)}
+  `;
   renderHeaderRight();
   aplicarEstadoMenuMobile();
 }

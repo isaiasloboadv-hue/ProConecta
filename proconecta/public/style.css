@@ -87,7 +87,6 @@ header{
 .empresa-tag:empty{display:none;}
 
 .header-right{display:flex;align-items:center;gap:14px;flex-shrink:0;}
-.user-chip{display:flex;align-items:center;gap:10px;}
 .user-avatar{width:34px;height:34px;border-radius:50%;background:var(--blue);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .user-meta{display:flex;flex-direction:column;line-height:1.25;}
 .user-meta .u-name{font-size:13.5px;font-weight:700;color:#fff;}
@@ -170,6 +169,7 @@ nav.side button{
 nav.side button .dot{width:6px;height:6px;border-radius:50%;background:#3C5A82;flex-shrink:0;}
 nav.side button .nav-icone{font-size:15px;line-height:1;flex-shrink:0;}
 nav.side button:hover{background:rgba(255,255,255,0.06);color:#fff;}
+nav.side button:disabled{opacity:.6;cursor:default;}
 nav.side button.active{background:var(--blue);color:#fff;}
 nav.side button.active .dot{background:#fff;}
 nav.side .count{margin-left:auto;background:rgba(255,255,255,0.15);color:#fff;font-size:11px;font-weight:700;border-radius:20px;padding:1px 7px;}
@@ -182,12 +182,17 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .nav-group-header .chevron{display:inline-block;font-size:10px;color:#7E97BC;transition:transform .15s;flex-shrink:0;}
 .nav-group-header .chevron.open{transform:rotate(90deg);color:#fff;}
 
-.btn-presenca{display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;padding:0 12px;height:36px;font-family:inherit;font-weight:700;font-size:12.5px;cursor:pointer;}
-.btn-presenca:hover{background:rgba(255,255,255,0.2);}
-.btn-presenca:disabled{opacity:.6;cursor:default;}
-.btn-presenca .presenca-bolinha{width:8px;height:8px;border-radius:50%;background:#8B98AE;flex-shrink:0;}
-.btn-presenca.online .presenca-bolinha{background:var(--green);box-shadow:0 0 0 3px rgba(23,114,69,.35);}
-.btn-presenca.offline .presenca-bolinha{background:#8B98AE;}
+/* pedido do usuário (print de referência de outro sistema): cartão de perfil no topo do menu
+   lateral + as ações de conta (Meu perfil, Online, Sincronizar) como linhas de menu — saíram do
+   cabeçalho pra cá, que fica "mais enxuto". As linhas em si são <button> comuns dentro de nav.side
+   e já herdam o visual de item de navegação (regras acima); só o cartão e o separador precisam de
+   CSS próprio. */
+.side-profile{display:flex;align-items:center;gap:12px;padding:2px 12px 16px;}
+.side-profile .user-avatar{width:40px;height:40px;font-size:14px;}
+.side-divider{height:1px;background:rgba(255,255,255,.12);margin:8px 4px 14px;}
+.side-action-dot{width:8px;height:8px;border-radius:50%;background:#8B98AE;flex-shrink:0;}
+nav.side button.online .side-action-dot{background:var(--green);box-shadow:0 0 0 3px rgba(23,114,69,.35);}
+nav.side button .bell-badge{position:static;margin-left:auto;border:none;}
 
 .bell-wrap{position:relative;}
 .btn-bell{position:relative;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
@@ -575,13 +580,8 @@ tr:last-child td{border-bottom:none;}
   .proposta-item-row button{grid-column:1/-1;}
   header{padding:0 10px;}
   .header-right{gap:6px;}
-  .user-meta{display:none;}
-  .btn-presenca{padding:0;width:36px;justify-content:center;}
-  .btn-presenca .presenca-label{display:none;}
-  /* pedido do usuário: "o botão Sair foi cortado" — em telas estreitas, sobretudo pro papel
-     suporte (que tem um botão a mais, o de ficar online/offline), o cabeçalho inteiro não cabe
-     com "Sair" por extenso; vira ícone só, do mesmo tamanho dos outros botões do cabeçalho
-     (sincronizar, sino), o que já libera espaço suficiente pra nada ser cortado. */
+  /* pedido do usuário: "o botão Sair foi cortado" — em telas estreitas o cabeçalho inteiro não
+     cabia com "Sair" por extenso; vira ícone só, do mesmo tamanho do sino ao lado. */
   .btn-logout{width:36px;height:36px;padding:0;justify-content:center;}
   .btn-logout-label{display:none;}
   .filtros-row{flex-direction:column;align-items:stretch;}
