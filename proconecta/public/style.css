@@ -88,12 +88,6 @@ header{
 
 .header-right{display:flex;align-items:center;gap:14px;flex-shrink:0;}
 .user-avatar{width:34px;height:34px;border-radius:50%;background:var(--blue);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.user-meta{display:flex;flex-direction:column;line-height:1.25;}
-.user-meta .u-name{font-size:13.5px;font-weight:700;color:#fff;}
-.user-meta .u-role{font-size:11px;color:#9FB6D6;text-transform:uppercase;letter-spacing:.5px;font-weight:600;}
-.btn-logout{background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:8px;padding:8px 13px;font-family:inherit;font-weight:600;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:6px;flex-shrink:0;}
-.btn-logout:hover{background:rgba(255,255,255,0.2);}
-.btn-logout svg{flex-shrink:0;}
 
 /* ---------- AUTH (LOGIN / PRIMEIRO ACESSO) ---------- */
 /* a foto é paisagem (16:9ish); em tela de celular (bem mais alta que larga), "cover" esticado
@@ -182,18 +176,6 @@ nav.side button.active .count{background:rgba(255,255,255,0.28);}
 .nav-group-header .chevron{display:inline-block;font-size:10px;color:#7E97BC;transition:transform .15s;flex-shrink:0;}
 .nav-group-header .chevron.open{transform:rotate(90deg);color:#fff;}
 
-/* pedido do usuário (print de referência de outro sistema): cartão de perfil no topo do menu
-   lateral + as ações de conta (Meu perfil, Online, Sincronizar) como linhas de menu — saíram do
-   cabeçalho pra cá, que fica "mais enxuto". As linhas em si são <button> comuns dentro de nav.side
-   e já herdam o visual de item de navegação (regras acima); só o cartão e o separador precisam de
-   CSS próprio. */
-.side-profile{display:flex;align-items:center;gap:12px;padding:2px 12px 16px;}
-.side-profile .user-avatar{width:40px;height:40px;font-size:14px;}
-.side-divider{height:1px;background:rgba(255,255,255,.12);margin:8px 4px 14px;}
-.side-action-dot{width:8px;height:8px;border-radius:50%;background:#8B98AE;flex-shrink:0;}
-nav.side button.online .side-action-dot{background:var(--green);box-shadow:0 0 0 3px rgba(23,114,69,.35);}
-nav.side button .bell-badge{position:static;margin-left:auto;border:none;}
-
 .bell-wrap{position:relative;}
 .btn-bell{position:relative;background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:9px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .btn-bell:hover{background:rgba(255,255,255,0.2);}
@@ -204,8 +186,17 @@ nav.side button .bell-badge{position:static;margin-left:auto;border:none;}
 .bell-panel.show{display:block;}
 .bell-title{font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.4px;padding:6px 8px 10px;}
 .bell-empty{padding:10px 8px;color:var(--ink-soft);font-size:13px;}
-.bell-item{display:block;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:9px 8px;font-family:inherit;font-size:13px;color:var(--ink);cursor:pointer;}
+.bell-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:9px 8px;font-family:inherit;font-size:13px;color:var(--ink);cursor:pointer;}
 .bell-item:hover{background:var(--blue-pale);}
+.bell-item:disabled{opacity:.6;cursor:default;}
+.bell-item .bell-badge{position:static;margin-left:auto;border:none;}
+/* pedido do usuário: menu de 3 pontinhos no cabeçalho (ver renderMenuConta) — Perfil/Online/
+   Sincronizar reaproveitam o visual de item do painel do sino (.bell-item) acima; só a bolinha de
+   status online e o separador antes do Sair (sempre por último, como pedido) precisam de CSS
+   próprio. */
+.side-action-dot{width:8px;height:8px;border-radius:50%;background:#8B98AE;flex-shrink:0;}
+.online .side-action-dot{background:var(--green);box-shadow:0 0 0 3px rgba(23,114,69,.35);}
+.bell-menu-divider{height:1px;background:var(--line);margin:6px 4px;}
 
 .combo-cliente{position:relative;}
 .combo-lista{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.16);padding:6px;z-index:70;}
@@ -580,10 +571,6 @@ tr:last-child td{border-bottom:none;}
   .proposta-item-row button{grid-column:1/-1;}
   header{padding:0 10px;}
   .header-right{gap:6px;}
-  /* pedido do usuário: "o botão Sair foi cortado" — em telas estreitas o cabeçalho inteiro não
-     cabia com "Sair" por extenso; vira ícone só, do mesmo tamanho do sino ao lado. */
-  .btn-logout{width:36px;height:36px;padding:0;justify-content:center;}
-  .btn-logout-label{display:none;}
   .filtros-row{flex-direction:column;align-items:stretch;}
 }
 @media(max-width:520px){

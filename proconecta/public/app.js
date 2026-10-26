@@ -699,12 +699,59 @@ function renderHeaderRight() {
       </button>
       <div class="bell-panel" id="bell-panel"></div>
     </div>
-    <button class="btn-logout" onclick="sair()" title="Sair">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span class="btn-logout-label">Sair</span>
+    <div class="bell-wrap">
+      <button class="btn-bell" id="btn-conta" onclick="alternarMenuConta()" title="Conta">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+      </button>
+      <div class="bell-panel" id="conta-panel"></div>
+    </div>
+  `;
+}
+
+// pedido do usuário (segunda rodada, com print do próprio app): no lugar do botão de "Sair"
+// isolado no cabeçalho, um botão de 3 pontinhos que abre um menu — Perfil, Online (papel suporte)
+// e Sincronizar (que tinham ido pro menu lateral na rodada anterior) entram aqui dentro também,
+// com Sair sempre por último na lista. Reaproveita o mesmo painel/dropdown branco já usado pelo
+// sino de notificações (.bell-panel/.bell-item), só que preenchido com estas ações de conta.
+function renderMenuConta() {
+  const painel = document.getElementById('conta-panel');
+  if (!painel) return;
+  painel.innerHTML = `
+    <div class="bell-title">Conta</div>
+    <button class="bell-item" onclick="fecharMenuConta(); abrirMeuPerfil();" title="Meu perfil — alterar e-mail/senha">
+      <span class="nav-icone">👤</span>${esc(USER.nome)}
+    </button>
+    ${USER.papel === 'suporte' ? `
+    <button class="bell-item ${USER.online ? 'online' : ''}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
+      <span class="side-action-dot"></span>${USER.online ? 'Online — recebendo atendimentos' : 'Offline'}
+    </button>` : ''}
+    <button class="bell-item" id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Sincronizar<span class="bell-badge hidden" id="sync-badge">0</span>
+    </button>
+    <div class="bell-menu-divider"></div>
+    <button class="bell-item" onclick="sair()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Sair
     </button>
   `;
 }
+
+function alternarMenuConta() {
+  renderMenuConta();
+  document.getElementById('conta-panel').classList.toggle('show');
+}
+
+function fecharMenuConta() {
+  const painel = document.getElementById('conta-panel');
+  if (painel) painel.classList.remove('show');
+}
+
+document.addEventListener('click', (e) => {
+  const painel = document.getElementById('conta-panel');
+  const botao = document.getElementById('btn-conta');
+  if (painel && !painel.contains(e.target) && botao && !botao.contains(e.target)) painel.classList.remove('show');
+});
 
 // pedido do usuário: "coloque opção de o próprio usuário alterar seu email e senha" — modal aberto
 // ao clicar no próprio chip de usuário no cabeçalho (até então só decorativo). Pede a senha atual
@@ -767,7 +814,7 @@ async function alternarPresenca() {
     const { usuario } = await api('/api/tecnico/online', { method: 'POST', body: { online: !USER.online } });
     USER.online = usuario.online;
     USER.online_desde = usuario.online_desde;
-    montarSidebar();
+    renderMenuConta();
   } catch (e) { alert('Erro: ' + e.message); }
   finally { if (btn) btn.disabled = false; }
 }
@@ -12904,37 +12951,14 @@ function renderNavNodes(nodes, nivel) {
   }).join('');
 }
 
-// pedido do usuário (print de referência de outro sistema): cabeçalho mais "enxuto" — perfil,
-// status online e sincronizar saem do cabeçalho navy e viram linhas dentro do próprio menu
-// lateral, igual o cartão de perfil + lista de ações da referência. Estrutura/cor/foto do resto
-// do sistema não mudam, só essa reorganização do menu. As linhas de ação (Meu perfil, Online,
-// Sincronizar) são <button> dentro de nav.side, então já herdam o estilo dos itens de navegação
-// (nav.side button no CSS) sem precisar de classe própria.
+// pedido do usuário (2ª rodada, com print do próprio app): o cartão de perfil + Meu
+// perfil/Online/Sincronizar que tinham ido pro menu lateral na rodada anterior saem daqui de
+// novo — agora moram dentro do menu de 3 pontinhos no cabeçalho (ver renderMenuConta), junto
+// com o Sair. O menu lateral volta a ser só a lista de módulos.
 function montarSidebar() {
+  const label = 'Acesso ' + (PAPEL_LABEL[USER.papel] || 'cliente').toLowerCase();
   const nav = navDoUsuario();
-  document.getElementById('sideNav').innerHTML = `
-    <div class="side-profile">
-      <div class="user-avatar">${initials(USER.nome)}</div>
-      <div class="user-meta">
-        <span class="u-name">${esc(USER.nome)}</span>
-        <span class="u-role">${PAPEL_LABEL[USER.papel] || USER.papel}</span>
-      </div>
-    </div>
-    <button onclick="abrirMeuPerfil()" title="Meu perfil — alterar e-mail/senha">
-      <span class="nav-icone">👤</span>Meu perfil
-    </button>
-    ${USER.papel === 'suporte' ? `
-    <button class="${USER.online ? 'online' : ''}" id="btn-presenca" onclick="alternarPresenca()" title="Ficar online pra receber atendimentos na fila">
-      <span class="side-action-dot"></span>${USER.online ? 'Online — recebendo atendimentos' : 'Offline'}
-    </button>` : ''}
-    <button id="btn-sync" onclick="sincronizarApp()" title="Sincronizar — buscar as atualizações mais recentes">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Sincronizar<span class="bell-badge hidden" id="sync-badge">0</span>
-    </button>
-    <div class="side-divider"></div>
-    <span class="tag">Módulos</span>
-    ${renderNavNodes(nav, 0)}
-  `;
+  document.getElementById('sideNav').innerHTML = `<span class="tag">${label}</span>` + renderNavNodes(nav, 0);
   renderHeaderRight();
   aplicarEstadoMenuMobile();
 }
