@@ -2,13 +2,17 @@
 // nome dele, e-mail e assinatura. Coloque um botão pra gerar link pra enviar pro cliente preencher
 // sem precisar logar. As outras área ficam bloqueada, só a área que o cliente tem que preencher
 // fica livre. Ele preenche, quando ele enviar aparecerá pra mim e eu concluo e envio o termo."
+// Pedido de acompanhamento: "Faltou a parte que o cliente preenche o aceite e avaliação de
+// desempenho. Ele precisa visualizar o restante das informações mesmo que não esteja preenchido."
 //
 // Cobre, pros 4 tipos que já pedem assinatura do cliente (Preventiva, Preventiva 2, Corretiva,
 // Termo de Aceite): salvar em modo rascunho (sem exigir os campos todos) gera o token de
-// assinatura; a rota pública só devolve um resumo (nunca o relatório inteiro); o PUT público só
-// aceita nome/e-mail/assinatura (qualquer outro campo do corpo é ignorado); bloqueia reenvio
-// depois de concluído; e-mail inválido/campos faltando são rejeitados; token inválido dá 404.
-// Sobe o server.js de verdade contra um data.json descartável, mesmo padrão de
+// assinatura; a rota pública devolve o contexto de leitura (o que já foi feito — checklist,
+// descrição do atendimento — mesmo vazio, mas nunca autor_id/tecnico_email/emails_copia/
+// empresa_id); o PUT público só aceita os campos "do cliente" (nome/e-mail/assinatura, avaliação
+// de desempenho, e aceite só no Termo de Aceite — qualquer outro campo do corpo é ignorado);
+// bloqueia reenvio depois de concluído; e-mail inválido/campos faltando são rejeitados; token
+// inválido dá 404. Sobe o server.js de verdade contra um data.json descartável, mesmo padrão de
 // test/relatorio-promotor-devolutivo.test.js.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -92,15 +96,19 @@ test('link de assinatura pública: Corretiva — gerar, ler resumo, assinar, blo
     const getPublico = await fetch(`${base}/api/relatorios-manutencao/assinatura/${criado.token_assinatura_cliente}`);
     assert.equal(getPublico.status, 200);
     const { relatorio: publico } = await getPublico.json();
-    // resumo mínimo — nunca o relatório inteiro
+    // contexto de leitura — o que já foi feito, mas nunca o relatório inteiro
     assert.equal(publico.empresa, 'Promarking Cliente Final');
     assert.equal(publico.tipo_label, 'Termo de Manutenção Corretiva');
-    assert.equal(publico.resumo, 'Troca de fusível');
+    assert.equal(publico.defeito_informado, 'Máquina não liga');
+    assert.equal(publico.acoes_executadas, 'Troca de fusível');
+    // "ele precisa visualizar o restante das informações mesmo que não esteja preenchido" —
+    // observacoes não foi preenchida ainda, mas o campo aparece (vazio), não some
+    assert.equal(publico.observacoes, '');
     assert.equal(publico.assinatura_cliente_concluida, false);
     assert.equal(publico.autor_id, undefined, 'não pode vazar autor_id pro link público');
-    assert.equal(publico.checklist, undefined, 'não pode vazar campos internos do relatório');
     assert.equal(publico.emails_copia, undefined, 'não pode vazar campos internos do relatório');
     assert.equal(publico.empresa_id, undefined, 'não pode vazar empresa_id pro link público');
+    assert.equal(publico.tecnico_email, undefined, 'não pode vazar e-mail do técnico pro link público');
 
     // token inválido -> 404
     const getInvalido = await fetch(`${base}/api/relatorios-manutencao/assinatura/tokeninexistente`);
@@ -120,14 +128,29 @@ test('link de assinatura pública: Corretiva — gerar, ler resumo, assinar, blo
     });
     assert.equal(emailInvalido.status, 400);
 
-    // as "outras áreas ficam bloqueadas": tenta forjar campos que não deveriam ser aceitos por
-    // essa rota (empresa, defeito_informado, satisfacao_estrelas) — nada disso deve mudar
+    // avaliação de desempenho faltando (sem estrelas/autoriza) -> 400 — agora faz parte da área
+    // que o cliente preenche, não é mais opcional
+    const semAvaliacao = await fetch(`${base}/api/relatorios-manutencao/assinatura/${criado.token_assinatura_cliente}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assinatura_cliente_nome: 'Cliente Final', assinatura_cliente_email: 'cliente@empresa.com', assinatura_cliente_img: 'data:image/png;base64,abc' }),
+    });
+    assert.equal(semAvaliacao.status, 400);
+    const semAutoriza = await fetch(`${base}/api/relatorios-manutencao/assinatura/${criado.token_assinatura_cliente}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assinatura_cliente_nome: 'Cliente Final', assinatura_cliente_email: 'cliente@empresa.com', assinatura_cliente_img: 'data:image/png;base64,abc', satisfacao_estrelas: 5 }),
+    });
+    assert.equal(semAutoriza.status, 400);
+
+    // envio completo e válido: nome/e-mail/assinatura + avaliação de desempenho (satisfacao_estrelas
+    // e satisfacao_autoriza/comentario, que a Corretiva usa) — e tenta forjar "empresa" e
+    // "defeito_informado" junto, que a rota pública NUNCA aceita ("as outras área ficam bloqueada")
     const assinarResp = await fetch(`${base}/api/relatorios-manutencao/assinatura/${criado.token_assinatura_cliente}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         assinatura_cliente_nome: 'Cliente Final', assinatura_cliente_email: 'cliente@empresa.com',
         assinatura_cliente_img: 'data:image/png;base64,abc',
-        empresa: 'EMPRESA FORJADA', defeito_informado: 'TEXTO FORJADO', satisfacao_estrelas: 5,
+        satisfacao_estrelas: 5, satisfacao_autoriza: 'sim', satisfacao_comentario: 'Atendimento rápido',
+        empresa: 'EMPRESA FORJADA', defeito_informado: 'TEXTO FORJADO',
       }),
     });
     assert.equal(assinarResp.status, 200);
@@ -135,14 +158,19 @@ test('link de assinatura pública: Corretiva — gerar, ler resumo, assinar, blo
     assert.equal(assinado.assinatura_cliente_concluida, true);
     assert.equal(assinado.assinatura_cliente_nome, 'Cliente Final');
     assert.equal(assinado.assinatura_cliente_email, 'cliente@empresa.com');
+    assert.equal(assinado.satisfacao_estrelas, 5);
+    assert.equal(assinado.satisfacao_autoriza, 'sim');
     assert.ok(assinado.assinatura_cliente_img);
 
-    // confirma do lado autenticado (relatório inteiro) que os campos forjados NÃO mudaram
+    // confirma do lado autenticado (relatório inteiro) que os campos forjados NÃO mudaram, mas a
+    // avaliação de desempenho (legítima) foi salva de verdade
     const detalheResp = await fetch(`${base}/api/relatorios-manutencao/${criado.id}`, { headers: auth });
     const { relatorio: detalhe } = await detalheResp.json();
     assert.equal(detalhe.empresa, 'Promarking Cliente Final');
     assert.equal(detalhe.defeito_informado, 'Máquina não liga');
-    assert.equal(detalhe.satisfacao_estrelas, 0);
+    assert.equal(detalhe.satisfacao_estrelas, 5);
+    assert.equal(detalhe.satisfacao_autoriza, 'sim');
+    assert.equal(detalhe.satisfacao_comentario, 'Atendimento rápido');
     assert.equal(detalhe.assinatura_cliente_nome, 'Cliente Final');
     assert.equal(detalhe.assinatura_cliente_email, 'cliente@empresa.com');
 
@@ -202,7 +230,48 @@ test('link de assinatura pública: Preventiva, Preventiva 2 e Termo de Aceite ta
       assert.equal(resp2.status, 200, `PUT falhou pro tipo ${tipo}`);
       const { relatorio: atualizado } = await resp2.json();
       assert.equal(atualizado.token_assinatura_cliente, relatorio.token_assinatura_cliente, `token mudou no PUT pro tipo ${tipo}`);
+
+      // contexto público mostra o checklist/campos do serviço mesmo vazios ("visualizar o restante
+      // das informações mesmo que não esteja preenchido"), nunca omitidos
+      const ctxResp = await fetch(`${base}/api/relatorios-manutencao/assinatura/${atualizado.token_assinatura_cliente}`);
+      const { relatorio: ctx } = await ctxResp.json();
+      assert.deepEqual(ctx.checklist, [], `checklist deveria vir como array vazio, não sumir, pro tipo ${tipo}`);
+      assert.equal(ctx.empresa, `Cliente ${tipo} atualizado`);
     }
+
+    // ---------- Termo de Aceite: fluxo completo de assinatura pública, com o campo "aceite" ----------
+    const criarAceite = await fetch(`${base}/api/relatorios-manutencao`, {
+      method: 'POST', headers: auth,
+      body: JSON.stringify({ tipo: 'aceite_entrega', rascunho: true, empresa: 'Cliente Aceite Final', servico: 'Instalação de equipamento' }),
+    });
+    const { relatorio: aceiteRelatorio } = await criarAceite.json();
+
+    // sem o campo "aceite" -> 400 (é exclusivo desse tipo, os outros 3 não têm)
+    const semAceite = await fetch(`${base}/api/relatorios-manutencao/assinatura/${aceiteRelatorio.token_assinatura_cliente}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assinatura_cliente_nome: 'Cliente Aceite', assinatura_cliente_email: 'aceite@empresa.com', assinatura_cliente_img: 'data:image/png;base64,abc', satisfacao_estrelas: 4, satisfacao_duvidas: 'sim', satisfacao_apto: 'sim' }),
+    });
+    assert.equal(semAceite.status, 400);
+
+    const assinarAceite = await fetch(`${base}/api/relatorios-manutencao/assinatura/${aceiteRelatorio.token_assinatura_cliente}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assinatura_cliente_nome: 'Cliente Aceite', assinatura_cliente_email: 'aceite@empresa.com',
+        assinatura_cliente_img: 'data:image/png;base64,abc',
+        satisfacao_estrelas: 4, aceite: 'aceito', satisfacao_duvidas: 'sim', satisfacao_apto: 'sim',
+      }),
+    });
+    assert.equal(assinarAceite.status, 200);
+    const { relatorio: aceiteAssinado } = await assinarAceite.json();
+    assert.equal(aceiteAssinado.aceite, 'aceito');
+    assert.equal(aceiteAssinado.satisfacao_duvidas, 'sim');
+    assert.equal(aceiteAssinado.satisfacao_apto, 'sim');
+    assert.equal(aceiteAssinado.assinatura_cliente_concluida, true);
+
+    const aceiteDetalheResp = await fetch(`${base}/api/relatorios-manutencao/${aceiteRelatorio.id}`, { headers: auth });
+    const { relatorio: aceiteDetalhe } = await aceiteDetalheResp.json();
+    assert.equal(aceiteDetalhe.aceite, 'aceito');
+    assert.equal(aceiteDetalhe.satisfacao_estrelas, 4);
   } finally {
     servidor.kill();
     fs.rmSync(dbTemp, { force: true });

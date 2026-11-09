@@ -1663,10 +1663,18 @@ rota('POST', /^\/api\/entregas\/([a-f0-9]+)\/concluir$/, async (req, res, m) => 
 // sem precisar logar. As outras área ficam bloqueada, só a área que o cliente tem que preencher
 // fica livre." — diferente do link da Entrega para Teste (que abre o relatório inteiro pro
 // cliente editar), aqui o token (token_assinatura_cliente, gerado na criação/edição desses 4
-// tipos — ver POST/PUT /api/relatorios-manutencao acima) só dá acesso a ler um resumo
-// (empresa/tipo/técnico/data/serviço, nunca o relatório inteiro) e a escrever exatamente 3
-// campos: nome, e-mail e assinatura do cliente. Tudo o mais continua só podendo ser editado pelo
-// técnico/administrador autenticado, pelas rotas normais.
+// tipos — ver POST/PUT /api/relatorios-manutencao acima) só dá acesso a ler um resumo do que foi
+// feito (nunca o relatório inteiro — sem autor_id/tecnico_email/emails_copia/empresa_id) e a
+// escrever exatamente os campos que são "do cliente": nome/e-mail/assinatura, aceite (só no Termo
+// de Aceite) e avaliação de desempenho. Pedido seguinte, revendo o resultado: "Faltou a parte que
+// o cliente preenche o aceite e avaliação de desempenho. Ele precisa visualizar o restante das
+// informações mesmo que não esteja preenchido" — então: 1) aceite/avaliação de desempenho
+// (estrelas + as perguntas de cada tipo) entram na área editável, do mesmo jeito que
+// nome/e-mail/assinatura; 2) o contexto read-only passa a trazer o que já foi preenchido do
+// serviço em si (checklist, descrição do atendimento) — e cada campo aparece com rótulo mesmo
+// vazio ("—"), nunca omitido, porque o cliente pode abrir o link antes do técnico ter terminado de
+// preencher o resto. Tudo o mais continua só podendo ser editado pelo técnico/administrador
+// autenticado, pelas rotas normais.
 const TIPOS_COM_ASSINATURA_PUBLICA = ['preventiva', 'preventiva2', 'corretiva', 'aceite_entrega'];
 const TIPO_RELATORIO_ASSINATURA_LABEL = {
   preventiva: 'Termo de Manutenção Preventiva', preventiva2: 'Termo de Manutenção Preventiva',
@@ -1675,33 +1683,75 @@ const TIPO_RELATORIO_ASSINATURA_LABEL = {
 function buscarRelatorioPorTokenAssinatura(data, token) {
   return data.relatorios_manutencao.find((r) => TIPOS_COM_ASSINATURA_PUBLICA.includes(r.tipo) && r.token_assinatura_cliente === token) || null;
 }
-// resumo de uma linha do que foi feito — cada tipo guarda isso num campo de texto diferente
-function resumoServicoRelatorioAssinatura(r) {
-  if (r.tipo === 'corretiva') return r.acoes_executadas || r.defeito_informado || '';
-  if (r.tipo === 'aceite_entrega') return r.servico || '';
-  return r.servico_feito || r.servico_realizado || '';
-}
-// só o que o cliente precisa ver pra saber o que está assinando — nunca autor_id/tecnico_email/
-// checklist/fotos/satisfação/emails_copia etc., e a assinatura já vem hidratada (ver
-// extrairFotosProfundo) senão o cliente só veria a referência `{__foto_ref}` no lugar da imagem.
+// só o que o cliente precisa ver/preencher — nunca autor_id/tecnico_email/empresa_id/emails_copia;
+// a assinatura já vem hidratada (ver extrairFotosProfundo) senão o cliente só veria a referência
+// `{__foto_ref}` no lugar da imagem. O bloco "o que foi feito" varia por tipo (cada um guarda a
+// descrição do atendimento em campos de texto diferentes); aceite_entrega também tem o campo
+// `aceite`, os outros três não.
 async function relatorioAssinaturaPublica(r) {
-  return {
+  const base = {
     id: r.id,
     tipo: r.tipo,
     tipo_label: TIPO_RELATORIO_ASSINATURA_LABEL[r.tipo] || 'Relatório de serviço',
     empresa: r.empresa || '',
     tecnico_nome: r.tecnico_nome || r.autor_nome || '',
     data: r.data_final || r.criado_em || '',
-    resumo: resumoServicoRelatorioAssinatura(r),
+    modelo_maquina: r.modelo_maquina || '',
+    numero_serie: r.numero_serie || '',
+    checklist: Array.isArray(r.checklist) ? r.checklist.map((c) => ({ item: c.item || '', resposta: c.resposta || '', observacao: c.observacao || '' })) : [],
     assinatura_cliente_nome: r.assinatura_cliente_nome || '',
     assinatura_cliente_email: r.assinatura_cliente_email || '',
     assinatura_cliente_img: await hidratarFotosProfundo(r.assinatura_cliente_img),
     assinatura_cliente_concluida: !!r.assinatura_cliente_concluida,
+    satisfacao_estrelas: r.satisfacao_estrelas || 0,
+  };
+  if (r.tipo === 'aceite_entrega') {
+    return {
+      ...base,
+      servico: r.servico || '', setor: r.setor || '', observacoes: r.observacoes || '',
+      aceite: r.aceite || '',
+      satisfacao_duvidas: r.satisfacao_duvidas || '', satisfacao_apto: r.satisfacao_apto || '',
+    };
+  }
+  if (r.tipo === 'corretiva') {
+    return {
+      ...base,
+      defeito_informado: r.defeito_informado || '', acoes_executadas: r.acoes_executadas || '', observacoes: r.observacoes || '',
+      satisfacao_comentario: r.satisfacao_comentario || '', satisfacao_autoriza: r.satisfacao_autoriza || '',
+    };
+  }
+  // preventiva / preventiva2
+  return {
+    ...base,
+    servico_realizado: r.servico_realizado || '', observacoes_checklist: r.observacoes_checklist || '',
+    servico_feito: r.servico_feito || '', observacoes_servico: r.observacoes_servico || '',
+    satisfacao_comentario: r.satisfacao_comentario || '', satisfacao_autoriza: r.satisfacao_autoriza || '',
   };
 }
 
-// GET /api/relatorios-manutencao/assinatura/:token — pública: contexto read-only + o que o
-// cliente já preencheu (se reabrir o link depois de enviar, por exemplo)
+// valida só os campos que a rota pública aceita de volta — os mesmos que relatorioAssinaturaPublica
+// devolve como editáveis: nome/e-mail/assinatura (todos os tipos), aceite (só aceite_entrega) e
+// avaliação de desempenho (estrelas sempre; duvidas/apto no aceite_entrega, autoriza nos outros 3
+// — comentário é opcional em todos, igual já era pro técnico preenchendo pelo app).
+function validarCamposPublicosAssinatura(tipo, body) {
+  if (!String(body.assinatura_cliente_nome || '').trim()) return 'Informe seu nome completo.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.assinatura_cliente_email || '').trim())) return 'Informe um e-mail válido.';
+  if (!body.assinatura_cliente_img) return 'Assine no campo indicado antes de enviar.';
+  const estrelas = Number(body.satisfacao_estrelas);
+  if (!(estrelas >= 1 && estrelas <= 5)) return 'Dê uma avaliação de 1 a 5 estrelas.';
+  if (tipo === 'aceite_entrega') {
+    if (body.aceite !== 'aceito' && body.aceite !== 'nao_aceito') return 'Informe se você aceita o serviço realizado.';
+    if (body.satisfacao_duvidas !== 'sim' && body.satisfacao_duvidas !== 'nao') return 'Responda se suas dúvidas foram sanadas.';
+    if (body.satisfacao_apto !== 'sim' && body.satisfacao_apto !== 'nao') return 'Responda se você se sente apto a operar o equipamento.';
+  } else if (body.satisfacao_autoriza !== 'sim' && body.satisfacao_autoriza !== 'nao') {
+    return 'Responda se autoriza o uso do seu feedback.';
+  }
+  return null;
+}
+
+// GET /api/relatorios-manutencao/assinatura/:token — pública: contexto read-only (o que já foi
+// preenchido do atendimento em si, mesmo que o técnico ainda não tenha terminado) + o que o
+// cliente já respondeu (se reabrir o link depois de enviar, por exemplo)
 rota('GET', /^\/api\/relatorios-manutencao\/assinatura\/([a-f0-9]+)$/, async (req, res, m) => {
   const data = db.load();
   const item = buscarRelatorioPorTokenAssinatura(data, m[1]);
@@ -1709,33 +1759,41 @@ rota('GET', /^\/api\/relatorios-manutencao\/assinatura\/([a-f0-9]+)$/, async (re
   enviarJSON(res, 200, { relatorio: await relatorioAssinaturaPublica(item) });
 });
 
-// PUT /api/relatorios-manutencao/assinatura/:token — pública: só aceita nome/e-mail/assinatura do
-// cliente (qualquer outro campo do corpo é ignorado — "as outras área ficam bloqueada"); uma vez
-// concluído, o link vira só-leitura, pra não dar pra sobrescrever a assinatura depois. Avisa o
-// técnico responsável por push assim que o cliente concluir ("quando ele enviar aparecerá pra
-// mim") — o próprio técnico decide quando concluir e enviar o termo de verdade, depois.
+// PUT /api/relatorios-manutencao/assinatura/:token — pública: só aceita os campos "do cliente"
+// (nome/e-mail/assinatura, aceite quando aplicável, avaliação de desempenho — qualquer outro campo
+// do corpo é ignorado, "as outras área ficam bloqueada"); uma vez concluído, o link vira
+// só-leitura, pra não dar pra sobrescrever depois. Avisa o técnico responsável por push assim que
+// o cliente concluir ("quando ele enviar aparecerá pra mim") — o próprio técnico decide quando
+// concluir e enviar o termo de verdade, depois.
 rota('PUT', /^\/api\/relatorios-manutencao\/assinatura\/([a-f0-9]+)$/, async (req, res, m) => {
   const data = db.load();
   const item = buscarRelatorioPorTokenAssinatura(data, m[1]);
   if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
   if (item.assinatura_cliente_concluida) return enviarJSON(res, 409, { erro: 'Este relatório já foi preenchido e assinado pelo cliente.' });
   const body = await extrairFotosProfundo(await lerCorpo(req), item.empresa_id);
-  const nome = String(body.assinatura_cliente_nome || '').trim();
-  const email = String(body.assinatura_cliente_email || '').trim();
-  if (!nome) return enviarJSON(res, 400, { erro: 'Informe seu nome completo.' });
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return enviarJSON(res, 400, { erro: 'Informe um e-mail válido.' });
-  if (!body.assinatura_cliente_img) return enviarJSON(res, 400, { erro: 'Assine no campo indicado antes de enviar.' });
+  const erro = validarCamposPublicosAssinatura(item.tipo, body);
+  if (erro) return enviarJSON(res, 400, { erro });
+  const nome = String(body.assinatura_cliente_nome).trim();
   Object.assign(item, {
     assinatura_cliente_nome: nome,
-    assinatura_cliente_email: email,
+    assinatura_cliente_email: String(body.assinatura_cliente_email).trim(),
     assinatura_cliente_img: body.assinatura_cliente_img,
+    satisfacao_estrelas: Number(body.satisfacao_estrelas),
+    ...(item.tipo === 'aceite_entrega' ? {
+      aceite: body.aceite,
+      satisfacao_duvidas: body.satisfacao_duvidas,
+      satisfacao_apto: body.satisfacao_apto,
+    } : {
+      satisfacao_comentario: String(body.satisfacao_comentario || '').trim(),
+      satisfacao_autoriza: body.satisfacao_autoriza,
+    }),
     assinatura_cliente_concluida: true,
     assinatura_cliente_concluida_em: new Date().toISOString(),
   });
   db.save(data);
   enviarPush(data, item.autor_id, {
     titulo: 'Cliente preencheu e assinou',
-    corpo: `${nome} confirmou nome, e-mail e assinatura no relatório de "${item.empresa || 'cliente'}". Você já pode concluir e enviar o termo.`,
+    corpo: `${nome} confirmou nome, e-mail, assinatura e avaliação no relatório de "${item.empresa || 'cliente'}". Você já pode concluir e enviar o termo.`,
     url: '/',
   }).catch(() => {});
   enviarJSON(res, 200, { relatorio: await relatorioAssinaturaPublica(item) });

@@ -18,6 +18,12 @@
   #ra-canvas{width:100%;max-width:560px;height:200px;border:1.5px dashed var(--line);border-radius:9px;background:#fff;touch-action:none;display:block;}
   .ra-status{margin-top:8px;font-size:12.5px;color:var(--ink-soft);}
   .ra-center{text-align:center;padding:40px 10px;color:var(--ink-soft);font-size:13.5px;}
+  .ra-checklist-row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;}
+  .ra-checklist-row:last-child{border-bottom:none;}
+  .ra-radio-row{display:flex;gap:18px;flex-wrap:wrap;margin:10px 0 16px;}
+  .ra-radio-row label{display:flex;align-items:center;gap:6px;font-weight:600;text-transform:none;font-size:13.5px;}
+  .ra-radio-row input{width:auto;}
+  .ra-estrelas button{background:none;border:none;cursor:pointer;font-size:28px;line-height:1;padding:2px;}
 </style>
 </head>
 <body>
@@ -31,6 +37,7 @@
 
 <script>
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function ouTraco(v) { return v ? esc(v) : '—'; }
 function fmtData(iso) {
   if (!iso) return '—';
   const [ano, mes, dia] = String(iso).slice(0, 10).split('-');
@@ -38,10 +45,12 @@ function fmtData(iso) {
 }
 function paramToken() { return new URLSearchParams(window.location.search).get('token') || ''; }
 const TOKEN = paramToken();
+const RESPOSTA_LABEL = { sim: 'Sim', nao: 'Não', na: 'N/A' };
 
 let registro = null;
 let assinaturaImg = null;
 let temTraco = false;
+let estrelas = 0;
 
 async function carregar() {
   const conteudo = document.getElementById('conteudo');
@@ -52,6 +61,7 @@ async function carregar() {
     if (!res.ok) throw new Error(data.erro || 'Link inválido ou expirado.');
     registro = data.relatorio;
     assinaturaImg = registro.assinatura_cliente_img || null;
+    estrelas = registro.satisfacao_estrelas || 0;
     if (registro.assinatura_cliente_concluida) renderConcluido();
     else renderFormulario();
   } catch (e) {
@@ -59,19 +69,61 @@ async function carregar() {
   }
 }
 
-// o resto do relatório (defeito, checklist, fotos, peças etc.) nunca chega até essa página —
-// a API só devolve esse resumo de leitura (ver relatorioAssinaturaPublica no servidor), então
-// não tem como "desbloquear" nada além do que já está aqui.
+// pedido do usuário: "ele precisa visualizar o restante das informações mesmo que não esteja
+// preenchido" — cada campo aparece com o próprio rótulo, mesmo vazio ("—"), em vez de sumir da
+// página: o cliente pode abrir o link antes do técnico terminar de preencher o resto. O que
+// aparece aqui é só leitura (não tem como editar nada disso por essa página) — vem da API já
+// filtrado (ver relatorioAssinaturaPublica no servidor), que nunca devolve autor_id/
+// tecnico_email/emails_copia/empresa_id.
+function renderChecklist(checklist) {
+  if (!checklist || !checklist.length) return '<p style="font-size:13px; color:var(--ink-soft); margin:4px 0 0;">Nenhum item de check-list ainda.</p>';
+  return `<div style="margin-top:6px;">${checklist.map((c) => `
+    <div class="ra-checklist-row">
+      <span>${ouTraco(c.item)}</span>
+      <span style="font-weight:700; color:var(--navy);">${RESPOSTA_LABEL[c.resposta] || '—'}</span>
+    </div>`).join('')}</div>`;
+}
+
+function renderODoQueFoiFeito() {
+  const r = registro;
+  if (r.tipo === 'aceite_entrega') {
+    return `
+      <div class="kv"><b>Serviço:</b> ${ouTraco(r.servico)}</div>
+      <div class="kv"><b>Setor:</b> ${ouTraco(r.setor)}</div>
+      <div class="kv"><b>Observações:</b> ${ouTraco(r.observacoes)}</div>
+      <div class="kv" style="margin-top:10px;"><b>Check-list</b></div>
+      ${renderChecklist(r.checklist)}`;
+  }
+  if (r.tipo === 'corretiva') {
+    return `
+      <div class="kv"><b>Defeito informado:</b> ${ouTraco(r.defeito_informado)}</div>
+      <div class="kv"><b>Ações executadas:</b> ${ouTraco(r.acoes_executadas)}</div>
+      <div class="kv"><b>Observações:</b> ${ouTraco(r.observacoes)}</div>`;
+  }
+  // preventiva / preventiva2
+  return `
+    <div class="kv"><b>Serviço realizado:</b> ${ouTraco(r.servico_realizado)}</div>
+    <div class="kv" style="margin-top:10px;"><b>Check-list</b></div>
+    ${renderChecklist(r.checklist)}
+    <div class="kv" style="margin-top:10px;"><b>Observações do check-list:</b> ${ouTraco(r.observacoes_checklist)}</div>
+    <div class="kv"><b>O que foi feito:</b> ${ouTraco(r.servico_feito)}</div>
+    <div class="kv"><b>Observações do serviço:</b> ${ouTraco(r.observacoes_servico)}</div>`;
+}
+
 function renderContexto() {
   const r = registro;
   return `
     <div class="panel">
       <h2>${esc(r.tipo_label)}</h2>
-      <p style="font-size:13px; color:var(--ink-soft); margin-top:-10px;">Confira abaixo o que foi atendido e, no fim da página, informe seu nome, e-mail e assinatura para confirmar.</p>
-      <div class="kv"><b>Empresa atendida:</b> ${esc(r.empresa || '—')}</div>
-      <div class="kv"><b>Técnico responsável:</b> ${esc(r.tecnico_nome || '—')}</div>
+      <p style="font-size:13px; color:var(--ink-soft); margin-top:-10px;">Confira abaixo o que foi atendido e, no fim da página, confirme sua avaliação, nome, e-mail e assinatura.</p>
+      <div class="kv"><b>Empresa atendida:</b> ${ouTraco(r.empresa)}</div>
+      <div class="kv"><b>Técnico responsável:</b> ${ouTraco(r.tecnico_nome)}</div>
       <div class="kv"><b>Data:</b> ${fmtData(r.data)}</div>
-      ${r.resumo ? `<div class="kv"><b>Serviço:</b> ${esc(r.resumo)}</div>` : ''}
+      <div class="kv"><b>Equipamento:</b> ${ouTraco(r.modelo_maquina)}${r.numero_serie ? ' — ' + esc(r.numero_serie) : ''}</div>
+    </div>
+    <div class="panel">
+      <h2>O que foi feito</h2>
+      ${renderODoQueFoiFeito()}
     </div>`;
 }
 
@@ -80,10 +132,61 @@ function renderConcluido() {
   document.getElementById('conteudo').innerHTML = `
     ${renderContexto()}
     <div class="panel">
+      <h2>Avaliação enviada</h2>
+      <div class="kv"><b>Avaliação:</b> ${'★'.repeat(r.satisfacao_estrelas || 0)}${'☆'.repeat(5 - (r.satisfacao_estrelas || 0))}</div>
+      ${r.tipo === 'aceite_entrega' ? `
+      <div class="kv"><b>Aceite:</b> ${r.aceite === 'aceito' ? 'Aceito o serviço realizado' : 'Não aceito'}</div>
+      <div class="kv"><b>Dúvidas sanadas:</b> ${RESPOSTA_LABEL[r.satisfacao_duvidas] || '—'}</div>
+      <div class="kv"><b>Apto a operar:</b> ${RESPOSTA_LABEL[r.satisfacao_apto] || '—'}</div>` : `
+      <div class="kv"><b>Autoriza uso do feedback:</b> ${RESPOSTA_LABEL[r.satisfacao_autoriza] || '—'}</div>
+      ${r.satisfacao_comentario ? `<div class="kv"><b>Comentário:</b> ${esc(r.satisfacao_comentario)}</div>` : ''}`}
+    </div>
+    <div class="panel">
       <h2>Assinatura registrada</h2>
-      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Este relatório já foi confirmado — não é mais possível editar por aqui. Qualquer dúvida, entre em contato com ${esc(r.tecnico_nome || 'o técnico responsável')}.</p>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Este relatório já foi confirmado — não é mais possível editar por aqui. Qualquer dúvida, entre em contato com ${ouTraco(r.tecnico_nome)}.</p>
       <div class="kv"><b>Confirmado por:</b> ${esc(r.assinatura_cliente_nome)} · ${esc(r.assinatura_cliente_email)}</div>
       ${r.assinatura_cliente_img ? `<div style="margin-top:14px;"><img src="${r.assinatura_cliente_img}" style="max-width:280px; border:1px solid var(--line); border-radius:8px;"></div>` : ''}
+    </div>`;
+}
+
+function renderAvaliacao() {
+  const d = registro;
+  if (d.tipo === 'aceite_entrega') {
+    return `
+      <div class="panel">
+        <h2>Aceite*</h2>
+        <p style="font-size:13px; color:var(--ink-soft); margin-top:-10px;">Você aceita o serviço realizado conforme descrito acima?</p>
+        <div class="ra-radio-row">
+          <label><input type="radio" name="ra-aceite" value="aceito" ${d.aceite === 'aceito' ? 'checked' : ''}> Aceito</label>
+          <label><input type="radio" name="ra-aceite" value="nao_aceito" ${d.aceite === 'nao_aceito' ? 'checked' : ''}> Não aceito</label>
+        </div>
+        <h2>Avaliação de desempenho*</h2>
+        <label>Qual a sua avaliação sobre o atendimento?*</label>
+        <div class="ra-estrelas" id="ra-estrelas" style="margin-bottom:16px;"></div>
+        <label>Suas dúvidas foram sanadas?*</label>
+        <div class="ra-radio-row">
+          <label><input type="radio" name="ra-duvidas" value="sim" ${d.satisfacao_duvidas === 'sim' ? 'checked' : ''}> Sim</label>
+          <label><input type="radio" name="ra-duvidas" value="nao" ${d.satisfacao_duvidas === 'nao' ? 'checked' : ''}> Não</label>
+        </div>
+        <label>Você se sente apto a operar o equipamento?*</label>
+        <div class="ra-radio-row">
+          <label><input type="radio" name="ra-apto" value="sim" ${d.satisfacao_apto === 'sim' ? 'checked' : ''}> Sim</label>
+          <label><input type="radio" name="ra-apto" value="nao" ${d.satisfacao_apto === 'nao' ? 'checked' : ''}> Não</label>
+        </div>
+      </div>`;
+  }
+  // preventiva / preventiva2 / corretiva
+  return `
+    <div class="panel">
+      <h2>Avaliação de desempenho*</h2>
+      <label>Qual a sua avaliação sobre o atendimento realizado?*</label>
+      <div class="ra-estrelas" id="ra-estrelas" style="margin-bottom:16px;"></div>
+      <div class="field"><label>Caso tenha algo para apontar (opcional)</label><input id="ra-comentario" value="${esc(d.satisfacao_comentario)}"></div>
+      <label>Podemos publicar o seu feedback nos canais de comunicação?*</label>
+      <div class="ra-radio-row">
+        <label><input type="radio" name="ra-autoriza" value="sim" ${d.satisfacao_autoriza === 'sim' ? 'checked' : ''}> Sim, autorizo</label>
+        <label><input type="radio" name="ra-autoriza" value="nao" ${d.satisfacao_autoriza === 'nao' ? 'checked' : ''}> Não autorizo</label>
+      </div>
     </div>`;
 }
 
@@ -91,9 +194,10 @@ function renderFormulario() {
   const d = registro;
   document.getElementById('conteudo').innerHTML = `
     ${renderContexto()}
+    ${renderAvaliacao()}
     <div class="panel">
       <h2>Sua confirmação*</h2>
-      <p style="font-size:13px; color:var(--ink-soft); line-height:1.6;">Preenchendo e assinando abaixo, você confirma o atendimento descrito acima.</p>
+      <p style="font-size:13px; color:var(--ink-soft); line-height:1.6;">Preenchendo e assinando abaixo, você confirma a avaliação e o atendimento descritos acima.</p>
       <div class="field"><label>Seu nome completo*</label><input id="ra-nome" value="${esc(d.assinatura_cliente_nome)}"></div>
       <div class="field"><label>Seu e-mail*</label><input id="ra-email" type="email" placeholder="nome@empresa.com" value="${esc(d.assinatura_cliente_email)}"></div>
       <label>Assinatura*</label>
@@ -103,8 +207,16 @@ function renderFormulario() {
     </div>
     <div id="ra-erro" class="auth-error hidden" style="margin-bottom:14px;"></div>
     <button class="btn btn-primary btn-sm" onclick="enviar()">Enviar</button>`;
+  renderEstrelas();
   montarCanvas();
 }
+
+function renderEstrelas() {
+  const el = document.getElementById('ra-estrelas');
+  if (!el) return;
+  el.innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" onclick="marcarEstrela(${n})" style="color:${n <= estrelas ? 'var(--blue)' : '#D8E2EF'};">★</button>`).join('');
+}
+function marcarEstrela(n) { estrelas = n; renderEstrelas(); }
 
 function montarCanvas() {
   const canvas = document.getElementById('ra-canvas');
@@ -155,11 +267,28 @@ async function enviar() {
   const email = document.getElementById('ra-email').value.trim();
   if (!nome) { erroEl.textContent = 'Informe seu nome completo.'; erroEl.classList.remove('hidden'); return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { erroEl.textContent = 'Informe um e-mail válido.'; erroEl.classList.remove('hidden'); return; }
+  if (!estrelas) { erroEl.textContent = 'Dê uma avaliação de 1 a 5 estrelas.'; erroEl.classList.remove('hidden'); return; }
   if (!assinaturaImg) { erroEl.textContent = 'Assine no campo indicado antes de enviar.'; erroEl.classList.remove('hidden'); return; }
+
+  const corpo = { assinatura_cliente_nome: nome, assinatura_cliente_email: email, assinatura_cliente_img: assinaturaImg, satisfacao_estrelas: estrelas };
+  if (registro.tipo === 'aceite_entrega') {
+    const aceite = document.querySelector('input[name="ra-aceite"]:checked');
+    const duvidas = document.querySelector('input[name="ra-duvidas"]:checked');
+    const apto = document.querySelector('input[name="ra-apto"]:checked');
+    if (!aceite) { erroEl.textContent = 'Informe se você aceita o serviço realizado.'; erroEl.classList.remove('hidden'); return; }
+    if (!duvidas) { erroEl.textContent = 'Responda se suas dúvidas foram sanadas.'; erroEl.classList.remove('hidden'); return; }
+    if (!apto) { erroEl.textContent = 'Responda se você se sente apto a operar o equipamento.'; erroEl.classList.remove('hidden'); return; }
+    corpo.aceite = aceite.value; corpo.satisfacao_duvidas = duvidas.value; corpo.satisfacao_apto = apto.value;
+  } else {
+    const autoriza = document.querySelector('input[name="ra-autoriza"]:checked');
+    if (!autoriza) { erroEl.textContent = 'Responda se autoriza o uso do seu feedback.'; erroEl.classList.remove('hidden'); return; }
+    corpo.satisfacao_autoriza = autoriza.value;
+    corpo.satisfacao_comentario = document.getElementById('ra-comentario').value.trim();
+  }
+
   try {
     const res = await fetch('/api/relatorios-manutencao/assinatura/' + TOKEN, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assinatura_cliente_nome: nome, assinatura_cliente_email: email, assinatura_cliente_img: assinaturaImg }),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.erro || 'Não foi possível enviar.');
