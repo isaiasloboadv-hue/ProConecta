@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexor Connect — Assinatura do cliente</title>
+<link rel="icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+  body{background:var(--bg, #F4F6FA);}
+  .ra-wrap{max-width:640px;margin:0 auto;padding:28px 16px 60px;}
+  .ra-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+  .ra-brand img{height:34px;width:auto;display:block;}
+  .ra-brand .wordmark{font-family:Montserrat,sans-serif;font-weight:800;font-size:19px;color:var(--navy);}
+  .ra-brand .wordmark .conecta{color:var(--blue);}
+  #ra-canvas{width:100%;max-width:560px;height:200px;border:1.5px dashed var(--line);border-radius:9px;background:#fff;touch-action:none;display:block;}
+  .ra-status{margin-top:8px;font-size:12.5px;color:var(--ink-soft);}
+  .ra-center{text-align:center;padding:40px 10px;color:var(--ink-soft);font-size:13.5px;}
+</style>
+</head>
+<body>
+<div class="ra-wrap">
+  <div class="ra-brand">
+    <img src="/logo.png" alt="Nexor Connect">
+    <div class="wordmark">Nexor<span class="conecta">Connect</span></div>
+  </div>
+  <div id="conteudo"><div class="ra-center">Carregando...</div></div>
+</div>
+
+<script>
+function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmtData(iso) {
+  if (!iso) return '—';
+  const [ano, mes, dia] = String(iso).slice(0, 10).split('-');
+  return dia && mes && ano ? `${dia}/${mes}/${ano}` : '—';
+}
+function paramToken() { return new URLSearchParams(window.location.search).get('token') || ''; }
+const TOKEN = paramToken();
+
+let registro = null;
+let assinaturaImg = null;
+let temTraco = false;
+
+async function carregar() {
+  const conteudo = document.getElementById('conteudo');
+  if (!TOKEN) { conteudo.innerHTML = '<div class="auth-error">Link inválido: token não informado.</div>'; return; }
+  try {
+    const res = await fetch('/api/relatorios-manutencao/assinatura/' + TOKEN);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Link inválido ou expirado.');
+    registro = data.relatorio;
+    assinaturaImg = registro.assinatura_cliente_img || null;
+    if (registro.assinatura_cliente_concluida) renderConcluido();
+    else renderFormulario();
+  } catch (e) {
+    conteudo.innerHTML = `<div class="auth-error">${esc(e.message)}</div>`;
+  }
+}
+
+// o resto do relatório (defeito, checklist, fotos, peças etc.) nunca chega até essa página —
+// a API só devolve esse resumo de leitura (ver relatorioAssinaturaPublica no servidor), então
+// não tem como "desbloquear" nada além do que já está aqui.
+function renderContexto() {
+  const r = registro;
+  return `
+    <div class="panel">
+      <h2>${esc(r.tipo_label)}</h2>
+      <p style="font-size:13px; color:var(--ink-soft); margin-top:-10px;">Confira abaixo o que foi atendido e, no fim da página, informe seu nome, e-mail e assinatura para confirmar.</p>
+      <div class="kv"><b>Empresa atendida:</b> ${esc(r.empresa || '—')}</div>
+      <div class="kv"><b>Técnico responsável:</b> ${esc(r.tecnico_nome || '—')}</div>
+      <div class="kv"><b>Data:</b> ${fmtData(r.data)}</div>
+      ${r.resumo ? `<div class="kv"><b>Serviço:</b> ${esc(r.resumo)}</div>` : ''}
+    </div>`;
+}
+
+function renderConcluido() {
+  const r = registro;
+  document.getElementById('conteudo').innerHTML = `
+    ${renderContexto()}
+    <div class="panel">
+      <h2>Assinatura registrada</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Este relatório já foi confirmado — não é mais possível editar por aqui. Qualquer dúvida, entre em contato com ${esc(r.tecnico_nome || 'o técnico responsável')}.</p>
+      <div class="kv"><b>Confirmado por:</b> ${esc(r.assinatura_cliente_nome)} · ${esc(r.assinatura_cliente_email)}</div>
+      ${r.assinatura_cliente_img ? `<div style="margin-top:14px;"><img src="${r.assinatura_cliente_img}" style="max-width:280px; border:1px solid var(--line); border-radius:8px;"></div>` : ''}
+    </div>`;
+}
+
+function renderFormulario() {
+  const d = registro;
+  document.getElementById('conteudo').innerHTML = `
+    ${renderContexto()}
+    <div class="panel">
+      <h2>Sua confirmação*</h2>
+      <p style="font-size:13px; color:var(--ink-soft); line-height:1.6;">Preenchendo e assinando abaixo, você confirma o atendimento descrito acima.</p>
+      <div class="field"><label>Seu nome completo*</label><input id="ra-nome" value="${esc(d.assinatura_cliente_nome)}"></div>
+      <div class="field"><label>Seu e-mail*</label><input id="ra-email" type="email" placeholder="nome@empresa.com" value="${esc(d.assinatura_cliente_email)}"></div>
+      <label>Assinatura*</label>
+      <canvas id="ra-canvas" width="600" height="200"></canvas>
+      <div class="ra-status" id="ra-assinatura-status">${assinaturaImg ? 'Assinatura registrada' : 'Assinatura pendente'}</div>
+      <button class="btn-outline-sm" style="margin-top:8px;" onclick="limparAssinatura()">Limpar assinatura</button>
+    </div>
+    <div id="ra-erro" class="auth-error hidden" style="margin-bottom:14px;"></div>
+    <button class="btn btn-primary btn-sm" onclick="enviar()">Enviar</button>`;
+  montarCanvas();
+}
+
+function montarCanvas() {
+  const canvas = document.getElementById('ra-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0B2D4F';
+  temTraco = false;
+  if (assinaturaImg) {
+    const img = new Image();
+    img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); temTraco = true; atualizarStatusAssinatura(); };
+    img.src = assinaturaImg;
+  }
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  let desenhando = false;
+  function iniciar(e) { e.preventDefault(); desenhando = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+  function mover(e) { if (!desenhando) return; e.preventDefault(); const p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); temTraco = true; }
+  function parar() {
+    if (!desenhando) return;
+    desenhando = false;
+    if (temTraco) { assinaturaImg = canvas.toDataURL('image/png'); atualizarStatusAssinatura(); }
+  }
+  canvas.addEventListener('mousedown', iniciar);
+  canvas.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', parar);
+  canvas.addEventListener('touchstart', iniciar, { passive: false });
+  canvas.addEventListener('touchmove', mover, { passive: false });
+  canvas.addEventListener('touchend', parar);
+}
+function atualizarStatusAssinatura() {
+  const el = document.getElementById('ra-assinatura-status');
+  if (el) { el.textContent = temTraco ? 'Assinatura registrada' : 'Assinatura pendente'; el.style.color = temTraco ? 'var(--green)' : 'var(--ink-soft)'; }
+}
+function limparAssinatura() {
+  const canvas = document.getElementById('ra-canvas');
+  canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+  temTraco = false;
+  assinaturaImg = null;
+  atualizarStatusAssinatura();
+}
+
+async function enviar() {
+  const erroEl = document.getElementById('ra-erro');
+  erroEl.classList.add('hidden');
+  const nome = document.getElementById('ra-nome').value.trim();
+  const email = document.getElementById('ra-email').value.trim();
+  if (!nome) { erroEl.textContent = 'Informe seu nome completo.'; erroEl.classList.remove('hidden'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { erroEl.textContent = 'Informe um e-mail válido.'; erroEl.classList.remove('hidden'); return; }
+  if (!assinaturaImg) { erroEl.textContent = 'Assine no campo indicado antes de enviar.'; erroEl.classList.remove('hidden'); return; }
+  try {
+    const res = await fetch('/api/relatorios-manutencao/assinatura/' + TOKEN, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assinatura_cliente_nome: nome, assinatura_cliente_email: email, assinatura_cliente_img: assinaturaImg }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.erro || 'Não foi possível enviar.');
+    registro = data.relatorio;
+    renderConcluido();
+  } catch (e) {
+    erroEl.textContent = e.message; erroEl.classList.remove('hidden');
+  }
+}
+
+carregar();
+</script>
+</body>
+</html>

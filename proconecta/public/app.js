@@ -21649,9 +21649,10 @@ function relatorioPreventivaPadrao() {
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
     satisfacao_autoriza: '',
-    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_cliente_nome: '', assinatura_cliente_email: '', assinatura_cliente_img: null,
     assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
     emails_copia: [''],
+    token_assinatura_cliente: null, assinatura_cliente_concluida: false,
   };
 }
 
@@ -21763,6 +21764,13 @@ async function mostrarFormRelatorioPreventiva(existente) {
     </div>
 
     <div class="panel">
+      <h2>Link para o cliente assinar</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Esqueceu de pedir nome, e-mail ou assinatura do cliente na hora? Gere um link — ele abre só esses 3 campos, sem acesso ao resto do relatório e sem precisar fazer login. Você continua preenchendo o resto por aqui normalmente; quando ele enviar, você recebe um aviso.</p>
+      <div id="rp-link-assinatura-area">${blocoLinkAssinaturaCliente(d)}</div>
+      <button class="btn-outline-sm" style="margin-top:10px;" onclick="gerarLinkAssinaturaClientePreventiva()">${d.token_assinatura_cliente ? 'Atualizar link' : 'Gerar link para o cliente'}</button>
+    </div>
+
+    <div class="panel">
       <h2>Assinatura*</h2>
       <div class="row2">
         ${blocoAssinaturaPreventiva('cliente', 'Cliente')}
@@ -21805,10 +21813,16 @@ async function limparRascunhoPreventiva(id) {
 }
 
 function blocoAssinaturaPreventiva(chave, titulo) {
+  // e-mail só faz sentido pro lado do cliente — é o campo novo pedido junto do nome/assinatura
+  // (ver "Link para o cliente assinar" acima), o técnico já tem o e-mail dele no cadastro.
+  const campoEmail = chave === 'cliente' ? `
+      <label>E-mail do cliente</label>
+      <input id="rp-assinatura-cliente-email" type="email" placeholder="nome@empresa.com" value="${esc(relatorioPreventivaDraft.assinatura_cliente_email || '')}" oninput="relatorioPreventivaDraft.assinatura_cliente_email=this.value;">` : '';
   return `
     <div>
       <label>${titulo}</label>
       <input id="rp-assinatura-${chave}-nome" placeholder="Nome do ${titulo.toLowerCase()}" value="${esc((relatorioPreventivaDraft['assinatura_' + chave + '_nome']) || '')}" oninput="relatorioPreventivaDraft.assinatura_${chave}_nome=this.value;">
+      ${campoEmail}
       <canvas id="rp-canvas-${chave}" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
       <div id="rp-assinatura-${chave}-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
       <div style="display:flex; gap:8px;">
@@ -22063,6 +22077,7 @@ function lerCamposPreventiva() {
   const autoriza = document.querySelector('input[name="rp-autoriza"]:checked');
   d.satisfacao_autoriza = autoriza ? autoriza.value : '';
   d.assinatura_cliente_nome = document.getElementById('rp-assinatura-cliente-nome').value;
+  d.assinatura_cliente_email = document.getElementById('rp-assinatura-cliente-email').value;
   d.assinatura_tecnico_nome = document.getElementById('rp-assinatura-tecnico-nome').value;
 }
 
@@ -22138,9 +22153,10 @@ function relatorioPreventiva2Padrao() {
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
     satisfacao_autoriza: '',
-    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_cliente_nome: '', assinatura_cliente_email: '', assinatura_cliente_img: null,
     assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
     emails_copia: [''],
+    token_assinatura_cliente: null, assinatura_cliente_concluida: false,
   };
 }
 
@@ -22252,11 +22268,20 @@ async function mostrarFormRelatorioPreventiva2(existente) {
     </div>
 
     <div class="panel">
+      <h2>Link para o cliente assinar</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Esqueceu de pedir nome, e-mail ou assinatura do cliente na hora? Gere um link — ele abre só esses 3 campos, sem acesso ao resto do relatório e sem precisar fazer login. Você continua preenchendo o resto por aqui normalmente; quando ele enviar, você recebe um aviso.</p>
+      <div id="rp2-link-assinatura-area">${blocoLinkAssinaturaCliente(d)}</div>
+      <button class="btn-outline-sm" style="margin-top:10px;" onclick="gerarLinkAssinaturaClientePreventiva2()">${d.token_assinatura_cliente ? 'Atualizar link' : 'Gerar link para o cliente'}</button>
+    </div>
+
+    <div class="panel">
       <h2>Assinatura*</h2>
       <div class="row2">
         <div>
           <label>Cliente</label>
           <input id="rp2-assinatura-cliente-nome" placeholder="Nome do cliente" value="${esc(d.assinatura_cliente_nome || '')}" oninput="relatorioPreventiva2Draft.assinatura_cliente_nome=this.value;">
+          <label>E-mail do cliente</label>
+          <input id="rp2-assinatura-cliente-email" type="email" placeholder="nome@empresa.com" value="${esc(d.assinatura_cliente_email || '')}" oninput="relatorioPreventiva2Draft.assinatura_cliente_email=this.value;">
           <canvas id="rp2-canvas-cliente" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
           <div id="rp2-assinatura-cliente-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
           <div style="display:flex; gap:8px;">
@@ -22555,6 +22580,7 @@ function lerCamposPreventiva2() {
   const autoriza = document.querySelector('input[name="rp2-autoriza"]:checked');
   d.satisfacao_autoriza = autoriza ? autoriza.value : '';
   d.assinatura_cliente_nome = document.getElementById('rp2-assinatura-cliente-nome').value;
+  d.assinatura_cliente_email = document.getElementById('rp2-assinatura-cliente-email').value;
   // pedido do usuário: "no campo assinatura no nome do técnico já puxa o que ele escreveu antes"
   // — não existe mais input de nome do lado do técnico (ver form acima); o nome vem sempre de
   // quem está logado, igual ao campo "Responsável".
@@ -22676,9 +22702,10 @@ function relatorioCorretivaPadrao() {
     satisfacao_estrelas: 0,
     satisfacao_comentario: '',
     satisfacao_autoriza: '',
-    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_cliente_nome: '', assinatura_cliente_email: '', assinatura_cliente_img: null,
     assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
     emails_copia: [''],
+    token_assinatura_cliente: null, assinatura_cliente_concluida: false,
   };
 }
 
@@ -22784,6 +22811,13 @@ async function mostrarFormRelatorioCorretiva(existente) {
     </div>
 
     <div class="panel">
+      <h2>Link para o cliente assinar</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Esqueceu de pedir nome, e-mail ou assinatura do cliente na hora? Gere um link — ele abre só esses 3 campos, sem acesso ao resto do relatório e sem precisar fazer login. Você continua preenchendo o resto por aqui normalmente; quando ele enviar, você recebe um aviso.</p>
+      <div id="rcm-link-assinatura-area">${blocoLinkAssinaturaCliente(d)}</div>
+      <button class="btn-outline-sm" style="margin-top:10px;" onclick="gerarLinkAssinaturaClienteCorretiva()">${d.token_assinatura_cliente ? 'Atualizar link' : 'Gerar link para o cliente'}</button>
+    </div>
+
+    <div class="panel">
       <h2>Assinatura*</h2>
       <div class="row2">
         ${blocoAssinaturaCorretiva('cliente', 'Cliente')}
@@ -22825,10 +22859,14 @@ async function limparRascunhoCorretiva(id) {
 }
 
 function blocoAssinaturaCorretiva(chave, titulo) {
+  const campoEmail = chave === 'cliente' ? `
+      <label>E-mail do cliente</label>
+      <input id="rcm-assinatura-cliente-email" type="email" placeholder="nome@empresa.com" value="${esc(relatorioCorretivaDraft.assinatura_cliente_email || '')}" oninput="relatorioCorretivaDraft.assinatura_cliente_email=this.value;">` : '';
   return `
     <div>
       <label>${titulo}</label>
       <input id="rcm-assinatura-${chave}-nome" placeholder="Nome do ${titulo.toLowerCase()}" value="${esc((relatorioCorretivaDraft['assinatura_' + chave + '_nome']) || '')}" oninput="relatorioCorretivaDraft.assinatura_${chave}_nome=this.value;">
+      ${campoEmail}
       <canvas id="rcm-canvas-${chave}" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
       <div id="rcm-assinatura-${chave}-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
       <div style="display:flex; gap:8px;">
@@ -23049,6 +23087,7 @@ function lerCamposCorretiva() {
   const autoriza = document.querySelector('input[name="rcm-autoriza"]:checked');
   d.satisfacao_autoriza = autoriza ? autoriza.value : '';
   d.assinatura_cliente_nome = document.getElementById('rcm-assinatura-cliente-nome').value;
+  d.assinatura_cliente_email = document.getElementById('rcm-assinatura-cliente-email').value;
   d.assinatura_tecnico_nome = document.getElementById('rcm-assinatura-tecnico-nome').value;
 }
 
@@ -23670,9 +23709,10 @@ function relatorioAceitePadrao(checklistAnterior) {
     observacoes: '',
     aceite: '',
     satisfacao_estrelas: 0, satisfacao_duvidas: '', satisfacao_apto: '',
-    assinatura_cliente_nome: '', assinatura_cliente_img: null,
+    assinatura_cliente_nome: '', assinatura_cliente_email: '', assinatura_cliente_img: null,
     assinatura_tecnico_nome: '', assinatura_tecnico_img: null,
     emails_copia: [''],
+    token_assinatura_cliente: null, assinatura_cliente_concluida: false,
   };
 }
 
@@ -23794,6 +23834,13 @@ async function mostrarFormRelatorioAceite(existente) {
     </div>
 
     <div class="panel">
+      <h2>Link para o cliente assinar</h2>
+      <p style="font-size:13.5px; color:var(--ink-soft); line-height:1.6;">Esqueceu de pedir nome, e-mail ou assinatura do cliente na hora? Gere um link — ele abre só esses 3 campos, sem acesso ao resto do relatório e sem precisar fazer login. Você continua preenchendo o resto por aqui normalmente; quando ele enviar, você recebe um aviso.</p>
+      <div id="rae-link-assinatura-area">${blocoLinkAssinaturaCliente(d)}</div>
+      <button class="btn-outline-sm" style="margin-top:10px;" onclick="gerarLinkAssinaturaClienteAceite()">${d.token_assinatura_cliente ? 'Atualizar link' : 'Gerar link para o cliente'}</button>
+    </div>
+
+    <div class="panel">
       <h2>Assinatura*</h2>
       <div class="row2">
         ${blocoAssinaturaAceite('cliente', 'Cliente')}
@@ -23887,10 +23934,14 @@ function removerEmailAceite(i) { relatorioAceiteDraft.emails_copia.splice(i, 1);
 
 // ---------- assinatura (canvas) — mesmo mecanismo do relatório preventivo, prefixo "rae-" ----------
 function blocoAssinaturaAceite(chave, titulo) {
+  const campoEmail = chave === 'cliente' ? `
+      <label>E-mail do cliente</label>
+      <input id="rae-assinatura-cliente-email" type="email" placeholder="nome@empresa.com" value="${esc(relatorioAceiteDraft.assinatura_cliente_email || '')}" oninput="relatorioAceiteDraft.assinatura_cliente_email=this.value;">` : '';
   return `
     <div>
       <label>${titulo}</label>
       <input id="rae-assinatura-${chave}-nome" placeholder="Nome do ${titulo.toLowerCase()}" value="${esc((relatorioAceiteDraft['assinatura_' + chave + '_nome']) || '')}" oninput="relatorioAceiteDraft.assinatura_${chave}_nome=this.value;">
+      ${campoEmail}
       <canvas id="rae-canvas-${chave}" width="360" height="150" style="width:100%; max-width:360px; height:150px; border:1.5px dashed var(--line); border-radius:9px; background:#fff; touch-action:none;"></canvas>
       <div id="rae-assinatura-${chave}-status" style="font-size:12px; color:var(--ink-soft); margin:6px 0;">Assinatura pendente</div>
       <div style="display:flex; gap:8px;">
@@ -24021,6 +24072,7 @@ function lerCamposAceite() {
   const apto = document.querySelector('input[name="rae-apto"]:checked');
   d.satisfacao_apto = apto ? apto.value : '';
   d.assinatura_cliente_nome = document.getElementById('rae-assinatura-cliente-nome').value;
+  d.assinatura_cliente_email = document.getElementById('rae-assinatura-cliente-email').value;
   d.assinatura_tecnico_nome = document.getElementById('rae-assinatura-tecnico-nome').value;
 }
 
@@ -24383,6 +24435,65 @@ async function copiarLinkEntregaTeste(link) {
   try { await navigator.clipboard.writeText(link); mostrarToast('Link copiado.'); }
   catch (e) { alert('Não foi possível copiar automaticamente — selecione e copie o link manualmente.'); }
 }
+
+// pedido do usuário: "estou preenchendo um relatório... esqueci de pedir pro cliente preencher
+// nome dele, e-mail e assinatura. Coloque um botão pra gerar link pra enviar pro cliente
+// preencher sem precisar logar. As outras área ficam bloqueada, só a área que o cliente tem que
+// preencher fica livre." — diferente do link da Entrega para Teste (acima: o cliente edita o
+// relatório inteiro), este link (token_assinatura_cliente) abre uma página à parte
+// (relatorio-assinatura.html) que só mostra um resumo e só aceita nome/e-mail/assinatura — usado
+// nos 4 tipos de relatório que já pedem assinatura do cliente (Preventiva, Preventiva 2,
+// Corretiva, Termo de Aceite). Compartilhado pelos 4 forms: cada um só passa o próprio draft, o
+// tipo (pra "rascunho" bater com o rascunho local salvo) e a própria função de montar a tela de
+// novo, pra reabrir com o relatório atualizado (já com o token, ou com a assinatura do cliente se
+// ele já tiver enviado).
+function linkPublicoAssinaturaCliente(token) {
+  return `${window.location.origin}/relatorio-assinatura.html?token=${token}`;
+}
+function blocoLinkAssinaturaCliente(d) {
+  if (!d.token_assinatura_cliente) return `<p style="font-size:13px; color:var(--ink-soft);">Nenhum link gerado ainda — salve pelo menos a empresa (cliente) abaixo pra gerar um.</p>`;
+  const link = linkPublicoAssinaturaCliente(d.token_assinatura_cliente);
+  const status = d.assinatura_cliente_concluida
+    ? `<span class="tag" style="background:var(--blue-pale); color:var(--blue);">✓ Cliente preencheu e assinou</span>`
+    : `<span class="tag tag-amber">Aguardando o cliente preencher</span>`;
+  return `
+    <div style="margin-bottom:8px;">${status}</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input readonly value="${esc(link)}" style="flex:1; min-width:220px;" onclick="this.select()">
+      <button class="btn-outline-sm" onclick="copiarLinkEntregaTeste('${esc(link)}')">Copiar link</button>
+      <a class="btn-outline-sm" href="https://wa.me/?text=${encodeURIComponent('Segue o link pra confirmar seu nome, e-mail e assinatura no relatório de serviço: ' + link)}" target="_blank" rel="noopener">Enviar no WhatsApp</a>
+    </div>`;
+}
+async function gerarLinkAssinaturaClienteCore(d, tipoRascunho, mostrarFormFn) {
+  if (!String(d.empresa || '').trim()) return alert('Informe ao menos a empresa (cliente) antes de gerar o link.');
+  try {
+    const idAntes = d.id;
+    const body = { ...d, rascunho: true };
+    const { relatorio } = idAntes
+      ? await api(`/api/relatorios-manutencao/${idAntes}`, { method: 'PUT', body })
+      : await api('/api/relatorios-manutencao', { method: 'POST', body });
+    limparRascunhoManual(tipoRascunho, idAntes);
+    mostrarToast(idAntes ? 'Link atualizado.' : 'Link gerado — copie e envie pro cliente.');
+    mostrarFormFn(relatorio);
+  } catch (e) { alert('Erro ao gerar o link: ' + e.message); }
+}
+async function gerarLinkAssinaturaClientePreventiva() {
+  lerCamposPreventiva();
+  await gerarLinkAssinaturaClienteCore(relatorioPreventivaDraft, 'preventiva', mostrarFormRelatorioPreventiva);
+}
+async function gerarLinkAssinaturaClientePreventiva2() {
+  lerCamposPreventiva2();
+  await gerarLinkAssinaturaClienteCore(relatorioPreventiva2Draft, 'preventiva2', mostrarFormRelatorioPreventiva2);
+}
+async function gerarLinkAssinaturaClienteCorretiva() {
+  lerCamposCorretiva();
+  await gerarLinkAssinaturaClienteCore(relatorioCorretivaDraft, 'corretiva', mostrarFormRelatorioCorretiva);
+}
+async function gerarLinkAssinaturaClienteAceite() {
+  lerCamposAceite();
+  await gerarLinkAssinaturaClienteCore(relatorioAceiteDraft, 'aceite_entrega', mostrarFormRelatorioAceite);
+}
+
 // salva o que já foi preenchido (sem exigir os campos todos nem a assinatura — rascunho: true no
 // corpo pula a validação completa, ver POST/PUT /api/relatorios-manutencao) e (re)gera o link
 // público — pode ser chamado tanto num relatório novo quanto num já existente, quantas vezes

@@ -1656,6 +1656,91 @@ rota('POST', /^\/api\/entregas\/([a-f0-9]+)\/concluir$/, async (req, res, m) => 
   enviarJSON(res, 200, { relatorio: await entregaTestePublica(item) });
 });
 
+// ---------- link público de assinatura do cliente (Preventiva/Preventiva 2/Corretiva/Termo de
+// Aceite) ----------
+// pedido do usuário: "estou preenchendo um relatório... esqueci de pedir pro cliente preencher
+// nome dele, e-mail e assinatura. Coloque um botão pra gerar link pra enviar pro cliente preencher
+// sem precisar logar. As outras área ficam bloqueada, só a área que o cliente tem que preencher
+// fica livre." — diferente do link da Entrega para Teste (que abre o relatório inteiro pro
+// cliente editar), aqui o token (token_assinatura_cliente, gerado na criação/edição desses 4
+// tipos — ver POST/PUT /api/relatorios-manutencao acima) só dá acesso a ler um resumo
+// (empresa/tipo/técnico/data/serviço, nunca o relatório inteiro) e a escrever exatamente 3
+// campos: nome, e-mail e assinatura do cliente. Tudo o mais continua só podendo ser editado pelo
+// técnico/administrador autenticado, pelas rotas normais.
+const TIPOS_COM_ASSINATURA_PUBLICA = ['preventiva', 'preventiva2', 'corretiva', 'aceite_entrega'];
+const TIPO_RELATORIO_ASSINATURA_LABEL = {
+  preventiva: 'Termo de Manutenção Preventiva', preventiva2: 'Termo de Manutenção Preventiva',
+  corretiva: 'Termo de Manutenção Corretiva', aceite_entrega: 'Termo de Aceite da Entrega',
+};
+function buscarRelatorioPorTokenAssinatura(data, token) {
+  return data.relatorios_manutencao.find((r) => TIPOS_COM_ASSINATURA_PUBLICA.includes(r.tipo) && r.token_assinatura_cliente === token) || null;
+}
+// resumo de uma linha do que foi feito — cada tipo guarda isso num campo de texto diferente
+function resumoServicoRelatorioAssinatura(r) {
+  if (r.tipo === 'corretiva') return r.acoes_executadas || r.defeito_informado || '';
+  if (r.tipo === 'aceite_entrega') return r.servico || '';
+  return r.servico_feito || r.servico_realizado || '';
+}
+// só o que o cliente precisa ver pra saber o que está assinando — nunca autor_id/tecnico_email/
+// checklist/fotos/satisfação/emails_copia etc., e a assinatura já vem hidratada (ver
+// extrairFotosProfundo) senão o cliente só veria a referência `{__foto_ref}` no lugar da imagem.
+async function relatorioAssinaturaPublica(r) {
+  return {
+    id: r.id,
+    tipo: r.tipo,
+    tipo_label: TIPO_RELATORIO_ASSINATURA_LABEL[r.tipo] || 'Relatório de serviço',
+    empresa: r.empresa || '',
+    tecnico_nome: r.tecnico_nome || r.autor_nome || '',
+    data: r.data_final || r.criado_em || '',
+    resumo: resumoServicoRelatorioAssinatura(r),
+    assinatura_cliente_nome: r.assinatura_cliente_nome || '',
+    assinatura_cliente_email: r.assinatura_cliente_email || '',
+    assinatura_cliente_img: await hidratarFotosProfundo(r.assinatura_cliente_img),
+    assinatura_cliente_concluida: !!r.assinatura_cliente_concluida,
+  };
+}
+
+// GET /api/relatorios-manutencao/assinatura/:token — pública: contexto read-only + o que o
+// cliente já preencheu (se reabrir o link depois de enviar, por exemplo)
+rota('GET', /^\/api\/relatorios-manutencao\/assinatura\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const item = buscarRelatorioPorTokenAssinatura(data, m[1]);
+  if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  enviarJSON(res, 200, { relatorio: await relatorioAssinaturaPublica(item) });
+});
+
+// PUT /api/relatorios-manutencao/assinatura/:token — pública: só aceita nome/e-mail/assinatura do
+// cliente (qualquer outro campo do corpo é ignorado — "as outras área ficam bloqueada"); uma vez
+// concluído, o link vira só-leitura, pra não dar pra sobrescrever a assinatura depois. Avisa o
+// técnico responsável por push assim que o cliente concluir ("quando ele enviar aparecerá pra
+// mim") — o próprio técnico decide quando concluir e enviar o termo de verdade, depois.
+rota('PUT', /^\/api\/relatorios-manutencao\/assinatura\/([a-f0-9]+)$/, async (req, res, m) => {
+  const data = db.load();
+  const item = buscarRelatorioPorTokenAssinatura(data, m[1]);
+  if (!item) return enviarJSON(res, 404, { erro: 'Link inválido ou expirado.' });
+  if (item.assinatura_cliente_concluida) return enviarJSON(res, 409, { erro: 'Este relatório já foi preenchido e assinado pelo cliente.' });
+  const body = await extrairFotosProfundo(await lerCorpo(req), item.empresa_id);
+  const nome = String(body.assinatura_cliente_nome || '').trim();
+  const email = String(body.assinatura_cliente_email || '').trim();
+  if (!nome) return enviarJSON(res, 400, { erro: 'Informe seu nome completo.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return enviarJSON(res, 400, { erro: 'Informe um e-mail válido.' });
+  if (!body.assinatura_cliente_img) return enviarJSON(res, 400, { erro: 'Assine no campo indicado antes de enviar.' });
+  Object.assign(item, {
+    assinatura_cliente_nome: nome,
+    assinatura_cliente_email: email,
+    assinatura_cliente_img: body.assinatura_cliente_img,
+    assinatura_cliente_concluida: true,
+    assinatura_cliente_concluida_em: new Date().toISOString(),
+  });
+  db.save(data);
+  enviarPush(data, item.autor_id, {
+    titulo: 'Cliente preencheu e assinou',
+    corpo: `${nome} confirmou nome, e-mail e assinatura no relatório de "${item.empresa || 'cliente'}". Você já pode concluir e enviar o termo.`,
+    url: '/',
+  }).catch(() => {});
+  enviarJSON(res, 200, { relatorio: await relatorioAssinaturaPublica(item) });
+});
+
 // GET /api/agenda?todas=1 — o técnico normalmente só vê a própria agenda ("Minha agenda"); o
 // parâmetro "todas" libera pra ele ver as O.S. de todos os técnicos (usado no menu Calendário),
 // só pra consulta — quem pode executar continua sendo decidido no front pelo tecnico_id.
@@ -4172,23 +4257,36 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
     }
     if (!ciclos.length) return enviarJSON(res, 400, { erro: 'Adicione ao menos um ciclo.' });
   } else if (tipo === 'preventiva') {
-    const erroPreventiva = validarRelatorioPreventiva(body);
-    if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+    // rascunho: pedido do usuário — "esqueci de pedir pro cliente preencher nome, e-mail e
+    // assinatura, coloque um botão pra gerar link" — o técnico quer só salvar o que já tem e
+    // gerar o link pra assinatura do cliente; a validação completa (campos + assinatura) só roda
+    // no envio final, seja pelo próprio técnico (aqui, sem rascunho) ou pelo cliente via link
+    // público (ver /api/relatorios-manutencao/assinatura abaixo). Mesmo padrão do entrega_teste.
+    if (!body.rascunho) {
+      const erroPreventiva = validarRelatorioPreventiva(body);
+      if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+    }
   } else if (tipo === 'preventiva2') {
     // pedido do usuário: "duplique o atual e renomeie como preventiva 2" — mesmo formato de dados
     // do termo "preventiva" original (só o PDF/formulário têm um visual diferente), por isso
     // reaproveita a mesma validação.
-    const erroPreventiva2 = validarRelatorioPreventiva(body);
-    if (erroPreventiva2) return enviarJSON(res, 400, { erro: erroPreventiva2 });
+    if (!body.rascunho) {
+      const erroPreventiva2 = validarRelatorioPreventiva(body);
+      if (erroPreventiva2) return enviarJSON(res, 400, { erro: erroPreventiva2 });
+    }
   } else if (tipo === 'corretiva') {
-    const erroCorretiva = validarRelatorioCorretiva(body);
-    if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
+    if (!body.rascunho) {
+      const erroCorretiva = validarRelatorioCorretiva(body);
+      if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
+    }
   } else if (tipo === 'relatorio_tecnico') {
     const erroTecnico = validarRelatorioTecnico(body);
     if (erroTecnico) return enviarJSON(res, 400, { erro: erroTecnico });
   } else if (tipo === 'aceite_entrega') {
-    const erroAceite = validarRelatorioAceite(body);
-    if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
+    if (!body.rascunho) {
+      const erroAceite = validarRelatorioAceite(body);
+      if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
+    }
   } else if (tipo === 'promotor') {
     const erroPromotor = validarRelatorioPromotor(body);
     if (erroPromotor) return enviarJSON(res, 400, { erro: erroPromotor });
@@ -4250,9 +4348,16 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      // token que abre o link público (sem login) pro cliente preencher só nome/e-mail/assinatura
+      // — pedido do usuário: "esqueci de pedir pro cliente preencher... coloque um botão pra
+      // gerar link". Gerado sempre na criação; se o cliente já assinou antes de reenviar (link
+      // reaproveitado em algum fluxo futuro), nunca sobrescreve aqui — só as rotas públicas
+      // /api/relatorios-manutencao/assinatura mexem em assinatura_cliente_concluida.
+      token_assinatura_cliente: gerarTokenConvite(),
+      assinatura_cliente_concluida: false,
     } : {}),
     ...(tipo === 'preventiva2' ? {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
@@ -4269,9 +4374,11 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      token_assinatura_cliente: gerarTokenConvite(),
+      assinatura_cliente_concluida: false,
     } : {}),
     ...(tipo === 'corretiva' ? {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
@@ -4287,9 +4394,11 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      token_assinatura_cliente: gerarTokenConvite(),
+      assinatura_cliente_concluida: false,
     } : {}),
     ...(tipo === 'relatorio_tecnico' ? {
       tipo_servico: Array.isArray(body.tipo_servico) ? body.tipo_servico : [],
@@ -4308,9 +4417,11 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_duvidas: body.satisfacao_duvidas || '',
       satisfacao_apto: body.satisfacao_apto || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
+      token_assinatura_cliente: gerarTokenConvite(),
+      assinatura_cliente_concluida: false,
     } : {}),
     ...(tipo === 'promotor' ? {
       agenda_id: body.agenda_id ? Number(body.agenda_id) : null,
@@ -4441,8 +4552,11 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       conclusao_ensaio: body.conclusao_ensaio || '',
     });
   } else if (item.tipo === 'preventiva') {
-    const erroPreventiva = validarRelatorioPreventiva(body);
-    if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+    if (!body.rascunho) {
+      const erroPreventiva = validarRelatorioPreventiva(body);
+      if (erroPreventiva) return enviarJSON(res, 400, { erro: erroPreventiva });
+    }
+    if (!item.token_assinatura_cliente) item.token_assinatura_cliente = gerarTokenConvite();
     Object.assign(item, {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
       data_inicial: body.data_inicial || '', data_final: body.data_final || '',
@@ -4458,14 +4572,17 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
       fotos,
     });
   } else if (item.tipo === 'preventiva2') {
-    const erroPreventiva2 = validarRelatorioPreventiva(body);
-    if (erroPreventiva2) return enviarJSON(res, 400, { erro: erroPreventiva2 });
+    if (!body.rascunho) {
+      const erroPreventiva2 = validarRelatorioPreventiva(body);
+      if (erroPreventiva2) return enviarJSON(res, 400, { erro: erroPreventiva2 });
+    }
+    if (!item.token_assinatura_cliente) item.token_assinatura_cliente = gerarTokenConvite();
     Object.assign(item, {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
       data_inicial: body.data_inicial || '', data_final: body.data_final || '',
@@ -4481,14 +4598,17 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
       fotos,
     });
   } else if (item.tipo === 'corretiva') {
-    const erroCorretiva = validarRelatorioCorretiva(body);
-    if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
+    if (!body.rascunho) {
+      const erroCorretiva = validarRelatorioCorretiva(body);
+      if (erroCorretiva) return enviarJSON(res, 400, { erro: erroCorretiva });
+    }
+    if (!item.token_assinatura_cliente) item.token_assinatura_cliente = gerarTokenConvite();
     Object.assign(item, {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
       data_inicial: body.data_inicial || '', data_final: body.data_final || '',
@@ -4503,7 +4623,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_comentario: body.satisfacao_comentario || '',
       satisfacao_autoriza: body.satisfacao_autoriza || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
       fotos,
@@ -4525,8 +4645,11 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       fotos,
     });
   } else if (item.tipo === 'aceite_entrega') {
-    const erroAceite = validarRelatorioAceite(body);
-    if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
+    if (!body.rascunho) {
+      const erroAceite = validarRelatorioAceite(body);
+      if (erroAceite) return enviarJSON(res, 400, { erro: erroAceite });
+    }
+    if (!item.token_assinatura_cliente) item.token_assinatura_cliente = gerarTokenConvite();
     Object.assign(item, {
       os_uf: body.os_uf || '', os_numero: body.os_numero || '', os_ano: body.os_ano || '',
       data_inicial: body.data_inicial || '', data_final: body.data_final || '',
@@ -4541,7 +4664,7 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
       satisfacao_estrelas: Number(body.satisfacao_estrelas) || 0,
       satisfacao_duvidas: body.satisfacao_duvidas || '',
       satisfacao_apto: body.satisfacao_apto || '',
-      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
+      assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_email: body.assinatura_cliente_email || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
       assinatura_tecnico_nome: body.assinatura_tecnico_nome || '', assinatura_tecnico_img: body.assinatura_tecnico_img || null,
       emails_copia: Array.isArray(body.emails_copia) ? body.emails_copia : [],
     });

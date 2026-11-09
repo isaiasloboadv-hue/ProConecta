@@ -37,7 +37,14 @@
 // o Bearer de sessão (ver POST /api/monitoramento/ingest em server.js). Só esse sub-caminho é
 // público; o resto de /api/monitoramento (cadastrar dispositivo, ver histórico) continua exigindo
 // login normal, cai em "núcleo" por omissão, igual o resto das rotas de perfil Refrigeração.
-const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr', '/api/pmoc/pesquisa', '/api/monitoramento/ingest'];
+// /api/relatorios-manutencao/assinatura/:token — pedido do usuário: "esqueci de pedir pro cliente
+// preencher nome, e-mail e assinatura... coloque um botão pra gerar link pra enviar pro cliente
+// preencher sem precisar logar" — mesmo padrão do /api/entregas acima (token próprio, gerado na
+// criação do relatório), só que como sub-caminho de /api/relatorios-manutencao (que por si só
+// exige login + módulo "relatorios" — ver PREFIXO_MODULO) em vez de prefixo-irmão: só esse
+// sub-caminho específico é público, o resto de /api/relatorios-manutencao continua exigindo login
+// normal.
+const PREFIXOS_PUBLICOS = ['/api/login', '/api/empresa', '/api/convite', '/api/whatsapp', '/api/entregas', '/api/os-refrigeracao-assinar', '/api/os-refrigeracao-orcamentos-assinar', '/api/outlook/callback', '/api/cadastro', '/api/pmoc/qr', '/api/pmoc/pesquisa', '/api/monitoramento/ingest', '/api/relatorios-manutencao/assinatura'];
 
 const PREFIXO_MODULO = [
   ['/api/agenda', 'os_chamados'],
