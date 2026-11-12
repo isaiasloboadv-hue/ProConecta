@@ -1623,7 +1623,7 @@ rota('PUT', /^\/api\/entregas\/([a-f0-9]+)$/, async (req, res, m) => {
     observacoes: body.observacoes || '',
     assinatura_cliente_nome: body.assinatura_cliente_nome || '', assinatura_cliente_img: body.assinatura_cliente_img || null,
   });
-  db.save(data);
+  await db.save(data);
   enviarJSON(res, 200, { relatorio: await entregaTestePublica(item) });
 });
 
@@ -1647,7 +1647,7 @@ rota('POST', /^\/api\/entregas\/([a-f0-9]+)\/concluir$/, async (req, res, m) => 
     status_preenchimento: 'concluido',
     concluido_em: new Date().toISOString(),
   });
-  db.save(data);
+  await db.save(data);
   enviarPush(data, item.autor_id, {
     titulo: 'Cliente concluiu a Entrega para Teste',
     corpo: `${item.empresa || 'Cliente'} preencheu e assinou o comprovante de "${item.equipamento || 'equipamento'}".`,
@@ -1790,7 +1790,11 @@ rota('PUT', /^\/api\/relatorios-manutencao\/assinatura\/([a-f0-9]+)$/, async (re
     assinatura_cliente_concluida: true,
     assinatura_cliente_concluida_em: new Date().toISOString(),
   });
-  db.save(data);
+  // await: só responde ao cliente depois da escrita no Postgres terminar — sem isso, um
+  // desligamento do processo por inatividade (plano gratuito do Render) bem depois do 200 já ter
+  // voltado pro cliente podia acontecer antes da escrita assíncrona chegar no banco, perdendo o
+  // relatório que ele acabou de preencher e assinar.
+  await db.save(data);
   enviarPush(data, item.autor_id, {
     titulo: 'Cliente preencheu e assinou',
     corpo: `${nome} confirmou nome, e-mail, assinatura e avaliação no relatório de "${item.empresa || 'cliente'}". Você já pode concluir e enviar o termo.`,
@@ -4566,7 +4570,11 @@ rota('POST', /^\/api\/relatorios-manutencao$/, async (req, res) => {
       criado_em: new Date().toISOString(),
     });
   }
-  db.save(data);
+  // await: o 201 só volta pro técnico depois da escrita no Postgres terminar — sem isso, se o
+  // processo for encerrado por inatividade (plano gratuito do Render) logo após responder, a
+  // escrita em voo podia nunca chegar no banco e o relatório recém-criado (ex.: um rascunho pra
+  // gerar o link do cliente) desaparecia na próxima leitura, mesmo o 201 já tendo voltado.
+  await db.save(data);
   // mesma hidratação do PUT logo abaixo — o front gera o PDF direto com esta resposta de criação
   // (ver concluirRelatorioXxx no app.js), então sem isso as fotos/assinaturas vinham como
   // `{__foto_ref}` e o PDF saía com os quadros de foto vazios.
@@ -4813,7 +4821,10 @@ rota('PUT', /^\/api\/relatorios-manutencao\/(\d+)$/, async (req, res, m) => {
     });
   }
   sincronizarClienteDoRelatorio(data, user.empresa_id, body);
-  db.save(data);
+  // await: mesmo motivo do POST acima — fecha a janela entre o 200 voltar pro técnico (ex.: ao
+  // gerar o link do cliente) e a escrita assíncrona no Postgres ainda não ter chegado no banco
+  // quando o processo é encerrado por inatividade (plano gratuito do Render).
+  await db.save(data);
   // hidrata antes de responder — o front gera o PDF na hora com ESTA resposta (ver
   // concluirRelatorioXxx no app.js), sem dar um GET de volta antes; sem isso as fotos/assinaturas
   // chegavam como `{__foto_ref}` (ver extrairFotosProfundo acima) em vez da imagem de verdade, e o

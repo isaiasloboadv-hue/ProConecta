@@ -1600,9 +1600,15 @@ function save(data) {
     })();
     escritasPendentes.add(escrita);
     escrita.finally(() => escritasPendentes.delete(escrita));
-    return;
+    // retorna a promise da escrita (quem não usa `await` continua em "fire-and-forget" como antes;
+    // rotas que criam dados de alto valor — ex. um relatório que vai virar link público pro cliente
+    // assinar — podem `await db.save(data)` pra só responder 200/201 depois da escrita no Postgres
+    // ter terminado, fechando a janela de corrida com um desligamento do processo por inatividade
+    // (plano gratuito do Render) que perderia a escrita em voo).
+    return escrita;
   }
   salvarNoArquivo(data);
+  return Promise.resolve();
 }
 
 // chamado no encerramento gracioso do processo (SIGTERM — é o sinal que o Render manda antes de
