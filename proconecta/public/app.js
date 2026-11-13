@@ -20284,6 +20284,22 @@ function salvarRascunhoManual(tipo, draft, idExistente, statusElId) {
   } catch (e) {}
   enviarRascunhoServidor(chave, draft);
 }
+// depois de gerar/atualizar o link pro cliente, guarda o relatório (já com o id de verdade) na
+// chave "_novo" — a MESMA que mostrarFormRelatorioXxx(sem argumento) consulta quando alguém reabre
+// o formulário pelo menu "Manual" (não pelo "Editar" da lista). Sem isso, reabrir do menu depois de
+// já ter gerado um link voltava pro formulário em branco (achava só a chave "_novo", já apagada
+// pela criação) e o próximo "Gerar link" criava um relatório NOVO duplicado — com um link
+// diferente do que já tinha sido mandado pro cliente — em vez de atualizar/reaproveitar o mesmo.
+function salvarPonteiroRascunhoNovo(tipo, relatorio) {
+  try {
+    const agoraDate = new Date();
+    localStorage.setItem(chaveRascunhoManual(tipo, null), JSON.stringify({
+      draft: relatorio,
+      em: agoraDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      salvoEmISO: agoraDate.toISOString(),
+    }));
+  } catch (e) {}
+}
 function limparRascunhoManual(tipo, idExistente) {
   if (window._pararAutoSalvarRascunhoPendente) window._pararAutoSalvarRascunhoPendente();
   const chave = chaveRascunhoManual(tipo, idExistente);
@@ -22111,6 +22127,10 @@ async function concluirRelatorioPreventiva() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('preventiva', d.id);
+    // também limpa o ponteiro "_novo" (ver salvarPonteiroRascunhoNovo) — senão, se o técnico tinha
+    // gerado o link do cliente antes de concluir aqui, reabrir "Manual" depois ressuscitava este
+    // relatório que acabou de ser concluído em vez de começar um em branco.
+    if (d.id) limparRascunhoManual('preventiva', null);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioPreventiva(relatorio, logo);
     window.open(url, '_blank');
@@ -22625,6 +22645,7 @@ async function concluirRelatorioPreventiva2() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('preventiva2', d.id);
+    if (d.id) limparRascunhoManual('preventiva2', null);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioPreventiva2(relatorio, logo);
     const nomeArquivo = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
@@ -23125,6 +23146,7 @@ async function concluirRelatorioCorretiva() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('corretiva', d.id);
+    if (d.id) limparRascunhoManual('corretiva', null);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioCorretiva(relatorio, logo);
     const nomeArquivo = `${nomeArquivoRelatorioManutencao(relatorio)}.pdf`;
@@ -24105,6 +24127,7 @@ async function concluirRelatorioAceite() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('aceite_entrega', d.id);
+    if (d.id) limparRascunhoManual('aceite_entrega', null);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioAceite(relatorio, logo);
     window.open(url, '_blank');
@@ -24473,6 +24496,7 @@ async function gerarLinkAssinaturaClienteCore(d, tipoRascunho, mostrarFormFn) {
       ? await api(`/api/relatorios-manutencao/${idAntes}`, { method: 'PUT', body })
       : await api('/api/relatorios-manutencao', { method: 'POST', body });
     limparRascunhoManual(tipoRascunho, idAntes);
+    salvarPonteiroRascunhoNovo(tipoRascunho, relatorio);
     mostrarToast(idAntes ? 'Link atualizado.' : 'Link gerado — copie e envie pro cliente.');
     mostrarFormFn(relatorio);
   } catch (e) { alert('Erro ao gerar o link: ' + e.message); }
@@ -24509,6 +24533,7 @@ async function gerarLinkEntregaTeste() {
       ? await api(`/api/relatorios-manutencao/${idAntes}`, { method: 'PUT', body })
       : await api('/api/relatorios-manutencao', { method: 'POST', body });
     limparRascunhoManual('entrega_teste', idAntes);
+    salvarPonteiroRascunhoNovo('entrega_teste', relatorio);
     mostrarToast(idAntes ? 'Link atualizado.' : 'Link gerado — copie e envie pro cliente.');
     mostrarFormRelatorioEntregaTeste(relatorio);
   } catch (e) { alert('Erro ao gerar o link: ' + e.message); }
@@ -24656,6 +24681,7 @@ async function concluirRelatorioEntregaTeste() {
       ? await api(`/api/relatorios-manutencao/${d.id}`, { method: 'PUT', body: d })
       : await api('/api/relatorios-manutencao', { method: 'POST', body: d });
     limparRascunhoManual('entrega_teste', d.id);
+    if (d.id) limparRascunhoManual('entrega_teste', null);
     const logo = await carregarLogoVariantes();
     const url = gerarPdfRelatorioEntregaTeste(relatorio, logo);
     window.open(url, '_blank');
